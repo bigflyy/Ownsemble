@@ -1,0 +1,20 @@
+{
+  "name": "ownsemble-vk-proof",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Local VK provider feasibility test",
+  "main": "main.cjs",
+  "scripts": {
+    "start": "electron .",
+    "proof:auto": "electron . --automated-proof",
+    "proof:status": "node proof-control.cjs status",
+    "proof:run": "node proof-control.cjs run",
+    "proof:stop": "node proof-control.cjs stop",
+    "offline": "electron . --offline",
+    "check": "node --check main.cjs && node --check preload.cjs && node --check renderer.js && node --check music-policy.cjs && node --check music-page.cjs && node --check music-dom.cjs && node --check library-sync.cjs && node --check music-action.cjs && node --check native-source.cjs && node --check automation.cjs && node --check automation-host.cjs && node --check proof-control.cjs && node --check player-proof.js && node --check audio-response.cjs",
+    "test": "node --test music.test.cjs workflow.test.cjs automation.test.cjs audio-response.test.cjs"
+  },
+  "devDependencies": {
+    "electron": "44.8.0"
+  }
+}

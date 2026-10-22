@@ -1,0 +1,2144 @@
+import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
+
+import 'package:crypto/crypto.dart';
+import 'package:flutter/foundation.dart';
+
+import '../data/library_store.dart';
+import '../media/audio_cache.dart';
+import '../media/audio_policy.dart';
+import '../media/artwork_cache.dart';
+import '../contracts/playback_engine.dart';
+import '../contracts/app_runtime.dart';
+import '../contracts/certificate_verifier.dart';
+import 'async_wait.dart';
+import '../media/streaming_audio.dart';
+import '../contracts/music_provider.dart';
+import '../provider/cached_source_witness.dart';
+import 'playback_queue.dart';
+
+import 'runtime_diagnostics.dart';
+
+class AppController extends ChangeNotifier {
+  final LibraryStore store;
+  final bool demo;
+  final Duration startupTimeout;
+  final Duration metadataTimeout;
+  final bool enableLocalControls;
+  final PlaybackEngine player;
+  final MusicProvider provider;
+  final AudioDecoder decodeAudio;
+  final AppRuntime runtime;
+  final CertificateVerifier Function() certificateVerifierFactory;
+  final queue = PlaybackQueue();
+  final List<StreamSubscription<dynamic>> _subscriptions = [];
+  Timer? _tick, _scheduler;
+  bool offline = false,
+      syncing = false,
+      disposed = false,
+      connecting = false,
+      loading = false;
+  bool _continueSweep = false;
+  String message = 'Your music, in your own order.',
+      view = 'library',
+      query = '';
+  int? pileId;
+  String? downloadId;
+  String? downloadStage;
+  String get downloadLabel => switch (downloadStage) {
+    'finding_source' => 'Finding source',
+    'receiving' =>
+      downloadBytes == 0
+          ? 'Waiting for audio'
+          : downloadBytes < 1048576
+          ? '${(downloadBytes / 1024).ceil()} KB received'
+          : '${(downloadBytes / 1048576).toStringAsFixed(1)} MB received',
+    'materializing' => 'Preparing audio',
+    'decoding' => 'Validating complete audio',
+    'publishing' => 'Saving offline',
+    _ => '',
+  };
+  int downloadBytes = 0;
+  int _request = 0, _cancelDownload = 0;
+  int _nativeErrors = 0;
+  String? _lastNativeCategory;
+  int _nativeSignals = 0;
+  Map<String, Object> _sourceTimings = {};
+  int? _playEvent;
+  int _listened = 0, _lastSave = 0;
+  bool _wasPlaying = false;
+  final _clock = Stopwatch()..start();
+  Duration _lastTick = Duration.zero;
+  DateTime _nextSync = DateTime.now();
+  DateTime _nextPinAttempt = DateTime.now();
+  bool _restartRequested = false,
+      _acceptanceRequested = false,
+      _checking = false;
+  final Map<String, Future<CachedAudio>> _downloads = {};
+  final _streams = <String, StreamingAudio>{};
+  final _streamReady = <String, Completer<StreamingAudio>>{};
+  String? _playingStream;
+  String? _checkingTrack;
+  Future<void>? _checkTask;
+  Completer<void>? _checkCancelled;
+  String? _checkCancelReason;
+  int? _checkGeneration;
+  Future<void> _downloadTail = Future.value();
+  List<LibraryRow>? _rowCache;
+  List<LibraryRow>? _oldAudioSample;
+  AudioCache? _activeCache;
+  final _diagnostics = <Map<String, Object>>[];
+  late final ArtworkCache artwork;
+  final _artworkTasks = <String, Future<void>>{};
+  final _artworkDemand = <String, Map<Object, int>>{};
+  final _visibleMetadataTasks = <String, Completer<void>>{};
+  final _visibleMetadataQueue = <String>[];
+  bool _visibleMetadataWorking = false;
+  final _metadataTasks = <String, Future<void>>{};
+  final _artworkRetry = <String, DateTime>{};
+  late double _volumeLevel, _unmutedVolume;
+  late Future<void> _volumeTail;
+  double get volumeLevel => _volumeLevel;
+  bool get muted => _volumeLevel == 0;
+  final metadataErrors = <String, String>{};
+  Future<Map<String, Object>>? _recordingRepair;
+  AppController(
+    this.store, {
+    this.demo = false,
+    this.startupTimeout = const Duration(seconds: 30),
+    this.metadataTimeout = const Duration(seconds: 45),
+    this.enableLocalControls = false,
+    required PlaybackEngine playbackPlayer,
+    required MusicProvider musicProvider,
+    required this.decodeAudio,
+    this.runtime = const UnsupportedAppRuntime(),
+    this.certificateVerifierFactory = strictCertificateVerifier,
+    ArtworkCache? artworkCache,
+  }) : player = playbackPlayer,
+       provider = musicProvider {
+    artwork =
+        artworkCache ??
+        ArtworkCache(
+          Directory('${store.directory.path}/artwork'),
+          certificateVerifier: certificateVerifierFactory(),
+          networkAllowed: () => !disposed && !offline,
+        );
+    offline = store.setting('offline', false) == true;
+    queue.restore(store.setting('queue'));
+    double savedVolume(String key, double fallback) {
+      final saved = store.setting(key, fallback);
+      return saved is num && saved.isFinite
+          ? saved.toDouble().clamp(0, 100)
+          : fallback;
+    }
+
+    _volumeLevel = savedVolume('volume', 75);
+    _unmutedVolume = _volumeLevel > 0
+        ? _volumeLevel
+        : savedVolume('unmuted_volume', 75);
+    if (_unmutedVolume == 0) _unmutedVolume = 75;
+    _volumeTail = player.setVolume(_volumeLevel);
+    _subscriptions.add(
+      player.stream.playing.listen((playing) {
+        _recordListening();
+        _wasPlaying = playing && !player.state.buffering && !loading;
+        if (!playing) _flushListening();
+        if (!loading && _playEvent != null) {
+          message = playing ? 'Playing' : 'Paused';
+        }
+        _notify(library: !playing);
+      }),
+    );
+    _subscriptions.add(
+      player.stream.buffering.listen((buffering) {
+        _recordListening();
+        _wasPlaying = player.state.playing && !buffering && !loading;
+        _notify(library: false);
+      }),
+    );
+    _subscriptions.add(
+      player.stream.position.listen((_) => _notify(library: false)),
+    );
+    _subscriptions.add(
+      player.stream.completed.listen((done) {
+        if (done && !disposed && !loading && _playEvent != null) {
+          unawaited(next(automatic: true));
+        }
+      }),
+    );
+    _subscriptions.add(
+      player.stream.error.listen((error) {
+        ++_nativeErrors;
+        _lastNativeCategory = classifyDecoderFailure(error);
+        _nativeSignals |= decoderSignalMask(error);
+        message = 'Playback failed. Try this track again.';
+        _notify();
+      }),
+    );
+    _subscriptions.add(
+      player.stream.log.listen((entry) {
+        if (entry.level == 'error' || entry.level == 'fatal') {
+          _lastNativeCategory = classifyDecoderFailure(
+            entry.text,
+            _lastNativeCategory,
+          );
+          _nativeSignals |= decoderSignalMask(entry.text);
+        }
+      }),
+    );
+    _tick = Timer.periodic(const Duration(seconds: 1), (_) {
+      _recordListening();
+      _reportPlayerState();
+    });
+    _scheduler = Timer.periodic(const Duration(seconds: 2), (_) => _schedule());
+  }
+  void providerStatus(String text) {
+    if (!loading && downloadId == null && !player.state.playing) message = text;
+    _notify(library: false);
+  }
+
+  void providerChanged() => _notify();
+  void providerDiagnostic(Map<String, Object> report) =>
+      _writeAudioDiagnostic(report);
+
+  void _writeAudioDiagnostic(Map<String, Object> report) {
+    if (disposed) return;
+    _diagnostics.add({
+      'updatedAt': DateTime.now().toUtc().toIso8601String(),
+      ...report,
+    });
+    if (_diagnostics.length > 40) _diagnostics.removeAt(0);
+    if (report['stage'] == 'music_binding') {
+      File('${store.directory.path}/source-binding.json')
+          .writeAsStringSync(jsonEncode(_diagnostics.last));
+    }
+    File('${store.directory.path}/audio-diagnostics.json')
+        .writeAsStringSync(jsonEncode({...report, 'events': _diagnostics}));
+  }
+
+  Track? get current =>
+      queue.current == null ? null : store.track(queue.current!.id);
+  List<LibraryRow> get rows => _rowCache ??= _libraryRows();
+  List<LibraryRow> _libraryRows() {
+    final source = store.rows(view: view, query: query, pile: pileId);
+    if (demo) return source;
+    final verified = store.verifiedAssetIds();
+    return [
+      for (final row in source)
+        if (view != 'offline' || verified.contains(row.track.id))
+          row.offline && !verified.contains(row.track.id)
+              ? LibraryRow(
+                  row.track,
+                  false,
+                  row.pinned,
+                  row.occurrence,
+                  row.error ?? 'cache_identity_unverified',
+                )
+              : row,
+    ];
+  }
+
+  List<Pile> get piles => store.piles();
+  bool enriching(String id) => _metadataTasks.containsKey(id);
+  Map<String, Object> metadataSummary() {
+    int number(String sql) =>
+        store.db.select(sql).first.values.first as int? ?? 0;
+    return {
+      'import_dates': number('SELECT COUNT(*) FROM tracks WHERE updated>0'),
+      'enriched_tracks': number('SELECT COUNT(*) FROM track_metadata'),
+      'albums': number(
+        "SELECT COUNT(*) FROM track_metadata WHERE json_type(body,'\$.album')='text'",
+      ),
+      'upload_dates': number(
+        "SELECT COUNT(*) FROM track_metadata WHERE json_type(body,'\$.uploadedAt')='integer'",
+      ),
+      'artwork_cached': number(
+        'SELECT COUNT(*) FROM track_metadata WHERE artwork IS NOT NULL',
+      ),
+      'lyrics_advertised': number(
+        "SELECT COUNT(*) FROM track_metadata WHERE json_extract(body,'\$.lyricsAvailable')=1 OR json_type(body,'\$.lyricsId')='integer'",
+      ),
+      'lyrics_cached': number(
+        "SELECT COUNT(*) FROM track_lyrics WHERE json_extract(body,'\$.state')='available'",
+      ),
+      'lyrics_not_provided': number(
+        "SELECT COUNT(*) FROM track_lyrics WHERE json_extract(body,'\$.state')='not_provided'",
+      ),
+      'pending_details': _metadataTasks.length + _visibleMetadataTasks.length,
+      'pending_artwork': _artworkTasks.length,
+    };
+  }
+
+  void _reportMetadataSummary() {
+    if (!disposed) {
+      File('${store.directory.path}/metadata-status.json').writeAsStringSync(
+        jsonEncode({
+          'updatedAt': DateTime.now().toUtc().toIso8601String(),
+          ...metadataSummary(),
+        }),
+      );
+    }
+  }
+
+  File? artworkFile(String id) => artwork.localFile(store.artworkKey(id));
+
+  void _mergeObservedMetadata(String id, {Map<String, dynamic>? observed}) {
+    final data = observed ?? provider.observedMetadata(id);
+    store.mergeMetadata(id, data);
+    final lyrics = data['lyrics'];
+    if (lyrics is Map) {
+      store.saveLyrics(id, lyrics, state: 'available');
+    } else if (data['lyricsAvailable'] == false) {
+      store.saveLyrics(id, null, state: 'not_provided');
+    }
+    if (_artworkDemand[id]?.isNotEmpty == true) {
+      unawaited(loadArtwork(id, visibleOnly: true));
+    }
+  }
+
+  Future<void> enrichTrack(String id, {bool force = false}) {
+    if (disposed || offline || demo) return Future.value();
+    return _metadataTasks.putIfAbsent(
+      id,
+      () => Future<void>(() async {
+        try {
+          if (disposed) return;
+          final track = store.track(id);
+          if (track == null) return;
+          if (!provider.connected && !autoSync) {
+            throw const ProofFailure('vk_not_connected');
+          }
+          final data = await provider
+              .inspectMetadata(track, force: force)
+              .timeout(
+                metadataTimeout,
+                onTimeout: () =>
+                    throw const ProofFailure('metadata_request_timeout'),
+              );
+          if (disposed) return;
+          _mergeObservedMetadata(id, observed: data);
+          if (data['lyricsAvailable'] == true && data['lyrics'] == null) {
+            store.saveLyrics(id, null, state: 'failed');
+          }
+          metadataErrors.remove(id);
+        } catch (e) {
+          if (disposed) return;
+          metadataErrors[id] = categoryOf(e);
+          store.saveLyrics(id, null, state: 'failed');
+        } finally {
+          _metadataTasks.remove(id);
+          if (!disposed) _notify();
+          if (!disposed) _reportMetadataSummary();
+        }
+      }),
+    );
+  }
+
+  void watchArtwork(String id, Object owner, {int priority = 1}) {
+    if (disposed) return;
+    (_artworkDemand[id] ??= {})[owner] = priority;
+    unawaited(loadArtwork(id, visibleOnly: true));
+  }
+
+  void unwatchArtwork(String id, Object owner) {
+    final demand = _artworkDemand[id];
+    demand?.remove(owner);
+    if (demand?.isEmpty == true) _artworkDemand.remove(id);
+    if (!_artworkDemand.containsKey(id) && _visibleMetadataQueue.remove(id)) {
+      _visibleMetadataTasks.remove(id)?.complete();
+    }
+    artwork.prune();
+  }
+
+  Future<void> _requestVisibleMetadata(String id) {
+    if (demo ||
+        disposed ||
+        offline ||
+        (!provider.connected && !autoSync) ||
+        _artworkDemand[id]?.isNotEmpty != true) {
+      return Future.value();
+    }
+    final task = _visibleMetadataTasks.putIfAbsent(id, () {
+      _visibleMetadataQueue.add(id);
+      return Completer<void>();
+    });
+    scheduleMicrotask(_pumpVisibleMetadata);
+    return task.future;
+  }
+
+  Future<void> _pumpVisibleMetadata() async {
+    if (_visibleMetadataWorking) return;
+    _visibleMetadataWorking = true;
+    try {
+      while (_visibleMetadataQueue.isNotEmpty) {
+        int priority(String id) => (_artworkDemand[id]?.values ?? const <int>[])
+            .fold<int>(0, (a, b) => a > b ? a : b);
+        _visibleMetadataQueue.sort(
+          (a, b) => priority(b).compareTo(priority(a)),
+        );
+        final id = _visibleMetadataQueue.removeAt(0);
+        final task = _visibleMetadataTasks[id]!;
+        var alive = true;
+        bool needed() =>
+            alive &&
+            !disposed &&
+            !offline &&
+            _artworkDemand[id]?.isNotEmpty == true;
+        try {
+          while (needed() && (loading || downloadId != null)) {
+            await Future<void>.delayed(const Duration(milliseconds: 200));
+          }
+          if (!needed()) continue;
+          final track = store.track(id);
+          if (track == null) continue;
+          final data = await provider
+              .inspectMetadata(
+                track,
+                includeLyrics: false,
+                cancelled: () => !needed(),
+              )
+              .timeout(metadataTimeout);
+          if (!needed()) continue;
+          _mergeObservedMetadata(id, observed: data);
+          if (provider.artworkSource(id) == null) {
+            _artworkRetry[id] = DateTime.now().add(const Duration(minutes: 1));
+          }
+          _notify(library: false);
+        } catch (error) {
+          if (needed() && categoryOf(error) != 'cancelled') {
+            _artworkRetry[id] = DateTime.now().add(const Duration(minutes: 1));
+          }
+        } finally {
+          alive = false;
+          _visibleMetadataTasks.remove(id);
+          task.complete();
+          if (!disposed) _reportMetadataSummary();
+        }
+      }
+    } finally {
+      _visibleMetadataWorking = false;
+    }
+  }
+
+  Future<void> loadArtwork(String id, {bool visibleOnly = false}) {
+    if (disposed ||
+        offline ||
+        (visibleOnly && _artworkDemand[id]?.isNotEmpty != true) ||
+        artworkFile(id) != null ||
+        DateTime.now().isBefore(
+          _artworkRetry[id] ?? DateTime.fromMillisecondsSinceEpoch(0),
+        )) {
+      return Future.value();
+    }
+    final source = provider.artworkSource(id);
+    if (source == null) {
+      return visibleOnly ? _requestVisibleMetadata(id) : Future.value();
+    }
+    bool needed() => !visibleOnly || _artworkDemand[id]?.isNotEmpty == true;
+    return _artworkTasks.putIfAbsent(id, () async {
+      try {
+        while (!disposed &&
+            !offline &&
+            needed() &&
+            (loading || downloadId != null)) {
+          await Future<void>.delayed(const Duration(milliseconds: 200));
+        }
+        if (disposed || offline || !needed()) return;
+        final protected = store.db
+            .select(
+              'SELECT DISTINCT m.artwork FROM track_metadata m JOIN pins p ON p.track=m.track WHERE m.artwork IS NOT NULL',
+            )
+            .map((r) => r['artwork'] as String)
+            .toSet();
+        final priorities = _artworkDemand[id]?.values ?? const <int>[];
+        final priority = priorities.fold<int>(0, (a, b) => a > b ? a : b);
+        final key = await artwork.obtain(
+          source,
+          protectedKeys: protected,
+          needed: needed,
+          priority: priority,
+        );
+        if (disposed || offline || !needed()) return;
+        store.saveArtwork(id, key);
+        _notify(library: false);
+      } catch (error) {
+        if (!disposed && needed() && categoryOf(error) != 'cancelled') {
+          _artworkRetry[id] = DateTime.now().add(const Duration(minutes: 1));
+        }
+      } finally {
+        _artworkTasks.remove(id);
+        if (!disposed) _reportMetadataSummary();
+        if (!disposed &&
+            !offline &&
+            visibleOnly &&
+            needed() &&
+            artworkFile(id) == null &&
+            !DateTime.now().isBefore(
+              _artworkRetry[id] ?? DateTime.fromMillisecondsSinceEpoch(0),
+            )) {
+          scheduleMicrotask(
+            () => unawaited(loadArtwork(id, visibleOnly: true)),
+          );
+        }
+      }
+    });
+  }
+
+  Future<Map<String, Object>> repairMismatchedCache() {
+    if (_recordingRepair != null) return _recordingRepair!;
+    final task = Future<Map<String, Object>>(() async {
+      final report = <String, Object>{'phase': 'running'};
+      void save() => File('${store.directory.path}/recording-integrity.json')
+          .writeAsStringSync(
+            jsonEncode({
+              'updatedAt': DateTime.now().toUtc().toIso8601String(),
+              ...report,
+            }),
+          );
+      try {
+        final mismatches = store.db.select(
+          'SELECT a.track FROM assets a JOIN tracks t ON t.id=a.track WHERE t.duration>0 AND ABS(a.duration-t.duration)>5',
+        );
+        report['mismatches_before'] = mismatches.length;
+        if (mismatches.length != 1) {
+          throw const ProofFailure('cache_mismatch_not_unique');
+        }
+        final track = store.track(mismatches.single['track'] as String)!;
+        save();
+        await stopPlayback(diagnostic: true);
+        final asset = await ensureAsset(track);
+        await AudioCache(
+          cacheDirectory,
+          decodeAudio,
+          certificateVerifier: certificateVerifierFactory(),
+        ).verify(asset, expectedTrack: track, requireIdentity: true);
+        store.setSetting('recording_repair_sample_id', track.id);
+        report.addAll({
+          'phase': 'finished',
+          'identity_bound': true,
+          'duration_matched': true,
+          'original_preserved': true,
+        });
+      } catch (error) {
+        report.addAll({'phase': 'failed', 'category': categoryOf(error)});
+      }
+      if (!disposed) save();
+      return report;
+    });
+    _recordingRepair = task;
+    task.whenComplete(() {
+      if (identical(_recordingRepair, task)) _recordingRepair = null;
+    });
+    return task;
+  }
+
+  bool get autoSync => store.setting('auto_sync', false) == true;
+  int get quota => store.setting('quota_bytes', 2 * 1024 * 1024 * 1024) as int;
+  String get heading => pileId != null
+      ? piles.where((p) => p.id == pileId).firstOrNull?.name ?? 'Pile'
+      : switch (view) {
+          'offline' => 'Available offline',
+          'recent' => 'Recently played',
+          'most' => 'Most played',
+          'vk' => 'VK music',
+          _ => 'Your library',
+        };
+  void _notify({bool library = true}) {
+    if (library) _rowCache = null;
+    if (!disposed) notifyListeners();
+  }
+
+  void browse(String next, {int? pile}) {
+    view = next;
+    pileId = pile;
+    query = '';
+    _notify();
+  }
+
+  void search(String text) {
+    query = text;
+    _notify();
+  }
+
+  void _saveQueue() => store.setSetting('queue', queue.toJson());
+  Future<void> connectVk() async {
+    if (demo) {
+      message = 'This preview uses generated music. Open the regular app to connect VK.';
+      _notify();
+      return;
+    }
+    offline = false;
+    store.setSetting('offline', false);
+    store.setSetting('auto_sync', true);
+    connecting = true;
+    message = 'Connecting to your VK library in the background…';
+    _notify();
+    try {
+      await provider.connect();
+      _nextSync = DateTime.now();
+    } catch (e) {
+      _failure(e);
+    } finally {
+      connecting = false;
+      _notify();
+    }
+  }
+
+  Future<void> signInVk() async {
+    if (demo) return;
+    try {
+      await provider.signInPrivately();
+    } catch (e) {
+      _failure(e);
+    }
+  }
+
+  Future<void> _schedule() async {
+    _pollControl();
+    if (_restartRequested &&
+        !loading &&
+        !player.state.playing &&
+        !syncing &&
+        downloadId == null &&
+        !_checking) {
+      _restartRequested = false;
+      unawaited(_restart());
+      return;
+    }
+    if (disposed || demo || offline || _checking || !autoSync) return;
+    if (syncing) return;
+    if (!provider.connected) {
+      // Start only after persisted consent; leave login interaction private.
+      if (!connecting) {
+        connecting = true;
+        try {
+          await provider.connect();
+        } catch (e) {
+          _failure(e);
+          _nextSync = DateTime.now().add(const Duration(minutes: 2));
+        } finally {
+          connecting = false;
+        }
+      }
+      return;
+    }
+    if (!syncing &&
+        !loading &&
+        downloadId == null &&
+        !DateTime.now().isBefore(_nextSync)) {
+      await refresh(full: false);
+    }
+    if (_acceptanceRequested &&
+        !loading &&
+        downloadId == null &&
+        !player.state.playing &&
+        _playEvent == null &&
+        store.count > 0) {
+      unawaited(_checkSample());
+      return;
+    }
+    if (!syncing && !loading && downloadId == null) unawaited(_pumpPins());
+  }
+
+  Future<void> refresh({bool full = true}) async {
+    if (offline || syncing || demo) return;
+    syncing = true;
+    _notify();
+    final watch = Stopwatch()..start();
+    final initial =
+        store.count == 0 ||
+        store.setting('initial_sync_pending', false) == true;
+    final broad = full || initial || _continueSweep;
+    final fromTop = full || !_continueSweep;
+    final checkpoint = store.syncHead;
+    final before = store.count;
+    void report(String phase, {String? reason, int checked = 0}) {
+      File('${store.directory.path}/sync-status.json').writeAsStringSync(
+        jsonEncode({
+          'updatedAt': DateTime.now().toUtc().toIso8601String(),
+          'phase': phase,
+          'mode': broad ? 'full' : 'head',
+          'manual': full,
+          'checkpoint_count': checkpoint.length,
+          'checked': checked,
+          'new_tracks': store.count - before,
+          'elapsed_ms': watch.elapsedMilliseconds,
+          'reason': ?reason,
+        }),
+      );
+    }
+
+    report('running');
+    try {
+      if (initial) store.setSetting('initial_sync_pending', true);
+      if (fromTop) store.setSetting('sweep_epoch', store.now);
+      final epoch = store.setting('sweep_epoch', store.now) as int;
+      final result = await provider.sync(
+        (tracks) {
+          store.merge(tracks, discoveredAt: epoch);
+          store.transaction(() {
+            for (final track in tracks) {
+              final position = provider.libraryPosition(track.id);
+              if (position != null) {
+                store.noteProviderPosition(track.id, position, epoch);
+              }
+              final unavailable = provider.trackUnavailable(track.id);
+              if (unavailable != null) {
+                store.noteAvailability(track.id, unavailable);
+              }
+              final reference = provider.musicReference(track.id);
+              if (reference != null) {
+                store.saveMusicReference(track.id, reference);
+              }
+              _mergeObservedMetadata(track.id);
+            }
+          });
+          _notify();
+        },
+        fromTop: fromTop,
+        newestOnly: !broad,
+        checkpoint: checkpoint,
+      );
+      _continueSweep = broad && result.continueSweep;
+      if (result.head.isNotEmpty &&
+          fromTop &&
+          (broad || ['known_head', 'head_seeded'].contains(result.reason))) {
+        store.saveSyncHead(result.head);
+      }
+      if (initial && !_continueSweep) {
+        store.setSetting('initial_sync_pending', false);
+      }
+      store.setSetting('last_sync', DateTime.now().toIso8601String());
+      store.setSetting('coverage', 'partial');
+      _nextSync = DateTime.now().add(
+        Duration(seconds: _continueSweep ? 5 : 120),
+      );
+      if (!loading && downloadId == null && !player.state.playing) {
+        message =
+            !broad && !['known_head', 'head_seeded'].contains(result.reason)
+            ? 'Newest-entry check was incomplete. Use Refresh VK for a deeper scan; your saved music is available.'
+            : '${store.count} tracks saved · ${broad ? 'VK coverage partial' : 'newest entries checked'}';
+      }
+      store.report('sync_partial', count: store.count);
+      report('finished', reason: result.reason, checked: result.discovered);
+      _reportMetadataSummary();
+    } catch (e) {
+      _continueSweep = false;
+      _nextSync = DateTime.now().add(const Duration(minutes: 2));
+      _failure(e);
+      report('failed', reason: categoryOf(e));
+    } finally {
+      syncing = false;
+      _notify();
+    }
+  }
+
+  Future<void> setOffline(bool value) async {
+    offline = value;
+    store.setSetting('offline', value);
+    if (value) {
+      artwork.cancel();
+      _cancelCheck('offline');
+      _cancelDownload++;
+      if (loading) {
+        ++_request;
+        loading = false;
+      }
+      _downloads.clear();
+      _activeCache?.cancel();
+      if (_playingStream != null) await player.pause();
+      await _closeStreams();
+      _notify();
+      await provider.disconnect();
+      message = 'Offline mode · saved music is ready.';
+    } else {
+      message = 'Online mode';
+      _nextSync = DateTime.now();
+    }
+    _notify();
+  }
+
+  void setAutoSync(bool enabled) {
+    store.setSetting('auto_sync', enabled);
+    _nextSync = DateTime.now();
+    _notify();
+  }
+
+  Future<void> playLibrary(List<LibraryRow> list) async {
+    var selected = list.indexWhere(
+      (row) => row.offline || !isProviderRestricted(row.error),
+    );
+    final local = list.indexWhere((row) => row.offline);
+    // When the beginning is unavailable, a verified local song can start
+    // immediately while metadata refresh updates the remaining availability.
+    if (selected > 0 && local >= 0) selected = local;
+    for (var attempt = 0; selected >= 0 && attempt < 3; attempt++) {
+      final expectedRequest = _request + 1;
+      await playRows(list, selected);
+      if (disposed || _request != expectedRequest) return;
+      final failedId = list[selected].track.id;
+      final failed = store.rows().any(
+        (row) => row.track.id == failedId && isProviderRestricted(row.error),
+      );
+      if (!failed) return;
+      if (local >= 0 && local != selected) {
+        selected = local;
+      } else {
+        selected = list.indexWhere(
+          (row) => row.offline || !isProviderRestricted(row.error),
+          selected + 1,
+        );
+      }
+    }
+    message = 'The attempted recordings are restricted in VK. Choose another song from your saved library.';
+    _notify(library: false);
+  }
+
+  Future<void> playRows(
+    List<LibraryRow> list,
+    int selected, {
+    bool diagnostic = false,
+  }) async {
+    queue.replace(
+      list.map((r) => QueueEntry(r.track.id, r.occurrence)).toList(),
+      selected,
+    );
+    if (!diagnostic) _saveQueue();
+    await playCurrent(diagnostic: diagnostic);
+  }
+
+  void enqueue(LibraryRow row) {
+    queue.append(QueueEntry(row.track.id, row.occurrence));
+    _saveQueue();
+    _notify();
+  }
+
+  void _reportPlayerState() {
+    if (disposed) return;
+    try {
+      File('${store.directory.path}/player-state.json').writeAsStringSync(
+        jsonEncode({
+          'updatedAt': DateTime.now().toUtc().toIso8601String(),
+          'loading': loading,
+          'playing': player.state.playing,
+          'buffering': player.state.buffering,
+          'position_ms': player.state.position.inMilliseconds,
+          'duration_ms': player.state.duration.inMilliseconds,
+          'volume': player.state.volume,
+          'cached': current != null && store.asset(current!.id) != null,
+          'download_stage': downloadStage,
+          'received_bytes': downloadBytes,
+        }),
+      );
+    } catch (_) {
+      /* Numeric diagnostics do not block the player. */
+    }
+  }
+
+  void _reportPlayback(String phase, Stopwatch watch, {String? category}) {
+    try {
+      File('${store.directory.path}/playback-status.json').writeAsStringSync(
+        jsonEncode({
+          'updatedAt': DateTime.now().toUtc().toIso8601String(),
+          'phase': phase,
+          'elapsed_ms': watch.elapsedMilliseconds,
+          'loading': loading,
+          'playing': player.state.playing,
+          'buffering': player.state.buffering,
+          'position_ms': player.state.position.inMilliseconds,
+          'cached': current != null && store.asset(current!.id) != null,
+          'download_stage': downloadStage,
+          'received_bytes': downloadBytes,
+          'provider_connected': provider.connected,
+          'scanning': syncing,
+          'category': ?category,
+        }),
+      );
+    } catch (_) {
+      /* Diagnostics cannot block playback. */
+    }
+  }
+
+  Future<void> playCurrent({bool diagnostic = false}) async {
+    final track = current;
+    if (track == null) return;
+    if (!diagnostic) _cancelCheck('selection_changed');
+    if (!diagnostic) _saveQueue();
+    final request = ++_request;
+    _finishListening();
+    loading = true;
+    store.trackError(track.id, null);
+    message = 'Preparing ${track.title}…';
+    _notify();
+    final watch = Stopwatch()..start();
+    var phase = 'stopping_previous';
+    String? playbackError;
+    _reportPlayback(phase, watch);
+    final progress = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (request == _request) _reportPlayback(phase, watch);
+    });
+    final deadline = Timer(startupTimeout, () {
+      if (request != _request || !loading || disposed) return;
+      unawaited(stopPlayback());
+      store.trackError(track.id, 'player_start_timeout');
+      _failure(const ProofFailure('player_start_timeout'));
+      _reportPlayback('failed', watch, category: 'player_start_timeout');
+    });
+    try {
+      await player.stop().timeout(const Duration(seconds: 5));
+      if (request != _request || disposed) return;
+      if (downloadId != null &&
+          downloadId != track.id &&
+          _streams[downloadId]?.downloadComplete != true) {
+        _cancelDownload++;
+        _activeCache?.cancel();
+        await provider.cancelResolution();
+      }
+      if (_playingStream != null && _playingStream != track.id) {
+        final previous = _playingStream;
+        _playingStream = null;
+        if (downloadId != previous) {
+          await _streams.remove(previous)?.close();
+        }
+      }
+      phase = 'resolving_source';
+      final (asset, stream) = await _preparePlayback(track);
+      if (request != _request || disposed) return;
+      phase = 'opening_native_player';
+      final errorsBeforeOpen = _nativeErrors;
+      final startup = Stopwatch()..start();
+      if (asset != null) {
+        await player.openLocal(asset.entry);
+      } else {
+        _playingStream = track.id;
+        await player.openStream(await stream!.open());
+      }
+      phase = 'waiting_first_audio';
+      await waitUntil(
+        () =>
+            request != _request ||
+            disposed ||
+            (_nativeErrors != errorsBeforeOpen &&
+                startup.elapsed > const Duration(seconds: 2)) ||
+            (player.state.playing &&
+                !player.state.buffering &&
+                player.state.position.inMilliseconds >= 100),
+        'player_start_timeout',
+        timeout: const Duration(seconds: 45),
+      );
+      if (request != _request || disposed) {
+        return;
+      }
+      if (!(player.state.playing &&
+          !player.state.buffering &&
+          player.state.position.inMilliseconds >= 100)) {
+        throw ProofFailure(_lastNativeCategory ?? 'player_start_failed');
+      }
+      if (!diagnostic) _playEvent = store.startPlay(track.id);
+      _listened = 0;
+      _lastSave = 0;
+      _lastTick = _clock.elapsed;
+      _wasPlaying = player.state.playing && !player.state.buffering;
+      store.touchAsset(track.id);
+      store.trackError(track.id, null);
+      store.setSetting('last_start_ms', watch.elapsedMilliseconds);
+      message = asset != null
+          ? 'Playing from your local cache'
+          : 'Streaming · saving for offline playback';
+      await enforceQuota();
+      phase = 'playing';
+    } catch (e, stack) {
+      if (request == _request) {
+        try {
+          await player.pause();
+        } catch (_) {
+          /* Preserve the original failure. */
+        }
+        phase = 'failed';
+        playbackError = categoryOf(e);
+        store.trackError(track.id, categoryOf(e));
+        _failure(e, stack);
+        _reportPlayback(phase, watch, category: categoryOf(e));
+      }
+    } finally {
+      progress.cancel();
+      deadline.cancel();
+      if (request == _request) {
+        loading = false;
+        _reportPlayback(phase, watch, category: playbackError);
+        _notify();
+      }
+    }
+  }
+
+  Future<void> togglePlay({bool diagnostic = false}) async {
+    if (!diagnostic) _cancelCheck('user_play_pause');
+    if (loading) {
+      await stopPlayback();
+      return;
+    }
+    if (player.state.playing) {
+      await player.pause();
+    } else if (_playEvent != null || diagnostic) {
+      await player.play();
+    } else {
+      await playCurrent();
+    }
+    _notify();
+  }
+
+  Future<void> stopPlayback({bool diagnostic = false}) async {
+    if (!diagnostic) _cancelCheck('user_stop');
+    ++_request;
+    ++_cancelDownload;
+    final stream = _streams.remove(_playingStream);
+    final activeCache = _activeCache;
+    _playingStream = null;
+    _downloads.clear();
+    _streamReady.clear();
+    _finishListening();
+    loading = false;
+    message = 'Playback stopped';
+    _notify();
+    // Unload native media before destroying its HTTP source. Pausing leaves
+    // demuxing alive; closing that relay can poison the next local open.
+    final resolution = provider.cancelResolution();
+    try {
+      await player.stop().timeout(const Duration(seconds: 5));
+    } catch (e) {
+      if (!disposed) _failure(e);
+    } finally {
+      activeCache?.cancel();
+      await stream?.close(cancel: true);
+      await resolution;
+    }
+  }
+
+  Future<void> next({bool automatic = false}) async {
+    _finishListening();
+    if (queue.next(automatic: automatic) != null) {
+      _saveQueue();
+      await playCurrent();
+    } else {
+      await stopPlayback();
+    }
+  }
+
+  Future<void> previous() async {
+    _cancelCheck('user_previous');
+    if (!loading && player.state.position.inSeconds > 3) {
+      await player.seek(Duration.zero);
+      return;
+    }
+    if (queue.previous() != null) {
+      _saveQueue();
+      await playCurrent();
+    }
+  }
+
+  Future<void> seek(double seconds, {bool diagnostic = false}) async {
+    if (!diagnostic) _cancelCheck('user_seek');
+    await player.seek(Duration(milliseconds: (seconds * 1000).round()));
+  }
+
+  Future<void> toggleMute() => volume(muted ? _unmutedVolume : 0);
+
+  Future<void> volume(double value) {
+    if (!value.isFinite || disposed) return Future.value();
+    final level = value.clamp(0.0, 100.0);
+    _volumeLevel = level;
+    if (level > 0) _unmutedVolume = level;
+    store.transaction(() {
+      store.setSetting('volume', level);
+      store.setSetting('unmuted_volume', _unmutedVolume);
+    });
+    _notify(library: false);
+    // Publish intent immediately, but serialize native writes so an earlier
+    // slow mute/slider change cannot overwrite the most recent selection.
+    final pending = _volumeTail.then((_) => player.setVolume(level));
+    _volumeTail = pending.then<void>((_) {}, onError: (Object _) {});
+    return pending;
+  }
+
+  void shuffle() {
+    queue.setShuffle(!queue.shuffle);
+    _saveQueue();
+    _notify();
+  }
+
+  void repeat() {
+    queue.repeat = QueueRepeat.values[(queue.repeat.index + 1) % 3];
+    _saveQueue();
+    _notify();
+  }
+
+  void _recordListening() {
+    final elapsed = _clock.elapsed;
+    final delta = elapsed - _lastTick;
+    _lastTick = elapsed;
+    if (_playEvent != null && _wasPlaying && !loading) {
+      _listened += delta.inMilliseconds.clamp(0, 2000);
+      if (_listened - _lastSave >= 5000) {
+        store.listen(
+          _playEvent!,
+          _listened,
+          player.state.duration.inMilliseconds / 1000,
+        );
+        _lastSave = _listened;
+        if (view == 'recent' || view == 'most') _notify();
+      }
+    }
+  }
+
+  void _finishListening() {
+    _recordListening();
+    _flushListening();
+    _playEvent = null;
+    _wasPlaying = false;
+  }
+
+  void _flushListening() {
+    if (_playEvent != null) {
+      store.listen(
+        _playEvent!,
+        _listened,
+        player.state.duration.inMilliseconds / 1000,
+      );
+    }
+  }
+
+  Future<CachedAudio> ensureAsset(Track track, {bool playback = false}) {
+    if (_downloads.containsKey(track.id)) return _downloads[track.id]!;
+    // Capture ownership before local verification or queueing. Stop must also
+    // invalidate work that has not reached the download lane yet.
+    final token = _cancelDownload;
+    final future = () async {
+      // Valid local music bypasses unrelated network work. A failed cache
+      // check rejoins the serialized lane before recovery or downloading.
+      final saved = store.asset(track.id);
+      if (saved != null) {
+        try {
+          await _safeCacheFolder(track.id, saved.entry);
+          await AudioCache(
+            cacheDirectory,
+            decodeAudio,
+            certificateVerifier: certificateVerifierFactory(),
+          ).verify(saved, expectedTrack: track, requireIdentity: !demo);
+          if (!demo) store.markAssetIdentity(saved);
+          return saved;
+        } catch (_) {
+          if (offline) rethrow;
+          // The queued path verifies/replaces the stale asset atomically.
+        }
+      }
+      final pending = _downloadTail.then((_) {
+        if (disposed ||
+            token != _cancelDownload ||
+            (playback && current?.id != track.id)) {
+          throw const ProofFailure('cancelled');
+        }
+        return _obtainAsset(track, token: token);
+      });
+      _downloadTail = pending.then<void>(
+        (_) {},
+        onError: (Object _, StackTrace _) {},
+      );
+      return pending;
+    }();
+    _downloads[track.id] = future;
+    future.then(
+      (_) {
+        if (identical(_downloads[track.id], future)) {
+          _downloads.remove(track.id);
+        }
+      },
+      onError: (Object error, StackTrace _) {
+        if (identical(_downloads[track.id], future)) {
+          _downloads.remove(track.id);
+        }
+        if (_playingStream == track.id &&
+            current?.id == track.id &&
+            categoryOf(error) != 'cancelled' &&
+            !disposed) {
+          store.trackError(track.id, categoryOf(error));
+          _failure(error);
+        }
+      },
+    );
+    return future;
+  }
+
+  Future<(CachedAudio?, StreamingAudio?)> _preparePlayback(
+    Track track, {
+    bool playback = true,
+  }) async {
+    if (offline || demo || store.asset(track.id) != null) {
+      return (await ensureAsset(track, playback: playback), null);
+    }
+    final ready = _streamReady.putIfAbsent(
+      track.id,
+      Completer<StreamingAudio>.new,
+    );
+    final existing = _streams[track.id];
+    if (existing != null && !ready.isCompleted) ready.complete(existing);
+    try {
+      return await Future.any<(CachedAudio?, StreamingAudio?)>([
+        ensureAsset(track, playback: playback).then((asset) => (asset, null)),
+        ready.future.then((stream) => (null, stream)),
+      ]);
+    } finally {
+      if (identical(_streamReady[track.id], ready)) {
+        _streamReady.remove(track.id);
+      }
+    }
+  }
+
+  Future<void> _closeStreams() async {
+    _playingStream = null;
+    for (final stream in _streams.values.toList()) {
+      await stream.close(cancel: true);
+    }
+    _streams.clear();
+  }
+
+  Directory get cacheDirectory => Directory('${store.directory.path}/audio');
+  Future<CachedAudio> _obtainAsset(Track track, {required int token}) async {
+    final progressWatch = Stopwatch()..start();
+    var lastProgress = -100;
+    final cache = AudioCache(
+      cacheDirectory,
+      decodeAudio,
+      certificateVerifier: certificateVerifierFactory(),
+      cancelled: () => disposed || token != _cancelDownload,
+      onProgress: (bytes) {
+        if (disposed || token != _cancelDownload) return;
+        downloadBytes = bytes;
+        if (progressWatch.elapsedMilliseconds - lastProgress >= 100) {
+          lastProgress = progressWatch.elapsedMilliseconds;
+          _notify(library: false);
+        }
+      },
+    )..offline = offline;
+    final saved = store.asset(track.id);
+    if (saved != null) {
+      try {
+        await _safeCacheFolder(track.id, saved.entry);
+        await cache.verify(saved, expectedTrack: track, requireIdentity: !demo);
+        if (!demo) store.markAssetIdentity(saved);
+        return saved;
+      } catch (error) {
+        if (offline) rethrow;
+        _writeAudioDiagnostic({
+          'stage': 'cache_revalidation_required',
+          'category': categoryOf(error),
+          'preserved': true,
+        });
+      }
+    } else {
+      // Recover an atomic publication whose SQLite update was interrupted.
+      final recovered = await _recoverAsset(track, cache);
+      if (recovered != null) return recovered;
+    }
+    if (offline) throw const ProofFailure('track_not_cached');
+    if (demo) throw const ProofFailure('preview_track_not_cached');
+    if (!provider.connected) {
+      // Consent is persistent; an early Play waits for the shared connection
+      // instead of misreporting an ordinary navigation as expired sign-in.
+      if (!autoSync) throw const ProofFailure('private_signin_required');
+      await provider.connect();
+      if (disposed || token != _cancelDownload) {
+        throw const ProofFailure('cancelled');
+      }
+    }
+    downloadId = track.id;
+    _sourceTimings = {};
+    downloadStage = 'finding_source';
+    _activeCache = cache;
+    downloadBytes = 0;
+    _notify();
+    StreamingAudio? stream;
+    try {
+      final sourceWatch = Stopwatch()..start();
+      final resolved = await provider.resolve(
+        track,
+        musicKey: store.musicReference(track.id),
+        cancelled: () => disposed || token != _cancelDownload,
+        manifestSegments: (source, userAgent) async {
+          final watch = Stopwatch()..start();
+          try {
+            final segments = await loadManifestSegments(source, (uri) async {
+              return utf8.decode(
+                await cache.fetch(
+                  uri,
+                  userAgent: userAgent,
+                  limit: 2 * 1024 * 1024,
+                ),
+              );
+            });
+            _writeAudioDiagnostic({
+              'stage': 'witness_manifest',
+              'segments': segments.length,
+              'elapsed_ms': watch.elapsedMilliseconds,
+            });
+            return segments;
+          } catch (error) {
+            _writeAudioDiagnostic({
+              'stage': 'witness_manifest_failed',
+              'category': categoryOf(error),
+              if (error is ProofFailure && error.code != null)
+                'code': error.code!,
+              'elapsed_ms': watch.elapsedMilliseconds,
+            });
+            rethrow;
+          }
+        },
+        prepareCandidate: (source, userAgent) {
+          stream ??= StreamingAudio(cache, source, userAgent: userAgent);
+          unawaited(
+            stream!.prepare().then<void>((_) {}, onError: (Object _) {}),
+          );
+        },
+      );
+      resolved.requireTrack(track);
+      _writeAudioDiagnostic({
+        'stage': 'recording_source_bound',
+        'identity_bound': true,
+        'identity_evidence': resolved.evidence,
+      });
+      _sourceTimings = {
+        'identity_bound': true,
+        'identity_evidence': resolved.evidence,
+        ...resolved.timings,
+        'source_return_ms': sourceWatch.elapsedMilliseconds,
+        'prefix_prepared_at_resolution': stream?.prepared == true,
+        'prefix_source_matched': stream?.source == resolved.source,
+      };
+      if (token != _cancelDownload) throw const ProofFailure('cancelled');
+      message = 'Saving complete audio for ${track.title}…';
+      downloadStage = 'receiving';
+      _notify();
+      if (stream != null && stream!.source != resolved.source) {
+        // A later segment witness can identify a different candidate. Drop
+        // provisional bytes; only the final verified source may be played or
+        // published. The shared network owner still handles Stop/cancellation.
+        await stream!.close();
+        stream = null;
+      }
+      stream ??= StreamingAudio(
+        cache,
+        resolved.source,
+        userAgent: resolved.userAgent,
+      );
+      _streams[track.id] = stream!;
+      final ready = _streamReady[track.id];
+      if (ready != null && !ready.isCompleted) ready.complete(stream!);
+      final sharedCache = AudioCache(
+        cacheDirectory,
+        decodeAudio,
+        certificateVerifier: certificateVerifierFactory(),
+        cancelled: () => disposed || token != _cancelDownload,
+        resourceLoader: stream!.fetch,
+        onStage: (stage) {
+          if (disposed || token != _cancelDownload) return;
+          downloadStage = stage;
+          _notify(library: false);
+        },
+      );
+      final asset = await sharedCache.save(
+        track,
+        resolved.source,
+        userAgent: resolved.userAgent,
+        recordingEvidence: resolved.evidence,
+        preserveExisting: true,
+      );
+      if (disposed || token != _cancelDownload) {
+        throw const ProofFailure('cancelled');
+      }
+      store.saveAsset(asset, identityVerified: true);
+      store.trackError(track.id, null);
+      await enforceQuota();
+      if (_playingStream == track.id) {
+        message = player.state.playing
+            ? 'Playing · saved offline'
+            : 'Paused · saved offline';
+      }
+      return asset;
+    } finally {
+      if (stream != null &&
+          (!identical(_streams[track.id], stream) ||
+              (_playingStream != track.id &&
+                  _checkingTrack != track.id &&
+                  !_streamReady.containsKey(track.id)))) {
+        if (identical(_streams[track.id], stream)) _streams.remove(track.id);
+        await stream!.close(cancel: true);
+      }
+      _activeCache = null;
+      downloadId = null;
+      downloadStage = null;
+      downloadBytes = 0;
+      _notify();
+    }
+  }
+
+  Future<CachedAudio?> _recoverAsset(Track track, AudioCache cache) async {
+    final folder = Directory('${cacheDirectory.path}/${track.id}');
+    if (!await folder.exists()) return null;
+    if (!demo && !File('${folder.path}/recording.json').existsSync()) {
+      return null;
+    }
+    try {
+      await _safeCacheFolder(track.id, '${folder.path}/audio.mp3');
+      final integrity = Map<String, dynamic>.from(
+        jsonDecode(await File('${folder.path}/integrity.json').readAsString()),
+      );
+      final names = integrity.keys.toList()..sort();
+      final ordered = {for (final name in names) name: integrity[name]};
+      final entry = ['mp3', 'm4a', 'ts', 'm3u8']
+          .map((e) => File('${folder.path}/audio.$e'))
+          .where((f) => f.existsSync())
+          .first;
+      var bytes = 0;
+      for (final name in names) {
+        if (!RegExp(r'^[a-zA-Z0-9_.-]+$').hasMatch(name)) {
+          throw const ProofFailure('cache_integrity_failed');
+        }
+        bytes += await File('${folder.path}/$name').length();
+      }
+      final duration = await decodeAudio(entry.path);
+      final recovered = CachedAudio(
+        track.id,
+        entry.path,
+        sha256.convert(utf8.encode(jsonEncode(ordered))).toString(),
+        bytes,
+        duration,
+      );
+      await cache.verify(
+        recovered,
+        expectedTrack: track,
+        requireIdentity: !demo,
+      );
+      store.saveAsset(recovered, identityVerified: !demo);
+      return recovered;
+    } catch (_) {
+      // Preserve an old/suspect publication until a proven replacement succeeds.
+      return null;
+    }
+  }
+
+  Future<Directory> _safeCacheFolder(String id, String entry) async {
+    if (!RegExp(r'^-?\d+_\d+$').hasMatch(id)) {
+      throw const ProofFailure('cache_path_invalid');
+    }
+    final expected = Directory('${cacheDirectory.path}/$id');
+    final root = cacheDirectory.absolute.path
+        .replaceAll('\\', '/')
+        .toLowerCase();
+    final actual = (await expected.resolveSymbolicLinks())
+        .replaceAll('\\', '/')
+        .toLowerCase();
+    final parent = (await File(
+      entry,
+    ).parent.resolveSymbolicLinks()).replaceAll('\\', '/').toLowerCase();
+    if (actual != '$root/$id' || parent != actual) {
+      throw const ProofFailure('cache_path_invalid');
+    }
+    return expected;
+  }
+
+  Future<void> _deleteAsset(String id) async {
+    final folder = Directory('${cacheDirectory.path}/$id');
+    if (await folder.exists()) {
+      final safe = await _safeCacheFolder(id, '${folder.path}/audio.mp3');
+      await safe.delete(recursive: true);
+    }
+    store.forgetAsset(id);
+  }
+
+  Future<void> enforceQuota() async {
+    final protected = {if (current != null) current!.id, ?downloadId};
+    for (final id in store.evictionOrder(protected)) {
+      if (store.usedBytes(pinned: false) <= quota) break;
+      await _deleteAsset(id);
+    }
+    if (store.usedBytes(pinned: false) > quota) {
+      message = 'Cache budget reached. The current track is protected.';
+    }
+    _notify();
+  }
+
+  Future<void> setQuota(int bytes) async {
+    store.setSetting('quota_bytes', bytes);
+    await enforceQuota();
+  }
+
+  Future<void> pinTrack(String id) async {
+    store.pinTrack(id, !store.individuallyPinned(id));
+    _notify();
+    if (store.isPinned(id)) {
+      unawaited(_pumpPins());
+    } else {
+      await enforceQuota();
+    }
+  }
+
+  Future<void> pinPile(int id, bool value) async {
+    store.pinPile(id, value);
+    _notify();
+    if (value) {
+      unawaited(_pumpPins());
+    } else {
+      await enforceQuota();
+    }
+  }
+
+  bool _pumping = false;
+  Future<void> _pumpPins() async {
+    if (_pumping ||
+        disposed ||
+        offline ||
+        loading ||
+        downloadId != null ||
+        demo ||
+        DateTime.now().isBefore(_nextPinAttempt)) {
+      return;
+    }
+    _pumping = true;
+    try {
+      for (final id in store.pendingPins) {
+        if (!store.isPinned(id)) continue;
+        if (disposed || offline || loading) break;
+        final track = store.track(id);
+        if (track == null) continue;
+        try {
+          await ensureAsset(track);
+        } catch (e) {
+          store.trackError(id, categoryOf(e));
+          _nextPinAttempt = DateTime.now().add(const Duration(minutes: 2));
+          _failure(e);
+          break;
+        }
+      }
+    } finally {
+      _pumping = false;
+      _notify();
+    }
+  }
+
+  int createPile(String name) {
+    final id = store.createPile(name);
+    _notify();
+    return id;
+  }
+
+  void renamePile(int id, String name) {
+    store.renamePile(id, name);
+    _notify();
+  }
+
+  void deletePile(int id) {
+    store.deletePile(id);
+    if (pileId == id) browse('library');
+    _notify();
+  }
+
+  void addToPile(int pile, String track) {
+    store.addToPile(pile, track);
+    _notify();
+    unawaited(_pumpPins());
+  }
+
+  void removeOccurrence(int id) {
+    store.removeOccurrence(id);
+    _notify();
+  }
+
+  void cancelDownload() {
+    unawaited(stopPlayback());
+  }
+
+  void _failure(Object error, [StackTrace? stack]) {
+    final category =
+        error is FileSystemException &&
+            [28, 112].contains(error.osError?.errorCode)
+        ? 'storage_full'
+        : categoryOf(error);
+    store.report(category);
+    try {
+      File('${store.directory.path}/runtime-error.json').writeAsStringSync(
+        jsonEncode({
+          'updatedAt': DateTime.now().toUtc().toIso8601String(),
+          ...runtimeDiagnostic(error, stack),
+          'category': category,
+        }),
+      );
+    } catch (_) {
+      /* Status and controls still work if the report cannot save. */
+    }
+    message = friendlyError(category);
+    _notify();
+  }
+
+  void _pollControl() {
+    if (demo || disposed || !enableLocalControls) return;
+    final file = File('${store.directory.path}/control.json');
+    try {
+      if (!file.existsSync() || file.lengthSync() > 1024) return;
+      final raw = jsonDecode(file.readAsStringSync());
+      if (raw is! Map ||
+          raw.length != 2 ||
+          raw.keys.any((k) => !['command', 'nonce'].contains(k)) ||
+          ![
+            'restart',
+            'check',
+            'play',
+            'play-current',
+            'play-uncached',
+            'play-deep',
+            'play-last',
+            'play-old-1',
+            'play-old-10',
+            'play-old-25',
+            'play-old-50',
+            'play-old-100',
+            'play-old-250',
+            'play-cached',
+            'audible',
+            'pause',
+            'resume',
+            'seek-middle',
+            'stop',
+            'next',
+            'refresh-head',
+            'refresh-full',
+            'metadata-summary',
+            'inspect-current',
+            'inspect-old',
+            'inspect-lyrics',
+            'repair-mismatched-cache',
+            'check-repaired',
+            'check-current',
+            'check-old',
+          ].contains(raw['command']) ||
+          raw['nonce'] is! String ||
+          !RegExp(r'^[a-f0-9-]{36}$').hasMatch(raw['nonce'] as String) ||
+          store.setting('control_nonce') == raw['nonce']) {
+        return;
+      }
+      store.setSetting('control_nonce', raw['nonce']);
+      if (raw['command'] == 'check-old') {
+        final list = store.rows(view: 'vk');
+        if (list.isNotEmpty) {
+          unawaited(
+            _checkSample(
+              targetId:
+                  list[(list.length - 25).clamp(0, list.length - 1)].track.id,
+            ),
+          );
+        }
+      }
+      if (raw['command'] == 'check-repaired') {
+        unawaited(checkRepairedControls());
+      }
+      if (raw['command'] == 'check-current' && current != null) {
+        unawaited(_checkSample(targetId: current!.id));
+      }
+      if (raw['command'] == 'repair-mismatched-cache') {
+        unawaited(repairMismatchedCache());
+      }
+      if (raw['command'] == 'metadata-summary') _reportMetadataSummary();
+      if (raw['command'] == 'inspect-lyrics') {
+        final track = store
+            .rows(view: 'vk')
+            .where(
+              (row) => store.metadata(row.track.id)['lyricsAvailable'] == true,
+            )
+            .firstOrNull
+            ?.track;
+        if (track != null) unawaited(enrichTrack(track.id, force: true));
+      }
+      if (raw['command'] == 'inspect-current' ||
+          raw['command'] == 'inspect-old') {
+        final list = raw['command'] == 'inspect-old'
+            ? store.rows(view: 'vk')
+            : const <LibraryRow>[];
+        final track = raw['command'] == 'inspect-old' && list.isNotEmpty
+            ? list[(list.length - 25).clamp(0, list.length - 1)].track
+            : current;
+        if (track != null) unawaited(enrichTrack(track.id, force: true));
+      }
+      if (raw['command'] == 'refresh-head') unawaited(refresh(full: false));
+      if (raw['command'] == 'refresh-full') unawaited(refresh());
+      if (raw['command'] == 'play' && rows.isNotEmpty) {
+        unawaited(playLibrary(rows));
+      }
+      if ((raw['command'] == 'play-deep' || raw['command'] == 'play-last') &&
+          rows.isNotEmpty) {
+        final visible = rows;
+        final index = raw['command'] == 'play-last'
+            ? visible.length - 1
+            : (visible.length - 1).clamp(0, 2000);
+        _writeAudioDiagnostic({
+          'stage': 'ordinary_selection',
+          'ordinal': index,
+          'rows': visible.length,
+        });
+        unawaited(playRows(visible, index));
+      }
+      if ([
+        'play-old-1',
+        'play-old-10',
+        'play-old-25',
+        'play-old-50',
+        'play-old-100',
+        'play-old-250',
+      ].contains(raw['command'])) {
+        // Freeze the test set before selecting; later sync must not change
+        // which recording a repeated fixed command addresses.
+        final sample = _oldAudioSample ??= store.rows(view: 'vk');
+        if (sample.isNotEmpty) {
+          final offset = int.parse((raw['command'] as String).split('-').last);
+          final index = (sample.length - offset).clamp(0, sample.length - 1);
+          _writeAudioDiagnostic({
+            'stage': 'old_audio_selection',
+            'ordinal': index,
+            'rows': sample.length,
+            'offset_from_end': offset,
+            'music_age_bucket': provider.musicAgeBucket(sample[index].track.id),
+          });
+          unawaited(playRows(sample, index));
+        }
+      }
+      if (raw['command'] == 'play-current') unawaited(playCurrent());
+      if (raw['command'] == 'audible') unawaited(volume(50));
+      if (raw['command'] == 'play-cached') {
+        final visible = rows;
+        final index = visible.indexWhere(
+          (row) => store.asset(row.track.id) != null,
+        );
+        if (index >= 0) unawaited(playRows(visible, index));
+      }
+      if (raw['command'] == 'play-uncached') {
+        final visible = rows;
+        final index = visible.indexWhere(
+          (row) => store.asset(row.track.id) == null,
+        );
+        if (index >= 0) unawaited(playRows(visible, index));
+      }
+      if (raw['command'] == 'pause' && player.state.playing) {
+        unawaited(togglePlay());
+      }
+      if (raw['command'] == 'resume' && !loading && !player.state.playing) {
+        unawaited(togglePlay());
+      }
+      if (raw['command'] == 'seek-middle' && !loading && current != null) {
+        unawaited(seek(current!.duration / 2));
+      }
+      if (raw['command'] == 'stop') unawaited(stopPlayback());
+      if (raw['command'] == 'next') unawaited(next());
+      if (raw['command'] == 'restart') _restartRequested = true;
+      if (raw['command'] == 'check' && autoSync) _acceptanceRequested = true;
+    } catch (_) {
+      store.report('control_invalid');
+    }
+  }
+
+  Future<void> _restart() async {
+    try {
+      store.report('app_restarting');
+      await runtime.restartAfter(shutdown);
+    } catch (e) {
+      if (!disposed) _failure(e);
+    }
+  }
+
+  void _cancelCheck(String reason) {
+    if (!_checking || _checkCancelled?.isCompleted == true) return;
+    _checkCancelReason = reason;
+    if (reason != 'deadline' && reason != 'shutdown') ++_request;
+    _checkCancelled?.complete();
+    if (_checkGeneration == _cancelDownload) {
+      ++_cancelDownload;
+      _activeCache?.cancel();
+      _downloads.clear();
+      _streamReady.clear();
+      unawaited(provider.cancelResolution());
+    }
+  }
+
+  Future<void> checkOfflineControls() => _checkSample(cachedOnly: true);
+
+  Future<void> checkRepairedControls() async {
+    var id = store.setting('recording_repair_sample_id');
+    if (id is! String) {
+      final verified = store.rows().where((row) {
+        final asset = store.asset(row.track.id);
+        return asset != null &&
+            File('${File(asset.entry).parent.path}/recording.json')
+                .existsSync();
+      }).toList();
+      if (verified.length != 1) return;
+      id = verified.single.track.id;
+      store.setSetting('recording_repair_sample_id', id);
+    }
+    await _checkSample(targetId: id);
+  }
+
+  Future<void> _checkSample({bool cachedOnly = false, String? targetId}) {
+    if (_checkTask != null) return _checkTask!;
+    final task = _runSampleCheck(cachedOnly: cachedOnly, targetId: targetId);
+    _checkTask = task;
+    task.whenComplete(() {
+      if (identical(_checkTask, task)) _checkTask = null;
+    });
+    return task;
+  }
+
+  Future<void> _runSampleCheck({
+    bool cachedOnly = false,
+    String? targetId,
+  }) async {
+    if (_checking || (!cachedOnly && (offline || !provider.connected))) return;
+    _acceptanceRequested = false;
+    _checking = true;
+    _checkCancelled = Completer<void>();
+    _checkCancelReason = null;
+    _checkGeneration = _cancelDownload;
+    final watch = Stopwatch()..start();
+    final savedQueue = queue.toJson();
+    var ownedRequest = _request;
+    var stage = 'preparing';
+    var lastBytes = 0;
+    var lastProgress = 0;
+    StreamingAudio? checkStream;
+    final result = <String, Object>{
+      'startedAt': DateTime.now().toUtc().toIso8601String(),
+      'running': true,
+      'fresh_offline_process': cachedOnly,
+      'player': 'main',
+    };
+    void checkpoint([String? next]) {
+      if (next != null) stage = next;
+      if (downloadBytes > lastBytes) {
+        lastBytes = downloadBytes;
+        lastProgress = watch.elapsedMilliseconds;
+      }
+      result.remove('transfer_stage');
+      result.addAll({
+        'updatedAt': DateTime.now().toUtc().toIso8601String(),
+        'stage': stage,
+        'elapsed_ms': watch.elapsedMilliseconds,
+        'received_bytes': lastBytes,
+        'last_progress_ms': lastProgress,
+        'position_ms': player.state.position.inMilliseconds,
+        'duration_ms': player.state.duration.inMilliseconds,
+        'buffering': player.state.buffering,
+        'playing': player.state.playing,
+        'native_category': ?_lastNativeCategory,
+        'native_signals': _nativeSignals,
+        'transfer_stage': ?downloadStage,
+        'cancel_reason': ?_checkCancelReason,
+      });
+      File(
+        '${store.directory.path}/${cachedOnly ? 'offline-check' : 'sample-check'}.json',
+      ).writeAsStringSync(jsonEncode(result));
+    }
+
+    Future<T> checked<T>(Future<T> future) => Future.any<T>([
+      future,
+      _checkCancelled!.future.then<T>(
+        (_) => throw const ProofFailure('cancelled'),
+      ),
+    ]);
+    Future<void> start(LibraryRow row) async {
+      final operation = playRows([row], 0, diagnostic: true);
+      ownedRequest = _request;
+      await checked(operation);
+      if (!player.state.playing || player.state.position.inMilliseconds < 100) {
+        final failure = store
+            .rows()
+            .firstWhere((r) => r.track.id == row.track.id)
+            .error;
+        throw ProofFailure(failure ?? 'main_control_start_failed');
+      }
+    }
+
+    Future<void> stop() async {
+      final operation = stopPlayback(diagnostic: true);
+      ownedRequest = _request;
+      await checked(operation);
+      if (loading || player.state.playing) {
+        throw const ProofFailure('main_control_stop_failed');
+      }
+    }
+
+    final timer = Timer.periodic(
+      const Duration(seconds: 1),
+      (_) => checkpoint(),
+    );
+    final deadline = Timer(
+      const Duration(minutes: 3),
+      () => _cancelCheck('deadline'),
+    );
+    try {
+      final rows = store.rows();
+      final accepted = store.setting('acceptance_sample_id');
+      final lastSample = accepted is String && store.asset(accepted) != null
+          ? accepted
+          : current?.id;
+      final row = targetId != null
+          ? rows.firstWhere((row) => row.track.id == targetId)
+          : cachedOnly
+          ? rows.firstWhere(
+              (row) => row.offline && row.track.id == lastSample,
+              orElse: () => rows.firstWhere((row) => row.offline),
+            )
+          : rows.firstWhere((row) => !row.offline, orElse: () => rows.first);
+      final sample = row.track;
+      final wasCached = row.offline;
+      result['selection_had_error'] = row.error != null;
+      _checkingTrack = sample.id;
+      checkpoint('main_play');
+      // Exercise the same controller methods bound to the visible UI, using
+      // the app's real player/audio output. No separate muted stream player.
+      // Diagnostic playback writes no history and does not persist its queue.
+      await start(row);
+      checkStream = _streams[sample.id];
+      result.addAll({
+        'streamed': _playingStream == sample.id,
+        'first_audio_ms': watch.elapsedMilliseconds,
+        if (!wasCached) ..._sourceTimings,
+        if (!wasCached && _sourceTimings['source_return_ms'] is int)
+          'native_start_ms':
+              watch.elapsedMilliseconds -
+              (_sourceTimings['source_return_ms'] as int),
+        'played_before_complete': store.asset(sample.id) == null,
+        'main_play': true,
+      });
+      checkpoint('main_pause');
+      await checked(togglePlay(diagnostic: true));
+      await checked(
+        waitUntil(() => !player.state.playing, 'main_control_pause_failed'),
+      );
+      // Position stream events may still be queued after Pause. Measure the
+      // native playback clock instead of treating a late event as more audio.
+      if (!await checked(player.isPaused())) {
+        throw const ProofFailure('main_control_pause_failed');
+      }
+      // During stream startup mpv can correct its initial timestamp even
+      // while paused. Require three stable native readings (bounded to 2 s),
+      // then measure a separate 300 ms window; continuous progress still fails.
+      Future<double> clockSeconds() async {
+        final value = await checked(player.clockSeconds());
+        if (value == null || !value.isFinite || value < 0) {
+          throw const ProofFailure('main_control_pause_failed');
+        }
+        return value;
+      }
+
+      var pausedSeconds = await clockSeconds();
+      final settling = Stopwatch()..start();
+      var stable = 0;
+      while (stable < 3) {
+        if (settling.elapsed >= const Duration(seconds: 2)) {
+          throw const ProofFailure('main_control_pause_failed');
+        }
+        await checked(Future<void>.delayed(const Duration(milliseconds: 100)));
+        final current = await clockSeconds();
+        stable = (current - pausedSeconds).abs() <= 0.002 ? stable + 1 : 0;
+        pausedSeconds = current;
+      }
+      result['pause_settle_ms'] = settling.elapsedMilliseconds;
+      final pausedAt = Duration(milliseconds: (pausedSeconds * 1000).round());
+      result['pause_position_ms'] = pausedAt.inMilliseconds;
+      await checked(Future<void>.delayed(const Duration(milliseconds: 300)));
+      final afterSeconds = await checked(player.clockSeconds());
+      result['pause_after_ms'] = afterSeconds == null
+          ? -1
+          : (afterSeconds * 1000).round();
+      if (!await checked(player.isPaused()) ||
+          afterSeconds == null ||
+          !afterSeconds.isFinite ||
+          (afterSeconds - pausedSeconds).abs() > 0.01) {
+        throw const ProofFailure('main_control_pause_failed');
+      }
+      result['main_pause'] = true;
+      checkpoint('main_resume');
+      await checked(togglePlay(diagnostic: true));
+      await checked(
+        waitUntil(
+          () =>
+              player.state.playing &&
+              player.state.position >
+                  pausedAt + const Duration(milliseconds: 150),
+          'main_control_resume_failed',
+        ),
+      );
+      result['main_resume'] = true;
+      checkpoint('main_seek');
+      final target = player.state.duration.inMilliseconds / 2000;
+      result['seek_target_ms'] = (target * 1000).round();
+      await checked(seek(target, diagnostic: true));
+      await checked(
+        waitUntil(
+          () => player.state.position.inMilliseconds > target * 1000 + 150,
+          'main_control_seek_failed',
+          timeout: const Duration(seconds: 45),
+        ),
+      );
+      result['main_seek'] = true;
+      result['stream_seek'] = _playingStream == sample.id;
+      checkpoint('complete_cache');
+      final asset = await checked(ensureAsset(sample));
+      store.setSetting('acceptance_sample_id', sample.id);
+      checkpoint('main_stop');
+      await stop();
+      result['main_stop'] = true;
+      checkpoint('local_play_seek');
+      await start(row);
+      if (_playingStream != null) {
+        throw const ProofFailure('local_play_used_stream');
+      }
+      final localTarget = player.state.duration.inMilliseconds / 2000;
+      await checked(seek(localTarget, diagnostic: true));
+      await checked(
+        waitUntil(
+          () => player.state.position.inMilliseconds > localTarget * 1000 + 150,
+          'main_local_seek_failed',
+        ),
+      );
+      await stop();
+      result.addAll({
+        'passed': true,
+        'complete_bytes': asset.bytes,
+        'duration': asset.duration,
+        'local_play_seek': true,
+        'was_cached': wasCached,
+        'offline_mode': offline,
+        'provider_connected': provider.connected,
+      });
+      store.report(
+        cachedOnly
+            ? 'offline_controls_passed'
+            : wasCached
+            ? 'cached_sample_controls_passed'
+            : 'stream_cache_controls_passed',
+        count: store.count,
+      );
+      message = 'Sample verified: complete cache and player controls.';
+    } catch (e) {
+      result.addAll({'passed': false, 'category': categoryOf(e)});
+      if (_checkCancelReason == null && !disposed) _failure(e);
+    } finally {
+      deadline.cancel();
+      timer.cancel();
+      // A newer foreground request owns the player and queue immediately.
+      // Never stop or restore over it while the cancelled check unwinds.
+      if (_request == ownedRequest) {
+        final completionMessage = message;
+        if (!disposed) {
+          await stopPlayback(diagnostic: true);
+          message = completionMessage;
+        }
+        queue.restore(savedQueue);
+      }
+      final sampleId = _checkingTrack;
+      _checkingTrack = null;
+      if (sampleId != null &&
+          _playingStream != sampleId &&
+          identical(_streams[sampleId], checkStream)) {
+        _streams.remove(sampleId);
+        await checkStream?.close(cancel: _checkCancelReason != null);
+      }
+      result['running'] = false;
+      checkpoint();
+      _checkGeneration = null;
+      _checking = false;
+      _notify();
+    }
+  }
+
+  Future<void> shutdown() async {
+    if (disposed) return;
+    _finishListening();
+    _saveQueue();
+    _cancelCheck('shutdown');
+    ++_request;
+    disposed = true;
+    _cancelDownload++;
+    _activeCache?.cancel();
+    _tick?.cancel();
+    _scheduler?.cancel();
+    for (final s in _subscriptions) {
+      await s.cancel();
+    }
+    await _closeStreams();
+    artwork.close();
+    await _volumeTail;
+    await player.dispose();
+    await provider.disconnect();
+    await _checkTask;
+    // Pending download work may still unwind; only close after it releases DB.
+    await _downloadTail;
+    store.report('app_closed', count: store.count);
+    store.close();
+  }
+
+  @override
+  void dispose() {
+    unawaited(shutdown());
+    super.dispose();
+  }
+}
+
+bool isProviderRestricted(String? category) =>
+    category == 'audio_restricted' ||
+    category?.startsWith('audio_restricted_') == true ||
+    category == 'audio_play_control_disabled';
+
+String friendlyError(String category) => switch (category) {
+  'cache_identity_unverified' => 'This older download needs an online recording check before playback. Its original files are preserved.',
+  'audio_identity_mismatch' || 'audio_identity_unverified' => 'VK did not provide audio bound to this exact recording. Playback stopped to avoid the wrong song.',
+  'audio_duration_mismatch' => 'The audio does not match this recording’s duration. Playback stopped; the existing files are preserved.',
+  'private_signin_required' => 'VK needs sign-in. Open Settings and choose Sign in privately. Saved music is still available.',
+  'vk_not_connected' =>
+    'Connect VK to load this track. Your saved music is still available.',
+  'track_not_cached' =>
+    'This song is not saved offline. Reconnect to download it.',
+  'cancelled' => 'Download cancelled. You can retry the track.',
+  'audio_source_unavailable' || 'audio_source_not_resolved' => 'Ownsemble could not resolve audio for this song. Your saved library is preserved.',
+  'audio_restricted' => 'VK restricts this recording and provides no audio source. Other songs and saved music are still available.',
+  'audio_restricted_copyright' =>
+    'VK restricts this recording at the rights holder request.',
+  'audio_restricted_region' =>
+    'VK restricts this recording in the current region.',
+  'audio_restricted_subscription' =>
+    'VK requires a subscription for this recording.',
+  'audio_restricted_age' => 'VK applies an age restriction to this recording.',
+  'audio_play_control_disabled' =>
+    'The selected recording has a disabled Play control in VK.',
+  'audio_source_ambiguous' =>
+    'VK exposed several sources. Playback stopped to avoid the wrong song.',
+  'music_adapter_unsupported' ||
+  'play_control_unsupported' ||
+  'music_search_unsupported' ||
+  'personal_music_unconfirmed' =>
+    'VK changed its music page. Your library and cached songs are safe.',
+  'music_rows_timeout' || 'music_page_timeout' =>
+    'VK’s track list has not finished loading. Playback can be retried.',
+  'music_input_timeout' =>
+    'VK’s playback control did not respond. Playback was stopped.',
+  'player_start_failed' || 'player_start_timeout' =>
+    'Audio did not start in the player. Choose Play to retry.',
+  'browser_mute_unavailable' =>
+    'The background browser could not be silenced. Playback was stopped.',
+  'track_not_in_search_results' || 'track_not_loaded' => 'This song was not found within the loading budget. Try again after refresh.',
+  'audio_network_failed' || 'audio_http_failed' =>
+    'The download could not finish. Check your connection and retry.',
+  'cache_path_invalid' || 'cache_integrity_failed' =>
+    'The cached file could not be verified. Retry while online.',
+  'audio_incomplete' =>
+    'VK returned incomplete audio. Retry to resolve a fresh source.',
+  'storage_full' => 'Storage is full. Free space or reduce the automatic cache budget, then retry.',
+  _ => 'The operation could not finish. Your library is saved; try again.',
+};

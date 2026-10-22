@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; media-src proof-audio:; img-src 'self' data:; connect-src 'none'; object-src 'none'; base-uri 'none'; frame-src 'none'">
+  <title>Ownsemble — VK feasibility test</title>
+  <style>
+    :root { color-scheme: dark; font-family: 'Segoe UI', sans-serif; color: #e9eaf0; background: #101319; }
+    * { box-sizing: border-box; }
+    body { margin: 0; }
+    button { font: inherit; cursor: pointer; border: 1px solid #363d4b; border-radius: 8px; padding: 10px 14px; color: #e9eaf0; background: #222833; }
+    button:hover { background: #303846; }
+    button:disabled { cursor: default; opacity: .4; }
+    .accent { background: #e8aa77; color: #201810; border-color: #e8aa77; font-weight: 600; }
+    .accent:hover { background: #f5bd8c; }
+    .layout { display: grid; grid-template-columns: 210px 1fr; min-height: calc(100vh - 100px); }
+    aside { padding: 30px 20px; border-right: 1px solid #262d38; background: #14181f; }
+    .brand { font-size: 23px; letter-spacing: -.8px; font-weight: 650; }
+    .brand span { color: #e8aa77; }
+    .eyebrow { text-transform: uppercase; font-size: 10px; letter-spacing: 1.8px; color: #8c97aa; margin-top: 8px; }
+    .steps { list-style: none; padding: 0; margin: 42px 0; }
+    .steps li { margin: 24px 0; color: #8d99ad; font-size: 13px; }
+    .steps b { display: inline-grid; place-items: center; width: 23px; height: 23px; margin-right: 8px; border: 1px solid #3b4657; border-radius: 50%; font-size: 11px; }
+    .steps .done { color: #9bcfba; }
+    .steps .done b { border-color: #4b8871; }
+    .note { font-size: 12px; color: #8d99ad; line-height: 1.7; }
+    main { padding: 30px 34px 120px; min-width: 0; }
+    header { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+    h1 { font-size: 27px; letter-spacing: -.7px; margin: 4px 0 8px; }
+    h2 { font-size: 16px; font-weight: 600; }
+    p { line-height: 1.6; }
+    .muted { color: #97a3b7; font-size: 13px; margin-top: 0; }
+    .badge { border: 1px solid #3a4657; color: #aab8ce; border-radius: 20px; font-size: 11px; padding: 7px 12px; white-space: nowrap; }
+    .badge.offline { color: #a7d7c1; border-color: #426f5d; }
+    .toolbar { display: flex; flex-wrap: wrap; gap: 9px; margin: 25px 0 16px; }
+    .status { border-left: 3px solid #e8aa77; background: #1c222c; padding: 13px 16px; font-size: 13px; line-height: 1.5; min-height: 48px; margin-bottom: 24px; }
+    .table-wrap { border: 1px solid #29313e; border-radius: 10px; overflow: hidden; }
+    table { border-collapse: collapse; width: 100%; font-size: 13px; }
+    th { text-align: left; font-size: 10px; text-transform: uppercase; letter-spacing: 1.2px; color: #8d99ad; background: #191f28; }
+    th,td { padding: 13px 15px; border-bottom: 1px solid #252d39; }
+    td { max-width: 260px; }
+    tr:last-child td { border-bottom: 0; }
+    tr.active { background: #28272a; }
+    .artist { display: block; color: #8d99ad; font-size: 12px; margin-top: 4px; }
+    .track-action { padding: 7px 10px; font-size: 12px; margin: 2px; }
+    .available { color: #9bcfba; font-size: 11px; white-space: nowrap; }
+    .empty { padding: 35px 20px; text-align: center; color: #8d99ad; font-size: 13px; }
+    details { margin-top: 25px; color: #8d99ad; font-size: 12px; }
+    pre { white-space: pre-wrap; line-height: 1.6; font: 11px Consolas, monospace; }
+    footer { position: fixed; bottom: 0; left: 0; right: 0; height: 100px; background: #1a2029; border-top: 1px solid #343b48; display: flex; align-items: center; gap: 25px; padding: 18px 28px; }
+    .now { min-width: 220px; max-width: 320px; font-size: 13px; }
+    .now strong { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    audio { flex: 1; height: 38px; }
+    #count { font-size: 11px; color: #8d99ad; }
+    @media (max-width: 900px) { .layout { grid-template-columns: 170px 1fr; } main { padding: 25px 20px 120px; } .now { min-width: 160px; } }
+  </style>
+</head>
+<body>
+  <div class="layout">
+    <aside>
+      <div class="brand">ownsemble<span>.</span></div>
+      <div class="eyebrow">VK connection proof</div>
+      <ol class="steps">
+        <li id="step-auth"><b>1</b> Connect VK</li>
+        <li id="step-list"><b>2</b> Import music only</li>
+        <li id="step-cache"><b>3</b> Save & play audio</li>
+        <li id="step-offline"><b>4</b> Restart offline</li>
+      </ol>
+      <p class="note">A focused feasibility test.<br>Your VK library stays unchanged.</p>
+      <p class="note">Sign in privately once, then enable automatic sync on My music. It checks for additions every two minutes while this probe runs. Sign-in forms pause access.</p>
+    </aside>
+    <main>
+      <header>
+        <div><h1>Your music, locally.</h1><p class="muted">Let's verify the connection before building the full app.</p></div>
+        <span class="badge" id="mode">ONLINE TEST</span>
+      </header>
+      <div class="toolbar">
+        <button class="accent" id="connect">1 · Connect VK</button>
+        <button id="auto-sync">2 · Enable automatic sync</button>
+        <button id="import">Sync now</button>
+        <button id="offline">Restart offline</button>
+      </div>
+      <div class="status" id="status" role="status">Starting…</div>
+      <h2>VK library <span id="count"></span></h2>
+      <div class="table-wrap">
+        <table><thead><tr><th>Track</th><th>Length</th><th>Local audio</th><th>Test actions</th></tr></thead><tbody id="tracks"></tbody></table>
+        <div id="empty" class="empty">Connect VK → sign in privately → open My music → enable automatic sync once.</div>
+      </div>
+      <details><summary>Test evidence</summary><pre id="evidence"></pre></details>
+      <p class="note">Play & cache asks VK for audio and saves a verified complete track before local playback. Listing names does not establish audio access. Scrolling discovers further tracks; the provider's total is still unverified.</p>
+    </main>
+  </div>
+  <footer>
+    <div class="now"><strong id="now-title">Nothing playing yet</strong><span class="artist" id="now-artist">Choose a real track from your VK library</span></div>
+    <audio id="player" controls preload="metadata"></audio>
+  </footer>
+  <script src="player-proof.js"></script>
+  <script src="renderer.js"></script>
+</body>
+</html>

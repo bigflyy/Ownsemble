@@ -1,0 +1,25 @@
+# Local feasibility environment, session data, and downloaded music
+.venv-vk/
+.local/
+node_modules/
+__pycache__/
+*.pyc
+*.log
+.env
+.env.*
+!.env.example
+# Nested native/Flutter/Gradle outputs in production and preserved probes
+**/build/
+**/.dart_tool/
+**/.gradle/
+**/.cxx/
+**/flutter/ephemeral/
+# Dedicated browser sessions and private credential containers at any depth
+**/app-profile/
+**/browser-profile/
+**/Cookies
+**/Login Data
+*.pfx
+*.p12
+*.key
+!spikes/vk-flutter/assets/synthetic*.key

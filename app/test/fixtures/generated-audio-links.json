@@ -1,0 +1,32 @@
+[
+  {
+    "source": "https://test.vkuseraudio.net/song.m3u8?synthetic=1",
+    "userId": 30303030,
+    "encoded": "https://vk.com/mp3/audio_api_unavailable.mp3?extra=mt1JAxrLAhrUExm/ohuZBs5NBM9Zl3rLBI5VAwr1yxjLC3vRDI5OC2vOlY86C3bODgG=#DG=="
+  },
+  {
+    "source": "https://test.vkuseraudio.net/song.m3u8?synthetic=1",
+    "userId": 30303030,
+    "encoded": "https://vk.com/mp3/audio_api_unavailable.mp3?extra=iZ8/oZHXzgq/lJG/ztOGpJGUos0+lYiKzsuUp2q4jcuSzsz4pNnOodiLpYmUpYi0DN0=#EaTl"
+  },
+  {
+    "source": "https://test.vkuseraudio.net/song.m3u8?synthetic=1",
+    "userId": 30303030,
+    "encoded": "https://vk.com/mp3/audio_api_unavailable.mp3?extra=EuTlrO06ChblDKPllK1cteP2sxjmDxPglKv2s3bkrKv4lKr0tgO/sLbfs3L2s3POCwy=#CGSXnW=="
+  },
+  {
+    "source": "https://test.vkuseraudio.net/song.m3u8?synthetic=1",
+    "userId": 30303030,
+    "encoded": "https://vk.com/mp3/audio_api_unavailable.mp3?extra=Ahv2B3nOzweVDhnTC3nLpxu4DhbJlNrRzxLOzhqVBM5PB2DUAc4XlI8/zxjZDdm6Axu=#CWSOmq=="
+  },
+  {
+    "source": "https://test.vkuseraudio.net/song.m3u8?synthetic=1",
+    "userId": 30303030,
+    "encoded": "https://vk.com/mp3/audio_api_unavailable.mp3?extra=Ac5OytPLCdfOzgnOl3LOCZ9ZzxzZl29TBMTPpxnUB3uUDs50Dc84DgvYzxrUzZnZAxu=#AqSXmJm="
+  },
+  {
+    "source": "https://test.vkuseraudio.net/song.m3u8?synthetic=1",
+    "userId": 30303030,
+    "encoded": "https://vk.com/mp3/audio_api_unavailable.mp3?extra=uwO0pY4KlNy+Bs0+md4LBu0GjwCIDuSKDwO/iNyJpOHXjt9TjJ92DtSJpY4SlNbnBJ8=#DGLZcZqYcxGlsWLPcZeYmWLYcZe3"
+  }
+]

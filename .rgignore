@@ -1,0 +1,8 @@
+# Agent searches must not traverse private sessions, credentials, or dependencies.
+.local/
+.venv-vk/
+node_modules/
+.dart_tool/
+build/
+.env
+.env.*
