@@ -48,3 +48,28 @@ branch. Packaging must pin/verify a current stable engine, retain licenses and
 provide an explicit update procedure. Native Ubuntu X11/Wayland, another distro
 family, physical audio and separate privacy-scoped VK acceptance remain gates.
 Windows implementation, existing catalog/cache and private sessions are unchanged.
+
+## Reproducible engine updates
+
+`app/linux/browser/cef-runtime.json` pins Linux x64 CEF156.0.7 / Chromium156.0.8078.17
+from the official public build index refreshed2026-10-22. The highest stable
+Chromium version is selected numerically, ignoring upload order and beta builds.
+The archive was verified against the published size/SHA1 and a SHA256 is pinned.
+This checks byte identity; it is not a claim of security or universal compatibility.
+
+On Linux, `python3 scripts/prepare-linux-browser.py CACHE_DIRECTORY` downloads and
+verifies the pinned SDK and prints its directory. An existing archive is verified
+again; an unmatched extraction destination is refused. Archives reject traversal,
+links and special files before extraction. This SDK cache is separate from all app
+sessions, catalogs and media. No session directory is inspected or cleaned.
+
+For maintainers only, `--update-pin` refreshes the public index, selects the highest
+stable Linux minimal artifact, downloads it and changes the source manifest.
+Review the diff, rerun native/Flutter/privacy/TLS and packaged checks, then commit
+that upgrade separately. The application does not silently upgrade its engine.
+Track upstream security releases and ship timely tested updates. Keep the SDK and
+archive out of Git and retain the supplied licenses in distributed bundles.
+
+The pinned156 runtime also passes the same13 generated native adapter checks.
+The SDK remains outside Git. Actual installed artifact validation is handled by
+the subsequent packaging change; live VK is not established by these fixtures.
