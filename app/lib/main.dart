@@ -11,7 +11,7 @@ import 'package:path_provider/path_provider.dart';
 import 'data/library_store.dart';
 import 'media/audio_policy.dart';
 import 'bootstrap/application.dart';
-import 'platform/windows/windows_music_browser.dart';
+import 'bootstrap/browser_factory.dart';
 import 'services/browser_smoke_test.dart';
 import 'services/preview.dart';
 import 'services/smoke_test.dart';
@@ -149,8 +149,8 @@ void main(List<String> args) {
             await runBackgroundBrowserSmoke(
               store!,
               visible: args.contains('--browser-smoke-visible'),
-              browserFactory: WindowsMusicBrowserFactory(
-                '${store!.directory.path}/browser-runtime-$pid',
+              browserFactory: createBrowserFactory(
+                profilePath: '${store!.directory.path}/browser-runtime-$pid',
                 hidden: !args.contains('--browser-smoke-visible'),
               ),
             );

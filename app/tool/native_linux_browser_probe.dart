@@ -255,9 +255,29 @@ fetch('/asset').then(r=>r.text()).then(()=>fetch('/asset',{cache:'force-cache'})
           true,
     );
     checks['restart_persistence'] = true;
-    final stalled = restarted.evaluate('new Promise(()=>{})');
+    // Kill only the exact helper launched above, using generated fixture data.
+    final pendingCrash = restarted.evaluate('new Promise(()=>{})');
+    final crashed = pendingCrash.then(
+      (_) => false,
+      onError: (Object _) => true,
+    );
+    require(spawned.last.kill(ProcessSignal.sigkill), 'generated_crash_signal');
+    require(
+      await crashed.timeout(const Duration(seconds: 3)),
+      'crash_cancels_work',
+    );
+    await waitFor(() async => !factory.prepared);
+    await factory.prepare();
+    final recovered = factory.create(events());
+    pages.add(recovered);
+    await recovered.open(Uri.parse('$origin/page'));
+    await waitFor(
+      () async => await recovered.evaluate('window.fixture!=null') == true,
+    );
+    checks['helper_crash_recovery'] = true;
+    final stalled = recovered.evaluate('new Promise(()=>{})');
     final cancelled = stalled.then((_) => false, onError: (Object _) => true);
-    await restarted.close();
+    await recovered.close();
     require(
       await cancelled.timeout(const Duration(seconds: 2)),
       'cancel_stalled_evaluation',

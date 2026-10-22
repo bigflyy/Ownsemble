@@ -37,7 +37,7 @@ metadata of its own descendants. Renderer-side sandbox introspection itself was
 blocked by seccomp and was replaced with this parent-side check.
 
 Reproduce the module check with `bash scripts/build-linux-browser.sh` in Linux,
-then `dart app/tool/native_linux_browser_probe.dart HELPER OUTPUT.json` from the
+then `dart app/tool/native_linux_browser_probe.dart CACHE/native-browser/runtime/lib/ownsemble_browser/ownsemble_browser OUTPUT.json` from the
 repository root using its Linux Dart SDK. Requires openssl for generated TLS data.
 Evidence is local and ignored: `.local/linux-proof/evidence/native-linux-browser-commit.json`.
 
@@ -73,3 +73,53 @@ archive out of Git and retain the supplied licenses in distributed bundles.
 The pinned156 runtime also passes the same13 generated native adapter checks.
 The SDK remains outside Git. Actual installed artifact validation is handled by
 the subsequent packaging change; live VK is not established by these fixtures.
+
+## Application integration and packaging
+
+Composition now selects LinuxMusicBrowserFactory on Linux. Its session path has a
+`-linux-cef` suffix: Chromium must not open the Windows WebView2 session directory.
+Windows retains its original factory/profile/native patch. Other unimplemented
+platforms still fail closed. Both normal startup and generated browser smoke use
+the same composition selector.
+
+The Linux harness prepares the pinned SDK in a separate cache before building.
+Direct Flutter builds can set OWNSEMBLE_CEF_ROOT to the verified SDK directory.
+Without it, the UI can build but Linux browser capability checks fail closed.
+CEF is built in an isolated CMake project so its flags do not affect Flutter or
+plugins. The install copies the helper, engine, resources, locales, runtime pin
+and supplied license into `lib/ownsemble_browser/`; no SDK symlinks or absolute
+SDK RPATHs remain. An SDK version that differs from the source pin is rejected.
+No setuid chrome-sandbox is shipped; user-namespace/seccomp attestation is required.
+Hosts that prevent this sandbox are unsupported until a safe solution is tested.
+
+`bash scripts/linux-app.sh browser debug` runs generated-only native browser smoke.
+The standalone driver additionally tests invalid TLS, lifecycle and forced helper
+crash recovery. The packaged Debug helper passed14 checks, and the actual Debug
+Flutter app passed browser/media/cache/streaming/restart/window-close checks.
+Windows198 tests / Linux197 plus1platform skip and both analyzers passed. Windows
+Release rebuilt and its generated browser smoke passed. These do not prove live
+VK, physical audibility or ordinary Ubuntu/Fedora desktop acceptance.
+
+The WSL test build uses standard Ubuntu24.04 ABI, x64 CEF and GTK. Runtime lookup
+contains no /opt test-root or Windows path. Distribution packaging and clean-host
+X11/Wayland checks remain work; do not promise all Linux distributions from WSLg.
+A new Linux session requires the user to sign in privately through Connect VK.
+Agents must not inspect that window, account catalog or profile files. Subsequent
+music checks must use fixed app-owned controls and sanitized outcomes.
+
+Final Release also passes the14-check driver, actual app browser smoke, generated
+media/cache/restart, prefix/offline streaming and native window-close checks. Its
+separate build workspace preserves the earlier generated preview. Source lib/assets/
+native-browser files match the staged Release source byte-for-byte. Native logs
+include platform warnings despite these passing outcomes.
+
+Incremental-build regression: changing native helper source in an existing Flutter
+build initially retained stale output. A generated real-CMake test reproduced it;
+the isolated native build step now runs on each parent build, while Ninja itself
+handles changed inputs. Both Linux output modes were rebuilt after this correction.
+
+Explicit OWNSEMBLE_CEF_ROOT also replaces an older cached SDK path on reconfigure;
+the generated incremental test first reproduced the stale-cache upgrade failure.
+The final normal Linux Release UI was launched with its own empty library/session;
+no private sign-in or provider data was inspected. Keep its Release bundle intact
+while running and use Debug for future builds.

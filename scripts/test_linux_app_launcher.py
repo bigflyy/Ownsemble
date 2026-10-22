@@ -26,6 +26,11 @@ class LauncherTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stdout, '--demo')
 
+    def test_browser_routes_to_generated_fixture_only(self):
+        result = self.invoke(['browser', 'debug'])
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout, '--browser-smoke')
+
     def test_invalid_build_mode_is_rejected_before_launch(self):
         result = self.invoke(['preview', 'invalid'])
         self.assertNotEqual(result.returncode, 0)

@@ -3,12 +3,11 @@ import 'dart:io';
 import 'package:flutter/services.dart';
 
 import '../contracts/app_runtime.dart';
-import '../contracts/music_browser.dart';
+import 'browser_factory.dart';
 import '../data/library_store.dart';
 import '../platform/media_kit_audio.dart';
 import '../platform/media_kit_playback.dart';
 import '../platform/windows/windows_app_runtime.dart';
-import '../platform/windows/windows_music_browser.dart';
 import '../platform/windows/windows_certificate.dart';
 import '../contracts/certificate_verifier.dart';
 import '../provider/vk_provider.dart';
@@ -22,9 +21,7 @@ AppController createApplication(
   String? repositoryRoot,
 }) {
   late final AppController controller;
-  final browserFactory = Platform.isWindows
-      ? WindowsMusicBrowserFactory(profilePath)
-      : const UnsupportedMusicBrowserFactory();
+  final browserFactory = createBrowserFactory(profilePath: profilePath);
   final provider = VkProvider(
     browserFactory: browserFactory,
     loadAdapter: () => rootBundle.loadString('assets/vk_adapter.js'),

@@ -28,17 +28,22 @@ case "$action" in
     tar -xf "$proof_root/source.tar" -C "$workspace"
     cd -- "$workspace/app"
     "$flutter_cli" pub get
+    if [[ -z "${OWNSEMBLE_CEF_ROOT:-}" ]]; then
+      export OWNSEMBLE_CEF_ROOT
+      OWNSEMBLE_CEF_ROOT="$(python3 "$repo_root/scripts/prepare-linux-browser.py" "$proof_root/cef-runtime")"
+    fi
     "$flutter_cli" build linux "--$mode" --no-pub
     ;;
-  preview|smoke|streaming)
+  preview|smoke|streaming|browser)
     [[ "$mode" == debug || "$mode" == release ]] || exit 2
     cd -- "$workspace"
     case "$action" in
       preview) flag=--demo ;;
       smoke) flag=--smoke-test ;;
       streaming) flag=--streaming-smoke ;;
+      browser) flag=--browser-smoke ;;
     esac
     exec "$workspace/app/build/linux/x64/$mode/bundle/ownsemble" "$flag"
     ;;
-  *) printf 'Use build, preview, smoke or streaming, followed by debug/release.\n' >&2; exit 2 ;;
+  *) printf 'Use build, preview, smoke, streaming or browser, followed by debug/release.\n' >&2; exit 2 ;;
 esac

@@ -79,19 +79,21 @@ package requirements still matter. A build on Ubuntu24.04 is not a guarantee for
 all older Linux distributions. Distribution packaging/runtime choice and clean-host
 acceptance remain explicit work.
 
-## VK browser readiness: blocked, not accepted
+## VK browser readiness: generated adapter gates pass; live VK pending
 
-The Linux backend is not wired in production. Required browser capabilities fail
-closed. Isolated CMake configuration of public flutter_inappwebview_linux0.1.0-beta.1
-failed with WPE WebKit not found. Neither wpe-webkit-2.0 nor1.1 is installed in this
-host. Generated UI/audio success does not prove VK sign-in, import, trusted input,
-native browser muting or cache-request witnesses on Linux. No sign-in was attempted.
+The Linux composition now selects a native CEF Views/Alloy adapter and the harness
+bundles pinned CEF156 with resources/licenses. See LINUX_BROWSER_ADAPTER.md and
+ADR0003. Windows6.1.5/native patch stay stable. Shared policy remains pure Dart.
+Generated native adapter14checks and actual Flutter browser smoke pass, including
+native isolation/trusted focused input/cached witnesses, sandbox attestation,
+private show/hide/popup cleanup, restart, cancellation, crash recovery and TLS
+negative cases. Linux197 Flutter tests plus1platform skip and analyzer pass.
+No sign-in, account catalog/profile inspection or live VK acceptance occurred.
 
-Browser selection now follows ADR0003: ordinary Ubuntu/Linux first, independently
-of WSL convenience. WebKitGTK/CEF generated comparisons and their current failures
-are recorded in LINUX_BROWSER_PROBE.md; WPE runtime/packaging remains a candidate. Run native
-capability tests before wiring it. Keep the Windows6.1.5 package/patch baseline
-until a replacement passes Windows regression and target-specific acceptance.
+Ordinary Ubuntu/Linux quality remains the priority, independently of WSL. The
+previous WPE package readiness failure is historical; no WSL-only runtime is used.
+New session sign-in must be completed privately by the user. Generated acceptance
+cannot establish compatibility with VK's real current website.
 
 ## Broader Linux acceptance
 

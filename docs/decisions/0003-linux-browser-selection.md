@@ -1,6 +1,6 @@
 # ADR 0003: qualify the Linux browser for desktop Linux, independently of WSL
 
-Status: CEF selected for the next Linux adapter implementation; production acceptance pending.
+Status: CEF Views adapter implemented and bundled; live-provider and broader Linux acceptance pending.
 Date: 2026-10-22.
 
 The user explicitly requires a reliable, maintainable adapter for Ubuntu and other
@@ -22,7 +22,7 @@ upgrade is part of a feasibility probe.
 | --- | --- | --- |
 | WebKitGTK | Natural GTK desktop integration; Ubuntu24.04 packages provide GTK3 API4.1 and security updates | Actual2.52.6 native probe passes pre-navigation mute, sandbox enabled, strict TLS setting, document-start script, hidden trusted/focused click, independent documents and cached fetch observations. Hidden media never loads; visible control plays and advances its clock. Not qualified for our invisible fallback path. |
 | WPE WebKit | Official embedded/offscreen WebKit port; suitable architecture for an invisible renderer | Existing Flutter Linux package configure failed because runtime is absent. Ubuntu package availability/packaging needs work. This is NOT an engine runtime failure or reason to reject it just for WSL. |
-| CEF / Chromium | Explicit windowless rendering/input/native-mute APIs and Chromium compatibility; bundled engine means an explicit security-update/distribution obligation | Verified public Linux build152.0.15. Both windowless and native hidden-window probes pass trusted/focused input, document-start scripts, cached requests, advancing media and native audio capture/discard. Native Views permits showing/hiding the same document for private sign-in. Sandbox is requested but renderer attestation and remaining adapter lifecycle/packaging gates are still pending. |
+| CEF / Chromium | Explicit windowless rendering/input/native-mute APIs and Chromium compatibility; bundled engine means an explicit security-update/distribution obligation | Feasibility used152.0.15; packaged runtime pins verified156.0.7. Both windowless and native hidden-window probes pass trusted/focused input, document-start scripts, cached requests, advancing media and native audio capture/discard. Native Views permits showing/hiding the same document for private sign-in. The actual adapter now passes renderer sandbox attestation, lifecycle, TLS and relocatable bundle gates; live/distro acceptance remains. |
 | External browser automation | Existing browsers can be maintained separately | Not selected as a shortcut: exposed debugging endpoints, session ownership, input/audio isolation and browser availability would all need an equally strong contract. |
 
 These are not interchangeable plugin badges. Runtime security, invisible native
@@ -36,7 +36,7 @@ or Chromium itself.
 
 Generated fixtures only; see [the probe](../LINUX_BROWSER_PROBE.md). No VK, sign-in,
 existing profile inspection, cookies, catalog or user media involved. Actual
-Linux VK is still unsupported in production. Implement the Linux adapter with
+Linux VK is not yet live-accepted. The implemented Linux adapter uses
 CEF's native Views/Alloy window, initially hidden, behind MusicBrowser. The same
 window can show private sign-in and hide without replacing the document. This uses
 supported native desktop windowing, not a transparent-window workaround. Discard
@@ -57,13 +57,14 @@ choice from VK policy, storage and playback. Android remains a separate native
 WebView adapter, not a CEF deployment. Qualify on native Ubuntu X11/Wayland, then
 another distribution family, with clean packaging and ordinary audio devices.
 
-Before production wiring, prove native isolation for every document before any
+The pre-wiring gates required native isolation for every document before any
 provider navigation, trusted per-event guarded input without OS focus theft,
 independent hidden documents, cached-media request witnesses, private sign-in to
 hidden-session transition, persistence/restart, cancellation/crash/late-callback
 cleanup and strict TLS negative cases. Existing policy tests remain required.
-Then run native UI/media/cache/offline/restart suites and separate scoped VK
-acceptance. Generated success alone cannot establish live-provider compatibility.
+These generated gates now pass, alongside native UI/media/cache/offline/restart
+checks; see LINUX_BROWSER_ADAPTER.md. Separate scoped VK and ordinary desktop
+acceptance remain. Generated success alone cannot establish live-provider compatibility.
 
 Primary sources: [WebKitGTK API](https://webkitgtk.org/reference/webkit2gtk/stable/class.WebView.html),
 [WPE purpose](https://wpewebkit.org/about/what-is-embedded.html),

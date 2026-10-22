@@ -133,3 +133,10 @@ Linux native UI continuation: `app/linux/` now provides a standard GTK host and
 shared-shutdown bridge. Generated UI/audio/cache/restart checks pass in WSLg; see
 LINUX_PROOF.md. This adds no WSL-only application dependency. Linux live VK and
 ordinary-desktop/other-distribution acceptance remain pending.
+
+Linux browser continuation: bootstrap/browser_factory.dart now selects the native
+CEF adapter under platform/linux. The child helper lives in linux/browser and
+ships under lib/ownsemble_browser with a pinned verified engine. JSON pipes expose
+only the application contract, no network debug listener/cookie export. Linux and
+Windows session namespaces are distinct. See LINUX_BROWSER_ADAPTER.md for native
+acceptance, packaging, security-update duties and remaining live/distro gates.

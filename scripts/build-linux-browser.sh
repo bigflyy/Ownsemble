@@ -9,12 +9,5 @@ fi
 build_dir="$proof_root/native-browser/build"
 cmake -S "$repo_root/app/linux/browser" -B "$build_dir" -G Ninja -DCMAKE_BUILD_TYPE=Release -DCEF_ROOT="$cef_dir"
 cmake --build "$build_dir" -j 8
-python3 - "$cef_dir" "$build_dir" <<'PY'
-from pathlib import Path
-import sys
-sdk, target = map(Path, sys.argv[1:])
-for source in (sdk / 'Release', sdk / 'Resources'):
-    for file in source.iterdir():
-        destination = target / file.name
-        if not destination.exists(): destination.symlink_to(file, target_is_directory=file.is_dir())
-PY
+ctest --test-dir "$build_dir" --output-on-failure
+cmake --install "$build_dir" --prefix "$proof_root/native-browser/runtime"
