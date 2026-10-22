@@ -155,8 +155,9 @@ void main() {
                 as RenderRepaintBoundary;
         final image = await render.toImage();
         final bytes = await image.toByteData(format: ui.ImageByteFormat.png);
-        await File('../.local/ownsemble-smoke/artwork-preview.png')
-            .writeAsBytes(bytes!.buffer.asUint8List());
+        final artifact = File('../.local/ownsemble-smoke/artwork-preview.png');
+        await artifact.parent.create(recursive: true);
+        await artifact.writeAsBytes(bytes!.buffer.asUint8List());
         image.dispose();
       });
       await tester.sendKeyEvent(LogicalKeyboardKey.escape);
