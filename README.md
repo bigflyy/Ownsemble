@@ -23,4 +23,4 @@ The app and both feasibility probes are separate. Nothing reads or copies accoun
 - [Private-session and Codex permissions](docs/CODEX_PRIVACY.md)
 - [Repository guidelines](AGENTS.md)
 
-`app/` contains production code/tests/assets and the Windows runner. `spikes/` preserves both experiments. `scripts/` contains scoped toolchain and control helpers. `.local/` is ignored local data, reports, caches and SDKs; browser profiles remain private. See the app README for pinned dependencies and reproducible commands. No commit, publication or deployment has been performed.
+`app/` contains production code/tests/assets and the Windows runner. `spikes/` preserves both experiments. `scripts/` contains scoped toolchain and control helpers. `.local/` is ignored local data, reports, caches and SDKs; browser profiles remain private. See the app README for pinned dependencies and reproducible commands. Source changes are tracked in Git; publication and deployment require separate authorization.
