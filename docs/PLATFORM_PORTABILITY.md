@@ -30,7 +30,7 @@ remain pending. Android production acceptance is still separate.
 | Target | Current evidence | Still required |
 | --- | --- | --- |
 | Windows | Shared/unit suite, generated native browser/media/restart/retention; final reports in handoff | Retain regression gates for each adapter change; live samples never certify every recording |
-| Linux | Native GTK Debug/Release UI, generated media/cache/restart/window-close checks and180 Flutter tests pass in Ubuntu24.04 WSLg; one Windows-only test skipped | WPE/browser adapter, real VK, packaging and ordinary Ubuntu/other-distribution acceptance |
+| Linux | Native GTK Debug/Release UI, generated media/cache/restart/window-close checks and180 Flutter tests pass in Ubuntu24.04 WSLg; one Windows-only test skipped | Qualified browser adapter, real VK, packaging and ordinary Ubuntu/other-distribution acceptance |
 | Android | Historical isolated synthetic WebView input/resource-hook/audio/cache/seek/offline proof in VK_FLUTTER_FEASIBILITY.md | Current production browser native mute/identity/cancellation contract, real VK, physical audibility, permissions/background audio/media controls |
 | macOS/iOS | No current project-specific acceptance | Target setup and the same platform/provider gates; no support claim from a plugin badge |
 
@@ -40,6 +40,20 @@ now installed in Ubuntu. WPE is still missing: public Linux-plugin CMake readine
 fails with WPE WebKit not found. Linux native sources under app/linux use standard
 GTK/Flutter, with no WSL-only app runtime path. WSLg is a test host; Ubuntu native
 desktop and another distribution family still need separate acceptance.
+
+## Current Linux browser selection
+
+The user explicitly prioritizes a strong ordinary Ubuntu/Linux desktop choice over
+WSL compatibility. [ADR0003](decisions/0003-linux-browser-selection.md) records this
+requirement. Native WebKitGTK2.52.6 generated probes now run: input/focus/native mute/
+cache witnesses pass, but offscreen media stalls while the visible control plays.
+CEF now passes both native windowless and hidden Views/Alloy media/input/cache
+probes after correcting standalone first-run UI and installing native audio
+capture/discard. CEF native Views is selected for adapter implementation; full
+lifecycle/sandbox/packaging/Ubuntu acceptance remain. No production Linux browser
+is wired and no live VK is tested. WPE remains an unqualified alternative. See
+[the detailed probe](LINUX_BROWSER_PROBE.md). Earlier plugin-only candidate notes
+below are historical context, not a selected engine or runtime acceptance.
 
 ## Linux browser candidate and the corrected earlier answer
 

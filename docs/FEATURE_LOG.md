@@ -1,5 +1,11 @@
 # Feature queue
 
+2026-10-22 current Linux browser direction: user explicitly requires a maintainable
+Ubuntu/desktop-Linux adapter; do not compromise the choice to make WSL pass.
+Selection criteria and honest generated qualification results are in ADR0003 and
+LINUX_BROWSER_PROBE.md. CEF native Views is selected for adapter implementation after generated media/input
+proof; full native lifecycle/packaging and live Linux VK remain undelivered.
+
 2026-10-22 selected Linux UI follow-up: native GTK host and shutdown bridge,
 Debug/Release builds and generated-data WSLg UI/audio/cache/restart checks delivered.
 Shared Dart/provider dependency pin unchanged. Broader Ubuntu/Fedora acceptance

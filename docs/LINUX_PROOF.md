@@ -87,8 +87,9 @@ failed with WPE WebKit not found. Neither wpe-webkit-2.0 nor1.1 is installed in 
 host. Generated UI/audio success does not prove VK sign-in, import, trusted input,
 native browser muting or cache-request witnesses on Linux. No sign-in was attempted.
 
-Next browser work: provision or package a supported WPE runtime in an isolated
-prototype, or evaluate another backend behind the same contracts. Run native
+Browser selection now follows ADR0003: ordinary Ubuntu/Linux first, independently
+of WSL convenience. WebKitGTK/CEF generated comparisons and their current failures
+are recorded in LINUX_BROWSER_PROBE.md; WPE runtime/packaging remains a candidate. Run native
 capability tests before wiring it. Keep the Windows6.1.5 package/patch baseline
 until a replacement passes Windows regression and target-specific acceptance.
 
