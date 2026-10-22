@@ -114,7 +114,8 @@ bash scripts/app.sh build windows --release --no-pub
 
 The first dependency resolution can report unavailable symlink privileges after
 writing the plugin registry. The junction helper creates workspace-only plugin
-links, then the second resolution completes. No Developer Mode or ACL changes
+links for each present Windows/Linux desktop project, then the second resolution
+completes. Flutter prepares both projects even for a Windows build. No Developer Mode or ACL changes
 are required. Dependencies are pinned in `pubspec.lock` and native input helpers.
 The build wrapper scopes caches/environment to the workspace.
 `windows/webview_windowed.cmake` compiles a scoped adaptation of the pinned
