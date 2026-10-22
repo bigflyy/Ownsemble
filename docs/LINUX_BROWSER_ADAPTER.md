@@ -123,3 +123,17 @@ the generated incremental test first reproduced the stale-cache upgrade failure.
 The final normal Linux Release UI was launched with its own empty library/session;
 no private sign-in or provider data was inspected. Keep its Release bundle intact
 while running and use Debug for future builds.
+
+## Private sign-in lifecycle correction
+
+User-reported QR refresh exposed background reconnect navigation and extra standby
+pages during login. Generated regressions failed before correction. An explicit
+private phase now quiesces other documents and prevents reconnect/sync/extraction/
+metadata/input from disturbing the visible login document, including pending URL
+or script responses. Only the user's Connect VK action resumes background work.
+
+Use Settings > VK account > Sign in privately, finish login in the private browser,
+then return to Ownsemble and press Connect VK. The session/document is retained;
+no credential export or login-form inspection is involved.203 Windows/202Linux+
+1platform skip and analyzers pass; rebuilt native Linux browser smoke passes.
+Actual private QR/authentication and live VK remain user/provider acceptance gates.

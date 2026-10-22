@@ -14,6 +14,7 @@ class GeneratedBrowserFactory implements MusicBrowserFactory {
   Completer<void>? preparing;
   bool muted = true, failMute = false, failOpen = false;
   Completer<void>? opening;
+  Completer<Uri?>? readingUrl;
   Uri? redirect;
   int prepares = 0;
   @override
@@ -63,7 +64,8 @@ class GeneratedBrowser implements MusicBrowser {
   }
 
   @override
-  Future<Uri?> currentUrl() async => uri;
+  Future<Uri?> currentUrl() async =>
+      factory.readingUrl == null ? uri : factory.readingUrl!.future;
   @override
   Future<dynamic> evaluate(String expression) async {
     factory.events.add('evaluate');

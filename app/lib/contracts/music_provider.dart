@@ -39,8 +39,12 @@ class SyncResult {
 /// References and optional fields are opaque provider data, never credentials.
 abstract interface class MusicProvider {
   bool get connected;
+  bool get privateSignInActive;
   Future<void> connect();
   Future<void> signInPrivately();
+
+  /// Only an explicit application action may resume background work.
+  Future<void> finishPrivateSignIn();
   Future<void> disconnect();
   Future<void> cancelResolution();
   Map<String, dynamic> observedMetadata(String id);

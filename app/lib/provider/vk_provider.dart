@@ -36,6 +36,10 @@ class VkProvider implements MusicProvider {
   final _navigation = MusicNavigation();
   @override
   bool connected = false;
+  @override
+  bool get privateSignInActive => _privateSignInActive;
+  bool _privateSignInActive = false;
+  int _privateSignInGeneration = 0;
   bool _capturing = false,
       _yieldScan = false,
       _closed = false,
@@ -146,6 +150,7 @@ class VkProvider implements MusicProvider {
   bool get playbackPageReady => !_playbackOnly && _standby.isReady;
   void preparePlaybackPage() {
     if (_playbackOnly ||
+        _privateSignInActive ||
         _closed ||
         !connected ||
         !browserFactory.prepared ||
@@ -175,6 +180,7 @@ class VkProvider implements MusicProvider {
 
   Future<void> _connect() async {
     if (_browser != null) {
+      if (_privateSignInActive) return;
       await pollRoute();
       return;
     }
@@ -199,7 +205,7 @@ class VkProvider implements MusicProvider {
       ]);
       requireActive();
       // Consent already reached connect: prepare both hidden pages concurrently.
-      if (!_playbackOnly) _standby.warm();
+      if (!_playbackOnly && !_privateSignInActive) _standby.warm();
       _browser = browserFactory.create(
         BrowserEvents(
           exited: () {
@@ -256,14 +262,18 @@ class VkProvider implements MusicProvider {
       _pageLoading = true;
       await Future.any<void>([
         _browser!.open(
-          Uri.parse(_playbackOnly ? 'about:blank' : 'https://vk.ru/audios'),
+          Uri.parse(
+            _playbackOnly && !_privateSignInActive
+                ? 'about:blank'
+                : 'https://vk.ru/audios',
+          ),
         ),
         _terminated.future.then((_) => throw const ProofFailure('cancelled')),
       ]).timeout(const Duration(seconds: 30));
       requireActive();
       await _requireMuted();
       requireActive();
-      if (_playbackOnly) {
+      if (_playbackOnly && !_privateSignInActive) {
         // Capacity only; do not read/extract music until a selection. Starting
         // with a blank document lets this run before any music-page prefetch.
         await _browser!.addDocumentStartScript(
@@ -278,7 +288,7 @@ class VkProvider implements MusicProvider {
           _terminated.future.then((_) => throw const ProofFailure('cancelled')),
         ]).timeout(const Duration(seconds: 30));
       }
-      await _browser?.hide();
+      if (!_privateSignInActive) await _browser?.hide();
     } catch (_) {
       if (active()) {
         _closed = true;
@@ -317,13 +327,51 @@ class VkProvider implements MusicProvider {
 
   @override
   Future<void> signInPrivately() async {
-    await connect();
-    await _browser?.showPrivateSignIn();
+    final generation = ++_privateSignInGeneration;
+    _privateSignInActive = true;
+    connected = false;
+    _capturing = false;
+    _yieldScan = true;
+    changed();
+    try {
+      // Quiesce other documents before displaying a shared-session login flow.
+      await cancelResolution();
+      if (!_playbackOnly) await _standby.discard();
+      await _detailsPage?.disconnect();
+      _detailsPage = null;
+      if (!_privateSignInActive || generation != _privateSignInGeneration) {
+        throw const ProofFailure('cancelled');
+      }
+      await connect();
+      if (!_privateSignInActive || generation != _privateSignInGeneration) {
+        throw const ProofFailure('cancelled');
+      }
+      await _browser?.showPrivateSignIn();
+      status('Finish VK sign-in privately, then return and press Connect VK.');
+    } catch (_) {
+      if (generation == _privateSignInGeneration) _privateSignInActive = false;
+      rethrow;
+    }
+  }
+
+  @override
+  Future<void> finishPrivateSignIn() async {
+    if (!_privateSignInActive) return;
+    ++_privateSignInGeneration;
+    _privateSignInActive = false;
+    await _browser?.finishPrivateSignIn();
+    changed();
+  }
+
+  void _requireBackgroundAccess() {
+    if (_privateSignInActive) {
+      throw const ProofFailure('private_signin_in_progress');
+    }
   }
 
   void _observe(Uri? uri) {
     _navigation.observe(uri);
-    connected = _navigation.isMusic;
+    connected = !_privateSignInActive && _navigation.isMusic;
     if (!connected) {
       _capturing = false;
       _sourceMemory.clear();
@@ -333,42 +381,62 @@ class VkProvider implements MusicProvider {
   }
 
   Future<void> pollRoute() async {
+    if (_privateSignInActive) return;
     if (_browser == null || _closed) return;
-    connected = await _navigation.refresh(
+    final isMusic = await _navigation.refresh(
       readUrl: () async {
         final url = await _musicUrl();
         return url == null ? null : Uri.tryParse(url.toString());
       },
       openMusic: () async {
+        _requireBackgroundAccess();
         await _browser!.navigate(Uri.parse('https://vk.ru/audios'));
       },
     );
+    _requireBackgroundAccess();
+    connected = isMusic;
     changed();
     preparePlaybackPage();
   }
 
   Future<dynamic> _evaluate(String script) async {
+    _requireBackgroundAccess();
+    final privateGeneration = _privateSignInGeneration;
     if (_closed || _browser == null) {
       throw const ProofFailure('vk_not_connected');
     }
-    return Future.any<dynamic>([
-      _browser!.evaluate(script),
-      _terminated.future.then((_) => throw const ProofFailure('cancelled')),
-    ]).timeout(
-      const Duration(seconds: 45),
-      onTimeout: () => throw const ProofFailure('music_page_timeout'),
-    );
+    final result =
+        await Future.any<dynamic>([
+          _browser!.evaluate(script),
+          _terminated.future.then((_) => throw const ProofFailure('cancelled')),
+        ]).timeout(
+          const Duration(seconds: 45),
+          onTimeout: () => throw const ProofFailure('music_page_timeout'),
+        );
+    _requireBackgroundAccess();
+    if (privateGeneration != _privateSignInGeneration) {
+      throw const ProofFailure('cancelled');
+    }
+    return result;
   }
 
-  Future<Uri?> _musicUrl() {
+  Future<Uri?> _musicUrl() async {
+    _requireBackgroundAccess();
+    final privateGeneration = _privateSignInGeneration;
     if (_browser == null || _closed) throw const ProofFailure('cancelled');
-    return Future.any<Uri?>([
-      _browser!.currentUrl(),
-      _terminated.future.then((_) => throw const ProofFailure('cancelled')),
-    ]).timeout(
-      const Duration(seconds: 10),
-      onTimeout: () => throw const ProofFailure('music_page_timeout'),
-    );
+    final url =
+        await Future.any<Uri?>([
+          _browser!.currentUrl(),
+          _terminated.future.then((_) => throw const ProofFailure('cancelled')),
+        ]).timeout(
+          const Duration(seconds: 10),
+          onTimeout: () => throw const ProofFailure('music_page_timeout'),
+        );
+    _requireBackgroundAccess();
+    if (privateGeneration != _privateSignInGeneration) {
+      throw const ProofFailure('cancelled');
+    }
+    return url;
   }
 
   Future<void> _requireMuted() async {
@@ -417,6 +485,7 @@ class VkProvider implements MusicProvider {
   }
 
   void _guard() {
+    _requireBackgroundAccess();
     if (_closed || !_navigation.isMusic) {
       throw const ProofFailure('private_signin_required');
     }
@@ -482,10 +551,12 @@ class VkProvider implements MusicProvider {
   }
 
   Future<void> _ensurePersonal({bool Function()? cancelled}) async {
+    _requireBackgroundAccess();
     if (_browser == null) throw const ProofFailure('vk_not_connected');
     final watch = Stopwatch()..start();
     var retryNavigationAt = Duration.zero;
     while (watch.elapsed < const Duration(seconds: 90)) {
+      _requireBackgroundAccess();
       if (_closed || cancelled?.call() == true) {
         throw const ProofFailure('cancelled');
       }
@@ -495,6 +566,7 @@ class VkProvider implements MusicProvider {
           return u == null ? null : Uri.tryParse(u.toString());
         },
         openMusic: () async {
+          _requireBackgroundAccess();
           await _browser!.navigate(Uri.parse('https://vk.ru/audios'));
         },
       );
@@ -718,9 +790,13 @@ class VkProvider implements MusicProvider {
     bool newestOnly = false,
     List<String> checkpoint = const [],
   }) {
+    if (_privateSignInActive) {
+      return Future.error(const ProofFailure('private_signin_in_progress'));
+    }
     if (_scan != null) return _scan!;
     _yieldScan = false;
     final future = _lock.run(() async {
+      _requireBackgroundAccess();
       await prepareLibraryDocument(
         fromTop: fromTop,
         requireMusicRoute: () async {
@@ -738,6 +814,7 @@ class VkProvider implements MusicProvider {
           // full route/form/personal witness again on the fresh document.
           final generation = _documentGeneration;
           await _requireMuted();
+          _requireBackgroundAccess();
           await _browser!.reload();
           final navigation = Stopwatch()..start();
           while (_documentGeneration == generation || _pageLoading) {
@@ -756,6 +833,7 @@ class VkProvider implements MusicProvider {
       );
       // Hiding happens only after the guarded personal-music witness succeeds.
       // Progress remains bounded if a provider throttles background loading.
+      _requireBackgroundAccess();
       await _browser?.hide();
       final watch = Stopwatch()..start();
       final result = await LibraryScanner(
@@ -880,6 +958,7 @@ class VkProvider implements MusicProvider {
     void Function(Uri, String)? prepareCandidate,
     Future<Set<Uri>> Function(Uri, String)? manifestSegments,
   }) async {
+    _requireBackgroundAccess();
     if (connected && !_closed) {
       final remembered = _sourceMemory.lookup(track.id);
       if (remembered != null) {
@@ -947,7 +1026,10 @@ class VkProvider implements MusicProvider {
       if (identical(_playback, playback)) _playback = null;
       playback._capturing = false;
       playback._candidates.clear();
-      if (!_closed && !playback._closed && playback._reusableDocument) {
+      if (!_privateSignInActive &&
+          !_closed &&
+          !playback._closed &&
+          playback._reusableDocument) {
         // Exact metadata lookup never activated browser audio. Reuse this
         // muted document; every new selection still rechecks route/form/id.
         await _standby.returnUnused(prepared);
@@ -1570,6 +1652,7 @@ class VkProvider implements MusicProvider {
         return (x: x, y: y);
       },
       dispatch: (parameters) async {
+        _guard();
         await _browser!
             .pointer(parameters)
             .timeout(
@@ -1587,6 +1670,9 @@ class VkProvider implements MusicProvider {
     bool includeLyrics = true,
     bool Function()? cancelled,
   }) {
+    if (_privateSignInActive) {
+      return Future.error(const ProofFailure('private_signin_in_progress'));
+    }
     final known = observedMetadata(track.id);
     if (!force &&
         known.isNotEmpty &&
@@ -1598,10 +1684,12 @@ class VkProvider implements MusicProvider {
     final requestKey = '${track.id}/${includeLyrics ? 1 : 0}';
     return _metadataRequests.putIfAbsent(requestKey, () {
       final task = _metadataLane.then((_) async {
+        _requireBackgroundAccess();
         if (_closed || cancelled?.call() == true) {
           throw const ProofFailure('cancelled');
         }
         if (!browserFactory.prepared) await connect();
+        _requireBackgroundAccess();
         final page = _detailsPage = _newPlaybackPage();
         try {
           await page.connect();
@@ -1748,6 +1836,8 @@ class VkProvider implements MusicProvider {
 
   @override
   Future<void> disconnect() async {
+    ++_privateSignInGeneration;
+    _privateSignInActive = false;
     ++_connectionGeneration;
     _navigation.observe(null);
     _networkListening = false;

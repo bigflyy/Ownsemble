@@ -1,5 +1,10 @@
 # Feature queue
 
+2026-10-22 private sign-in reload repair: generated tests reproduced extra standby
+pages and repeated/late root-to-Music redirects disturbing login. Explicit private
+phase now pauses background work until Connect VK; rebuilt Linux app delivered.
+Actual QR/authentication acceptance remains unverified. See latest SESSION_HANDOFF.
+
 2026-10-22 current Linux browser direction: user explicitly requires a maintainable
 Ubuntu/desktop-Linux adapter; do not compromise the choice to make WSL pass.
 Selection criteria and honest generated qualification results are in ADR0003 and

@@ -102,7 +102,59 @@ class PortableController extends AppController {
       CachedAudio(track.id, generatedAudio, 'generated', 1, 10);
 }
 
+class PrivateSessionProvider extends FixtureProvider {
+  final calls = <String>[];
+  bool active = false;
+  @override
+  bool get privateSignInActive => active;
+  @override
+  Future<void> signInPrivately() async {
+    active = true;
+    connected = false;
+    calls.add('sign-in');
+  }
+
+  @override
+  Future<void> finishPrivateSignIn() async {
+    active = false;
+    calls.add('finish');
+  }
+
+  @override
+  Future<void> connect() async {
+    calls.add('connect');
+  }
+}
+
 void main() {
+  test(
+    'scheduler leaves private sign-in alone until explicit Connect VK',
+    () async {
+      final directory = await Directory.systemTemp.createTemp(
+        'ownsemble-private-controller-',
+      );
+      final store = LibraryStore(directory);
+      final provider = PrivateSessionProvider();
+      final controller = AppController(
+        store,
+        musicProvider: provider,
+        playbackPlayer: PortablePlayback(),
+        decodeAudio: (_) async => 10,
+      );
+      try {
+        controller.setAutoSync(true);
+        await controller.signInVk();
+        await Future<void>.delayed(const Duration(milliseconds: 2200));
+        expect(provider.calls, ['sign-in']);
+        await controller.connectVk();
+        expect(provider.calls, ['sign-in', 'finish', 'connect']);
+      } finally {
+        await controller.shutdown();
+        await directory.delete(recursive: true);
+      }
+    },
+  );
+
   test('shared app playback uses independent ports without native player/provider inheritance', () async {
     final directory = await Directory.systemTemp.createTemp('ownsemble-ports-');
     final store = LibraryStore(directory);

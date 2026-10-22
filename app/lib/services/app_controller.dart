@@ -575,6 +575,7 @@ class AppController extends ChangeNotifier {
     message = 'Connecting to your VK library in the background…';
     _notify();
     try {
+      await provider.finishPrivateSignIn();
       await provider.connect();
       _nextSync = DateTime.now();
     } catch (e) {
@@ -606,7 +607,14 @@ class AppController extends ChangeNotifier {
       unawaited(_restart());
       return;
     }
-    if (disposed || demo || offline || _checking || !autoSync) return;
+    if (disposed ||
+        demo ||
+        offline ||
+        _checking ||
+        !autoSync ||
+        provider.privateSignInActive) {
+      return;
+    }
     if (syncing) return;
     if (!provider.connected) {
       // Start only after persisted consent; leave login interaction private.
@@ -2100,6 +2108,8 @@ String friendlyError(String category) => switch (category) {
   'cache_identity_unverified' => 'This older download needs an online recording check before playback. Its original files are preserved.',
   'audio_identity_mismatch' || 'audio_identity_unverified' => 'VK did not provide audio bound to this exact recording. Playback stopped to avoid the wrong song.',
   'audio_duration_mismatch' => 'The audio does not match this recording’s duration. Playback stopped; the existing files are preserved.',
+  'private_signin_in_progress' =>
+    'Finish VK sign-in privately, then press Connect VK.',
   'private_signin_required' => 'VK needs sign-in. Open Settings and choose Sign in privately. Saved music is still available.',
   'vk_not_connected' =>
     'Connect VK to load this track. Your saved music is still available.',

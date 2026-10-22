@@ -6,6 +6,10 @@ class FixtureProvider implements MusicProvider {
   @override
   bool connected = false;
   @override
+  bool get privateSignInActive => false;
+  @override
+  Future<void> finishPrivateSignIn() async {}
+  @override
   Future<void> connect() async =>
       throw const ProofFailure('fixture_network_disabled');
   @override
