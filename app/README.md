@@ -95,7 +95,7 @@ Prerequisites: the pinned Flutter 3.47.7 / Dart 3.13.5 SDK under
 and Git Bash. Standalone runtime also needs Microsoft Visual C++ x64 runtime (already present on this PC). Python/Node are developer tools only. Runtime playback uses Dart
 and bundled native libraries, with no Python/FFmpeg executable or Ownsemble server.
 
-Follow the tests-first rule in [AGENTS.md](../AGENTS.md): write a behavioral
+Follow the [tests-first Git workflow](../docs/GIT_WORKFLOW.md): write a behavioral
 regression test and observe its failure before implementing a behavior change.
 Run from repository-root Git Bash:
 

@@ -23,7 +23,8 @@ remain pending. Android production acceptance is still separate.
 - The Windows generated native browser smoke now drives the new adapter contract,
   testing native isolation, trusted input, hidden independent documents,
   document-start scripts and browser-cache request witnesses. Final rebuilt-mode
-  acceptance and scope belong in the latest SESSION_HANDOFF.md section.
+  acceptance and scope are described in VK_PAGINATION_REPAIR.md and
+  WINDOWS_BROWSER_REGISTRATION.md.
 
 ## Target gates
 

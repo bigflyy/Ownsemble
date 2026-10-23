@@ -1,22 +1,29 @@
 # Git workflow
 
-The user requires good Git practices, including atomic commits (2026-10-22).
-AGENTS.md makes this a repository rule.
+Use a focused feature or fix branch from a reviewed baseline. Keep commits atomic:
+one coherent behavior change with its necessary tests and documentation. Preserve
+unrelated work and review status and diffs before editing.
 
-The initial commit d5654bc captures the existing application and preserved probes,
-with fresh Windows analyzer/181 Flutter/48 Node checks. Its documentation uses the
-preceding Linux UI checkpoint. Private/runtime data and the newer browser
-experiments were excluded; working files were preserved. This initial import is
-the baseline, not a claim that Linux VK is complete.
+For behavior changes, write meaningful regression tests first and observe the
+expected failure before implementation. Run relevant checks after the correction.
+Keep supplemental qualification results distinct from tests-first evidence.
 
-Continue browser work on feat/linux-browser-adapter. Commit each completed coherent
-slice together with its tests and relevant documentation, after observing the
-required tests-first failure and running the relevant green checks. Stage explicit
-paths, inspect the staged diff, check whitespace and keep unrelated work separate.
-Do not commit unfinished tests as accepted production behavior; isolated feasibility
-qualification may record an unsupported capability honestly.
+Stage explicit intended paths, inspect the staged diff and run
+`git diff --cached --check` before committing. Use clear imperative commit subjects.
+Do not add assistant coauthor or attribution trailers.
 
-Keep local sessions, credentials, real catalogs/user media, SDKs and build outputs
-excluded. Use the source line-ending rules in .gitattributes. Do not destructively
-reset unrelated changes or rewrite existing history. No push/publication is
-implicitly authorized by a local commit. Recovery snapshots remain supplementary.
+Keep credentials, private browser sessions, real catalogs, cached user media,
+SDKs, build outputs and temporary artifacts outside source control. Use the
+repository's source line-ending rules. Local assistant configuration, instruction
+files, handoffs and logs also stay outside published commits; put their ignore
+entries in `.git/info/exclude` rather than changing the committed `.gitignore`.
+
+Before a first push, review the entire unpublished history as well as the current
+tree for excluded local files. Preserve the original local history when preparing
+a separate filtered publication. Do not rewrite shared history, discard unrelated
+work or force-push without explicit authorization.
+
+Push reviewed, verified working milestones when publication is authorized. State
+which source branch and checks were published, and document unresolved acceptance
+gates separately from completed fixes. A local commit alone does not authorize
+publication or deployment.
