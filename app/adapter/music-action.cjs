@@ -196,21 +196,65 @@ async function musicPageAction(action, id, options = {}) {
     }
     return { urls: [...urls], segments: [...segments] };
   }
-  if (action === 'probe-pagination') {
-    const scroller = document.scrollingElement;
-    const containers = new Set();
-    const rows = [...document.querySelectorAll('[data-audio-id], [data-audio]')];
-    for (const row of [rows[0], rows[rows.length - 1]]) {
-      let parent = row?.parentElement;
-      for (let depth = 0; parent && depth < 12; depth++, parent = parent.parentElement) {
-        if (parent.scrollHeight > parent.clientHeight + 1 && parent.clientHeight > 0 &&
-            /^(?:auto|scroll)$/.test(getComputedStyle(parent).overflowY)) containers.add(parent);
+  // Locate rendered music rows and the scroll pane containing the largest group.
+  function musicViewport() {
+    // Collect only recognized recording elements, without exporting their IDs.
+    const allRows = [...document.querySelectorAll('[data-audio-id], [data-audio]')];
+    // Exclude hidden player duplicates; offscreen rendered rows still have rectangles.
+    const rows = allRows.filter(row => !row.getClientRects || row.getClientRects().length > 0);
+    // Count the rendered rows belonging to each nearest scrollable ancestor.
+    const candidates = new Map();
+    // Count clipped ancestors separately to diagnose unsupported layouts.
+    const clipped = new Set();
+    // Record the largest ancestor content height in CSS pixels.
+    let tallest = 0;
+    // Inspect each rendered row without reading titles or arbitrary page state.
+    for (const row of rows) {
+      // Bound the ancestor walk to twelve elements per row.
+      for (let parent = row.parentElement, depth = 0; parent && depth < 12;
+        parent = parent.parentElement, depth++) {
+        tallest = Math.max(tallest, parent.scrollHeight || 0);
+        // Skip ancestors whose content fits or whose viewport is hidden.
+        if (parent.clientHeight <= 0 || parent.scrollHeight <= parent.clientHeight + 1) continue;
+        // Read only the vertical overflow mode needed to select a scroll target.
+        const overflow = getComputedStyle(parent).overflowY;
+        // Keep clipped-container counts without treating them as ordinary scrollers.
+        if (/^(?:hidden|clip)$/.test(overflow)) clipped.add(parent);
+        // Require a browser-managed vertical scrollbar for ordinary scrolling.
+        if (!/^(?:auto|scroll)$/.test(overflow)) continue;
+        // Retain the last row and total membership for this candidate pane.
+        const candidate = candidates.get(parent) || { count: 0, lastRow: row };
+        candidate.count++; candidate.lastRow = row; candidates.set(parent, candidate);
+        break;
       }
     }
+    // Fall back to document scrolling when no music pane owns a scrollbar.
+    let musicScroller = null;
+    // Use the last rendered recording, excluding hidden player copies.
+    let lastRow = rows[rows.length - 1];
+    // Prefer the pane containing the largest observed recording group.
+    let mostRows = 0;
+    // Select a music pane without consulting unrelated navigation/sidebar elements.
+    for (const [element, candidate] of candidates) {
+      // Replace the current target only when this pane contains more rows.
+      if (candidate.count > mostRows) {
+        musicScroller = element; lastRow = candidate.lastRow; mostRows = candidate.count;
+      }
+    }
+    return { allRows, rows, musicScroller, lastRow, candidates, clipped, tallest };
+  }
+  // Return bounded layout diagnostics without row identities or page text.
+  if (action === 'probe-pagination') {
+    // Read document geometry for the document-scrolling fallback.
+    const scroller = document.scrollingElement;
+    // Describe music-specific geometry using the same selection as pagination.
+    const layout = musicViewport();
     return { counts: { documentScrollHeight: Math.round(scroller?.scrollHeight || 0),
       documentClientHeight: Math.round(scroller?.clientHeight || 0),
       documentScrollTop: Math.round(scroller?.scrollTop || 0),
-      scrollableMusicAncestors: containers.size, visibleDocument: Number(document.visibilityState === 'visible') } };
+      musicRows: layout.allRows.length, visibleMusicRows: layout.rows.length,
+      tallestMusicAncestor: Math.round(layout.tallest), clippedMusicAncestors: layout.clipped.size,
+      scrollableMusicAncestors: layout.candidates.size, visibleDocument: Number(document.visibilityState === 'visible') } };
   }
   if (action === 'reset') {
     window.scrollTo(0, 0);
@@ -252,16 +296,23 @@ async function musicPageAction(action, id, options = {}) {
       timer = setTimeout(() => finish({ ok: true, progressed: false,
         loading: Boolean(document.querySelector('[aria-busy="true"]')) }), waitMs);
     }) : null;
+    // Ignore hidden duplicate/player rows and choose the scroll pane containing
+    // the largest recognized row group, rather than the last node in the DOM.
+    // Resolve the pane and its final rendered row from the current layout.
+    const { musicScroller, lastRow } = musicViewport();
+    // Move by at least 600 CSS pixels to enter the next lazy-loading region.
+    const step = Math.max(600, musicScroller?.clientHeight || window.innerHeight);
+    // Apply both retry and forward movements to the same scroll target.
+    const scroll = delta => (musicScroller || window).scrollBy(0, delta);
     try {
     if (action === 'retry-pagination') {
       // Re-enter the bottom loading region after a stalled lazy-load boundary.
-      window.scrollBy(0, -Math.max(600, window.innerHeight));
+      scroll(-step);
       await new Promise((resolve) => setTimeout(resolve, 500));
     }
     if (interrupted) return await waiting;
-    const rows = document.querySelectorAll('[data-audio-id], [data-audio]');
-    rows[rows.length - 1]?.scrollIntoView({ block: 'end' });
-    window.scrollBy(0, Math.max(600, window.innerHeight));
+    lastRow?.scrollIntoView({ block: 'end' });
+    scroll(step);
     return waiting ? await waiting : { ok: true };
     } finally { observer?.disconnect(); if (timer !== undefined) clearTimeout(timer); }
   }

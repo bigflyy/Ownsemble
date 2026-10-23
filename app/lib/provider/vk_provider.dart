@@ -14,6 +14,7 @@ import '../contracts/music_provider.dart';
 export '../contracts/music_provider.dart';
 import 'guarded_input.dart';
 import 'progress_budget.dart';
+import 'pagination_diagnostics.dart';
 
 import 'standby_resource.dart';
 
@@ -836,6 +837,8 @@ class VkProvider implements MusicProvider {
       _requireBackgroundAccess();
       await _browser?.hide();
       final watch = Stopwatch()..start();
+      // Limit layout diagnostics to three retries per bounded scan slice.
+      var paginationSamples = 0;
       final result = await LibraryScanner(
         elapsed: () => watch.elapsed,
         cancelled: () => _yieldScan || _closed,
@@ -868,6 +871,30 @@ class VkProvider implements MusicProvider {
           }
         },
         advance: (milliseconds, retry) async {
+          // Collect geometry only when pagination stalls and a report consumer exists.
+          if (retry && diagnostic != null && paginationSamples++ < 3) {
+            try {
+              // Bound the music-only probe so diagnostics cannot hold up scanning.
+              final probe = await _action('probe-pagination')
+                  .timeout(const Duration(seconds: 2));
+              diagnostic?.call({
+                'stage': 'scan_pagination',
+                'counts': paginationCounts(probe['counts']),
+              });
+            } on ProofFailure catch (error) {
+              // Preserve cancellation and private-login guards during diagnostics.
+              if ([
+                'cancelled',
+                'private_signin_required',
+                'private_signin_in_progress',
+              ].contains(error.category)) {
+                rethrow;
+              }
+            } on TimeoutException {
+              // A diagnostic probe cannot hold the scan indefinitely.
+            }
+          }
+
           final value = await _action(
             retry ? 'retry-pagination' : 'advance',
             waitMs: milliseconds,

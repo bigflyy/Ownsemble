@@ -649,3 +649,84 @@ test('a recently requested exact-recording lyrics dialog supplies plain text onl
   });
   assert.equal(result.lyrics.text,'Generated lyrics');
 });
+
+// Verify ordinary and retry movements target the pane owning the music rows.
+test('pagination advances the music row scroll container instead of the outer page', async () => {
+  // Exercise both forward pagination and recovery after a quiet loading boundary.
+  for (const action of ['advance', 'retry-pagination']) {
+    // Record movement inside the generated music pane in CSS pixels.
+    const innerMoves = [];
+    // Detect accidental movement of the outer page.
+    const outerMoves = [];
+    // Model a scrollable pane without any private page content.
+    const container = { scrollHeight: 5000, clientHeight: 600, parentElement: null,
+      // Record the pane's vertical scroll request.
+      scrollBy: (x, y) => innerMoves.push(y) };
+    // Place one recognized recording in the pane.
+    const row = { parentElement: container,
+      // Supply a generated music identity for mutation observation.
+      getAttribute: () => '1_2',
+      // Keep the fixture's final row rendered without moving the outer page.
+      scrollIntoView: () => {} };
+    // Run the actual serialized page action against the generated layout.
+    const result = await vm.runInNewContext(`(${musicPageAction.toString()})('${action}')`, {
+      location: { protocol: 'https:', hostname: 'vk.ru', pathname: '/audios' },
+      document: { querySelector: () => null, querySelectorAll: () => [row] },
+      window: { innerHeight: 900, scrollBy: (x, y) => outerMoves.push(y) },
+      getComputedStyle: () => ({ overflowY: 'auto' }),
+      setTimeout: fn => { fn(); return 0; }, clearTimeout: () => {},
+    });
+    assert.equal(result.ok, true);
+    assert.equal(innerMoves.length, action === 'advance' ? 1 : 2);
+    assert.ok(innerMoves.at(-1) > 0);
+    // Require a backward movement only when recovering a stalled boundary.
+    if (action === 'retry-pagination') assert.ok(innerMoves[0] < 0);
+    assert.equal(outerMoves.length, 0);
+  }
+});
+
+// Preserve pagination for layouts using the document's ordinary scrollbar.
+test('pagination retains document scrolling when no music ancestor scrolls', async () => {
+  // Record document scroll requests in CSS pixels.
+  const moves = [];
+  // Model a rendered music row without a nested scroll ancestor.
+  const row = { parentElement: null, getAttribute: () => '1_2', scrollIntoView: () => {} };
+  // Run the production page action with only document scrolling available.
+  const result = await vm.runInNewContext(`(${musicPageAction.toString()})('advance')`, {
+    location: { protocol: 'https:', hostname: 'vk.ru', pathname: '/audios' },
+    document: { querySelector: () => null, querySelectorAll: () => [row] },
+    window: { innerHeight: 900, scrollBy: (x, y) => moves.push(y) },
+  });
+  assert.equal(result.ok, true);
+  assert.deepEqual(moves, [900]);
+});
+
+// Reject hidden player duplicates when choosing the final scroll target.
+test('pagination finds the music pane before a trailing unrelated hidden row', async () => {
+  // Record movement inside the rendered music pane.
+  const innerMoves = [];
+  // Detect accidental document movement caused by a hidden trailing row.
+  const outerMoves = [];
+  // Model the music pane containing the actual rendered recording.
+  const pane = { scrollHeight: 5000, clientHeight: 600, parentElement: null,
+    scrollBy: (x, y) => innerMoves.push(y) };
+  // Track whether the actual music row received the visibility request.
+  let musicScrolled = false;
+  // Keep the rendered row before an unrelated hidden player copy in DOM order.
+  const music = { parentElement: pane, getAttribute: () => '1_2',
+    scrollIntoView: () => { musicScrolled = true; } };
+  // Fail immediately if pagination attempts to reveal a hidden player row.
+  const hidden = { parentElement: null, getAttribute: () => '1_3', getClientRects: () => [],
+    scrollIntoView: () => { throw Error('hidden row scrolled'); } };
+  // Run the actual page action with the hidden row at the end of the node list.
+  const result = await vm.runInNewContext(`(${musicPageAction.toString()})('advance')`, {
+    location: { protocol: 'https:', hostname: 'vk.ru', pathname: '/audios' },
+    document: { querySelector: () => null, querySelectorAll: () => [music, hidden] },
+    window: { innerHeight: 900, scrollBy: (x, y) => outerMoves.push(y) },
+    getComputedStyle: () => ({ overflowY: 'auto' }),
+  });
+  assert.equal(result.ok, true);
+  assert.equal(musicScrolled, true);
+  assert.deepEqual(innerMoves, [600]);
+  assert.deepEqual(outerMoves, []);
+});

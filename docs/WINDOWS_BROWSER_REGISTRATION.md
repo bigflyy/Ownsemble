@@ -30,7 +30,7 @@ clean and all 207 Flutter tests pass at this checkpoint.
 
 A separate authorized normal Windows run retained 2,633 catalog records. A cached
 selection started in 1,113 ms. During 45 samples under a concurrent full scan, the
-clock advanced 43,990 ms across 44 sampling intervals, with940–1050ms steps, no
+clock advanced 43,990 ms across 44 sampling intervals, with 940 to 1,050 ms steps, no
 stationary samples and no reported buffering. These measurements establish that
 sampled playback progressed; they do not independently establish audible quality
 or resolve the recurring pauses observed through WSLg.

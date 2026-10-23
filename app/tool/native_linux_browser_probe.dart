@@ -125,6 +125,26 @@ fetch('/asset').then(r=>r.text()).then(()=>fetch('/asset',{cache:'force-cache'})
       () async => await second.evaluate('window.fixture?.start===true') == true,
     );
     checks['document_start_and_independent_documents'] = true;
+    // Lazy music lists depend on viewport observers even in an inactive,
+    // never-shown scanner document. This fixture contains no provider content.
+    await second.evaluate("""(()=>{
+      window.generatedIntersections=0;
+      // Move the generated loading sentinel beyond the initial viewport.
+      const spacer=document.createElement('div');spacer.style.height='3000px';
+      // Observe only this generated sentinel in the never-shown document.
+      const sentinel=document.createElement('div');sentinel.style.height='20px';
+      document.body.append(spacer,sentinel);
+      window.generatedObserver=new IntersectionObserver(entries=>{
+        // Count a viewport intersection without exposing page content.
+        if(entries.some(entry=>entry.isIntersecting))window.generatedIntersections++;
+      });
+      generatedObserver.observe(sentinel);sentinel.scrollIntoView({block:'center'});
+      return true;
+    })()""");
+    await waitFor(
+      () async => await second.evaluate('generatedIntersections>0') == true,
+    );
+    checks['inactive_hidden_intersection_observer'] = true;
     await first.activate();
     for (final phase in PointerPhase.values) {
       require(await first.isAudioIsolated(), 'input_isolation_guard');
