@@ -207,7 +207,8 @@ class AppController extends ChangeNotifier {
     // Leave providers without this optional capability untouched.
     if (inspector is! LibraryMembershipDiagnostics) return;
     try {
-      await (inspector as LibraryMembershipDiagnostics).inspectLibraryMembership();
+      await (inspector as LibraryMembershipDiagnostics)
+          .inspectLibraryMembership();
     } catch (error, stack) {
       // Keep private-access failures inside the existing sanitized error path.
       _failure(error, stack);
@@ -897,6 +898,8 @@ class AppController extends ChangeNotifier {
     final watch = Stopwatch()..start();
     var phase = 'stopping_previous';
     String? playbackError;
+    // Keep the selected relay's original failure available throughout startup.
+    StreamingAudio? openingStream;
     _reportPlayback(phase, watch);
     final progress = Timer.periodic(const Duration(seconds: 1), (_) {
       if (request == _request) _reportPlayback(phase, watch);
@@ -927,6 +930,7 @@ class AppController extends ChangeNotifier {
       }
       phase = 'resolving_source';
       final (asset, stream) = await _preparePlayback(track);
+      openingStream = stream;
       if (request != _request || disposed) return;
       phase = 'opening_native_player';
       final errorsBeforeOpen = _nativeErrors;
@@ -942,6 +946,7 @@ class AppController extends ChangeNotifier {
         () =>
             request != _request ||
             disposed ||
+            openingStream?.failure != null ||
             (_nativeErrors != errorsBeforeOpen &&
                 startup.elapsed > const Duration(seconds: 2)) ||
             (player.state.playing &&
@@ -953,6 +958,10 @@ class AppController extends ChangeNotifier {
       if (request != _request || disposed) {
         return;
       }
+      // Prefer the actual transfer failure over the native relay-open symptom.
+      final transferFailure = openingStream?.failure;
+      // Stop startup immediately if its upstream source has already failed.
+      if (transferFailure != null) throw transferFailure;
       if (!(player.state.playing &&
           !player.state.buffering &&
           player.state.position.inMilliseconds >= 100)) {
@@ -973,16 +982,36 @@ class AppController extends ChangeNotifier {
       phase = 'playing';
     } catch (e, stack) {
       if (request == _request) {
+        // Preserve upstream transport errors even when the player reports a generic open failure.
+        final failure = openingStream?.failure ?? e;
         try {
-          await player.pause();
+          await player.stop().timeout(const Duration(seconds: 5));
         } catch (_) {
           /* Preserve the original failure. */
         }
+        // A newer request owns player state once this cleanup acknowledgement returns.
+        if (request != _request || disposed) return;
+        // Close only the relay owned by this failed startup, after native unload.
+        final failedStream = openingStream;
+        // Leave a replacement relay untouched if another request already installed it.
+        if (failedStream != null &&
+            identical(_streams[track.id], failedStream)) {
+          _streams.remove(track.id);
+          // Release the failed selection without changing another request's source.
+          if (_playingStream == track.id) _playingStream = null;
+          try {
+            await failedStream.close(cancel: true);
+          } catch (_) {
+            /* Preserve the original startup failure. */
+          }
+        }
+        // Keep late cleanup from replacing a newer request's successful status.
+        if (request != _request || disposed) return;
         phase = 'failed';
-        playbackError = categoryOf(e);
-        store.trackError(track.id, categoryOf(e));
-        _failure(e, stack);
-        _reportPlayback(phase, watch, category: categoryOf(e));
+        playbackError = categoryOf(failure);
+        store.trackError(track.id, categoryOf(failure));
+        _failure(failure, stack);
+        _reportPlayback(phase, watch, category: categoryOf(failure));
       }
     } finally {
       progress.cancel();
@@ -1387,6 +1416,10 @@ class AppController extends ChangeNotifier {
             : 'Paused · saved offline';
       }
       return asset;
+    } catch (error) {
+      // Record the transfer cause before relay cleanup and generic native errors obscure it.
+      _writeAudioDiagnostic(audioTransferDiagnostic(error));
+      rethrow;
     } finally {
       if (stream != null &&
           (!identical(_streams[track.id], stream) ||

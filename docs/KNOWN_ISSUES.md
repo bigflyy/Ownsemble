@@ -6,6 +6,13 @@
   conceal an upstream transfer failure. Cached controls pass; uncached playback
   remains an active release gate. Diagnose the original transfer category/status
   before changing TLS, source allowlists or identity verification.
+  Follow-up: preserve HTTP status and the relay's original transfer failure;
+  unload failed media and ignore late cleanup from superseded Play requests.
+  Tests reproduced both stuck buffering and late cleanup before correction.
+  Fresh live attempts also exposed audio_destination_rejected and source-resolution
+  timeouts. The exact selected row exposes an opaque HTTPS okcdn.ru source that
+  the older CDN/filename policy does not accept. This remains under investigation;
+  the failure-reporting repair is not a successful uncached-playback claim.
 
 - Delayed first sound despite several MB received (2026-10-22): user observes
   2–3–10 MB downloaded while still silent and suspects a complete-download wait.

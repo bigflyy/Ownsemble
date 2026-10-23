@@ -28,6 +28,25 @@ class StreamingAudio {
   bool _closed = false, _prepared = false;
   bool get prepared => _prepared;
   int _bytes = 0;
+  // Retain the first sanitized upstream failure even after relay cleanup.
+  ProofFailure? _failure;
+
+  /// Expose a fixed transfer category/code without native messages or source URLs.
+  ProofFailure? get failure => _failure;
+
+  /// Preserve the original transfer failure while excluding normal cancellation.
+  void _rememberFailure(Object error) {
+    // Keep the first cause and avoid turning an intentional Stop into an error.
+    if (_closed ||
+        _failure != null ||
+        error is ProofFailure && error.category == 'cancelled') {
+      return;
+    }
+    _failure = error is ProofFailure
+        ? error
+        : const ProofFailure('audio_transfer_failed');
+  }
+
   StreamingAudio(this.network, this.source, {this.userAgent = 'Ownsemble/0.1'});
 
   bool get downloadComplete {
@@ -79,6 +98,7 @@ class StreamingAudio {
               return bytes;
             },
             onError: (Object error, StackTrace stack) {
+              _rememberFailure(error);
               resource.finish(error);
               Error.throwWithStackTrace(error, stack);
             },
@@ -133,7 +153,13 @@ class StreamingAudio {
     );
   }
 
-  Future<String> _manifest() => _manifestFuture ??= _buildManifest();
+  /// Retain manifest failures so the player can report their transfer cause.
+  Future<String> _manifest() => _manifestFuture ??= _buildManifest().catchError(
+    (Object error, StackTrace stack) {
+      _rememberFailure(error);
+      Error.throwWithStackTrace(error, stack);
+    },
+  );
   Future<String> _buildManifest() async {
     var uri = source;
     HlsPlan? plan;
@@ -259,6 +285,7 @@ class StreamingAudio {
             return bytes;
           })
           .catchError((Object error, StackTrace stack) {
+            _rememberFailure(error);
             resource.finish(error);
             Error.throwWithStackTrace(error, stack);
           });

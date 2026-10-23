@@ -140,7 +140,155 @@ class DiagnosticLibraryProvider extends FixtureProvider
   }
 }
 
+/// Model a native open failure that leaves buffering active until media unloads.
+class FailingBufferingPlayback extends PortablePlayback {
+  // Preserve the native buffering symptom after an unsuccessful open.
+  bool waitingForAudio = false;
+  // Count media unloads before startup and during failure recovery.
+  int stops = 0;
+
+  /// Report the buffering state independently of the paused state.
+  @override
+  PlaybackState get state => PlaybackState(
+    playing: playing,
+    buffering: waitingForAudio,
+    position: position,
+    duration: const Duration(seconds: 10),
+    volume: volume,
+  );
+
+  /// Reproduce a failed open without reading or decoding a real audio file.
+  @override
+  Future<void> openLocal(String path, {bool play = true}) async {
+    waitingForAudio = true;
+    throw const ProofFailure('decoder_open_failed');
+  }
+
+  /// Clear buffering only when the media is unloaded, matching native behavior.
+  @override
+  Future<void> stop() async {
+    stops++;
+    waitingForAudio = false;
+    await super.stop();
+  }
+}
+
+/// Delay one failed-open cleanup acknowledgement while a newer Play succeeds.
+class DelayedFailureCleanupPlayback extends PortablePlayback {
+  // Signal that the old request has entered native cleanup.
+  final cleanupStarted = Completer<void>();
+  // Release the old native acknowledgement after the newer request finishes.
+  final releaseCleanup = Completer<void>();
+  // Fail only the first open so the second request can prove successful recovery.
+  bool failNextOpen = true;
+  // Apply native state immediately, then delay only its acknowledgement.
+  bool cleanupPending = false;
+
+  /// Suspend the first failed-open cleanup response without blocking later calls.
+  Future<void> _waitForCleanup() async {
+    // Leave ordinary player operations unaffected by the controlled delay.
+    if (!cleanupPending) return;
+    cleanupPending = false;
+    cleanupStarted.complete();
+    await releaseCleanup.future;
+  }
+
+  /// Fail the old request and accept the next request using generated media state.
+  @override
+  Future<void> openLocal(String path, {bool play = true}) async {
+    // Reproduce one failed request before allowing the retry to succeed.
+    if (failNextOpen) {
+      failNextOpen = false;
+      cleanupPending = true;
+      throw const ProofFailure('decoder_open_failed');
+    }
+    await super.openLocal(path, play: play);
+  }
+
+  /// Apply a pause before delaying the acknowledgement of the old cleanup.
+  @override
+  Future<void> pause() async {
+    await super.pause();
+    await _waitForCleanup();
+  }
+
+  /// Apply media unload before delaying its acknowledgement.
+  @override
+  Future<void> stop() async {
+    position = Duration.zero;
+    await super.pause();
+    await _waitForCleanup();
+  }
+}
+
 void main() {
+  test(
+    'late failure cleanup cannot overwrite a newer successful Play',
+    () async {
+      // Isolate the request race from real catalog and media files.
+      final directory = await Directory.systemTemp.createTemp(
+        'ownsemble-cleanup-race-',
+      );
+      // Store one generated recording for both requests.
+      final store = LibraryStore(directory);
+      store.merge([const Track('17_1', 'Generated', 'Fixture', 10)]);
+      // Delay the old cleanup response while allowing the retry to finish.
+      final player = DelayedFailureCleanupPlayback();
+      // Exercise normal controller request ownership through an independent engine.
+      final controller = PortableController(
+        store,
+        player,
+        FixtureProvider(),
+        '${directory.path}/generated.mp3',
+      );
+      try {
+        // Start the failing request without waiting for its cleanup acknowledgement.
+        final first = controller.playRows(store.rows(), 0);
+        await player.cleanupStarted.future;
+        await controller.playRows(store.rows(), 0);
+        player.releaseCleanup.complete();
+        await first;
+        expect(store.rows().single.error, isNull);
+        expect(player.state.playing, isTrue);
+        expect(controller.loading, isFalse);
+      } finally {
+        // Release the fixture even if an assertion fails before ordinary shutdown.
+        if (!player.releaseCleanup.isCompleted) {
+          player.releaseCleanup.complete();
+        }
+        await controller.shutdown();
+        await directory.delete(recursive: true);
+      }
+    },
+  );
+  test('failed startup unloads media instead of leaving an endless buffering state', () async {
+    // Keep this regression isolated from user files and the real media backend.
+    final directory = await Directory.systemTemp.createTemp(
+      'ownsemble-failed-start-',
+    );
+    // Store one generated recording for the ordinary controller Play action.
+    final store = LibraryStore(directory);
+    store.merge([const Track('17_1', 'Generated', 'Fixture', 10)]);
+    // Reproduce the native buffering symptom through an independent engine double.
+    final player = FailingBufferingPlayback();
+    // Return a generated path directly so the test needs no native media access.
+    final controller = PortableController(
+      store,
+      player,
+      FixtureProvider(),
+      '${directory.path}/generated.mp3',
+    );
+    try {
+      await controller.playRows(store.rows(), 0);
+      expect(controller.loading, isFalse);
+      expect(player.state.playing, isFalse);
+      expect(player.state.buffering, isFalse);
+      expect(player.stops, 2);
+    } finally {
+      await controller.shutdown();
+      await directory.delete(recursive: true);
+    }
+  });
   test('fixed library inspection leaves catalog and playback unchanged', () async {
     // Keep this controller test isolated from the application's real catalog.
     final directory = await Directory.systemTemp.createTemp(

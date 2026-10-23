@@ -8,6 +8,37 @@ class ProofFailure implements Exception {
   String toString() => category;
 }
 
+/// Describe a rejected media destination with fixed flags, never its URL.
+class AudioDestinationFailure extends ProofFailure {
+  // Keep only structural flags and matches against public, fixed service suffixes.
+  final Map<String, Object> diagnostic;
+
+  /// Capture safe destination shape while preserving the existing failure category.
+  AudioDestinationFailure(Uri destination, {required bool redirect})
+    : diagnostic = {
+        'redirect': redirect,
+        'https': destination.scheme == 'https',
+        'http': destination.scheme == 'http',
+        'userinfo': destination.userInfo.isNotEmpty,
+        'port': destination.hasPort,
+        'trailing_dot': destination.host.endsWith('.'),
+        for (final suffix in [
+          ...cdnSuffixes,
+          'vk.com',
+          'vk.ru',
+          'mycdn.me',
+          'okcdn.ru',
+          'vkuser.net',
+          'vkusercdn.net',
+          'vkcdn.audio',
+        ])
+          'suffix_$suffix':
+              destination.host == suffix ||
+              destination.host.endsWith('.$suffix'),
+      },
+      super('audio_destination_rejected');
+}
+
 class Track {
   final String id, title, artist;
   final double duration;

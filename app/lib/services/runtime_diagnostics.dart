@@ -4,6 +4,16 @@ import 'package:flutter/services.dart';
 
 import '../media/audio_policy.dart';
 
+/// Preserve only the original transfer category and numeric error code.
+Map<String, Object> audioTransferDiagnostic(Object error) => {
+  'stage': 'audio_transfer_failed',
+  'category': categoryOf(error),
+  // Include a typed code without copying native messages or temporary URLs.
+  if (error is ProofFailure && error.code != null) 'code': error.code!,
+  // Export fixed destination flags only when the allowlist rejects a fetch.
+  if (error is AudioDestinationFailure) 'destination': error.diagnostic,
+};
+
 // Never export exception messages, stack traces, filenames, IDs or URLs.
 Map<String, Object> runtimeDiagnostic(Object error, StackTrace? stack) {
   final text = stack?.toString() ?? '';

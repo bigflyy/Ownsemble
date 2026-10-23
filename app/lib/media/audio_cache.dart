@@ -85,7 +85,7 @@ class AudioCache {
     }
     if (offline) throw const ProofFailure('offline_network_blocked');
     if (!allowedAudio(source, fixturePort: fixturePort)) {
-      throw const ProofFailure('audio_destination_rejected');
+      throw AudioDestinationFailure(source, redirect: false);
     }
     if (resourceLoader != null) {
       return resourceLoader!(source, userAgent: userAgent, limit: limit);
@@ -103,7 +103,7 @@ class AudioCache {
       var uri = source;
       for (var hop = 0; hop < 6; hop++) {
         if (!allowedAudio(uri, fixturePort: fixturePort)) {
-          throw const ProofFailure('audio_destination_rejected');
+          throw AudioDestinationFailure(uri, redirect: hop > 0);
         }
         if (userAgent.length > 512 || userAgent.contains(RegExp(r'[\r\n]'))) {
           throw const ProofFailure('user_agent_invalid');
@@ -134,7 +134,7 @@ class AudioCache {
           continue;
         }
         if (response.statusCode != 200) {
-          throw const ProofFailure('audio_http_failed');
+          throw ProofFailure('audio_http_failed', code: response.statusCode);
         }
         onHeaders?.call(response.contentLength);
         final bytes = BytesBuilder(copy: false);
