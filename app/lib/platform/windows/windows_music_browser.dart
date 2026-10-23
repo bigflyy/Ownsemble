@@ -8,6 +8,7 @@ import '../../contracts/music_browser.dart';
 import '../../media/audio_policy.dart';
 import 'native_browser.dart';
 import 'background_browser.dart';
+import 'document_start_script.dart';
 
 /// Shares only the plugin's dedicated private environment between independent
 /// documents. No profile/cookie inspection or session export API is exposed.
@@ -122,13 +123,16 @@ class WindowsMusicBrowser implements MusicBrowser {
     return value.value;
   }
 
+  /// Register the script before navigation, waiting for the native completion.
   @override
   Future<void> addDocumentStartScript(String source) =>
-      _controller.addUserScript(
-        userScript: UserScript(
-          source: source,
-          injectionTime: UserScriptInjectionTime.AT_DOCUMENT_START,
-        ),
+      registerWindowsDocumentStartScript(
+        source,
+        callProtocol: (method, parameters) =>
+            _controller.callDevToolsProtocolMethod(
+              methodName: method,
+              parameters: parameters,
+            ),
       );
   @override
   Future<bool> isAudioIsolated() async {
