@@ -1,5 +1,26 @@
 # Feature queue
 
+2026-10-23 Windows checkpoint: document-start registration now waits for the native
+acknowledgement. The native browser check passes. Cached playback advanced steadily
+during a full scan in the sampled Windows run. Pagination supports nested panes
+and ignores hidden trailing rows, but current provider coverage remains partial:
+a later full slice stopped at 895 records. See WINDOWS_BROWSER_REGISTRATION.md and
+VK_PAGINATION_REPAIR.md. Native Ubuntu audio acceptance stays deferred.
+
+2026-10-22 connection UX feedback: replace the unclear Settings sign-in / return /
+Connect VK sequence with one guided connection flow. Keep private login paused
+and prevent background QR reloads; make the app-owned next step explicit without
+inspecting credentials or inferring authentication from private fields. Coordinate
+with the clickable provider badge proposal below. Logged while the active Linux
+playback and incomplete-import repair continues.
+
+2026-10-22 Linux runtime failures: a downloaded track stalled while the app still
+reported playing. WSLg PulseAudio stopped accepting/responding to independent
+clients; restarting that service restored cached playback and the main-player
+controls check. Smooth physical output remains unverified. Import was really only
+115 stored records; a later full scan reached 135, still partial. Keep live
+pagination acceptance separate from generated nested-scroll regression passes.
+
 2026-10-22 private sign-in reload repair: generated tests reproduced extra standby
 pages and repeated/late root-to-Music redirects disturbing login. Explicit private
 phase now pauses background work until Connect VK; rebuilt Linux app delivered.
