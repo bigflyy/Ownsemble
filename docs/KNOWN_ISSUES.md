@@ -1,5 +1,12 @@
 # Reported issues
 
+- Uncached Windows playback (2026-10-23): a deep-library sample bound the exact
+  recording source, then failed opening its local relay after 8,519 ms with no
+  upstream bytes observed. The UI category was decoder_open_failed, which can
+  conceal an upstream transfer failure. Cached controls pass; uncached playback
+  remains an active release gate. Diagnose the original transfer category/status
+  before changing TLS, source allowlists or identity verification.
+
 - Delayed first sound despite several MB received (2026-10-22): user observes
   2–3–10 MB downloaded while still silent and suspects a complete-download wait.
   Streaming exists, but branch selection/prefix/verification/native buffering

@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ownsemble/contracts/playback_engine.dart';
+import 'package:ownsemble/contracts/music_provider.dart';
 import 'package:ownsemble/data/library_store.dart';
 import 'package:ownsemble/media/audio_cache.dart';
 import 'package:ownsemble/media/audio_policy.dart';
@@ -126,7 +127,54 @@ class PrivateSessionProvider extends FixtureProvider {
   }
 }
 
+/// Model optional read-only diagnostics without constructing a browser backend.
+class DiagnosticLibraryProvider extends FixtureProvider
+    implements LibraryMembershipDiagnostics {
+  // Count explicit inspections independently of ordinary synchronization.
+  int inspections = 0;
+
+  /// Record the diagnostic request without returning or changing music data.
+  @override
+  Future<void> inspectLibraryMembership() async {
+    inspections++;
+  }
+}
+
 void main() {
+  test('fixed library inspection leaves catalog and playback unchanged', () async {
+    // Keep this controller test isolated from the application's real catalog.
+    final directory = await Directory.systemTemp.createTemp(
+      'ownsemble-library-inspection-',
+    );
+    // Store only one generated recording to detect accidental import mutations.
+    final store = LibraryStore(directory);
+    store.merge([const Track('17_1', 'Generated', 'Fixture', 10)]);
+    // Expose only the optional diagnostic capability to the controller.
+    final provider = DiagnosticLibraryProvider();
+    // Track player operations independently from the provider's inspection count.
+    final player = PortablePlayback();
+    // Enable the same fixed-command polling used by authorized local checks.
+    final controller = AppController(
+      store,
+      musicProvider: provider,
+      playbackPlayer: player,
+      decodeAudio: (_) async => 10,
+      enableLocalControls: true,
+    );
+    try {
+      await File('${directory.path}/control.json').writeAsString(
+        '{"command":"inspect-library","nonce":"12345678-1234-1234-1234-123456789abc"}',
+      );
+      await Future<void>.delayed(const Duration(milliseconds: 2200));
+      expect(provider.inspections, 1);
+      expect(store.count, 1);
+      expect(player.opened, isEmpty);
+      expect(player.playing, isFalse);
+    } finally {
+      await controller.shutdown();
+      await directory.delete(recursive: true);
+    }
+  });
   test(
     'scheduler leaves private sign-in alone until explicit Connect VK',
     () async {

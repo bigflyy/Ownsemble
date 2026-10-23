@@ -1,0 +1,72 @@
+import 'dart:async';
+
+import 'package:flutter_test/flutter_test.dart';
+import 'package:ownsemble/media/audio_policy.dart';
+import 'package:ownsemble/provider/library_probe.dart';
+
+/// Check bounded diagnostic completion without exposing native error contents.
+void main() {
+  test(
+    'a stalled probe reports its deadline instead of disappearing',
+    () async {
+      // Hold the generated request forever to exercise the diagnostic deadline.
+      final pending = Completer<Map<String, dynamic>>();
+      // Capture only projected numeric reports.
+      final reports = <Map<String, int>>[];
+      await runLibraryProbe(
+        read: () => pending.future,
+        report: reports.add,
+        deadline: const Duration(milliseconds: 1),
+      );
+      expect(reports, [
+        {'libraryProbeTimeout': 1},
+      ]);
+    },
+  );
+
+  test(
+    'successful probe counters are projected again before reporting',
+    () async {
+      // Capture only recognized, bounded diagnostic counters.
+      final reports = <Map<String, int>>[];
+      await runLibraryProbe(
+        read: () async => {
+          'counts': {
+            'libraryRows': 2000,
+            'privateField': 'generated private value',
+          },
+        },
+        report: reports.add,
+      );
+      expect(reports, [
+        {'libraryRows': 2000},
+      ]);
+    },
+  );
+
+  test('private sign-in cancellation remains a hard boundary', () async {
+    // Detect any attempted diagnostic report after access is revoked.
+    final reports = <Map<String, int>>[];
+    await expectLater(
+      runLibraryProbe(
+        read: () async =>
+            throw const ProofFailure('private_signin_in_progress'),
+        report: reports.add,
+      ),
+      throwsA(isA<ProofFailure>()),
+    );
+    expect(reports, isEmpty);
+  });
+
+  test('native exception details are replaced with a fixed numeric category', () async {
+    // Capture sanitized failure information without forwarding exception text.
+    final reports = <Map<String, int>>[];
+    await runLibraryProbe(
+      read: () async => throw StateError('generated private destination'),
+      report: reports.add,
+    );
+    expect(reports, [
+      {'libraryProbeScriptFailed': 1},
+    ]);
+  });
+}

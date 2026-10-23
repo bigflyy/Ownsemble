@@ -730,3 +730,290 @@ test('pagination finds the music pane before a trailing unrelated hidden row', a
   assert.deepEqual(innerMoves, [600]);
   assert.deepEqual(outerMoves, []);
 });
+
+// Probe only the account's own music listing, returning numeric shape counts.
+test('library pagination probe projects music counts without private response fields', async () => {
+  // Exercise the two documented music-only reply envelopes.
+  for (const envelope of ['payload', 'data']) {
+    // Model one music page with a continuation offset and an explicit total.
+    const playlist = { list: [[1, 17, '', 'Generated', 'Artist', 30]],
+      hasMore: true, nextOffset: 1, totalCount: 2633,
+      privateField: 'must never be returned' };
+    // Wrap the playlist using a known music-list response structure.
+    const reply = envelope === 'payload' ? { payload: [0, [playlist]] } : { data: [playlist] };
+    // Count requests to ensure the diagnostic cannot paginate by itself.
+    let requests = 0;
+    // Run the real guarded action using only generated response data.
+    const result = await vm.runInNewContext(`(${musicPageAction.toString()})('probe-library-page')`, {
+      location: { protocol: 'https:', hostname: 'vk.ru', pathname: '/audios' },
+      document: { querySelector: () => null }, window: { vk: { id: 17 } },
+      URLSearchParams, AbortSignal,
+      // Verify a same-origin read-only music request without cookie export.
+      fetch: async (url, options) => {
+        requests++;
+        assert.equal(url, '/al_audio.php');
+        assert.equal(options.credentials, 'same-origin');
+        assert.equal(options.redirect, 'error');
+        assert.equal(options.body.get('act'), 'load_section');
+        assert.equal(options.body.get('owner_id'), '17');
+        assert.equal(options.body.get('playlist_id'), '-1');
+        assert.equal(options.body.get('offset'), '0');
+        return { ok: true, headers: { get: () => 'application/json' }, text: async () => JSON.stringify(reply) };
+      },
+    });
+    assert.equal(requests, 1);
+    assert.deepEqual(JSON.parse(JSON.stringify(result)), { counts: {
+      libraryRequestOK: 1, libraryShapeSupported: 1, libraryRows: 1,
+      libraryHasMore: 1, libraryNextOffset: 1, libraryTotal: 2633,
+      libraryResponseCharacters: JSON.stringify(reply).length,
+    } });
+  }
+});
+
+// Reject non-music responses before reading their bodies.
+test('library pagination probe does not read HTML responses', async () => {
+  // Track any attempt to inspect a response outside the music JSON contract.
+  let bodyRead = false;
+  // Run the guarded request against a generated HTML response.
+  const result = await vm.runInNewContext(`(${musicPageAction.toString()})('probe-library-page')`, {
+    location: { protocol: 'https:', hostname: 'vk.ru', pathname: '/audios' },
+    document: { querySelector: () => null }, window: { vk: { id: 17 } },
+    URLSearchParams, AbortSignal,
+    fetch: async () => ({ ok: true, headers: { get: () => 'text/html' },
+      text: async () => { bodyRead = true; throw Error('body must not be read'); } }),
+  });
+  assert.equal(bodyRead, false);
+  assert.equal(result.counts.libraryResponseUnsupported, 1);
+});
+
+// Keep private sign-in outside the scope of the music-list probe.
+test('library pagination probe never sends a request when a sign-in form exists', async () => {
+  // Detect any forbidden network activity during private sign-in.
+  let requests = 0;
+  // Run the action behind a generated sign-in-form presence flag.
+  const result = await vm.runInNewContext(`(${musicPageAction.toString()})('probe-library-page')`, {
+    location: { protocol: 'https:', hostname: 'vk.ru', pathname: '/audios' },
+    document: { querySelector: () => ({}) },
+    fetch: async () => { requests++; throw Error('forbidden request'); },
+  });
+  assert.equal(requests, 0);
+  assert.equal(typeof result.error, 'string');
+});
+
+// Recheck consent boundaries when navigation changes during the network wait.
+test('library pagination probe drops a response when sign-in starts while awaiting it', async () => {
+  // Switch only the generated form-presence flag after the request starts.
+  let signInPresent = false;
+  // Detect any attempt to read the response after private sign-in begins.
+  let bodyRead = false;
+  // Run the action against a request that completes during private sign-in.
+  const result = await vm.runInNewContext(`(${musicPageAction.toString()})('probe-library-page')`, {
+    location: { protocol: 'https:', hostname: 'vk.ru', pathname: '/audios' },
+    document: { querySelector: () => signInPresent ? {} : null },
+    window: { vk: { id: 17 } }, URLSearchParams, AbortSignal,
+    fetch: async () => {
+      signInPresent = true;
+      return { ok: true, headers: { get: () => 'application/json' },
+        text: async () => { bodyRead = true; throw Error('forbidden response read'); } };
+    },
+  });
+  assert.equal(bodyRead, false);
+  assert.equal(typeof result.error, 'string');
+});
+
+// Drop music results when private sign-in starts during response-body transfer.
+test('library pagination probe rechecks sign-in before decoding a completed body', async () => {
+  // Change only a generated presence flag; never model or read credential values.
+  let signInPresent = false;
+  // Complete the music body after the form-presence flag changes.
+  const result = await vm.runInNewContext(`(${musicPageAction.toString()})('probe-library-page')`, {
+    location: { protocol: 'https:', hostname: 'vk.ru', pathname: '/audios' },
+    document: { querySelector: () => signInPresent ? {} : null },
+    window: { vk: { id: 17 } }, URLSearchParams, AbortSignal,
+    fetch: async () => ({ ok: true, headers: { get: () => 'application/json' },
+      text: async () => {
+        signInPresent = true;
+        return JSON.stringify({ payload: [0, [{ list: [], hasMore: false }]] });
+      } }),
+  });
+  assert.equal(typeof result.error, 'string');
+  assert.equal(result.counts, undefined);
+});
+
+// Retain a fixed failure category without forwarding network exception details.
+test('library pagination probe masks network errors and unknown reply fields', async () => {
+  // Provide only the guarded music route and generated account owner.
+  const environment = {
+    location: { protocol: 'https:', hostname: 'vk.ru', pathname: '/audios' },
+    document: { querySelector: () => null }, window: { vk: { id: 17 } },
+    URLSearchParams, AbortSignal,
+  };
+  // Fail with a generated sensitive-looking message that must not be returned.
+  const failed = await vm.runInNewContext(`(${musicPageAction.toString()})('probe-library-page')`, {
+    ...environment, fetch: async () => { throw Error('generated private destination'); },
+  });
+  assert.deepEqual(JSON.parse(JSON.stringify(failed)), { counts: { libraryProbeFailed: 1 } });
+  // Measure the generated reply without relying on a duplicated length constant.
+  const partialBody = JSON.stringify({ payload: [0, [{ list: [], hasMore: 'yes',
+    nextOffset: -1, totalCount: 1000000001, ignored: 'generated private field' }]] });
+  // Supply malformed continuation fields while keeping the music list shape valid.
+  const partial = await vm.runInNewContext(`(${musicPageAction.toString()})('probe-library-page')`, {
+    ...environment, fetch: async () => ({ ok: true, headers: { get: () => 'application/json' },
+      text: async () => partialBody }),
+  });
+  assert.deepEqual(JSON.parse(JSON.stringify(partial)), { counts: {
+    libraryRequestOK: 1, libraryShapeSupported: 1, libraryRows: 0,
+    libraryResponseCharacters: partialBody.length,
+  } });
+});
+
+// Compare complete music membership internally while exporting counts only.
+test('library membership probe follows one continuation and identifies extra recommendation rows', async () => {
+  // Supply two bounded pages for a three-recording personal library.
+  const playlists = [
+    { list: [[1, 17], [2, 17]], hasMore: true, nextOffset: 2, totalCount: 3 },
+    { list: [[3, 17]], hasMore: false, nextOffset: 3, totalCount: 3 },
+  ];
+  // Record requested offsets without collecting response content.
+  const offsets = [];
+  // Model rendered library recordings plus one separately marked recommendation.
+  const rows = ['17_1', '17_2', '17_3', '17_4'].map(identity => ({
+    getAttribute: name => name === 'data-audio-id' ? identity : null,
+    closest: () => identity === '17_4' ? {} : null,
+  }));
+  // Run the same probe with its fixed membership-comparison option enabled.
+  const result = await vm.runInNewContext(`(${musicPageAction.toString()})('probe-library-page',null,{compareMembership:true})`, {
+    location: { protocol: 'https:', hostname: 'vk.ru', pathname: '/audios' },
+    document: { querySelector: () => null, querySelectorAll: () => rows },
+    window: { vk: { id: 17 } }, URLSearchParams, AbortSignal,
+    setTimeout: resolve => { resolve(); return 0; },
+    fetch: async (_, options) => {
+      offsets.push(Number(options.body.get('offset')));
+      return { ok: true, headers: { get: () => 'application/json' },
+        text: async () => JSON.stringify({ payload: [0, [playlists[offsets.length - 1]]] }) };
+    },
+  });
+  assert.deepEqual(offsets, [0, 2]);
+  assert.equal(result.counts.libraryComparedComplete, 1);
+  assert.equal(result.counts.libraryUniqueRecordings, 3);
+  assert.equal(result.counts.libraryDOMUniqueRecordings, 4);
+  assert.equal(result.counts.libraryDOMOutsideListing, 1);
+  assert.equal(result.counts.libraryOutsideRecommendationRows, 1);
+  assert.equal(JSON.stringify(result).includes('17_'), false);
+});
+
+// Keep an unusually large single reply outside the membership-comparison budget.
+test('library membership probe rejects more than four thousand complete entries', async () => {
+  // Build a generated music list exceeding only the comparison limit.
+  const playlist = { list: Array.from({ length: 4001 }, (_, index) => [index + 1, 17]),
+    hasMore: false, totalCount: 4001 };
+  // Run the bounded probe without permitting a DOM comparison for this oversized list.
+  const result = await vm.runInNewContext(`(${musicPageAction.toString()})('probe-library-page',null,{compareMembership:true})`, {
+    location: { protocol: 'https:', hostname: 'vk.ru', pathname: '/audios' },
+    document: { querySelector: () => null,
+      querySelectorAll: () => { throw Error('oversized comparison must not inspect DOM'); } },
+    window: { vk: { id: 17 } }, URLSearchParams, AbortSignal,
+    fetch: async () => ({ ok: true, headers: { get: () => 'application/json' },
+      text: async () => JSON.stringify({ payload: [0, [playlist]] }) }),
+  });
+  assert.equal(result.counts.libraryComparisonUnavailable, 1);
+  assert.equal(result.counts.libraryComparedComplete, undefined);
+});
+
+// Keep membership diagnostics independent of optional recording metadata work.
+test('stalled optional metadata cannot hold up library membership counters', async () => {
+  // Model a complete one-recording playlist without any continuation request.
+  const playlist = { list: [[1, 17]], hasMore: false, totalCount: 1 };
+  // Start the actual action with an optional metadata reader that never finishes.
+  const action = vm.runInNewContext(`(${musicPageAction.toString()})('probe-library-page',null,{compareMembership:true})`, {
+    location: { protocol: 'https:', hostname: 'vk.ru', pathname: '/audios' },
+    document: { querySelector: () => null, querySelectorAll: () => [] },
+    window: { vk: { id: 17 }, ownsembleMusic: { read: () => new Promise(() => {}) } },
+    URLSearchParams, AbortSignal,
+    fetch: async () => ({ ok: true, headers: { get: () => 'application/json' },
+      text: async () => JSON.stringify({ payload: [0, [playlist]] }) }),
+  });
+  // Bound the generated regression so a failure cannot stall the test process.
+  const result = await Promise.race([action, new Promise(resolve => setTimeout(() => resolve(null), 30))]);
+  assert.notEqual(result, null);
+  assert.equal(result.counts.libraryComparedComplete, 1);
+});
+
+// Keep a two-page diagnostic independent of timers throttled by a hidden page.
+test('a stalled page timer cannot block the second bounded library request', async () => {
+  // Supply one recording per page with an explicit complete total.
+  const playlists = [
+    { list: [[1, 17]], hasMore: true, nextOffset: 1, totalCount: 2 },
+    { list: [[2, 17]], hasMore: false, totalCount: 2 },
+  ];
+  // Track the bounded request count without reading any account data.
+  let requests = 0;
+  // Simulate a hidden-page timer that never invokes its callback.
+  const action = vm.runInNewContext(`(${musicPageAction.toString()})('probe-library-page',null,{compareMembership:true})`, {
+    location: { protocol: 'https:', hostname: 'vk.ru', pathname: '/audios' },
+    document: { querySelector: () => null, querySelectorAll: () => [] },
+    window: { vk: { id: 17 } }, URLSearchParams, AbortSignal,
+    setTimeout: () => 0,
+    fetch: async () => ({ ok: true, headers: { get: () => 'application/json' },
+      text: async () => JSON.stringify({ payload: [0, [playlists[requests++]]] }) }),
+  });
+  // Fail promptly if a hidden-page timer holds the diagnostic result.
+  const result = await Promise.race([action, new Promise(resolve => setTimeout(() => resolve(null), 30))]);
+  assert.notEqual(result, null);
+  assert.equal(requests, 2);
+  assert.equal(result.counts.libraryComparedComplete, 1);
+});
+
+// Distinguish server rejection from a response-format change without reading bodies.
+test('library probe reports HTTP and format categories for rejected responses', async () => {
+  // Cover both an HTTP failure and an HTML response with a successful status.
+  for (const [status, contentType, jsonResponse] of [[503, 'application/json', 1], [200, 'text/html', 0]]) {
+    // Detect any forbidden body read for either unsupported response category.
+    let bodyRead = false;
+    // Run the guarded probe with only generated transport metadata.
+    const result = await vm.runInNewContext(`(${musicPageAction.toString()})('probe-library-page')`, {
+      location: { protocol: 'https:', hostname: 'vk.ru', pathname: '/audios' },
+      document: { querySelector: () => null }, window: { vk: { id: 17 } },
+      URLSearchParams, AbortSignal,
+      fetch: async () => ({ ok: status === 200, status, headers: { get: () => contentType },
+        text: async () => { bodyRead = true; throw Error('body must not be read'); } }),
+    });
+    assert.equal(bodyRead, false);
+    assert.equal(result.counts.libraryHTTPStatus, status);
+    assert.equal(result.counts.libraryJSONResponse, jsonResponse);
+    assert.equal(result.counts.libraryResponseUnsupported, 1);
+  }
+});
+
+// Accept a realistic bounded music reply larger than the old two-million-character cap.
+test('library probe accepts a valid music page above the former response budget', async () => {
+  // Keep the large generated field unrelated to the projected music counters.
+  const body = JSON.stringify({ payload: [0, [{ list: [], hasMore: false }]],
+    ignored: 'x'.repeat(2 * 1024 * 1024) });
+  // Run the same bounded reader without any real account or network interaction.
+  const result = await vm.runInNewContext(`(${musicPageAction.toString()})('probe-library-page')`, {
+    location: { protocol: 'https:', hostname: 'vk.ru', pathname: '/audios' },
+    document: { querySelector: () => null }, window: { vk: { id: 17 } },
+    URLSearchParams, AbortSignal,
+    fetch: async () => ({ ok: true, status: 200, headers: { get: () => 'application/json' }, text: async () => body }),
+  });
+  assert.equal(result.counts.libraryShapeSupported, 1);
+  assert.equal(result.counts.libraryResponseCharacters, body.length);
+  assert.equal(JSON.stringify(result).includes('xxx'), false);
+});
+
+// Preserve a hard parsing budget while distinguishing it from transport rejection.
+test('library probe reports oversized response length without parsing its body', async () => {
+  // Exceed the new eight-million-character cap with generated whitespace only.
+  const body = ' '.repeat(8 * 1024 * 1024 + 1);
+  // Run the actual reader against the oversized generated response text.
+  const result = await vm.runInNewContext(`(${musicPageAction.toString()})('probe-library-page')`, {
+    location: { protocol: 'https:', hostname: 'vk.ru', pathname: '/audios' },
+    document: { querySelector: () => null }, window: { vk: { id: 17 } },
+    URLSearchParams, AbortSignal,
+    fetch: async () => ({ ok: true, status: 200, headers: { get: () => 'application/json' }, text: async () => body }),
+  });
+  assert.equal(result.counts.libraryResponseTooLarge, 1);
+  assert.equal(result.counts.libraryResponseCharacters, body.length);
+  assert.equal(result.counts.libraryResponseUnsupported, undefined);
+});

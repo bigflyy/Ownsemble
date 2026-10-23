@@ -199,6 +199,21 @@ class AppController extends ChangeNotifier {
   }
 
   void providerChanged() => _notify();
+
+  /// Request optional provider diagnostics without importing or selecting music.
+  Future<void> inspectLibraryMembership() async {
+    // Use a capability interface so other providers need no diagnostic stub.
+    final inspector = provider;
+    // Leave providers without this optional capability untouched.
+    if (inspector is! LibraryMembershipDiagnostics) return;
+    try {
+      await (inspector as LibraryMembershipDiagnostics).inspectLibraryMembership();
+    } catch (error, stack) {
+      // Keep private-access failures inside the existing sanitized error path.
+      _failure(error, stack);
+    }
+  }
+
   void providerDiagnostic(Map<String, Object> report) =>
       _writeAudioDiagnostic(report);
 
@@ -1623,6 +1638,7 @@ class AppController extends ChangeNotifier {
             'inspect-current',
             'inspect-old',
             'inspect-lyrics',
+            'inspect-library',
             'repair-mismatched-cache',
             'check-repaired',
             'check-current',
@@ -1655,6 +1671,10 @@ class AppController extends ChangeNotifier {
         unawaited(repairMismatchedCache());
       }
       if (raw['command'] == 'metadata-summary') _reportMetadataSummary();
+      // Run read-only provider diagnostics only for this explicit fixed command.
+      if (raw['command'] == 'inspect-library') {
+        unawaited(inspectLibraryMembership());
+      }
       if (raw['command'] == 'inspect-lyrics') {
         final track = store
             .rows(view: 'vk')

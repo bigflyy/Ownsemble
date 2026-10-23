@@ -35,6 +35,12 @@ class SyncResult {
   });
 }
 
+/// Optional read-only diagnostics, separate from importing or resolving music.
+abstract interface class LibraryMembershipDiagnostics {
+  /// Emit sanitized membership counters through the provider's diagnostic observer.
+  Future<void> inspectLibraryMembership();
+}
+
 /// Application-facing music operations; implementations own provider policy.
 /// References and optional fields are opaque provider data, never credentials.
 abstract interface class MusicProvider {

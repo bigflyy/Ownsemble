@@ -1,5 +1,13 @@
 # Feature queue
 
+2026-10-23 continued verification: the full Windows page scan observed 2,630
+recordings while all 2,633 saved records remained intact. An explicit bounded
+library diagnostic capability now reports only numeric outcomes and does not run
+during ordinary sync or Play. The direct listing reported a different total;
+complete membership comparison remains unverified. A new uncached deep-library
+play failed after exact source binding. Fixing that transfer/relay path takes
+priority over new features; see KNOWN_ISSUES.md and VK_LIBRARY_PROBE.md.
+
 2026-10-23 Windows checkpoint: document-start registration now waits for the native
 acknowledgement. The native browser check passes. Cached playback advanced steadily
 during a full scan in the sampled Windows run. Pagination supports nested panes

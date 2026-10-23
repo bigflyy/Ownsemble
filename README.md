@@ -16,6 +16,7 @@ The app and both feasibility probes are separate. Nothing reads or copies accoun
 
 - [App build, test, development and runtime instructions](app/README.md)
 - [Approved MVP requirements and acceptance gates](docs/MVP.md)
+- [Bounded provider diagnostics and current limitations](docs/VK_LIBRARY_PROBE.md)
 - [Git workflow and tests-first development](docs/GIT_WORKFLOW.md)
 - [Flutter and Android feasibility evidence](docs/VK_FLUTTER_FEASIBILITY.md)
 - [Preserved Electron reference evidence](docs/VK_FEASIBILITY.md)

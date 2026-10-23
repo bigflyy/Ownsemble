@@ -196,6 +196,148 @@ async function musicPageAction(action, id, options = {}) {
     }
     return { urls: [...urls], segments: [...segments] };
   }
+  // Probe one read-only personal-library page without returning its music content.
+  if (action === 'probe-library-page') {
+    // Require the approved music route and absence of private sign-in forms.
+    function musicRequestAllowed() {
+      return location.protocol === 'https:' && ['vk.ru', 'vk.com'].includes(location.hostname) &&
+        /^\/(?:audios\d*|audio|music)(?:\/|$)/.test(location.pathname) &&
+        !document.querySelector('input[type="password"], input[autocomplete="one-time-code"], input[autocomplete="username"], form[action*="login"], form[action*="auth"]');
+    }
+    // Reuse the numeric music owner already exposed to the guarded music adapter.
+    const ownerId = Number(window.vk?.id);
+    // Avoid guessing an owner or consulting authentication/session objects.
+    if (!Number.isSafeInteger(ownerId) || ownerId <= 0) return { counts: { libraryOwnerUnavailable: 1 } };
+    // Read a bounded music-list envelope using the current consent checks.
+    async function readLibraryPlaylist(offset, signal) {
+      // Recheck consent before every request, including any continuation.
+      if (!musicRequestAllowed()) return { error: 'Sign-in is required; automatic music access is paused.' };
+      // Request only the account's own music; the session remains in the browser.
+      const response = await fetch('/al_audio.php', {
+        method: 'POST', credentials: 'same-origin', redirect: 'error',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'X-Requested-With': 'XMLHttpRequest' },
+        body: new URLSearchParams({ al: '1', act: 'load_section', owner_id: String(ownerId),
+          playlist_id: '-1', offset: String(offset), type: 'playlist', is_loading_all: '1' }), signal,
+      });
+      // Recheck the music route and form guard before examining any response body.
+      if (!musicRequestAllowed()) {
+        return { error: 'Sign-in is required; automatic music access is paused.' };
+      }
+      // Reject HTML, redirects and failures without reading their response bodies.
+      // Classify the response format without forwarding its header text.
+      const jsonResponse = /^(?:application\/json|text\/plain)(?:;|$)/i.test(response.headers?.get('content-type') || '');
+      // Retain only a bounded HTTP status code for transport troubleshooting.
+      const httpStatus = Number.isInteger(response.status) && response.status >= 100 && response.status <= 599 ? response.status : 0;
+      // Stop before body access when transport or response format is unsupported.
+      if (!response.ok || !jsonResponse) {
+        return { counts: { libraryResponseUnsupported: 1, libraryHTTPStatus: httpStatus,
+          libraryJSONResponse: Number(jsonResponse) } };
+      }
+      // Bound the known music-list JSON before decoding it.
+      const body = await response.text();
+      // Discard a completed body if private sign-in began during its transfer.
+      if (!musicRequestAllowed()) {
+        return { error: 'Sign-in is required; automatic music access is paused.' };
+      }
+      // Stop on oversized replies rather than inspecting unrelated response fields.
+      if (body.length > 8 * 1024 * 1024) return { counts: { libraryResponseTooLarge: 1,
+        libraryResponseCharacters: body.length } };
+      // Decode only the documented music-list envelopes.
+      const reply = JSON.parse(body.replace(/^\s*<!--/, ''));
+      // Select the named playlist slot without recursively traversing the reply.
+      const playlist = reply?.payload?.[1]?.[0] ?? reply?.data?.[0];
+      // Require a bounded music list before projecting its pagination counters.
+      if (!playlist || !Array.isArray(playlist.list) || playlist.list.length > 5000) {
+        return { counts: { libraryRequestOK: 1, libraryShapeUnsupported: 1 } };
+      }
+      return { playlist, characters: body.length };
+    }
+    // Extract a recording identity internally without exporting its value.
+    function recordingIdentity(record) {
+      // Read only the documented audio and owner identity fields.
+      const audioId = Array.isArray(record) ? record[0] : record?.id;
+      // Accept both known owner spellings without traversing unrelated state.
+      const owner = Array.isArray(record) ? record[1] : record?.owner_id ?? record?.ownerId;
+      return Number.isSafeInteger(audioId) && audioId > 0 && Number.isSafeInteger(owner) && owner !== 0
+        ? `${owner}_${audioId}` : null;
+    }
+    try {
+      // Share one five-second network deadline across both optional requests.
+      const signal = AbortSignal.timeout(5000);
+      // Read the first page before considering a bounded membership comparison.
+      const first = await readLibraryPlaylist(0, signal);
+      // Preserve fixed failure categories and private-login rejection unchanged.
+      if (!first.playlist) return first;
+      // Keep the actual music content inside this function until only counts remain.
+      const playlist = first.playlist;
+      // Return numeric diagnostics only; retain no track objects or response body.
+      const counts = { libraryRequestOK: 1, libraryShapeSupported: 1,
+        libraryRows: playlist.list.length, libraryResponseCharacters: first.characters };
+      // Preserve only explicit, well-typed continuation flags.
+      if ([true, false, 0, 1].includes(playlist.hasMore)) counts.libraryHasMore = Number(playlist.hasMore);
+      // Read only named pagination offsets and totals within the numeric budget.
+      for (const [key, value] of [['libraryNextOffset', playlist.nextOffset], ['libraryTotal', playlist.totalCount]]) {
+        // Ignore missing or malformed counters rather than guessing their meaning.
+        if (Number.isSafeInteger(value) && value >= 0 && value <= 1000000000) counts[key] = value;
+      }
+      // Keep the ordinary shape probe to one request unless comparison is explicit.
+      if (options.compareMembership !== true) return { counts };
+      // Reject an oversized single page before allocating comparison collections.
+      if (playlist.list.length > 4000) return { counts: { ...counts, libraryComparisonUnavailable: 1 } };
+      // Accumulate at most two pages and four thousand recording entries.
+      const recordings = [...playlist.list];
+      // Require an explicit provider end flag before treating the listing as complete.
+      let ended = playlist.hasMore === false || playlist.hasMore === 0;
+      // Follow only one validated forward continuation for a bounded library.
+      if (!ended && [true, 1].includes(playlist.hasMore) &&
+          Number.isSafeInteger(playlist.totalCount) && playlist.totalCount <= 4000 &&
+          Number.isSafeInteger(playlist.nextOffset) && playlist.nextOffset > 0 && playlist.nextOffset <= 4000) {
+        // Read the continuation using the same consent checks and shared deadline.
+        const continuation = await readLibraryPlaylist(playlist.nextOffset, signal);
+        // Stop immediately if private sign-in began between requests.
+        if (continuation.error) return continuation;
+        // Reject changed totals, oversized lists and unsupported continuation replies.
+        if (!continuation.playlist || continuation.playlist.totalCount !== playlist.totalCount ||
+            recordings.length + continuation.playlist.list.length > 4000) {
+          return { counts: { ...counts, libraryComparisonUnavailable: 1 } };
+        }
+        recordings.push(...continuation.playlist.list);
+        ended = continuation.playlist.hasMore === false || continuation.playlist.hasMore === 0;
+      }
+      // Never compare a partial listing with the rendered document as complete.
+      if (!ended || recordings.length !== playlist.totalCount) {
+        return { counts: { ...counts, libraryComparisonUnavailable: 1 } };
+      }
+      // Validate every music identity before constructing the membership set.
+      const identities = recordings.map(recordingIdentity);
+      // Reject malformed recordings instead of manufacturing membership evidence.
+      if (identities.some(identity => identity === null)) return { counts: { ...counts, libraryComparisonUnavailable: 1 } };
+      // Deduplicate membership without persisting or exporting recording identifiers.
+      const library = new Set(identities);
+      // Collect one rendered DOM row per recognized recording identity.
+      const rendered = new Map();
+      // Examine only known music-row attributes, excluding page text and field values.
+      for (const row of document.querySelectorAll('[data-audio-id], [data-audio]')) {
+        // Read the modern identity without parsing unrelated element attributes.
+        const identity = row.getAttribute('data-audio-id');
+        // Keep only valid recording identities in the internal comparison.
+        if (typeof identity === 'string' && /^-?\d+_\d+$/.test(identity)) rendered.set(identity, row);
+      }
+      // Identify rendered entries outside the completed personal-library listing.
+      const outside = [...rendered].filter(([identity]) => !library.has(identity));
+      counts.libraryComparedComplete = 1;
+      counts.libraryUniqueRecordings = library.size;
+      counts.libraryDOMUniqueRecordings = rendered.size;
+      counts.libraryDOMOutsideListing = outside.length;
+      counts.libraryListedOutsideDOM = [...library].filter(identity => !rendered.has(identity)).length;
+      counts.libraryOutsideRecommendationRows = outside.filter(([, row]) => row.closest?.(
+        '[class*="Recommendation"], [class*="recommendation"], [data-testid*="Recommendation"]')).length;
+      return { counts };
+    } catch (_) {
+      // Report a fixed category without logging native errors or response contents.
+      return { counts: { libraryProbeFailed: 1 } };
+    }
+  }
   // Locate rendered music rows and the scroll pane containing the largest group.
   function musicViewport() {
     // Collect only recognized recording elements, without exporting their IDs.

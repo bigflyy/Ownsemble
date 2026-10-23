@@ -15,12 +15,13 @@ export '../contracts/music_provider.dart';
 import 'guarded_input.dart';
 import 'progress_budget.dart';
 import 'pagination_diagnostics.dart';
+import 'library_probe.dart';
 
 import 'standby_resource.dart';
 
 /// The only module that owns VK page access. No cookies, auth responses,
 /// framework stores or arbitrary caller-supplied scripts leave this boundary.
-class VkProvider implements MusicProvider {
+class VkProvider implements MusicProvider, LibraryMembershipDiagnostics {
   final MusicBrowserFactory browserFactory;
   final Future<String> Function() loadAdapter;
   final void Function(String) status;
@@ -492,10 +493,12 @@ class VkProvider implements MusicProvider {
     }
   }
 
+  /// Dispatch a guarded music action with an explicit optional membership probe.
   Future<Map<String, dynamic>> _action(
     String action, {
     String id = '',
     int waitMs = 0,
+    bool compareMembership = false,
     num? since,
     String? musicKey,
     String? musicQuery,
@@ -503,8 +506,9 @@ class VkProvider implements MusicProvider {
     num? y,
   }) async {
     _guard();
+    // Serialize the fixed options for the app-owned guarded music adapter.
     final value = await _evaluate(
-      '(async()=>JSON.stringify(await window.ownsembleMusic.action(${jsonEncode(action)},${jsonEncode(id)},${jsonEncode({'waitMs': waitMs, 'since': ?since, 'musicKey': ?musicKey, 'musicQuery': ?musicQuery, 'x': ?x, 'y': ?y})})))()',
+      '(async()=>JSON.stringify(await window.ownsembleMusic.action(${jsonEncode(action)},${jsonEncode(id)},${jsonEncode({'waitMs': waitMs, if (compareMembership) 'compareMembership': true, 'since': ?since, 'musicKey': ?musicKey, 'musicQuery': ?musicQuery, 'x': ?x, 'y': ?y})})))()',
     );
     final data = value is String ? jsonDecode(value) : value;
     if (data is Map && data['error'] != null) {
@@ -919,6 +923,29 @@ class VkProvider implements MusicProvider {
       },
     );
     return future;
+  }
+
+  /// Inspect personal-library membership only on an explicit diagnostic request.
+  @override
+  Future<void> inspectLibraryMembership() async {
+    _requireBackgroundAccess();
+    // Avoid network work when no sanitized diagnostic observer is attached.
+    if (diagnostic == null) return;
+    await _lock.run(() async {
+      _guard();
+      await _install();
+      // Require the current personal-music witness without reloading or scanning.
+      final witness = await _action('verify-my-music');
+      // Reject unrelated music pages before sending a personal-library request.
+      if (witness['personal'] != true) {
+        throw const ProofFailure('personal_music_unconfirmed');
+      }
+      await runLibraryProbe(
+        read: () => _action('probe-library-page', compareMembership: true),
+        report: (counts) =>
+            diagnostic?.call({'stage': 'library_page_probe', 'counts': counts}),
+      );
+    });
   }
 
   Future<ResolvedAudio?> _resolveReference(
