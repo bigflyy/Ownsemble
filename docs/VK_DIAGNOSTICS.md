@@ -44,6 +44,12 @@ reporting absence from that listing. Absence and zero exact reload matches do no
 establish a rights restriction, deletion or permanent unavailability; preserve the
 saved entry and never substitute a same-title recording automatically.
 
+Search traces preserve `musicSearchChangeHandler` alongside `musicSearchInputs`.
+This reports whether the recognized input exposes the supported React change
+handler; it does not prove that VK returned the selected recording. Search uses
+artist plus title when both fit the existing 160-character input budget, retaining
+the title-only path for longer metadata. Every result still needs the original ID.
+
 For explicitly authorized live playback checks that must stay silent, first run
 `node scripts/app-control.cjs mute`. This affects only Ownsemble and preserves its
 remembered unmuted volume. Wait for a fresh app-owned `player-state.json` showing

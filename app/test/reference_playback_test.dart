@@ -17,6 +17,12 @@ class ReferenceBrowserFactory extends GeneratedBrowserFactory {
   int referenceRequests = 0;
   // Model a busy main document while the isolated playback page has valid consent.
   bool mainWitnessMissing = false;
+  // Model a recording available only through a sufficiently specific music query.
+  bool requiresArtistSearch = false;
+  // Publish the exact generated recording only after the narrow search completes.
+  bool searchedWithArtist = false;
+  // Retain the bounded query expected by this generated search result.
+  String expectedMusicQuery = 'Тестовый артист Тестовая песня';
 
   /// Create isolated generated documents without any account or native IO.
   @override
@@ -53,6 +59,13 @@ class ReferenceBrowser extends GeneratedBrowser {
     // Resolve only the requested recording, even without a saved reload hash.
     if (expression.contains('"resolve-reference","17_2630"')) {
       (factory as ReferenceBrowserFactory).referenceRequests++;
+      // Exercise search when the service has no usable saved or bare reload reference.
+      if ((factory as ReferenceBrowserFactory).requiresArtistSearch) {
+        return jsonEncode({
+          'source': '',
+          'counts': {'matched': 0, 'urlsFound': 0},
+        });
+      }
       return jsonEncode({
         'source': 'https://generated.vkuseraudio.net/exact.mp3',
         'userId': 17,
@@ -62,10 +75,37 @@ class ReferenceBrowser extends GeneratedBrowser {
     }
     // Make the old search fallback fail promptly for a meaningful regression.
     if (expression.contains('"search-track"')) {
+      // Match the generated artist and title rather than a common title alone.
+      if ((factory as ReferenceBrowserFactory).requiresArtistSearch &&
+          expression.contains(
+            '"musicQuery":${jsonEncode((factory as ReferenceBrowserFactory).expectedMusicQuery)}',
+          )) {
+        (factory as ReferenceBrowserFactory).searchedWithArtist = true;
+        return jsonEncode({
+          'searched': true,
+          'counts': {'musicSearchInputs': 1},
+        });
+      }
       throw const ProofFailure('track_not_in_search_results');
     }
     // Model a viewport that never contains the old selected recording.
     if (expression.contains('window.ownsembleMusic.read(')) {
+      // Keep exact owner/audio identity binding mandatory after a metadata query.
+      if ((factory as ReferenceBrowserFactory).searchedWithArtist) {
+        return jsonEncode({
+          'userId': 17,
+          'userAgent': 'Generated',
+          'tracks': [
+            {
+              'id': '17_2630',
+              'title': 'Тестовая песня',
+              'artist': 'Тестовый артист',
+              'duration': 60,
+              'url': 'https://generated.vkuseraudio.net/exact.mp3',
+            },
+          ],
+        });
+      }
       return jsonEncode({
         'userId': 17,
         'userAgent': 'Generated',
@@ -86,6 +126,54 @@ class ReferenceBrowser extends GeneratedBrowser {
 
 /// Cover exact-ID playback independently of viewport, title search and saved hashes.
 void main() {
+  test('long artist metadata preserves the working title-only search budget', () async {
+    // Keep an overlong artist from pushing a short title beyond the input budget.
+    final factory = ReferenceBrowserFactory()
+      ..requiresArtistSearch = true
+      ..expectedMusicQuery = 'Тестовая песня';
+    // Exercise the actual source resolver while keeping all content generated.
+    final provider = VkProvider(
+      browserFactory: factory,
+      loadAdapter: () async => 'generated-only',
+      status: (_) {},
+      changed: () {},
+    );
+    try {
+      await provider.connect();
+      // Preserve the existing title-only fallback for unusually long provider metadata.
+      final result = await provider.resolve(
+        Track('17_2630', 'Тестовая песня', 'А' * 200, 60),
+      );
+      expect(result.recordingId, '17_2630');
+    } finally {
+      await provider.disconnect();
+    }
+  });
+
+  test('search fallback narrows a common title with its artist while retaining exact identity', () async {
+    // Require the real provider's fallback search rather than an available reference.
+    final factory = ReferenceBrowserFactory()..requiresArtistSearch = true;
+    // Keep all page and transport results generated and silent.
+    final provider = VkProvider(
+      browserFactory: factory,
+      loadAdapter: () async => 'generated-only',
+      status: (_) {},
+      changed: () {},
+    );
+    try {
+      await provider.connect();
+      // Require the exact recording to appear only for the complete metadata query.
+      final result = await provider.resolve(
+        Track('17_2630', 'Тестовая песня', 'Тестовый артист', 60),
+      );
+      expect(factory.searchedWithArtist, true);
+      expect(result.recordingId, '17_2630');
+      expect(result.evidence, 'metadata_row');
+    } finally {
+      await provider.disconnect();
+    }
+  });
+
   test('missing main-page witness does not skip exact reload on the prepared personal page', () async {
     // Prepare the ordinary connection before simulating an unrelated main-page state.
     final factory = ReferenceBrowserFactory();

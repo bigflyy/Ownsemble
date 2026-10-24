@@ -1501,9 +1501,14 @@ class VkProvider implements MusicProvider, LibraryMembershipDiagnostics {
         }
         if (searchWatch == null) {
           try {
+            // Keep both artist and title inside the existing 160-character music input budget.
+            final specificQuery = '${track.artist} ${track.title}';
             final search = await _action(
               'search-track',
-              musicQuery: track.title,
+              // Preserve the former title-only path when unusually long artist metadata will not fit.
+              musicQuery: specificQuery.length <= 160
+                  ? specificQuery
+                  : track.title,
             );
             diagnostic?.call({
               'stage': 'music_search_input',

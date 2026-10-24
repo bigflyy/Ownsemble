@@ -40,6 +40,15 @@ failure; the isolated test and complete sequential suite passed without changing
 the mute implementation. All native checks were silent. The reported recording
 remains an unresolved live-provider gate, not a completed playback repair.
 
+A subsequent bounded probe also searched with artist plus title instead of the
+common title alone. It still did not recover the reported original identity:
+native Debug failed in 10,706 ms with zero received bytes. The resolver now uses
+the more specific query when it fits the existing 160-character input budget;
+long metadata retains the prior title-only path. Tests first cover both the
+specific query and that budget boundary. This remains an exact-ID search, never
+an automatic switch to a name match. Numeric diagnostics also retain the existing
+`musicSearchChangeHandler` control-capability flag without exporting input values.
+
 Updated 2026-10-21. The user reported one title playing the next recording.
 Read-only aggregate checks confirmed the reported pair shared a cached payload;
 one cached duration disagreed with its track by more than five seconds. SQLite

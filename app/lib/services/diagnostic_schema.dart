@@ -149,6 +149,7 @@ const _metricKeys = {
   'headingMatch',
   'personalURLMatch',
   'musicSearchInputs',
+  'musicSearchChangeHandler',
   'targetWidth',
   'targetHeight',
   'viewportWidth',
