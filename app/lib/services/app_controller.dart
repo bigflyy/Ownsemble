@@ -1385,7 +1385,8 @@ class AppController extends ChangeNotifier {
     Track track, {
     bool playback = true,
   }) async {
-    if (offline || demo || store.asset(track.id) != null) {
+    // Offline/demo require local verification; an online legacy cache may need a streaming replacement.
+    if (offline || demo) {
       return (await ensureAsset(track, playback: playback), null);
     }
     final ready = _streamReady.putIfAbsent(
@@ -1393,7 +1394,12 @@ class AppController extends ChangeNotifier {
       Completer<StreamingAudio>.new,
     );
     final existing = _streams[track.id];
-    if (existing != null && !ready.isCompleted) ready.complete(existing);
+    // Prefer a verified local file over a completed relay, but resume an active replacement immediately.
+    if (existing != null &&
+        (store.asset(track.id) == null || !existing.downloadComplete) &&
+        !ready.isCompleted) {
+      ready.complete(existing);
+    }
     try {
       return await Future.any<(CachedAudio?, StreamingAudio?)>([
         ensureAsset(track, playback: playback).then((asset) => (asset, null)),
