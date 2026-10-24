@@ -9,6 +9,7 @@ import 'package:ownsemble/data/library_store.dart';
 import 'package:ownsemble/media/audio_cache.dart';
 import 'package:ownsemble/media/audio_policy.dart';
 import 'package:ownsemble/services/app_controller.dart';
+import 'package:ownsemble/services/diagnostic_store.dart';
 
 import 'support/fixture_provider.dart';
 
@@ -141,6 +142,44 @@ class DiagnosticLibraryProvider extends FixtureProvider
   }
 }
 
+/// Hold generated source callbacks even after cancellation to model a stalled adapter.
+class StalledSourceProvider extends FixtureProvider {
+  // Signal when the first exact recording reaches source resolution.
+  final firstStarted = Completer<void>();
+  // Signal when a newer selection reaches source resolution independently.
+  final secondStarted = Completer<void>();
+  // Release the first callback only after the test has checked request isolation.
+  final firstSource = Completer<ResolvedAudio>();
+  // Hold the second callback while a late first callback unwinds.
+  final secondSource = Completer<ResolvedAudio>();
+
+  /// Keep browser startup out of this generated controller scheduling regression.
+  StalledSourceProvider() {
+    connected = true;
+    // Observe deliberate failures even when a blocked lane has not attached its consumer yet.
+    unawaited(firstSource.future.then<void>((_) {}, onError: (Object _) {}));
+    unawaited(secondSource.future.then<void>((_) {}, onError: (Object _) {}));
+  }
+
+  /// Delay each exact selection without fetching any audio or inspecting a browser.
+  @override
+  Future<ResolvedAudio> resolve(
+    Track track, {
+    String? musicKey,
+    bool Function()? cancelled,
+    void Function(Uri, String)? prepareCandidate,
+    Future<Set<Uri>> Function(Uri, String)? manifestSegments,
+  }) {
+    // Keep the old callback pending even after the controller cancels its request.
+    if (track.id == '17_1') {
+      firstStarted.complete();
+      return firstSource.future;
+    }
+    secondStarted.complete();
+    return secondSource.future;
+  }
+}
+
 /// Model a native open failure that leaves buffering active until media unloads.
 class FailingBufferingPlayback extends PortablePlayback {
   // Preserve the native buffering symptom after an unsuccessful open.
@@ -223,6 +262,71 @@ class DelayedFailureCleanupPlayback extends PortablePlayback {
 }
 
 void main() {
+  test(
+    'a stalled old source cannot hold the next selection or erase its progress',
+    () async {
+      // Isolate source scheduling from the real catalog, network and audio device.
+      final directory = await Directory.systemTemp.createTemp(
+        'ownsemble-source-lane-',
+      );
+      // Keep two generated exact recordings in a deterministic selection order.
+      final store = LibraryStore(directory)
+        ..merge([
+          const Track('17_1', 'Generated first', 'Fixture', 10),
+          const Track('17_2', 'Generated second', 'Fixture', 10),
+        ]);
+      // Leave both callbacks under explicit test control.
+      final provider = StalledSourceProvider();
+      // Use an independent silent engine and an in-memory optional diagnostic sink.
+      final controller = AppController(
+        store,
+        playbackPlayer: PortablePlayback(),
+        musicProvider: provider,
+        decodeAudio: (_) async => 10,
+        diagnosticStore: DiagnosticStore.memory(),
+      );
+      // Select by generated IDs without relying on database insertion ordering.
+      final rows = store.rows()
+        ..sort((a, b) => a.track.id.compareTo(b.track.id));
+      // Keep references to both ordinary Play calls for deterministic cleanup.
+      final first = controller.playRows(rows, 0);
+      Future<void>? second;
+      try {
+        await provider.firstStarted.future.timeout(const Duration(seconds: 2));
+        second = controller.playRows(rows, 1);
+        // Require a new source lookup before the stale callback has returned.
+        final advanced = await provider.secondStarted.future
+            .then((_) => true)
+            .timeout(const Duration(milliseconds: 500), onTimeout: () => false);
+        expect(
+          advanced,
+          isTrue,
+          reason: 'New Play must not queue behind a stalled old source.',
+        );
+        provider.firstSource.completeError(const ProofFailure('cancelled'));
+        await first.timeout(const Duration(milliseconds: 500));
+        expect(controller.downloadId, '17_2');
+        expect(controller.downloadStage, 'finding_source');
+        expect(controller.loading, isTrue);
+      } finally {
+        // Release every generated callback even when the old implementation fails the assertion.
+        if (!provider.firstSource.isCompleted) {
+          provider.firstSource.completeError(const ProofFailure('cancelled'));
+        }
+        // Keep unavailable-recording errors distinct from stale callback cancellation.
+        if (!provider.secondSource.isCompleted) {
+          provider.secondSource.completeError(
+            const ProofFailure('audio_restricted'),
+          );
+        }
+        await first;
+        await second;
+        await controller.shutdown();
+        await directory.delete(recursive: true);
+      }
+    },
+  );
+
   test('diagnostic export retains a failed Play without contacting a private provider', () async {
     // Keep generated diagnostic files separate from the real catalog and browser session.
     final directory = await Directory.systemTemp.createTemp(

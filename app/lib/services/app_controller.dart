@@ -63,6 +63,8 @@ class AppController extends ChangeNotifier {
   };
   int downloadBytes = 0;
   int _request = 0, _cancelDownload = 0;
+  // Wake selected-source waits immediately when their download generation expires.
+  final _downloadCancellations = StreamController<void>.broadcast(sync: true);
   int _nativeErrors = 0;
   String? _lastNativeCategory;
   int _nativeSignals = 0;
@@ -809,7 +811,7 @@ class AppController extends ChangeNotifier {
     if (value) {
       artwork.cancel();
       _cancelCheck('offline');
-      _cancelDownload++;
+      _cancelPendingDownloads();
       if (loading) {
         ++_request;
         loading = false;
@@ -975,12 +977,14 @@ class AppController extends ChangeNotifier {
     try {
       await player.stop().timeout(const Duration(seconds: 5));
       if (request != _request || disposed) return;
-      if (downloadId != null &&
-          downloadId != track.id &&
+      // Cancel even before source lookup has assigned downloadId, including a pending connection.
+      if (_downloads.keys.any((id) => id != track.id) &&
           _streams[downloadId]?.downloadComplete != true) {
-        _cancelDownload++;
+        _cancelPendingDownloads();
         _activeCache?.cancel();
-        await provider.cancelResolution();
+        _downloads.clear();
+        // Let native browser cleanup finish independently of the newer selection.
+        unawaited(provider.cancelResolution().catchError((Object _) {}));
       }
       if (_playingStream != null && _playingStream != track.id) {
         final previous = _playingStream;
@@ -1104,7 +1108,7 @@ class AppController extends ChangeNotifier {
   Future<void> stopPlayback({bool diagnostic = false}) async {
     if (!diagnostic) _cancelCheck('user_stop');
     ++_request;
-    ++_cancelDownload;
+    _cancelPendingDownloads();
     final stream = _streams.remove(_playingStream);
     final activeCache = _activeCache;
     _playingStream = null;
@@ -1221,6 +1225,37 @@ class AppController extends ChangeNotifier {
     }
   }
 
+  /// Invalidate old work and release source waits without waiting for an adapter callback.
+  void _cancelPendingDownloads() {
+    ++_cancelDownload;
+    _downloadCancellations.add(null);
+  }
+
+  /// Bound a provider wait by its download generation and observe late completions safely.
+  Future<T> _awaitDownload<T>(Future<T> operation, int token) async {
+    // Reject work invalidated before its provider callback was attached.
+    if (disposed || token != _cancelDownload) {
+      // Observe a future already created by the caller without accepting its result.
+      unawaited(operation.then<void>((_) {}, onError: (Object _) {}));
+      throw const ProofFailure('cancelled');
+    }
+    // Complete only this wait when a new generation invalidates its result.
+    final cancellation = Completer<T>();
+    // Remove this subscription after either source completion or cancellation.
+    final subscription = _downloadCancellations.stream.listen((_) {
+      // Complete once even if Stop and shutdown arrive during the same callback.
+      if (!cancellation.isCompleted) {
+        cancellation.completeError(const ProofFailure('cancelled'));
+      }
+    });
+    try {
+      return await Future.any([operation, cancellation.future]);
+    } finally {
+      await subscription.cancel();
+    }
+  }
+
+  /// Reuse verified assets or queue one cancellable source/download operation per recording.
   Future<CachedAudio> ensureAsset(Track track, {bool playback = false}) {
     if (_downloads.containsKey(track.id)) return _downloads[track.id]!;
     // Capture ownership before local verification or queueing. Stop must also
@@ -1360,7 +1395,7 @@ class AppController extends ChangeNotifier {
       // Consent is persistent; an early Play waits for the shared connection
       // instead of misreporting an ordinary navigation as expired sign-in.
       if (!autoSync) throw const ProofFailure('private_signin_required');
-      await provider.connect();
+      await _awaitDownload(provider.connect(), token);
       if (disposed || token != _cancelDownload) {
         throw const ProofFailure('cancelled');
       }
@@ -1374,46 +1409,59 @@ class AppController extends ChangeNotifier {
     StreamingAudio? stream;
     try {
       final sourceWatch = Stopwatch()..start();
-      final resolved = await provider.resolve(
-        track,
-        musicKey: store.musicReference(track.id),
-        cancelled: () => disposed || token != _cancelDownload,
-        manifestSegments: (source, userAgent) async {
-          final watch = Stopwatch()..start();
-          try {
-            final segments = await loadManifestSegments(source, (uri) async {
-              return utf8.decode(
-                await cache.fetch(
-                  uri,
-                  userAgent: userAgent,
-                  limit: 2 * 1024 * 1024,
-                ),
-              );
-            });
-            _writeAudioDiagnostic({
-              'stage': 'witness_manifest',
-              'segments': segments.length,
-              'elapsed_ms': watch.elapsedMilliseconds,
-            });
-            return segments;
-          } catch (error) {
-            _writeAudioDiagnostic({
-              'stage': 'witness_manifest_failed',
-              'category': categoryOf(error),
-              if (error is ProofFailure && error.code != null)
-                'code': error.code!,
-              'elapsed_ms': watch.elapsedMilliseconds,
-            });
-            rethrow;
-          }
-        },
-        prepareCandidate: (source, userAgent) {
-          stream ??= StreamingAudio(cache, source, userAgent: userAgent);
-          unawaited(
-            stream!.prepare().then<void>((_) {}, onError: (Object _) {}),
-          );
-        },
+      final resolved = await _awaitDownload(
+        provider.resolve(
+          track,
+          musicKey: store.musicReference(track.id),
+          cancelled: () => disposed || token != _cancelDownload,
+          manifestSegments: (source, userAgent) async {
+            // Reject a late adapter request before it starts any obsolete network work.
+            if (disposed || token != _cancelDownload) {
+              throw const ProofFailure('cancelled');
+            }
+            final watch = Stopwatch()..start();
+            try {
+              final segments = await loadManifestSegments(source, (uri) async {
+                return utf8.decode(
+                  await cache.fetch(
+                    uri,
+                    userAgent: userAgent,
+                    limit: 2 * 1024 * 1024,
+                  ),
+                );
+              });
+              _writeAudioDiagnostic({
+                'stage': 'witness_manifest',
+                'segments': segments.length,
+                'elapsed_ms': watch.elapsedMilliseconds,
+              });
+              return segments;
+            } catch (error) {
+              _writeAudioDiagnostic({
+                'stage': 'witness_manifest_failed',
+                'category': categoryOf(error),
+                if (error is ProofFailure && error.code != null)
+                  'code': error.code!,
+                'elapsed_ms': watch.elapsedMilliseconds,
+              });
+              rethrow;
+            }
+          },
+          prepareCandidate: (source, userAgent) {
+            // Ignore candidates delivered after Stop or a newer song selection.
+            if (disposed || token != _cancelDownload) return;
+            stream ??= StreamingAudio(cache, source, userAgent: userAgent);
+            unawaited(
+              stream!.prepare().then<void>((_) {}, onError: (Object _) {}),
+            );
+          },
+        ),
+        token,
       );
+      // Reject a late resolution before changing bindings or shared timing state.
+      if (disposed || token != _cancelDownload) {
+        throw const ProofFailure('cancelled');
+      }
       resolved.requireTrack(track);
       _writeAudioDiagnostic({
         'stage': 'recording_source_bound',
@@ -1495,11 +1543,14 @@ class AppController extends ChangeNotifier {
         if (identical(_streams[track.id], stream)) _streams.remove(track.id);
         await stream!.close(cancel: true);
       }
-      _activeCache = null;
-      downloadId = null;
-      downloadStage = null;
-      downloadBytes = 0;
-      _notify();
+      // Leave a newer selection's progress untouched when old cancellation unwinds late.
+      if (identical(_activeCache, cache)) {
+        _activeCache = null;
+        downloadId = null;
+        downloadStage = null;
+        downloadBytes = 0;
+        _notify();
+      }
     }
   }
 
@@ -1896,7 +1947,7 @@ class AppController extends ChangeNotifier {
     if (reason != 'deadline' && reason != 'shutdown') ++_request;
     _checkCancelled?.complete();
     if (_checkGeneration == _cancelDownload) {
-      ++_cancelDownload;
+      _cancelPendingDownloads();
       _activeCache?.cancel();
       _downloads.clear();
       _streamReady.clear();
@@ -2203,7 +2254,7 @@ class AppController extends ChangeNotifier {
     _cancelCheck('shutdown');
     ++_request;
     disposed = true;
-    _cancelDownload++;
+    _cancelPendingDownloads();
     _activeCache?.cancel();
     _tick?.cancel();
     _scheduler?.cancel();
@@ -2218,6 +2269,7 @@ class AppController extends ChangeNotifier {
     await _checkTask;
     // Pending download work may still unwind; only close after it releases DB.
     await _downloadTail;
+    await _downloadCancellations.close();
     // Drain optional reports after producers stop, without holding shutdown indefinitely.
     try {
       await _diagnosticStore.close().timeout(const Duration(seconds: 2));
