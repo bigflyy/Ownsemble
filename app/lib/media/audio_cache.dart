@@ -202,13 +202,28 @@ class AudioCache {
     try {
       onStage?.call('receiving');
       var entry = 'audio.mp3';
-      if (source.path.toLowerCase().endsWith('.m3u8')) {
+      // Reuse opaque source bytes after classification instead of requesting them twice.
+      final initialBytes = !hasAudioFilename(source)
+          ? await fetch(source, userAgent: userAgent)
+          : null;
+      // Detect opaque endpoint format from shared bytes, never from signed query values.
+      final hls =
+          source.path.toLowerCase().endsWith('.m3u8') ||
+          initialBytes != null && isHlsPrefix(initialBytes);
+      // Materialize HLS resources only after positively identifying a manifest.
+      if (hls) {
         var uri = source;
         HlsPlan? plan;
         for (var depth = 0; depth < 4; depth++) {
           plan = parseHls(
             utf8.decode(
-              await fetch(uri, userAgent: userAgent, limit: 2 * 1024 * 1024),
+              depth == 0 && initialBytes != null
+                  ? initialBytes
+                  : await fetch(
+                      uri,
+                      userAgent: userAgent,
+                      limit: 2 * 1024 * 1024,
+                    ),
             ),
             uri,
           );
@@ -265,26 +280,21 @@ class AudioCache {
             ) ??
             entry;
       } else {
-        if (!RegExp(
-          r'\.(?:mp3|m4a|wav)$',
-          caseSensitive: false,
-        ).hasMatch(source.path)) {
-          throw const ProofFailure('audio_format_unsupported');
-        }
+        // Keep opaque progressive audio under a local name; full decoding still gates publication.
         entry = source.path.toLowerCase().endsWith('.wav')
             ? 'audio.wav'
             : source.path.toLowerCase().endsWith('.m4a')
             ? 'audio.m4a'
             : 'audio.mp3';
-        await File(
-          '${staging.path}/$entry',
-        ).writeAsBytes(await fetch(source, userAgent: userAgent), flush: true);
+        await File('${staging.path}/$entry').writeAsBytes(
+          initialBytes ?? await fetch(source, userAgent: userAgent),
+          flush: true,
+        );
       }
       onStage?.call('decoding');
       final duration = await decode('${staging.path}/$entry');
       verifyRecordingDuration(duration, track.duration);
-      if (entry != 'audio.m3u8' &&
-          source.path.toLowerCase().endsWith('.m3u8')) {
+      if (entry != 'audio.m3u8' && hls) {
         // The complete normalized MP3 passed strict decoding. Publish that one
         // asset; generated transport segments and keys are no longer needed.
         await for (final item in staging.list()) {

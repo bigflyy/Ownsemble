@@ -78,6 +78,7 @@ const cdnSuffixes = [
   'userapi.com',
   'vk-cdn.net',
   'vk-cdn.me',
+  'okcdn.ru',
 ];
 bool allowedAudio(Uri uri, {int? fixturePort}) {
   if (fixturePort != null &&
@@ -92,9 +93,23 @@ bool allowedAudio(Uri uri, {int? fixturePort}) {
       cdnSuffixes.any((s) => uri.host == s || uri.host.endsWith('.$s'));
 }
 
+/// Recognize conventional audio names before using bounded content detection.
+bool hasAudioFilename(Uri uri) =>
+    RegExp(r'\.(mp3|m4a|m3u8|wav)$', caseSensitive: false).hasMatch(uri.path);
+
+/// Detect HLS from a small response prefix without trusting URL extensions.
+bool isHlsPrefix(List<int> bytes) => utf8
+    .decode(bytes.take(64).toList(), allowMalformed: true)
+    .replaceFirst('\uFEFF', '')
+    .trimLeft()
+    .startsWith('#EXTM3U');
+
+/// Accept opaque OK CDN endpoints only inside the existing HTTPS authority guard.
 bool audioCandidate(Uri uri) =>
     allowedAudio(uri) &&
-    RegExp(r'\.(mp3|m4a|m3u8)$', caseSensitive: false).hasMatch(uri.path);
+    (RegExp(r'\.(mp3|m4a|m3u8)$', caseSensitive: false).hasMatch(uri.path) ||
+        uri.host == 'okcdn.ru' ||
+        uri.host.endsWith('.okcdn.ru'));
 Uri selectSource(
   Set<Uri> candidates, {
   bool requireBinding = false,

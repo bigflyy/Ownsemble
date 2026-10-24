@@ -1,4 +1,5 @@
-const CDN_SUFFIXES = ['vkuseraudio.net', 'vkuseraudio.com', 'vkuseraudio.ru', 'useraudio.com', 'userapi.com', 'vk-cdn.net', 'vk-cdn.me'];
+// Match only fixed provider CDN suffixes, including modern opaque OK CDN audio.
+const CDN_SUFFIXES = ['vkuseraudio.net', 'vkuseraudio.com', 'vkuseraudio.ru', 'useraudio.com', 'userapi.com', 'vk-cdn.net', 'vk-cdn.me', 'okcdn.ru'];
 function mediaURL(value) {
   if (typeof value !== 'string' || value.length > 16000) throw new Error('Invalid audio link.');
   let url;

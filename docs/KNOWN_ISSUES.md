@@ -1,18 +1,22 @@
 # Reported issues
 
-- Uncached Windows playback (2026-10-23): a deep-library sample bound the exact
+- Repaired uncached Windows CDN compatibility (2026-10-23): a deep-library sample bound the exact
   recording source, then failed opening its local relay after 8,519 ms with no
   upstream bytes observed. The UI category was decoder_open_failed, which can
   conceal an upstream transfer failure. Cached controls pass; uncached playback
-  remains an active release gate. Diagnose the original transfer category/status
+  was an active release gate. Diagnose the original transfer category/status
   before changing TLS, source allowlists or identity verification.
   Follow-up: preserve HTTP status and the relay's original transfer failure;
   unload failed media and ignore late cleanup from superseded Play requests.
   Tests reproduced both stuck buffering and late cleanup before correction.
   Fresh live attempts also exposed audio_destination_rejected and source-resolution
   timeouts. The exact selected row exposes an opaque HTTPS okcdn.ru source that
-  the older CDN/filename policy does not accept. This remains under investigation;
-  the failure-reporting repair is not a successful uncached-playback claim.
+  the older CDN/filename policy did not accept. The compatibility repair now
+  handles that fixed CDN suffix and detects opaque response format while preserving
+  identity/TLS/cache checks. Five uncached samples, including deep/old recordings,
+  played and reached cache publication. Cold first sound still took 15.2 seconds;
+  warm old samples took 3.6–5.1 seconds. See VK_OPAQUE_AUDIO.md for scoped evidence
+  and remaining performance/platform gates.
 
 - Delayed first sound despite several MB received (2026-10-22): user observes
   2–3–10 MB downloaded while still silent and suspects a complete-download wait.

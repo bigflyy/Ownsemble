@@ -10,6 +10,17 @@ const payload = () => ({ userId: 1, userAgent: 'test', tracks: [
   { id: '1_2', artist: 'Artist', title: 'Song', duration: 180, url: 'https://test.vkuseraudio.net/song.mp3' },
 ] });
 
+test('opaque OK CDN audio keeps exact HTTPS authority checks', () => {
+  assert.equal(mediaURL('https://generated.okcdn.ru/?fixture=1'),
+    'https://generated.okcdn.ru/?fixture=1');
+  // Reject lookalike authorities and insecure transports before any transfer.
+  for (const value of ['https://okcdn.ru.attacker.test/', 'https://notokcdn.ru/',
+    'http://generated.okcdn.ru/', 'https://user:secret@generated.okcdn.ru/',
+    'https://generated.okcdn.ru:8443/']) {
+    assert.throws(() => mediaURL(value));
+  }
+});
+
 test('current player source requires its exact recording identity, not a next-song prefetch', async () => {
   let current = [99,1,'https://test.vkuseraudio.net/next.mp3','Generated next','Fixture',240];
   let touched = 0;

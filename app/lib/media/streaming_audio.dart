@@ -47,10 +47,33 @@ class StreamingAudio {
         : const ProofFailure('audio_transfer_failed');
   }
 
-  StreamingAudio(this.network, this.source, {this.userAgent = 'Ownsemble/0.1'});
+  // Remember the detected format without delaying progressive playback until EOF.
+  bool _hls;
+  // Share one prefix classification between preparation and native opening.
+  Future<bool>? _format;
+
+  /// Construct a relay without fetching media until preparation or opening.
+  StreamingAudio(this.network, this.source, {this.userAgent = 'Ownsemble/0.1'})
+    : _hls = source.path.toLowerCase().endsWith('.m3u8');
+
+  /// Inspect at most 64 initial bytes when an endpoint omits its audio extension.
+  Future<bool> _detectFormat() async {
+    // Preserve established filename behavior for conventional MP3/M4A/HLS sources.
+    if (hasAudioFilename(source)) return _hls;
+    // Read only a bounded prefix from the same transfer used by playback and saving.
+    final prefix = BytesBuilder(copy: false);
+    await for (final part in _resource(source).read(0, 63)) {
+      prefix.add(part);
+    }
+    _hls = isHlsPrefix(prefix.takeBytes());
+    return _hls;
+  }
+
+  /// Deduplicate format detection across concurrent relay consumers.
+  Future<bool> _usesHls() => _format ??= _detectFormat();
 
   bool get downloadComplete {
-    if (!source.path.toLowerCase().endsWith('.m3u8')) {
+    if (!_hls) {
       return _resources[source]?.finished == true &&
           _resources[source]?.failure == null;
     }
@@ -123,7 +146,8 @@ class StreamingAudio {
   /// Warm at most two packed-audio segments, without exposing a player URL.
   /// Called only for a selected track while source identity is being checked.
   Future<void> prepare() async {
-    if (!source.path.toLowerCase().endsWith('.m3u8')) return;
+    // Warm HLS only; progressive transfers can start after their bounded prefix.
+    if (!await _usesHls()) return;
     await _manifest();
     for (final path in _segments.keys.take(2)) {
       await _servedResource(path, _routes[path]!).done;
@@ -134,11 +158,14 @@ class StreamingAudio {
   Future<Uri> open() => _opening ??= _open();
   Future<Uri> _open() async {
     if (_closed) throw const ProofFailure('cancelled');
+    // Detect opaque sources before choosing the native player's local route.
+    final hls = await _usesHls();
+    // Stop may have closed the relay while the response prefix was arriving.
+    if (_closed) throw const ProofFailure('cancelled');
     _server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
     _server!.listen((request) {
       unawaited(_serve(request));
     });
-    final hls = source.path.toLowerCase().endsWith('.m3u8');
     final path = hls
         ? '/$_token/audio.m3u8'
         : _route(
