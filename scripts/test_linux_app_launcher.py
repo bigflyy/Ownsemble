@@ -1,14 +1,28 @@
 """Linux harness routing tests with a generated executable; no real app/data."""
 from pathlib import Path
 import os
+import shutil
 import subprocess
 import tempfile
 import unittest
+from unittest.mock import patch
 
 SCRIPT = Path(__file__).with_name('linux-app.sh').resolve()
+# Resolve from PATH explicitly; Windows CreateProcess otherwise prefers System32/bash.exe.
+BASH = shutil.which('bash')
 
 class LauncherTests(unittest.TestCase):
+    def test_shell_is_explicit(self):
+        """Prevent Windows subprocess search from selecting the legacy WSL bash alias."""
+        with patch.object(subprocess, 'run') as invocation:
+            self.invoke([])
+        self.assertTrue(Path(invocation.call_args.args[0][0]).is_absolute())
+
     def invoke(self, arguments):
+        # Reject the Windows legacy WSL alias rather than starting a distribution in a unit test.
+        if not BASH or (os.name == 'nt' and
+                        Path(BASH).resolve().parent == Path(os.environ['SystemRoot'], 'System32').resolve()):
+            self.skipTest('An explicit Git Bash executable is required on Windows.')
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             sdk = root / 'sdk'
@@ -19,7 +33,7 @@ class LauncherTests(unittest.TestCase):
             binary.write_text('#!/bin/sh\nprintf "%s" "$1"\n')
             binary.chmod(0o700)
             env = dict(os.environ, OWNSEMBLE_FLUTTER_SDK=str(sdk), OWNSEMBLE_LINUX_PROOF_ROOT=str(root / 'proof'))
-            return subprocess.run(['bash', str(SCRIPT), *arguments], env=env, text=True, capture_output=True)
+            return subprocess.run([BASH, str(SCRIPT), *arguments], env=env, text=True, capture_output=True)
 
     def test_default_routes_to_generated_preview(self):
         result = self.invoke([])
