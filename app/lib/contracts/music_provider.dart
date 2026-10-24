@@ -22,10 +22,13 @@ class ResolvedAudio {
   }
 }
 
+/// Describe bounded sync progress; only provider_end attests a unique complete listing.
 class SyncResult {
   final int discovered;
   final bool continueSweep;
+  // Preserve a fixed outcome, distinguishing explicit provider end from quiet/partial scans.
   final String reason;
+  // Carry the original newest-first prefix across full-import slices.
   final List<String> head;
   const SyncResult(
     this.discovered,

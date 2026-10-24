@@ -1,8 +1,49 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ownsemble/provider/pagination_diagnostics.dart';
+import 'package:ownsemble/services/diagnostic_schema.dart';
 
 /// Verify that pagination diagnostics expose only bounded layout counts.
 void main() {
+  test('listing action failures retain their fixed action through report sanitization', () {
+    // Preserve a useful fixed stage/action while dropping private-looking unknown fields.
+    final event = sanitizeDiagnosticEvent({
+      'stage': 'action_failed',
+      'action': 'read-library-page',
+      'counts': {
+        'libraryRows': 100,
+        'libraryNextOffset': 100,
+        'privateBody': 'generated',
+      },
+    });
+    expect(event['action'], 'read-library-page');
+    expect(event['counts'], {'libraryRows': 100, 'libraryNextOffset': 100});
+  });
+
+  test(
+    'library probe failure stages survive the numeric privacy projection',
+    () {
+      expect(
+        paginationCounts({
+          'libraryMetadataUnsupported': 1,
+          'libraryPaginationUnsupported': 0,
+          'libraryProbeFailureStage': 3,
+          'libraryProbePage': 1,
+          'libraryJSONDecodeFailed': 1,
+          'libraryDeadlineExpired': 0,
+          'rawBody': 'generated private reply',
+        }),
+        {
+          'libraryMetadataUnsupported': 1,
+          'libraryPaginationUnsupported': 0,
+          'libraryProbeFailureStage': 3,
+          'libraryProbePage': 1,
+          'libraryJSONDecodeFailed': 1,
+          'libraryDeadlineExpired': 0,
+        },
+      );
+    },
+  );
+
   test('pagination reports accept bounded layout counts only', () {
     expect(
       paginationCounts({

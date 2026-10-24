@@ -532,7 +532,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
             Padding(
               padding: const EdgeInsets.only(bottom: 12),
               child: Text(
-                'Automatic refresh checks newest entries. Refresh VK scans deeper; library coverage remains partial.',
+                c.libraryCoverageSummary,
                 style: TextStyle(
                   color: muted.withValues(alpha: .85),
                   fontSize: 12,

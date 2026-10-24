@@ -6,6 +6,29 @@ import 'package:ownsemble/provider/library_probe.dart';
 
 /// Check bounded diagnostic completion without exposing native error contents.
 void main() {
+  testWidgets(
+    'a bounded slow library body can finish before the explicit diagnostic deadline',
+    (tester) async {
+      // Keep the slow body entirely on the fixture clock instead of using real network time.
+      final reports = <Map<String, int>>[];
+      // Model a valid response taking longer than the former six-second outer deadline.
+      final task = runLibraryProbe(
+        read: () => Future.delayed(
+          const Duration(milliseconds: 6500),
+          () => {
+            'counts': {'libraryRows': 2000},
+          },
+        ),
+        report: reports.add,
+      );
+      await tester.pump(const Duration(seconds: 7));
+      await task;
+      expect(reports, [
+        {'libraryRows': 2000},
+      ]);
+    },
+  );
+
   test(
     'a stalled probe reports its deadline instead of disappearing',
     () async {

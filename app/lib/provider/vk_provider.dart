@@ -7,7 +7,7 @@ import '../data/music_metadata.dart';
 import 'music_navigation.dart';
 import 'audio_url_decoder.dart';
 import 'source_memory.dart';
-import 'library_scanner.dart';
+import 'library_listing_scanner.dart';
 import 'library_navigation.dart';
 import '../contracts/music_browser.dart';
 import '../contracts/music_provider.dart';
@@ -78,6 +78,8 @@ class VkProvider implements MusicProvider, LibraryMembershipDiagnostics {
   @override
   String? musicReference(String id) => _musicReferences[id];
   Future<SyncResult>? _scan;
+  // Retain only validated personal-list pagination across bounded full-import slices.
+  LibraryListingState? _listingState;
   Future<void>? _connectionTask;
   final _lock = _OperationLock();
   Completer<void> _terminated = Completer<void>();
@@ -186,6 +188,8 @@ class VkProvider implements MusicProvider, LibraryMembershipDiagnostics {
       await pollRoute();
       return;
     }
+    // A new browser/session cannot resume an old personal-list membership witness.
+    _listingState = null;
     final generation = ++_connectionGeneration;
     _closed = false;
     if (_terminated.isCompleted) _terminated = Completer<void>();
@@ -329,6 +333,8 @@ class VkProvider implements MusicProvider, LibraryMembershipDiagnostics {
 
   @override
   Future<void> signInPrivately() async {
+    // Reset enumeration before the user may switch or renew a private session.
+    _listingState = null;
     final generation = ++_privateSignInGeneration;
     _privateSignInActive = true;
     connected = false;
@@ -499,6 +505,8 @@ class VkProvider implements MusicProvider, LibraryMembershipDiagnostics {
     String id = '',
     int waitMs = 0,
     bool compareMembership = false,
+    int? libraryOffset,
+    bool newestOnly = false,
     num? since,
     String? musicKey,
     String? musicQuery,
@@ -508,7 +516,7 @@ class VkProvider implements MusicProvider, LibraryMembershipDiagnostics {
     _guard();
     // Serialize the fixed options for the app-owned guarded music adapter.
     final value = await _evaluate(
-      '(async()=>JSON.stringify(await window.ownsembleMusic.action(${jsonEncode(action)},${jsonEncode(id)},${jsonEncode({'waitMs': waitMs, if (compareMembership) 'compareMembership': true, 'since': ?since, 'musicKey': ?musicKey, 'musicQuery': ?musicQuery, 'x': ?x, 'y': ?y})})))()',
+      '(async()=>JSON.stringify(await window.ownsembleMusic.action(${jsonEncode(action)},${jsonEncode(id)},${jsonEncode({'waitMs': waitMs, if (compareMembership) 'compareMembership': true, 'libraryOffset': ?libraryOffset, if (newestOnly) 'newestOnly': true, 'since': ?since, 'musicKey': ?musicKey, 'musicQuery': ?musicQuery, 'x': ?x, 'y': ?y})})))()',
     );
     final data = value is String ? jsonDecode(value) : value;
     if (data is Map && data['error'] != null) {
@@ -843,76 +851,75 @@ class VkProvider implements MusicProvider, LibraryMembershipDiagnostics {
       _requireBackgroundAccess();
       await _browser?.hide();
       final watch = Stopwatch()..start();
-      // Limit layout diagnostics to three retries per bounded scan slice.
-      var paginationSamples = 0;
-      final result = await LibraryScanner(
-        elapsed: () => watch.elapsed,
-        cancelled: () => _yieldScan || _closed,
+      // Start a fresh membership witness for every new top-to-bottom enumeration.
+      if (fromTop || newestOnly || _listingState == null) {
+        _listingState = LibraryListingState();
+      }
+      // Prefer the guarded personal listing to virtualized rows of uncertain membership.
+      final listing = await LibraryListingScanner(
+        state: _listingState!,
         newestOnly: newestOnly,
         checkpoint: checkpoint,
-        quietLimit: Duration(seconds: newestOnly ? 5 : 45),
-        hardLimit: Duration(seconds: newestOnly ? 15 : 90),
-        progress: (count) => status(
-          '${newestOnly ? 'Checking newest VK entries' : 'Refreshing VK'} · $count tracks checked · coverage partial',
-        ),
+        elapsed: () => watch.elapsed,
+        cancelled: () => _yieldScan || _closed,
         merge: merge,
-        read: () async {
+        read: (offset) async {
           _guard();
+          // Reconfirm personal-library consent before every page request.
           final witness = await _action('verify-my-music');
+          // Reject other music sections instead of guessing which list is displayed.
           if (witness['personal'] != true) {
             throw const ProofFailure('personal_music_unconfirmed');
           }
-          try {
-            final tracks = _tracks(await _read());
-            for (final track in tracks) {
-              _libraryPositions.putIfAbsent(
-                track.id,
-                () => _libraryPositions.length,
-              );
-            }
-            return tracks;
-          } on ProofFailure catch (e) {
-            if (e.category != 'music_adapter_unsupported') rethrow;
-            return [];
-          }
-        },
-        advance: (milliseconds, retry) async {
-          // Collect geometry only when pagination stalls and a report consumer exists.
-          if (retry && diagnostic != null && paginationSamples++ < 3) {
-            try {
-              // Bound the music-only probe so diagnostics cannot hold up scanning.
-              final probe = await _action('probe-pagination')
-                  .timeout(const Duration(seconds: 2));
-              diagnostic?.call({
-                'stage': 'scan_pagination',
-                'counts': paginationCounts(probe['counts']),
-              });
-            } on ProofFailure catch (error) {
-              // Preserve cancellation and private-login guards during diagnostics.
-              if ([
-                'cancelled',
-                'private_signin_required',
-                'private_signin_in_progress',
-              ].contains(error.category)) {
-                rethrow;
-              }
-            } on TimeoutException {
-              // A diagnostic probe cannot hold the scan indefinitely.
-            }
-          }
-
-          final value = await _action(
-            retry ? 'retry-pagination' : 'advance',
-            waitMs: milliseconds,
+          // Read basic metadata only; Play resolves its exact recording independently.
+          final data = await _action(
+            'read-library-page',
+            libraryOffset: offset,
+            newestOnly: newestOnly,
           );
-          return value['loading'] == true;
+          // Report only fixed numeric counts, including unsupported pagination shapes.
+          diagnostic?.call({
+            'stage': 'library_listing_page',
+            'counts': paginationCounts(data['counts']),
+          });
+          // Keep unsupported provider shapes partial without guessing membership from rendered rows.
+          if (data['supported'] != true || data['pagination'] is! Map) {
+            return null;
+          }
+          // Validate bridge counters before constructing shared scanner state.
+          final pagination = data['pagination'] as Map;
+          // Reject malformed counters rather than coercing private server state.
+          if (pagination['offset'] is! int ||
+              pagination['nextOffset'] is! int ||
+              pagination['total'] is! int ||
+              pagination['hasMore'] is! bool) {
+            return null;
+          }
+          // Parse the same strict Track DTO used by rendered music imports.
+          final tracks =
+              data['tracks'] is List && (data['tracks'] as List).isEmpty
+              ? <Track>[]
+              : _tracks(data);
+          // Preserve provider order without changing identities or local cache bindings.
+          for (var index = 0; index < tracks.length; index++) {
+            _libraryPositions[tracks[index].id] = offset + index;
+          }
+          return LibraryListingPage(
+            tracks,
+            pagination['offset'] as int,
+            pagination['nextOffset'] as int,
+            pagination['total'] as int,
+            pagination['hasMore'] as bool,
+          );
         },
       ).run();
+      // Never infer personal membership from DOM rows after a listing contract failure.
+      // Saved playback and targeted metadata inspection remain independent of sync.
       return SyncResult(
-        result.count,
-        result.continueSweep,
-        reason: result.reason,
-        head: result.head,
+        listing.count,
+        listing.continueSweep,
+        reason: listing.reason,
+        head: listing.head,
       );
     });
     _scan = future;

@@ -1,64 +1,107 @@
-# Bounded VK library diagnostics
+# VK personal-library listing and sync
 
-The guarded music-page request `load_section` exposes a personal playlist listing
-with explicit `hasMore`, `nextOffset` and `totalCount` fields. A Windows feasibility
-check received 2,000 entries, a continuation offset of 2,000 and a total of 2,615.
-The rendered page separately exposed 2,630 distinct recordings. Those counts must
-not be treated as interchangeable without checking membership.
+VK's guarded `load_section` music request exposes the account's personal listing
+with `hasMore`, `nextOffset` and `totalCount`. Import now uses this listing before
+trying rendered rows. Play resolves an exact recording independently; sync does
+not download audio or wait for artwork or lyrics.
 
-The adapter can compare the listing and rendered recording IDs internally. It
-exports only numeric counts: listed and rendered membership, differences and
-explicit recommendation-container markers. Optional metadata readers are excluded
-from this diagnostic path so stalled enrichment cannot hold up its result.
-No IDs, song names, response bodies, source URLs or credentials are returned in
-these diagnostics. The comparison never changes the catalog or cache.
+## Incremental and full import
 
-## Bounds and privacy
+Ordinary automatic checks request the small page form (`is_loading_all=0`). They
+stop after a consecutive block of up to 12 saved head identities. A generated
+300-record new prefix takes four 100-row pages; an unchanged library takes one.
+The saved head retains up to 128 validated identities from received pages, even
+when merging stops earlier. It is not replaced after an unresolved head check.
 
-- Run only after approved personal-music access and the explicit fixed
-  `inspect-library` diagnostic command. Ordinary sync and playback do not run it.
-- Send at most two read-only requests, with one shared five-second network
-  deadline and a six-second outer diagnostic deadline.
-- Keep session attachment inside the browser; reject redirects and non-JSON
-  responses before reading bodies. Limit each response text to 8,388,608 characters
-  before parsing; record only its length and a distinct oversized-response category.
-- Recheck route and sign-in-form presence before requests, after response headers
-  and after body transfer. Never read credential-field values.
-- Compare membership only when an explicit end marker and a matching total fit
-  the two-page, 4,000-entry budget. Reject malformed recording IDs or changed totals.
-- Compare modern recognized DOM recording rows only. A partial or virtualized DOM
-  is not proof that listed tracks are missing from VK.
-- Project known bounded counters again at the Dart boundary before reporting.
+Head checks have a 15-second slice budget, at most eight page requests and at
+most 4,096 accepted rows. An in-flight request has its own 20-second deadline and
+can finish after the slice budget; no further page is then started. An unmatched
+or over-budget prefix remains incomplete. It does not trigger a full sweep per
+poll or per Play.
 
-This is a feasibility and troubleshooting path. It does not replace import with
-an unverified endpoint or infer that entries absent from one representation should
-be deleted. Existing records remain preserved.
+Initial discovery and explicit Refresh VK use larger pages (`is_loading_all=1`),
+a 90-second slice budget, at most 32 requests per slice and a 50,000-record bound.
+Validated contiguous cursors, unique identities, a stable advertised total and an
+explicit provider end are all required for `provider_end`. Full slices retain
+their original head and unique membership witness within the provider session.
+A restart or new browser/private sign-in session safely begins enumeration again
+with idempotent merges. A verified empty listing does not repeat initial broad
+discovery on every automatic poll.
 
-## Validation
+VK may advance a terminal cursor by the full page width: the observed final page
+started at 2,000, returned 616 rows, and advertised nextOffset 4,000 for total
+2,616. Normalize that terminal cursor only when `hasMore=false` and returned row
+count reaches the exact total. Nonterminal gaps, duplicate rows, overlaps and
+changed totals never manufacture complete coverage.
 
-The initial request/projection tests, body-transfer sign-in race and bounded
-membership comparison failed before their corrections. Additional generated
-fixtures cover network failures, HTML rejection, sign-in during requests and
-malformed optional counters. Dedicated Dart tests cover deadlines, numeric
-projection, private sign-in cancellation and native exception sanitization. Later
-Linux validation of this shared change remains deferred.
+Rendered DOM rows are not a fallback source for personal membership. The live
+comparison found rows outside the listing without recommendation markers, so
+filtering explicit recommendation containers cannot establish membership. An
+unsupported listing stays partial and preserves all saved data. Initial partial
+or failing discovery stays pending and pauses broad automatic retries across
+restart; bounded head checks can still run. Targeted exact-recording playback
+and optional metadata readers continue to use their independent DOM guards.
 
-The preceding authorized Windows scan observed 2,630 distinct recordings across
-bounded continuations and retained all 2,633 saved records. An older cached
-selection passed main-player and local-cache controls in 3,619 ms with zero
-received bytes. These are scoped observations, not a universal provider or audio
-quality guarantee.
+## Persistence and presentation
 
-Final Windows checks: all 212 Flutter tests and 64 adapter tests pass; analysis is
-clean. Release source and the generated adapter asset match. The explicit native
-probe emits sanitized failure counters. The old two-million-character response
-cap was incorrectly reported as a transport/format rejection; size failures now
-have a separate category and the bounded parsing cap is eight million characters.
-A complete live membership comparison remains unverified. Keep the alternate
-endpoint diagnostic-only until that discrepancy is understood.
+A completed enumeration stores the provider count and verification timestamp
+separately from the saved catalog. The UI displays the dated last verified VK
+listing and local saved count. A later head check preserves that dated witness;
+it does not claim to revalidate every historical row. An incomplete broad scan
+shows partial coverage. Only a verified end clears initial-discovery pending state.
 
-Uncached playback acceptance is still open: a deep-library selection obtained an
-exact native-player source binding, then failed opening the local relay after
-8,519 ms with no upstream bytes observed. Cached-player passes do not resolve
-that failure. Preserve the underlying transfer error before changing transport
-or weakening certificate, destination or recording-identity guards.
+No enumeration deletes tracks, cached audio, Piles, listening history or optional
+metadata absent from a later response. Historical saved tracks outside today's
+personal listing remain saved. Absence from the listing does not prove that a
+recording is unavailable or that earlier imports were recommendations.
+
+## Privacy and diagnostics
+
+- Require the existing personal-music witness and native browser audio isolation.
+- Send only a read-only request for the browser's own numeric music owner.
+  Session attachment remains inside the browser; no cookie export or auth lookup.
+- Recheck the recognized route and sign-in-form presence before every request,
+  after headers and after body transfer. Never read credential-field values.
+- Reject redirects and non-JSON/plain-text response types before body access.
+  Reject text over 8,388,608 characters before JSON decoding. This bounds parsing,
+  not bytes accumulated by `response.text()` before that check.
+- Project only known basic recording fields. Drop response media URLs; exact
+  Play source validation and cache bindings remain independent.
+- `library_listing_page` reports only allowlisted numeric page/total/transport
+  counters. Request failures retain a fixed stage: 1 fetch, 2 body, 3 JSON decode,
+  4 decoded envelope, plus deadline/JSON-error flags. Separate pagination and
+  metadata projection counters identify server-contract drift. No bodies or native errors.
+- Explicit `inspect-library` remains a separate optional diagnostic. It compares
+  at most two pages and 4,000 unique entries with one shared 20-second request
+  deadline and a 21-second outer deadline. Ordinary sync does not run the DOM
+  membership comparison. No diagnostic exports recording IDs, titles or URLs.
+
+## Windows validation, 2026-10-24
+
+Tests first reproduced the private projection, unsupported cursor behavior,
+300-new-record prefix missed by the old provider, duplicate membership, quiet
+initial-import state, checkpoint overwrite/shrinking, and complete-coverage UI.
+The terminal fixed-width cursor regression was added after live qualification
+rejected that final page, then passed after its correction. Additional generated
+scanner tests cover explicit empty end, continuation, changed totals and overlap.
+
+The original five-second explicit probe expired while reading its body, before
+JSON decoding. The longer bounded probe completed in 7,972 ms: 2,616 unique listed
+recordings versus 114 rendered rows, 14 rendered outside the listing. None of
+those 14 had a recognized recommendation marker. Their cause is not established.
+
+Native head qualification requested one 100-row page and matched the saved
+checkpoint after 19 entries, with no new rows, in 6,616 ms including preparation.
+Native full qualification then read 2,000 + 616 rows, verified unique total 2,616
+and explicit end in 9,430 ms. The local historical catalog stayed preserved. Live
+addition/removal was not induced on the account; new additions are generated-data
+qualification, not a claim of a real account mutation test. Timing is host/network
+specific. Ordinary Linux qualification remains separate.
+
+Generated checks: 256 Flutter tests, 75 app-adapter/diagnostic Node tests and 66
+preserved probe/CLI tests pass; Dart analysis is clean. The shared provider
+contract probe passes. Native Windows candidate Release browser isolation/input,
+1,200-row catalog/restart/SQLite, and streaming/seek/cache/offline checks pass.
+Streaming starts at 306 ms with the generated delayed source; the existing
+nonfatal decoder signal 4096 remains, while complete validation passes. These
+fixture results do not certify physical sound quality or other operating systems.

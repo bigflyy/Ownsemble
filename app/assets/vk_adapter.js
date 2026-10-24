@@ -588,8 +588,14 @@ action: async function musicPageAction(action, id, options = {}) {
     }
     return { urls: [...urls], segments: [...segments] };
   }
-  // Probe one read-only personal-library page without returning its music content.
-  if (action === 'probe-library-page') {
+  // Read or diagnose a guarded personal-library page using only known music fields.
+  if (action === 'probe-library-page' || action === 'read-library-page') {
+    // Separate optional diagnostics from the app's bounded personal-list import.
+    const importing = action === 'read-library-page';
+    // Accept only forward cursors owned by the application scanner.
+    const offset = importing ? options.libraryOffset : 0;
+    // Reject malformed cursors before any network or response access.
+    if (!Number.isSafeInteger(offset) || offset < 0 || offset > 50000) return { supported: false };
     // Require the approved music route and absence of private sign-in forms.
     function musicRequestAllowed() {
       return location.protocol === 'https:' && ['vk.ru', 'vk.com'].includes(location.hostname) &&
@@ -600,16 +606,26 @@ action: async function musicPageAction(action, id, options = {}) {
     const ownerId = Number(window.vk?.id);
     // Avoid guessing an owner or consulting authentication/session objects.
     if (!Number.isSafeInteger(ownerId) || ownerId <= 0) return { counts: { libraryOwnerUnavailable: 1 } };
+    // Locate failures without retaining request URLs, response text or exception messages.
+    let failureStage = 0;
+    // Distinguish the initial page from its single permitted continuation.
+    let requestPage = -1;
+    // Retain only the latest response length for bounded parsing diagnostics.
+    let responseCharacters = 0;
+    // Observe the existing shared deadline without exporting a signal or native error.
+    let deadlineSignal;
     // Read a bounded music-list envelope using the current consent checks.
     async function readLibraryPlaylist(offset, signal) {
       // Recheck consent before every request, including any continuation.
       if (!musicRequestAllowed()) return { error: 'Sign-in is required; automatic music access is paused.' };
+      failureStage = 1;
+      requestPage++;
       // Request only the account's own music; the session remains in the browser.
       const response = await fetch('/al_audio.php', {
         method: 'POST', credentials: 'same-origin', redirect: 'error',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'X-Requested-With': 'XMLHttpRequest' },
         body: new URLSearchParams({ al: '1', act: 'load_section', owner_id: String(ownerId),
-          playlist_id: '-1', offset: String(offset), type: 'playlist', is_loading_all: '1' }), signal,
+          playlist_id: '-1', offset: String(offset), type: 'playlist', is_loading_all: importing && options.newestOnly === true ? '0' : '1' }), signal,
       });
       // Recheck the music route and form guard before examining any response body.
       if (!musicRequestAllowed()) {
@@ -626,7 +642,9 @@ action: async function musicPageAction(action, id, options = {}) {
           libraryJSONResponse: Number(jsonResponse) } };
       }
       // Bound the known music-list JSON before decoding it.
+      failureStage = 2;
       const body = await response.text();
+      responseCharacters = body.length;
       // Discard a completed body if private sign-in began during its transfer.
       if (!musicRequestAllowed()) {
         return { error: 'Sign-in is required; automatic music access is paused.' };
@@ -635,7 +653,9 @@ action: async function musicPageAction(action, id, options = {}) {
       if (body.length > 8 * 1024 * 1024) return { counts: { libraryResponseTooLarge: 1,
         libraryResponseCharacters: body.length } };
       // Decode only the documented music-list envelopes.
+      failureStage = 3;
       const reply = JSON.parse(body.replace(/^\s*<!--/, ''));
+      failureStage = 4;
       // Select the named playlist slot without recursively traversing the reply.
       const playlist = reply?.payload?.[1]?.[0] ?? reply?.data?.[0];
       // Require a bounded music list before projecting its pagination counters.
@@ -654,14 +674,72 @@ action: async function musicPageAction(action, id, options = {}) {
         ? `${owner}_${audioId}` : null;
     }
     try {
-      // Share one five-second network deadline across both optional requests.
-      const signal = AbortSignal.timeout(5000);
+      // Bound both explicit diagnostic requests, including their large response bodies.
+      const signal = deadlineSignal = AbortSignal.timeout(20000);
       // Read the first page before considering a bounded membership comparison.
-      const first = await readLibraryPlaylist(0, signal);
+      const first = await readLibraryPlaylist(offset, signal);
       // Preserve fixed failure categories and private-login rejection unchanged.
-      if (!first.playlist) return first;
+      if (!first.playlist) return importing ? { supported: false, ...first } : first;
       // Keep the actual music content inside this function until only counts remain.
       const playlist = first.playlist;
+      // Keep only fixed numeric counters for import failures and pagination diagnostics.
+      const importCounts = { libraryRequestOK: 1, libraryShapeSupported: 1,
+        libraryRows: playlist.list.length, libraryResponseCharacters: first.characters };
+      // Project typed provider counters without retaining server strings or music identities.
+      for (const [key, value] of [['libraryNextOffset', playlist.nextOffset], ['libraryTotal', playlist.totalCount]]) {
+        // Omit malformed counters rather than guessing their meaning.
+        if (Number.isSafeInteger(value) && value >= 0 && value <= 1000000000) importCounts[key] = value;
+      }
+      // Retain an explicit typed continuation flag for diagnosis.
+      if ([true, false, 0, 1].includes(playlist.hasMore)) importCounts.libraryHasMore = Number(playlist.hasMore);
+      // Project only validated music fields; never forward server URLs or unrelated state.
+      if (importing) {
+        // Require explicit pagination with a consistent end, including an empty library.
+        const total = playlist.totalCount;
+        // Keep the cursor within the bounded account-list size.
+        const nextOffset = playlist.nextOffset;
+        // Normalize only a terminal fixed-width cursor after all advertised rows were received.
+        const consumed = offset + playlist.list.length;
+        // Read only the provider's explicit continuation flag.
+        const hasMore = playlist.hasMore === true || playlist.hasMore === 1;
+        // Reject contradictory totals, gaps and ambiguous termination.
+        if (![true, false, 0, 1].includes(playlist.hasMore) ||
+            !Number.isSafeInteger(total) || total < 0 || total > 50000 ||
+            !Number.isSafeInteger(nextOffset) || nextOffset > 50000 ||
+            (hasMore ? nextOffset !== consumed || nextOffset >= total : consumed !== total || nextOffset < consumed) ||
+            (hasMore && playlist.list.length === 0)) return { supported: false, counts: { ...importCounts, libraryPaginationUnsupported: 1 } };
+        // Decode entities using the same text-only primitive as rendered music rows.
+        function plainText(value) {
+          // Reject non-text metadata instead of coercing server objects.
+          if (typeof value !== 'string' || value.length > 1000) return null;
+          // Use a detached textarea; its content is never inserted into the page.
+          const element = document.createElement('textarea');
+          element.innerHTML = value;
+          return element.value;
+        }
+        // Validate every row before exposing a page for merging.
+        const tracks = [];
+        // Detect duplicate recordings within this page before persisting any of them.
+        const identities = new Set();
+        // Read only the known array slots or named music fields.
+        for (const record of playlist.list) {
+          // Keep identity independent of the row's order or display metadata.
+          const identity = recordingIdentity(record);
+          // Extract known title, artist and duration fields without traversing other state.
+          const title = plainText(Array.isArray(record) ? record[3] : record?.title);
+          // Preserve exact artist spelling after the ordinary HTML-entity decode.
+          const artist = plainText(Array.isArray(record) ? record[4] : record?.artist);
+          // Require finite seconds and reject null instead of turning it into zero.
+          const duration = Array.isArray(record) ? record[5] : record?.duration;
+          // Fail the entire page when any recording cannot be safely identified.
+          if (!identity || identities.has(identity) || title === null || artist === null ||
+              !Number.isFinite(duration) || duration < 0 || duration > 86400) return { supported: false, counts: { ...importCounts, libraryMetadataUnsupported: 1 } };
+          identities.add(identity);
+          tracks.push({ id: identity, title, artist, duration, url: '' });
+        }
+        return { supported: true, counts: importCounts, userId: ownerId, userAgent: navigator.userAgent,
+          tracks, pagination: { offset, nextOffset: hasMore ? nextOffset : consumed, total, hasMore } };
+      }
       // Return numeric diagnostics only; retain no track objects or response body.
       const counts = { libraryRequestOK: 1, libraryShapeSupported: 1,
         libraryRows: playlist.list.length, libraryResponseCharacters: first.characters };
@@ -706,6 +784,10 @@ action: async function musicPageAction(action, id, options = {}) {
       if (identities.some(identity => identity === null)) return { counts: { ...counts, libraryComparisonUnavailable: 1 } };
       // Deduplicate membership without persisting or exporting recording identifiers.
       const library = new Set(identities);
+      // Reject overlapping pages or duplicate identities instead of treating raw row counts as coverage.
+      if (library.size !== playlist.totalCount) {
+        return { counts: { ...counts, libraryComparisonUnavailable: 1 } };
+      }
       // Collect one rendered DOM row per recognized recording identity.
       const rendered = new Map();
       // Examine only known music-row attributes, excluding page text and field values.
@@ -725,9 +807,13 @@ action: async function musicPageAction(action, id, options = {}) {
       counts.libraryOutsideRecommendationRows = outside.filter(([, row]) => row.closest?.(
         '[class*="Recommendation"], [class*="recommendation"], [data-testid*="Recommendation"]')).length;
       return { counts };
-    } catch (_) {
+    } catch (error) {
       // Report a fixed category without logging native errors or response contents.
-      return { counts: { libraryProbeFailed: 1 } };
+      return { ...(importing ? { supported: false } : {}), counts: { libraryProbeFailed: 1,
+        libraryProbeFailureStage: failureStage, libraryProbePage: Math.max(0, requestPage),
+        libraryResponseCharacters: responseCharacters,
+        libraryJSONDecodeFailed: Number(error?.name === 'SyntaxError'),
+        libraryDeadlineExpired: Number(deadlineSignal?.aborted === true) } };
     }
   }
   // Locate rendered music rows and the scroll pane containing the largest group.

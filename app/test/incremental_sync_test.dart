@@ -291,8 +291,108 @@ void main() {
       provider.results.add(SyncResult(128, false, head: known));
       await controller.refresh(full: false);
       expect(provider.calls.single.head, isFalse);
-      expect(store.setting('initial_sync_pending'), isFalse);
+      // Preserve unresolved coverage when the provider supplied no explicit end witness.
+      expect(store.setting('initial_sync_pending'), isTrue);
+      expect(store.setting('initial_sync_paused'), isTrue);
       expect(store.count, 128);
+    });
+
+    test('a quiet initial scan remains pending and pauses broad retries across restart', () async {
+      await controller.shutdown();
+      await directory.delete(recursive: true);
+      controller = open();
+      provider.results.add(
+        SyncResult(
+          40,
+          false,
+          reason: 'quiet_boundary',
+          head: known.take(40).toList(),
+        ),
+      );
+      await controller.refresh(full: false);
+      expect(store.setting('initial_sync_pending'), isTrue);
+      expect(store.setting('initial_sync_paused'), isTrue);
+      expect(store.setting('coverage'), 'partial');
+      await controller.shutdown();
+      controller = open();
+      provider.results.add(
+        SyncResult(
+          40,
+          false,
+          reason: 'head_seeded',
+          head: known.take(40).toList(),
+        ),
+      );
+      await controller.refresh(full: false);
+      expect(provider.calls.single.head, isTrue);
+      expect(store.setting('initial_sync_pending'), isTrue);
+      expect(store.count, 40);
+    });
+
+    test('verified provider end completes initial discovery, survives restart and preserves historical rows', () async {
+      // Preserve saved rows outside the current personal listing and its shorter size.
+      store.setSetting('initial_sync_pending', true);
+      store.setSetting('initial_sync_paused', true);
+      provider.results.addAll([
+        SyncResult(128, true, reason: 'time_budget', head: known),
+        SyncResult(2616, false, reason: 'provider_end', head: known),
+      ]);
+      await controller.refresh();
+      await controller.refresh(full: false);
+      expect(store.setting('initial_sync_pending'), isFalse);
+      expect(store.setting('initial_sync_paused'), isFalse);
+      expect(store.setting('coverage'), 'complete');
+      expect(store.setting('provider_library_count'), 2616);
+      expect(controller.message, contains('2616 in verified VK listing'));
+      expect(store.count, 2633);
+      expect(store.syncHead, known);
+      await controller.shutdown();
+      controller = open();
+      // A successful head poll must preserve the previous dated full-coverage witness.
+      provider.results.add(
+        SyncResult(
+          12,
+          false,
+          reason: 'known_head',
+          head: known.take(12).toList(),
+        ),
+      );
+      await controller.refresh(full: false);
+      expect(provider.calls.single.head, isTrue);
+      expect(store.setting('coverage'), 'complete');
+      expect(store.setting('provider_library_count'), 2616);
+      expect(store.count, 2633);
+    });
+
+    test('verified empty library does not repeat initial full import on every poll', () async {
+      await controller.shutdown();
+      await directory.delete(recursive: true);
+      controller = open();
+      // Persist an explicit zero-member provider end without manufacturing local rows.
+      provider.results.add(const SyncResult(0, false, reason: 'provider_end'));
+      await controller.refresh(full: false);
+      expect(store.setting('initial_sync_pending'), isFalse);
+      await controller.shutdown();
+      controller = open();
+      provider.results.add(const SyncResult(0, false, reason: 'provider_end'));
+      await controller.refresh(full: false);
+      expect(provider.calls.single.head, isTrue);
+      expect(store.count, 0);
+    });
+
+    test('an incomplete full scan cannot replace a successful incremental checkpoint', () async {
+      provider.results.add(
+        SyncResult(
+          3,
+          false,
+          reason: 'quiet_boundary',
+          head: songs(9000, 3).map((track) => track.id).toList(),
+        ),
+      );
+      await controller.refresh();
+      expect(store.syncHead, known);
+      expect(store.count, 2636);
+      expect(store.setting('coverage'), 'partial');
     });
 
     test(

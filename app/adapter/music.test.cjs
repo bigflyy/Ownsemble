@@ -10,6 +10,162 @@ const payload = () => ({ userId: 1, userAgent: 'test', tracks: [
   { id: '1_2', artist: 'Artist', title: 'Song', duration: 180, url: 'https://test.vkuseraudio.net/song.mp3' },
 ] });
 
+test('personal-library paging projects music fields and validates its explicit continuation', async () => {
+  // Keep unrelated server fields outside the projected application result.
+  const playlist = { list:[[1,17,'https://generated.vkuseraudio.net/private','Generated','Fixture',60]],
+    hasMore:true,nextOffset:1,totalCount:2,ignored:'generated private server data' };
+  // Capture only the fixed request parameters used by this generated call.
+  const requests = [];
+  // Invoke the production adapter without any real browser or private session.
+  const result = await vm.runInNewContext(`(${musicPageAction.toString()})('read-library-page',null,{libraryOffset:0,newestOnly:true})`, {
+    location:{protocol:'https:',hostname:'vk.ru',pathname:'/audios'},
+    window:{vk:{id:17}},navigator:{userAgent:'Generated'}, URLSearchParams,AbortSignal,
+    document:{querySelector:()=>null,querySelectorAll:()=>[],
+      createElement:()=>({set innerHTML(value){this.value=value;}})},
+    fetch:async(_,options)=>{
+      requests.push(Object.fromEntries(options.body));
+      return {ok:true,status:200,headers:{get:()=> 'application/json'},
+        text:async()=>JSON.stringify({payload:[0,[playlist]]})};
+    },
+  });
+  assert.deepEqual(Array.from(result.tracks,track=>track.id),['17_1']);
+  assert.equal(result.tracks[0].url,'');
+  assert.equal(result.pagination.offset,0);
+  assert.equal(result.pagination.nextOffset,1);
+  assert.equal(result.pagination.total,2);
+  assert.equal(result.pagination.hasMore,true);
+  assert.equal(requests[0].is_loading_all,'0');
+  assert.equal(requests[0].owner_id,'17');
+  assert.equal(JSON.stringify(result).includes('generated private'),false);
+  assert.equal(JSON.stringify(result).includes('https://'),false);
+});
+
+test('personal-library terminal cursor may advance by page width after the verified final row', async () => {
+  // Model the observed final page: one remaining row with a larger fixed-width cursor.
+  const result = await vm.runInNewContext(`(${musicPageAction.toString()})('read-library-page',null,{libraryOffset:2})`, {
+    location:{protocol:'https:',hostname:'vk.ru',pathname:'/audios'},window:{vk:{id:17}},
+    navigator:{userAgent:'Generated'},URLSearchParams,AbortSignal,
+    document:{querySelector:()=>null,createElement:()=>({set innerHTML(value){this.value=value;}})},
+    fetch:async()=>({ok:true,status:200,headers:{get:()=> 'application/json'},text:async()=>JSON.stringify({data:[{
+      list:[[3,17,'','Generated','Fixture',60]],hasMore:false,nextOffset:4,totalCount:3,
+    }]})}),
+  });
+  assert.equal(result.supported,true);
+  assert.equal(result.pagination.nextOffset,3);
+  assert.equal(result.pagination.hasMore,false);
+  assert.equal(result.counts.libraryNextOffset,4);
+});
+
+test('personal-library paging rejects malformed rows and contradictory end markers', async () => {
+  // Cover malformed music data and an end marker contradicting the advertised total.
+  for (const playlist of [
+    {list:[[1,17,'','Generated','Fixture',NaN]],hasMore:false,nextOffset:1,totalCount:1},
+    {list:[[1,17,'','Generated','Fixture',60]],hasMore:false,nextOffset:1,totalCount:2},
+  ]) {
+    // Keep each malformed reply generated and scoped to the recognized music route.
+    const result = await vm.runInNewContext(`(${musicPageAction.toString()})('read-library-page',null,{libraryOffset:0})`, {
+      location:{protocol:'https:',hostname:'vk.ru',pathname:'/audios'},
+      window:{vk:{id:17}},navigator:{userAgent:'Generated'}, URLSearchParams,AbortSignal,
+      document:{querySelector:()=>null,querySelectorAll:()=>[],
+        createElement:()=>({set innerHTML(value){this.value=value;}})},
+      fetch:async()=>({ok:true,status:200,headers:{get:()=> 'application/json'},
+        text:async()=>JSON.stringify({payload:[0,[playlist]]})}),
+    });
+    assert.equal(result.supported,false);
+    assert.equal(result.tracks,undefined);
+    // Distinguish pagination drift from recording-field drift using fixed counters only.
+    assert.equal(result.counts[Number.isNaN(playlist.list[0][5]) ? 'libraryMetadataUnsupported' : 'libraryPaginationUnsupported'],1);
+  }
+});
+
+test('personal-library paging rejects private document races and invalid cursors before extraction', async () => {
+  // Exercise both guard checkpoints around a generated response transfer.
+  for (const phase of ['headers','body','cursor']) {
+    // Count network and body access without retaining any private content.
+    let privateForm=false, requests=0, reads=0;
+    // Keep a valid generated music page unless the tested race revokes consent.
+    const result=await vm.runInNewContext(`(${musicPageAction.toString()})('read-library-page',null,{libraryOffset:${phase==='cursor'?-1:0}})`, {
+      location:{protocol:'https:',hostname:'vk.ru',pathname:'/audios'},
+      window:{vk:{id:17}}, navigator:{userAgent:'Generated'}, URLSearchParams,AbortSignal,
+      document:{querySelector:()=>privateForm?{}:null, querySelectorAll:()=>[]},
+      fetch:async()=>{
+        requests++;
+        if(phase==='headers') privateForm=true;
+        return {ok:true,status:200,headers:{get:()=> 'application/json'},text:async()=>{
+          reads++;
+          privateForm=true;
+          return JSON.stringify({data:[{list:[],hasMore:false,nextOffset:0,totalCount:0}]});
+        }};
+      },
+    });
+    if(phase==='cursor') {assert.equal(requests,0);assert.equal(result.supported,false);}
+    else {assert.ok(result.error);assert.equal(reads,phase==='headers'?0:1);}
+    assert.equal(result.tracks,undefined);
+  }
+});
+
+test('overlapping library pages cannot manufacture complete membership from duplicate recordings', async () => {
+  // Keep the advertised total stable while repeating one recording across pages.
+  const pages = [
+    {list:[[1,17],[2,17]],hasMore:true,nextOffset:2,totalCount:3},
+    {list:[[2,17]],hasMore:false,nextOffset:3,totalCount:3},
+  ];
+  // Advance only the generated response page, not a real browser document.
+  let page = 0;
+  // Require unique validated identities in addition to raw count and end markers.
+  const result = await vm.runInNewContext(`(${musicPageAction.toString()})('probe-library-page',null,{compareMembership:true})`, {
+    location:{protocol:'https:',hostname:'vk.ru',pathname:'/audios'},
+    window:{vk:{id:17}}, URLSearchParams, AbortSignal,
+    document:{querySelector:()=>null,querySelectorAll:()=>[]},
+    fetch:async()=>({ok:true,status:200,headers:{get:()=> 'application/json'},
+      text:async()=>JSON.stringify({payload:[0,[pages[page++]]]})}),
+  });
+  assert.equal(result.counts.libraryComparisonUnavailable,1);
+  assert.notEqual(result.counts.libraryComparedComplete,1);
+});
+
+test('explicit library comparison tolerates two bounded slow bodies while keeping a shared deadline', async () => {
+  // Advance a generated monotonic clock only when a response body is consumed.
+  let elapsed = 0;
+  // Keep two small synthetic pages with a verified end and stable total.
+  const pages = [
+    {list:[[1,17]],hasMore:true,nextOffset:1,totalCount:2},
+    {list:[[2,17]],hasMore:false,totalCount:2},
+  ];
+  // Count requests without exporting any response or identity from the adapter.
+  let requests = 0;
+  // Run the production probe using a deterministic six-second-per-body fixture.
+  const result = await vm.runInNewContext(`(${musicPageAction.toString()})('probe-library-page',null,{compareMembership:true})`, {
+    location:{protocol:'https:',hostname:'vk.ru',pathname:'/audios'},
+    window:{vk:{id:17}}, URLSearchParams,
+    document:{querySelector:()=>null,querySelectorAll:()=>[]},
+    AbortSignal:{timeout:milliseconds=>({deadline:milliseconds,get aborted(){return elapsed>=milliseconds;}})},
+    fetch:async (_,options)=>({ok:true,status:200,headers:{get:()=> 'application/json'},text:async()=>{
+      elapsed+=6000;
+      // Reject body transfer after the shared generated deadline expires.
+      if(options.signal.aborted) throw Object.assign(new Error('generated timeout'),{name:'TimeoutError'});
+      return JSON.stringify({payload:[0,[pages[requests++]]]});
+    }}),
+  });
+  assert.equal(result.counts.libraryComparedComplete,1);
+  assert.equal(requests,2);
+});
+
+test('library diagnostics distinguish JSON decoding from request failures without exposing a body', async () => {
+  // Keep the malformed reply entirely generated and outside any real browser session.
+  const result = await vm.runInNewContext(`(${musicPageAction.toString()})('probe-library-page',null,{compareMembership:true})`, {
+    location: { protocol: 'https:', hostname: 'vk.ru', pathname: '/audios' },
+    document: { querySelector: () => null, querySelectorAll: () => [] },
+    window: { vk: { id: 17 } }, URLSearchParams, AbortSignal,
+    fetch: async () => ({ ok: true, status: 200,
+      headers: { get: () => 'application/json' },
+      text: async () => 'generated private invalid JSON' }),
+  });
+  assert.equal(result.counts.libraryProbeFailureStage, 3);
+  assert.equal(result.counts.libraryJSONDecodeFailed, 1);
+  assert.equal(JSON.stringify(result).includes('generated private'), false);
+});
+
 test('opaque OK CDN audio keeps exact HTTPS authority checks', () => {
   assert.equal(mediaURL('https://generated.okcdn.ru/?fixture=1'),
     'https://generated.okcdn.ru/?fixture=1');
@@ -863,7 +1019,10 @@ test('library pagination probe masks network errors and unknown reply fields', a
   const failed = await vm.runInNewContext(`(${musicPageAction.toString()})('probe-library-page')`, {
     ...environment, fetch: async () => { throw Error('generated private destination'); },
   });
-  assert.deepEqual(JSON.parse(JSON.stringify(failed)), { counts: { libraryProbeFailed: 1 } });
+  assert.deepEqual(JSON.parse(JSON.stringify(failed)), { counts: {
+    libraryProbeFailed: 1, libraryProbeFailureStage: 1, libraryProbePage: 0,
+    libraryResponseCharacters: 0, libraryJSONDecodeFailed: 0, libraryDeadlineExpired: 0,
+  } });
   // Measure the generated reply without relying on a duplicated length constant.
   const partialBody = JSON.stringify({ payload: [0, [{ list: [], hasMore: 'yes',
     nextOffset: -1, totalCount: 1000000001, ignored: 'generated private field' }]] });

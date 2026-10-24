@@ -7,7 +7,7 @@ import 'pagination_diagnostics.dart';
 Future<void> runLibraryProbe({
   required Future<Map<String, dynamic>> Function() read,
   required void Function(Map<String, int>) report,
-  Duration deadline = const Duration(seconds: 6),
+  Duration deadline = const Duration(seconds: 21),
 }) async {
   try {
     // Bound the browser operation independently of its network deadline.

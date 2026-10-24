@@ -169,6 +169,42 @@ void main() {
     await tester.pump();
   }
 
+  testControls(
+    'VK coverage distinguishes the verified provider size from saved historical rows',
+    (tester) async {
+      // Keep generated local history larger than the current provider membership.
+      store.setSetting('provider_library_count', 1);
+      store.setSetting(
+        'provider_library_verified_at',
+        '2026-10-24T10:00:00.000Z',
+      );
+      store.setSetting('coverage', 'complete');
+      createController();
+      controller.view = 'vk';
+      await show(tester);
+      expect(
+        find.textContaining('1 recording in last verified VK listing'),
+        findsOneWidget,
+      );
+      expect(find.textContaining('2 saved locally'), findsOneWidget);
+      expect(find.textContaining('coverage remains partial'), findsNothing);
+    },
+  );
+
+  testControls('VK coverage labels an unfinished listing as partial', (
+    tester,
+  ) async {
+    // Keep the existing incomplete-import warning visible until a real end witness.
+    createController();
+    controller.view = 'vk';
+    await show(tester);
+    expect(
+      find.textContaining('VK listing coverage is partial'),
+      findsOneWidget,
+    );
+    expect(find.textContaining('in last verified VK listing'), findsNothing);
+  });
+
   testControls('shortcuts mute and adjust volume without intercepting AltGr', (
     tester,
   ) async {

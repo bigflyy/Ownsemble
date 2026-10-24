@@ -701,16 +701,37 @@ class AppController extends ChangeNotifier {
   Future<void> refresh({bool full = true}) =>
       diagnostics.run('sync', () => _refresh(full: full));
 
+  /// Describe the dated provider witness separately from all preserved local recordings.
+  String get libraryCoverageSummary {
+    // Keep provider membership distinct from historical rows saved in this application.
+    final count = store.setting('provider_library_count');
+    // Parse only the app-owned timestamp; missing legacy settings remain partial.
+    final verified = DateTime.tryParse(
+      store.setting('provider_library_verified_at', '').toString(),
+    );
+    // Display complete coverage only when its count and date are available.
+    if (store.setting('coverage') == 'complete' &&
+        count is int &&
+        count >= 0 &&
+        verified != null) {
+      return 'Automatic refresh checks newest entries. $count ${count == 1 ? 'recording' : 'recordings'} in last verified VK listing (${verified.toIso8601String().split('T').first}); ${store.count} saved locally.';
+    }
+    return 'Automatic refresh checks newest entries. VK listing coverage is partial. Refresh VK checks the full listing; saved music stays available.';
+  }
+
   /// Run the existing bounded sync policy without changing import or deletion behavior.
   Future<void> _refresh({bool full = true}) async {
     if (offline || syncing || demo) return;
     syncing = true;
     _notify();
     final watch = Stopwatch()..start();
+    // Respect a completed empty library instead of repeating full discovery forever.
     final initial =
-        store.count == 0 ||
-        store.setting('initial_sync_pending', false) == true;
-    final broad = full || initial || _continueSweep;
+        store.setting('initial_sync_pending', store.count == 0) == true;
+    // Keep quiet/incomplete initial imports pending without repeating broad scans every poll.
+    final initialPaused = store.setting('initial_sync_paused', false) == true;
+    // Resume active slices automatically; paused discovery still permits bounded head checks.
+    final broad = full || (initial && !initialPaused) || _continueSweep;
     final fromTop = full || !_continueSweep;
     final checkpoint = store.syncHead;
     final before = store.count;
@@ -742,7 +763,10 @@ class AppController extends ChangeNotifier {
 
     report('running');
     try {
+      // Preserve incomplete discovery independently of whether the current request checks the head.
       if (initial) store.setSetting('initial_sync_pending', true);
+      // Resume explicit or active broad discovery without treating its end as verified coverage.
+      if (broad && initial) store.setSetting('initial_sync_paused', false);
       if (fromTop) store.setSetting('sweep_epoch', store.now);
       final epoch = store.setting('sweep_epoch', store.now) as int;
       final result = await provider.sync(
@@ -772,30 +796,60 @@ class AppController extends ChangeNotifier {
         checkpoint: checkpoint,
       );
       _continueSweep = broad && result.continueSweep;
+      // Accept complete membership only from the provider's validated unique end witness.
+      final complete = result.reason == 'provider_end' && !result.continueSweep;
+      // Carry the original head across full-scan slices; never replace it after a partial scan.
       if (result.head.isNotEmpty &&
-          fromTop &&
-          (broad || ['known_head', 'head_seeded'].contains(result.reason))) {
+          (complete ||
+              (fromTop &&
+                  ['known_head', 'head_seeded'].contains(result.reason)))) {
         store.saveSyncHead(result.head);
       }
-      if (initial && !_continueSweep) {
-        store.setSetting('initial_sync_pending', false);
+      // A quiet/page/time boundary cannot prove the provider's complete membership.
+      if (!complete && initial && broad && !_continueSweep) {
+        store.setSetting('initial_sync_paused', true);
       }
       store.setSetting('last_sync', DateTime.now().toIso8601String());
-      store.setSetting('coverage', 'partial');
+      // Record the verified provider size separately from the preserved local catalog.
+      if (complete) {
+        store.setSetting('initial_sync_pending', false);
+        store.setSetting('initial_sync_paused', false);
+        store.setSetting('provider_library_count', result.discovered);
+        store.setSetting(
+          'provider_library_verified_at',
+          DateTime.now().toIso8601String(),
+        );
+        store.setSetting('coverage', 'complete');
+      }
+      // Keep the dated full witness during ordinary head polling.
+      else if (broad) {
+        store.setSetting('coverage', 'partial');
+      }
       _nextSync = DateTime.now().add(
         Duration(seconds: _continueSweep ? 5 : 120),
       );
       if (!loading && downloadId == null && !player.state.playing) {
         message =
-            !broad && !['known_head', 'head_seeded'].contains(result.reason)
+            !broad &&
+                !complete &&
+                !['known_head', 'head_seeded'].contains(result.reason)
             ? 'Newest-entry check was incomplete. Use Refresh VK for a deeper scan; your saved music is available.'
-            : '${store.count} tracks saved · ${broad ? 'VK coverage partial' : 'newest entries checked'}';
+            : '${store.count} tracks saved · ${complete
+                  ? '${result.discovered} in verified VK listing'
+                  : broad
+                  ? 'VK coverage partial'
+                  : 'newest entries checked'}';
       }
-      store.report('sync_partial', count: store.count);
+      store.report(
+        complete ? 'sync_complete' : 'sync_partial',
+        count: store.count,
+      );
       report('finished', reason: result.reason, checked: result.discovered);
       _reportMetadataSummary();
     } catch (e) {
       _continueSweep = false;
+      // Preserve pending initial discovery after a failed or revoked provider request.
+      if (initial) store.setSetting('initial_sync_paused', true);
       _nextSync = DateTime.now().add(const Duration(minutes: 2));
       _failure(e);
       report('failed', reason: categoryOf(e));
