@@ -6,9 +6,83 @@ const { readMusicPage } = require('./music-page.cjs');
 const { musicPageAction } = require('./music-action.cjs');
 const { inspectMusicDOM, sanitizeMusicStructure } = require('./music-dom.cjs');
 
+/** Supply browser byte-body decoding while preserving controlled legacy fetch fixtures. */
+function runMusicFixture(source, context) {
+  // Keep the original synthetic transport; never create a real network request.
+  const generatedFetch = context.fetch;
+  return vm.runInNewContext(source, { TextDecoder, ...context,
+    ...(generatedFetch ? { fetch: async (...args) => {
+      // Upgrade text-only mocks to the browser Response byte-reading contract.
+      const response = await generatedFetch(...args);
+      // Preserve explicit byte fixtures and rejected transport behavior.
+      if (response && typeof response.arrayBuffer !== 'function') {
+        response.arrayBuffer = async () => new TextEncoder().encode(await response.text()).buffer;
+      }
+      return response;
+    } } : {}),
+  });
+}
+
 const payload = () => ({ userId: 1, userAgent: 'test', tracks: [
   { id: '1_2', artist: 'Artist', title: 'Song', duration: 180, url: 'https://test.vkuseraudio.net/song.mp3' },
 ] });
+
+test('personal-library import preserves Cyrillic from declared Windows-1251 response bytes', async () => {
+  // Keep non-ASCII recording text generated and independent of any account content.
+  const title=String.fromCodePoint(1050,1088,1072,1081),artist=String.fromCodePoint(1047,1077,1084,1083,1103);
+  // Build a valid legacy-encoded music envelope with known Cyrillic byte mappings.
+  const json=JSON.stringify({data:[{list:[[1,17,'',title,artist,60]],hasMore:false,nextOffset:1,totalCount:1}]});
+  // Encode Cyrillic letters to their standard Windows-1251 byte positions.
+  const bytes=Uint8Array.from([...json],character=>character.charCodeAt(0)>=0x410?character.charCodeAt(0)-0x350:character.charCodeAt(0));
+  // Use a real generated Response so text() reproduces the original UTF-8 decoding bug.
+  const response=new Response(bytes,{headers:{'content-type':'text/plain; charset=windows-1251'}});
+  // Run the production guarded importer with no browser, session or external request.
+  const result=await runMusicFixture(`(${musicPageAction.toString()})('read-library-page',null,{libraryOffset:0})`,{
+    location:{protocol:'https:',hostname:'vk.ru',pathname:'/audios'},window:{vk:{id:17}},
+    navigator:{userAgent:'Generated'},URLSearchParams,AbortSignal,
+    document:{querySelector:()=>null,createElement:()=>({set innerHTML(value){this.value=value;}})},
+    fetch:async()=>response,
+  });
+  assert.equal(result.tracks[0].title,title);
+  assert.equal(result.tracks[0].artist,artist);
+  assert.equal(result.counts.libraryWindows1251,1);
+});
+
+test('invalid UTF-8 never becomes replacement characters in imported metadata', async () => {
+  // Insert one invalid byte inside a structurally valid generated recording title.
+  const prefix=Buffer.from('{"data":[{"list":[[1,17,"","');
+  // Keep the remaining music envelope valid to isolate lossy body decoding.
+  const suffix=Buffer.from('","Fixture",60]],"hasMore":false,"nextOffset":1,"totalCount":1}]}');
+  // A permissive text() decoder would silently turn this byte into U+FFFD.
+  const response=new Response(Buffer.concat([prefix,Buffer.from([0xff]),suffix]),{headers:{'content-type':'application/json; charset=utf-8'}});
+  // Reject the entire untrusted page before it can replace good saved text.
+  const result=await runMusicFixture(`(${musicPageAction.toString()})('read-library-page',null,{libraryOffset:0})`,{
+    location:{protocol:'https:',hostname:'vk.ru',pathname:'/audios'},window:{vk:{id:17}},
+    navigator:{userAgent:'Generated'},URLSearchParams,AbortSignal,
+    document:{querySelector:()=>null,createElement:()=>({set innerHTML(value){this.value=value;}})},fetch:async()=>response,
+  });
+  assert.equal(result.supported,false);
+  assert.equal(result.tracks,undefined);
+  assert.equal(result.counts.libraryEncodingFailed,1);
+});
+
+test('UTF-8 Cyrillic and supplementary characters round-trip through the byte decoder', async () => {
+  // Cover UTF-8 and an undeclared UTF-8 response without legacy fallback guessing.
+  for (const contentType of ['application/json; charset=utf-8','application/json']) {
+    // Preserve generated Cyrillic and emoji rather than reducing them to ASCII fixtures.
+    const title=String.fromCodePoint(1050,1088,1072,1081,32,128640);
+    // Use real UTF-8 Response bytes with no account data or external network.
+    const response=new Response(JSON.stringify({data:[{list:[[1,17,'',title,'Fixture',60]],hasMore:false,nextOffset:1,totalCount:1}]}),{headers:{'content-type':contentType}});
+    // Exercise exactly the application-owned personal-list action.
+    const result=await runMusicFixture(`(${musicPageAction.toString()})('read-library-page',null,{libraryOffset:0})`,{
+      location:{protocol:'https:',hostname:'vk.ru',pathname:'/audios'},window:{vk:{id:17}},
+      navigator:{userAgent:'Generated'},URLSearchParams,AbortSignal,
+      document:{querySelector:()=>null,createElement:()=>({set innerHTML(value){this.value=value;}})},fetch:async()=>response,
+    });
+    assert.equal(result.tracks[0].title,title);
+    assert.equal(result.counts.libraryWindows1251,0);
+  }
+});
 
 test('personal-library paging projects music fields and validates its explicit continuation', async () => {
   // Keep unrelated server fields outside the projected application result.
@@ -17,7 +91,7 @@ test('personal-library paging projects music fields and validates its explicit c
   // Capture only the fixed request parameters used by this generated call.
   const requests = [];
   // Invoke the production adapter without any real browser or private session.
-  const result = await vm.runInNewContext(`(${musicPageAction.toString()})('read-library-page',null,{libraryOffset:0,newestOnly:true})`, {
+  const result = await runMusicFixture(`(${musicPageAction.toString()})('read-library-page',null,{libraryOffset:0,newestOnly:true})`, {
     location:{protocol:'https:',hostname:'vk.ru',pathname:'/audios'},
     window:{vk:{id:17}},navigator:{userAgent:'Generated'}, URLSearchParams,AbortSignal,
     document:{querySelector:()=>null,querySelectorAll:()=>[],
@@ -42,7 +116,7 @@ test('personal-library paging projects music fields and validates its explicit c
 
 test('personal-library terminal cursor may advance by page width after the verified final row', async () => {
   // Model the observed final page: one remaining row with a larger fixed-width cursor.
-  const result = await vm.runInNewContext(`(${musicPageAction.toString()})('read-library-page',null,{libraryOffset:2})`, {
+  const result = await runMusicFixture(`(${musicPageAction.toString()})('read-library-page',null,{libraryOffset:2})`, {
     location:{protocol:'https:',hostname:'vk.ru',pathname:'/audios'},window:{vk:{id:17}},
     navigator:{userAgent:'Generated'},URLSearchParams,AbortSignal,
     document:{querySelector:()=>null,createElement:()=>({set innerHTML(value){this.value=value;}})},
@@ -63,7 +137,7 @@ test('personal-library paging rejects malformed rows and contradictory end marke
     {list:[[1,17,'','Generated','Fixture',60]],hasMore:false,nextOffset:1,totalCount:2},
   ]) {
     // Keep each malformed reply generated and scoped to the recognized music route.
-    const result = await vm.runInNewContext(`(${musicPageAction.toString()})('read-library-page',null,{libraryOffset:0})`, {
+    const result = await runMusicFixture(`(${musicPageAction.toString()})('read-library-page',null,{libraryOffset:0})`, {
       location:{protocol:'https:',hostname:'vk.ru',pathname:'/audios'},
       window:{vk:{id:17}},navigator:{userAgent:'Generated'}, URLSearchParams,AbortSignal,
       document:{querySelector:()=>null,querySelectorAll:()=>[],
@@ -84,7 +158,7 @@ test('personal-library paging rejects private document races and invalid cursors
     // Count network and body access without retaining any private content.
     let privateForm=false, requests=0, reads=0;
     // Keep a valid generated music page unless the tested race revokes consent.
-    const result=await vm.runInNewContext(`(${musicPageAction.toString()})('read-library-page',null,{libraryOffset:${phase==='cursor'?-1:0}})`, {
+    const result=await runMusicFixture(`(${musicPageAction.toString()})('read-library-page',null,{libraryOffset:${phase==='cursor'?-1:0}})`, {
       location:{protocol:'https:',hostname:'vk.ru',pathname:'/audios'},
       window:{vk:{id:17}}, navigator:{userAgent:'Generated'}, URLSearchParams,AbortSignal,
       document:{querySelector:()=>privateForm?{}:null, querySelectorAll:()=>[]},
@@ -113,7 +187,7 @@ test('overlapping library pages cannot manufacture complete membership from dupl
   // Advance only the generated response page, not a real browser document.
   let page = 0;
   // Require unique validated identities in addition to raw count and end markers.
-  const result = await vm.runInNewContext(`(${musicPageAction.toString()})('probe-library-page',null,{compareMembership:true})`, {
+  const result = await runMusicFixture(`(${musicPageAction.toString()})('probe-library-page',null,{compareMembership:true})`, {
     location:{protocol:'https:',hostname:'vk.ru',pathname:'/audios'},
     window:{vk:{id:17}}, URLSearchParams, AbortSignal,
     document:{querySelector:()=>null,querySelectorAll:()=>[]},
@@ -135,7 +209,7 @@ test('explicit library comparison tolerates two bounded slow bodies while keepin
   // Count requests without exporting any response or identity from the adapter.
   let requests = 0;
   // Run the production probe using a deterministic six-second-per-body fixture.
-  const result = await vm.runInNewContext(`(${musicPageAction.toString()})('probe-library-page',null,{compareMembership:true})`, {
+  const result = await runMusicFixture(`(${musicPageAction.toString()})('probe-library-page',null,{compareMembership:true})`, {
     location:{protocol:'https:',hostname:'vk.ru',pathname:'/audios'},
     window:{vk:{id:17}}, URLSearchParams,
     document:{querySelector:()=>null,querySelectorAll:()=>[]},
@@ -153,7 +227,7 @@ test('explicit library comparison tolerates two bounded slow bodies while keepin
 
 test('library diagnostics distinguish JSON decoding from request failures without exposing a body', async () => {
   // Keep the malformed reply entirely generated and outside any real browser session.
-  const result = await vm.runInNewContext(`(${musicPageAction.toString()})('probe-library-page',null,{compareMembership:true})`, {
+  const result = await runMusicFixture(`(${musicPageAction.toString()})('probe-library-page',null,{compareMembership:true})`, {
     location: { protocol: 'https:', hostname: 'vk.ru', pathname: '/audios' },
     document: { querySelector: () => null, querySelectorAll: () => [] },
     window: { vk: { id: 17 } }, URLSearchParams, AbortSignal,
@@ -180,7 +254,7 @@ test('opaque OK CDN audio keeps exact HTTPS authority checks', () => {
 test('current player source requires its exact recording identity, not a next-song prefetch', async () => {
   let current = [99,1,'https://test.vkuseraudio.net/next.mp3','Generated next','Fixture',240];
   let touched = 0;
-  const invoke = (form=false) => vm.runInNewContext(`(${musicPageAction.toString()})('current-audio-source','1_2')`, {
+  const invoke = (form=false) => runMusicFixture(`(${musicPageAction.toString()})('current-audio-source','1_2')`, {
     location:{protocol:'https:',hostname:'vk.ru',pathname:'/audio'},
     window:{getAudioPlayer(){touched++;return {getCurrentAudio:()=>current};}},
     navigator:{userAgent:'Generated'}, document:{querySelector:()=>form?{}:null,querySelectorAll:()=>[]},
@@ -228,13 +302,13 @@ test('login-page extraction stops before any DOM or network access', async () =>
   const context = { location: { protocol: 'https:', hostname: 'vk.ru', pathname: '/login' },
     document: new Proxy({}, { get() { touched = true; throw new Error('Unexpected DOM access'); } }),
     fetch: () => { touched = true; throw new Error('Unexpected network access'); } };
-  const result = await vm.runInNewContext(`(${readMusicPage.toString()})()`, context);
+  const result = await runMusicFixture(`(${readMusicPage.toString()})()`, context);
   assert.equal(typeof result.error, 'string');
   assert.equal(touched, false);
 });
 test('form detection does not read field values', async () => {
   const field = Object.defineProperty({}, 'value', { get() { throw new Error('Credential value read'); } });
-  const result = await vm.runInNewContext(`(${readMusicPage.toString()})()`, {
+  const result = await runMusicFixture(`(${readMusicPage.toString()})()`, {
     location: { protocol: 'https:', hostname: 'vk.ru', pathname: '/audio' },
     document: { querySelector: () => field, querySelectorAll: () => { throw new Error('Read music while signing in'); } },
   });
@@ -242,7 +316,7 @@ test('form detection does not read field values', async () => {
 });
 
 test('music readiness reports only row count and loading presence', async () => {
-  const result = await vm.runInNewContext(`(${musicPageAction.toString()})('readiness')`, {
+  const result = await runMusicFixture(`(${musicPageAction.toString()})('readiness')`, {
     location: { protocol: 'https:', hostname: 'vk.ru', pathname: '/audio' },
     document: { readyState: 'complete',
       querySelector: selector => selector.startsWith('input') ? null : {},
@@ -261,7 +335,7 @@ async function readSyntheticRows(values, fetch = () => { throw new Error('Unexpe
     assert.equal(name, 'data-audio');
     return typeof value === 'string' ? value : JSON.stringify(value);
   } }));
-  return vm.runInNewContext(`(${readMusicPage.toString()})(undefined, ${JSON.stringify(options)})`, {
+  return runMusicFixture(`(${readMusicPage.toString()})(undefined, ${JSON.stringify(options)})`, {
     location: { protocol: 'https:', hostname: 'vk.ru', pathname: '/audio' },
     document: {
       querySelector: () => null,
@@ -350,7 +424,7 @@ test('structural diagnosis reads music class labels and counts without content o
       node('DIV', ['MusicCatalog'], { querySelectorAll: () => [node('DIV', ['AudioRow__root--xyz'])] }),
     ] : selector === 'iframe' ? [{ }] : [],
   };
-  const result = vm.runInNewContext(`(${inspectMusicDOM.toString()})()`, { document });
+  const result = runMusicFixture(`(${inspectMusicDOM.toString()})()`, { document });
   assert.equal(result.counts.frames, 1);
   assert.equal(result.counts.openShadowRoots, 1);
   assert.equal(result.components.AudioRow, 2);
@@ -369,7 +443,7 @@ test('structural report drops unexpected fields, identifiers, URLs, and out-of-r
 });
 
 test('login form prevents structural diagnosis as well as extraction', async () => {
-  const result = await vm.runInNewContext(`(${readMusicPage.toString()})(() => {
+  const result = await runMusicFixture(`(${readMusicPage.toString()})(() => {
     throw new Error('Inspected login structure');
   })`, {
     location: { protocol: 'https:', hostname: 'vk.ru', pathname: '/audio' },
@@ -436,7 +510,7 @@ test('modern row ignores mismatched track props and rejects malformed DOM identi
 });
 
 async function timingAction(action, since, entries, overrides = {}) {
-  return vm.runInNewContext(`(${musicPageAction.toString()})(${JSON.stringify(action)},'',{since:boundary})`, {
+  return runMusicFixture(`(${musicPageAction.toString()})(${JSON.stringify(action)},'',{since:boundary})`, {
     boundary: since, URL,
     location: { protocol: 'https:', hostname: 'vk.ru', pathname: '/audio' },
     document: { querySelector: () => null },
@@ -486,7 +560,7 @@ test('trusted activation rechecks the exact track and original playback area', a
     getBoundingClientRect:()=>({left:0,top:0,width:100,height:60}),
     closest:selector=>selector==='[data-audio-id]'?row:null};
   const row = {getAttribute:()=> '1_2', querySelector:()=>controls};
-  const run = (x=50, y=30, id='1_2') => vm.runInNewContext(
+  const run = (x=50, y=30, id='1_2') => runMusicFixture(
     `(${musicPageAction.toString()})('verify-play-hit',id,{x,y})`, {
       id,x,y, location:{protocol:'https:',hostname:'vk.ru',pathname:'/audio'},
       window:{innerWidth:200,innerHeight:200}, document:{querySelector:()=>null,
@@ -520,7 +594,7 @@ test('playback state projects only recognized controls within the requested row'
   Object.defineProperty(svg,'value',{get(){throw Error('Field read');}});
   const region = {tagName:'DIV',getAttribute:()=>null,querySelectorAll:s=>s==='*'?[svg]:[]};
   const row = {getAttribute:()=> '1_2',querySelector:()=>region};
-  const run = () => vm.runInNewContext(`(${musicPageAction.toString()})('probe-playback','1_2')`, {
+  const run = () => runMusicFixture(`(${musicPageAction.toString()})('probe-playback','1_2')`, {
     location:{protocol:'https:',hostname:'vk.ru',pathname:'/audio'},
     document:{querySelector:()=>null,querySelectorAll:s=>s==='[data-audio-id]'?[row]:[]},
   });
@@ -540,7 +614,7 @@ test('native input targets the visible Play button rather than its surrounding c
     closest:s=>s==='[data-audio-id]'?row:null,contains:e=>e===button};
   const region = {getBoundingClientRect:()=>({left:0,top:0,width:100,height:40}),querySelectorAll:()=>[button]};
   preferred = {tagName:'DIV',getBoundingClientRect:region.getBoundingClientRect};
-  const result = await vm.runInNewContext(`(${musicPageAction.toString()})('play-position','1_2')`, {
+  const result = await runMusicFixture(`(${musicPageAction.toString()})('play-position','1_2')`, {
     location:{protocol:'https:',hostname:'vk.ru',pathname:'/audio'},
     window:{innerWidth:200,innerHeight:200},setTimeout:f=>f(),
     document:{querySelector:()=>null,querySelectorAll:()=>[row],elementFromPoint:()=>button},
@@ -604,7 +678,7 @@ test('selected music refresh rejects non-music content before reading its body',
 
 test('selected music reference resolves without scrolling or reading account state', async () => {
   let requested = 0;
-  const invoke = (id, form=false) => vm.runInNewContext(`(${musicPageAction.toString()})('resolve-reference',${JSON.stringify(id)})`, {
+  const invoke = (id, form=false) => runMusicFixture(`(${musicPageAction.toString()})('resolve-reference',${JSON.stringify(id)})`, {
     location:{protocol:'https:',hostname:'vk.ru',pathname:'/audio'},
     document:{querySelector:()=>form?{}:null,querySelectorAll:()=>{throw Error('Unexpected DOM traversal');}},
     fetch:async (path,options)=>{
@@ -634,7 +708,7 @@ test('music references are projected only for the app metadata path', async () =
 test('selected music response accepts bounded array wrappers but never mismatched audio', async () => {
   const row=[2,1,'https://music.vkuseraudio.ru/selected.mp3','Generated','Generated',180];
   for (const batch of [[[row]], [row], [[[row]]], [{audios:[row]}]]) {
-    const result=await vm.runInNewContext(`(${musicPageAction.toString()})('resolve-reference','1_2')`,{
+    const result=await runMusicFixture(`(${musicPageAction.toString()})('resolve-reference','1_2')`,{
       location:{protocol:'https:',hostname:'vk.ru',pathname:'/audio'},document:{querySelector:()=>null},
       fetch:async()=>({ok:true,headers:{get:()=> 'application/json'},text:async()=>JSON.stringify({payload:[0,batch]})}),
       URLSearchParams,AbortSignal,window:{vk:{id:1}},navigator:{userAgent:'Generated'},
@@ -648,7 +722,7 @@ test('music search writes only the recognized music input without reading its va
   function Input() {}
   Object.defineProperty(Input.prototype,'value',{set:value=>{written=value;},get:()=>{throw Error('Input value read');}});
   const input={getAttribute:name=>name==='placeholder'?'Search music':name==='type'?'search':null,dispatchEvent:()=>events++};
-  const result=await vm.runInNewContext(`(${musicPageAction.toString()})('search-track','1_2',{musicQuery:'Generated song'})`,{
+  const result=await runMusicFixture(`(${musicPageAction.toString()})('search-track','1_2',{musicQuery:'Generated song'})`,{
     location:{protocol:'https:',hostname:'vk.ru',pathname:'/audio'},document:{querySelector:()=>null,querySelectorAll:()=>[input]},
     HTMLInputElement:Input,Event:class{},
   });
@@ -661,7 +735,7 @@ test('music search rejects sign-in, duplicate controls and a generic header with
   function Input() {}
   Object.defineProperty(Input.prototype,'value',{set:()=>writes++,get:()=>{throw Error('Field value read');}});
   const input=label=>({getAttribute:name=>name==='placeholder'?label:name==='type'?'search':null,dispatchEvent(){}});
-  const invoke=(inputs,form=false)=>vm.runInNewContext(`(${musicPageAction.toString()})('search-track','1_2',{musicQuery:'Generated'})`,{
+  const invoke=(inputs,form=false)=>runMusicFixture(`(${musicPageAction.toString()})('search-track','1_2',{musicQuery:'Generated'})`,{
     location:{protocol:'https:',hostname:'vk.ru',pathname:'/audio'},
     document:{querySelector:()=>form?{}:null,querySelectorAll:()=>{if(form)throw Error('Sign-in fields traversed');return inputs;}},
     HTMLInputElement:Input,Event:class{},
@@ -707,7 +781,7 @@ test('an explicitly disabled exact-row Play control cannot be activated', async 
   let clicked=false;
   const button={disabled:true,click:()=>clicked=true};
   const row={getAttribute:name=>name==='data-audio-id'?'1_2':null,querySelector:()=>button};
-  const result=await vm.runInNewContext(`(${musicPageAction.toString()})('play','1_2')`,{
+  const result=await runMusicFixture(`(${musicPageAction.toString()})('play','1_2')`,{
     location:{protocol:'https:',hostname:'vk.ru',pathname:'/audio'},document:{querySelector:()=>null,querySelectorAll:()=>[row]},
   });
   assert.equal(result.blocked,true);assert.equal(clicked,false);
@@ -795,22 +869,22 @@ test('lyrics control positioning is bound to the exact music row and never activ
   const button={disabled:false,getAttribute:name=>name==='aria-label'?'Show lyrics':null,getBoundingClientRect:()=>({left:20,top:20,width:20,height:20}),scrollIntoView(){},contains:()=>true};
   const row={getAttribute:name=>name==='data-audio-id'?'1_2':null,querySelectorAll:()=>[button],querySelector:()=>({textContent:'Generated'}),getBoundingClientRect:()=>({left:0,top:0,width:200,height:60}),scrollIntoView(){}};
   const context={location:{protocol:'https:',hostname:'vk.ru',pathname:'/audio'},window:{innerWidth:800,innerHeight:600},document:{querySelector:()=>null,querySelectorAll:s=>s==='[data-audio-id]'?[row]:[],elementFromPoint:()=>button},setTimeout:fn=>fn()};
-  const result=await vm.runInNewContext(`(${musicPageAction.toString()})('lyrics-position','1_2')`,context);
+  const result=await runMusicFixture(`(${musicPageAction.toString()})('lyrics-position','1_2')`,context);
   assert.deepEqual(JSON.parse(JSON.stringify(result.position)),{x:30,y:30});
-  const wrong=await vm.runInNewContext(`(${musicPageAction.toString()})('lyrics-position','1_99')`,context);
+  const wrong=await runMusicFixture(`(${musicPageAction.toString()})('lyrics-position','1_99')`,context);
   assert.ok(wrong.error);
 });
 
 test('lyrics dialog text from another recording cannot be imported',async()=>{
   const dialog={getAttribute:name=>name==='data-audio-id'?'1_99':null,querySelector:()=>({textContent:'Wrong lyrics'})};
   const context={location:{protocol:'https:',hostname:'vk.ru',pathname:'/audio'},window:{__ownsembleLyricsRequest:{id:'1_2',at:Date.now(),title:'Generated'}},document:{querySelector:()=>null,querySelectorAll:()=>[dialog]}};
-  const result=await vm.runInNewContext(`(${musicPageAction.toString()})('read-lyrics','1_2')`,context);
+  const result=await runMusicFixture(`(${musicPageAction.toString()})('read-lyrics','1_2')`,context);
   assert.equal(result.lyrics,undefined);
 });
 
 test('a recently requested exact-recording lyrics dialog supplies plain text only',async()=>{
   const dialog={getAttribute:name=>name==='data-audio-id'?'1_2':null,querySelector:()=>({textContent:'Generated lyrics'})};
-  const result=await vm.runInNewContext(`(${musicPageAction.toString()})('read-lyrics','1_2')`,{
+  const result=await runMusicFixture(`(${musicPageAction.toString()})('read-lyrics','1_2')`,{
     location:{protocol:'https:',hostname:'vk.ru',pathname:'/audio'},window:{__ownsembleLyricsRequest:{id:'1_2',at:Date.now(),title:'Generated'}},
     document:{querySelector:()=>null,querySelectorAll:()=>[dialog]},
   });
@@ -836,7 +910,7 @@ test('pagination advances the music row scroll container instead of the outer pa
       // Keep the fixture's final row rendered without moving the outer page.
       scrollIntoView: () => {} };
     // Run the actual serialized page action against the generated layout.
-    const result = await vm.runInNewContext(`(${musicPageAction.toString()})('${action}')`, {
+    const result = await runMusicFixture(`(${musicPageAction.toString()})('${action}')`, {
       location: { protocol: 'https:', hostname: 'vk.ru', pathname: '/audios' },
       document: { querySelector: () => null, querySelectorAll: () => [row] },
       window: { innerHeight: 900, scrollBy: (x, y) => outerMoves.push(y) },
@@ -859,7 +933,7 @@ test('pagination retains document scrolling when no music ancestor scrolls', asy
   // Model a rendered music row without a nested scroll ancestor.
   const row = { parentElement: null, getAttribute: () => '1_2', scrollIntoView: () => {} };
   // Run the production page action with only document scrolling available.
-  const result = await vm.runInNewContext(`(${musicPageAction.toString()})('advance')`, {
+  const result = await runMusicFixture(`(${musicPageAction.toString()})('advance')`, {
     location: { protocol: 'https:', hostname: 'vk.ru', pathname: '/audios' },
     document: { querySelector: () => null, querySelectorAll: () => [row] },
     window: { innerHeight: 900, scrollBy: (x, y) => moves.push(y) },
@@ -886,7 +960,7 @@ test('pagination finds the music pane before a trailing unrelated hidden row', a
   const hidden = { parentElement: null, getAttribute: () => '1_3', getClientRects: () => [],
     scrollIntoView: () => { throw Error('hidden row scrolled'); } };
   // Run the actual page action with the hidden row at the end of the node list.
-  const result = await vm.runInNewContext(`(${musicPageAction.toString()})('advance')`, {
+  const result = await runMusicFixture(`(${musicPageAction.toString()})('advance')`, {
     location: { protocol: 'https:', hostname: 'vk.ru', pathname: '/audios' },
     document: { querySelector: () => null, querySelectorAll: () => [music, hidden] },
     window: { innerHeight: 900, scrollBy: (x, y) => outerMoves.push(y) },
@@ -911,7 +985,7 @@ test('library pagination probe projects music counts without private response fi
     // Count requests to ensure the diagnostic cannot paginate by itself.
     let requests = 0;
     // Run the real guarded action using only generated response data.
-    const result = await vm.runInNewContext(`(${musicPageAction.toString()})('probe-library-page')`, {
+    const result = await runMusicFixture(`(${musicPageAction.toString()})('probe-library-page')`, {
       location: { protocol: 'https:', hostname: 'vk.ru', pathname: '/audios' },
       document: { querySelector: () => null }, window: { vk: { id: 17 } },
       URLSearchParams, AbortSignal,
@@ -932,7 +1006,7 @@ test('library pagination probe projects music counts without private response fi
     assert.deepEqual(JSON.parse(JSON.stringify(result)), { counts: {
       libraryRequestOK: 1, libraryShapeSupported: 1, libraryRows: 1,
       libraryHasMore: 1, libraryNextOffset: 1, libraryTotal: 2633,
-      libraryResponseCharacters: JSON.stringify(reply).length,
+      libraryResponseCharacters: JSON.stringify(reply).length, libraryResponseBytes: Buffer.byteLength(JSON.stringify(reply)), libraryWindows1251: 0,
     } });
   }
 });
@@ -942,7 +1016,7 @@ test('library pagination probe does not read HTML responses', async () => {
   // Track any attempt to inspect a response outside the music JSON contract.
   let bodyRead = false;
   // Run the guarded request against a generated HTML response.
-  const result = await vm.runInNewContext(`(${musicPageAction.toString()})('probe-library-page')`, {
+  const result = await runMusicFixture(`(${musicPageAction.toString()})('probe-library-page')`, {
     location: { protocol: 'https:', hostname: 'vk.ru', pathname: '/audios' },
     document: { querySelector: () => null }, window: { vk: { id: 17 } },
     URLSearchParams, AbortSignal,
@@ -958,7 +1032,7 @@ test('library pagination probe never sends a request when a sign-in form exists'
   // Detect any forbidden network activity during private sign-in.
   let requests = 0;
   // Run the action behind a generated sign-in-form presence flag.
-  const result = await vm.runInNewContext(`(${musicPageAction.toString()})('probe-library-page')`, {
+  const result = await runMusicFixture(`(${musicPageAction.toString()})('probe-library-page')`, {
     location: { protocol: 'https:', hostname: 'vk.ru', pathname: '/audios' },
     document: { querySelector: () => ({}) },
     fetch: async () => { requests++; throw Error('forbidden request'); },
@@ -974,7 +1048,7 @@ test('library pagination probe drops a response when sign-in starts while awaiti
   // Detect any attempt to read the response after private sign-in begins.
   let bodyRead = false;
   // Run the action against a request that completes during private sign-in.
-  const result = await vm.runInNewContext(`(${musicPageAction.toString()})('probe-library-page')`, {
+  const result = await runMusicFixture(`(${musicPageAction.toString()})('probe-library-page')`, {
     location: { protocol: 'https:', hostname: 'vk.ru', pathname: '/audios' },
     document: { querySelector: () => signInPresent ? {} : null },
     window: { vk: { id: 17 } }, URLSearchParams, AbortSignal,
@@ -993,7 +1067,7 @@ test('library pagination probe rechecks sign-in before decoding a completed body
   // Change only a generated presence flag; never model or read credential values.
   let signInPresent = false;
   // Complete the music body after the form-presence flag changes.
-  const result = await vm.runInNewContext(`(${musicPageAction.toString()})('probe-library-page')`, {
+  const result = await runMusicFixture(`(${musicPageAction.toString()})('probe-library-page')`, {
     location: { protocol: 'https:', hostname: 'vk.ru', pathname: '/audios' },
     document: { querySelector: () => signInPresent ? {} : null },
     window: { vk: { id: 17 } }, URLSearchParams, AbortSignal,
@@ -1016,7 +1090,7 @@ test('library pagination probe masks network errors and unknown reply fields', a
     URLSearchParams, AbortSignal,
   };
   // Fail with a generated sensitive-looking message that must not be returned.
-  const failed = await vm.runInNewContext(`(${musicPageAction.toString()})('probe-library-page')`, {
+  const failed = await runMusicFixture(`(${musicPageAction.toString()})('probe-library-page')`, {
     ...environment, fetch: async () => { throw Error('generated private destination'); },
   });
   assert.deepEqual(JSON.parse(JSON.stringify(failed)), { counts: {
@@ -1027,13 +1101,13 @@ test('library pagination probe masks network errors and unknown reply fields', a
   const partialBody = JSON.stringify({ payload: [0, [{ list: [], hasMore: 'yes',
     nextOffset: -1, totalCount: 1000000001, ignored: 'generated private field' }]] });
   // Supply malformed continuation fields while keeping the music list shape valid.
-  const partial = await vm.runInNewContext(`(${musicPageAction.toString()})('probe-library-page')`, {
+  const partial = await runMusicFixture(`(${musicPageAction.toString()})('probe-library-page')`, {
     ...environment, fetch: async () => ({ ok: true, headers: { get: () => 'application/json' },
       text: async () => partialBody }),
   });
   assert.deepEqual(JSON.parse(JSON.stringify(partial)), { counts: {
     libraryRequestOK: 1, libraryShapeSupported: 1, libraryRows: 0,
-    libraryResponseCharacters: partialBody.length,
+    libraryResponseCharacters: partialBody.length, libraryResponseBytes: Buffer.byteLength(partialBody), libraryWindows1251: 0,
   } });
 });
 
@@ -1052,7 +1126,7 @@ test('library membership probe follows one continuation and identifies extra rec
     closest: () => identity === '17_4' ? {} : null,
   }));
   // Run the same probe with its fixed membership-comparison option enabled.
-  const result = await vm.runInNewContext(`(${musicPageAction.toString()})('probe-library-page',null,{compareMembership:true})`, {
+  const result = await runMusicFixture(`(${musicPageAction.toString()})('probe-library-page',null,{compareMembership:true})`, {
     location: { protocol: 'https:', hostname: 'vk.ru', pathname: '/audios' },
     document: { querySelector: () => null, querySelectorAll: () => rows },
     window: { vk: { id: 17 } }, URLSearchParams, AbortSignal,
@@ -1078,7 +1152,7 @@ test('library membership probe rejects more than four thousand complete entries'
   const playlist = { list: Array.from({ length: 4001 }, (_, index) => [index + 1, 17]),
     hasMore: false, totalCount: 4001 };
   // Run the bounded probe without permitting a DOM comparison for this oversized list.
-  const result = await vm.runInNewContext(`(${musicPageAction.toString()})('probe-library-page',null,{compareMembership:true})`, {
+  const result = await runMusicFixture(`(${musicPageAction.toString()})('probe-library-page',null,{compareMembership:true})`, {
     location: { protocol: 'https:', hostname: 'vk.ru', pathname: '/audios' },
     document: { querySelector: () => null,
       querySelectorAll: () => { throw Error('oversized comparison must not inspect DOM'); } },
@@ -1095,7 +1169,7 @@ test('stalled optional metadata cannot hold up library membership counters', asy
   // Model a complete one-recording playlist without any continuation request.
   const playlist = { list: [[1, 17]], hasMore: false, totalCount: 1 };
   // Start the actual action with an optional metadata reader that never finishes.
-  const action = vm.runInNewContext(`(${musicPageAction.toString()})('probe-library-page',null,{compareMembership:true})`, {
+  const action = runMusicFixture(`(${musicPageAction.toString()})('probe-library-page',null,{compareMembership:true})`, {
     location: { protocol: 'https:', hostname: 'vk.ru', pathname: '/audios' },
     document: { querySelector: () => null, querySelectorAll: () => [] },
     window: { vk: { id: 17 }, ownsembleMusic: { read: () => new Promise(() => {}) } },
@@ -1119,7 +1193,7 @@ test('a stalled page timer cannot block the second bounded library request', asy
   // Track the bounded request count without reading any account data.
   let requests = 0;
   // Simulate a hidden-page timer that never invokes its callback.
-  const action = vm.runInNewContext(`(${musicPageAction.toString()})('probe-library-page',null,{compareMembership:true})`, {
+  const action = runMusicFixture(`(${musicPageAction.toString()})('probe-library-page',null,{compareMembership:true})`, {
     location: { protocol: 'https:', hostname: 'vk.ru', pathname: '/audios' },
     document: { querySelector: () => null, querySelectorAll: () => [] },
     window: { vk: { id: 17 } }, URLSearchParams, AbortSignal,
@@ -1141,7 +1215,7 @@ test('library probe reports HTTP and format categories for rejected responses', 
     // Detect any forbidden body read for either unsupported response category.
     let bodyRead = false;
     // Run the guarded probe with only generated transport metadata.
-    const result = await vm.runInNewContext(`(${musicPageAction.toString()})('probe-library-page')`, {
+    const result = await runMusicFixture(`(${musicPageAction.toString()})('probe-library-page')`, {
       location: { protocol: 'https:', hostname: 'vk.ru', pathname: '/audios' },
       document: { querySelector: () => null }, window: { vk: { id: 17 } },
       URLSearchParams, AbortSignal,
@@ -1161,7 +1235,7 @@ test('library probe accepts a valid music page above the former response budget'
   const body = JSON.stringify({ payload: [0, [{ list: [], hasMore: false }]],
     ignored: 'x'.repeat(2 * 1024 * 1024) });
   // Run the same bounded reader without any real account or network interaction.
-  const result = await vm.runInNewContext(`(${musicPageAction.toString()})('probe-library-page')`, {
+  const result = await runMusicFixture(`(${musicPageAction.toString()})('probe-library-page')`, {
     location: { protocol: 'https:', hostname: 'vk.ru', pathname: '/audios' },
     document: { querySelector: () => null }, window: { vk: { id: 17 } },
     URLSearchParams, AbortSignal,
@@ -1177,7 +1251,7 @@ test('library probe reports oversized response length without parsing its body',
   // Exceed the new eight-million-character cap with generated whitespace only.
   const body = ' '.repeat(8 * 1024 * 1024 + 1);
   // Run the actual reader against the oversized generated response text.
-  const result = await vm.runInNewContext(`(${musicPageAction.toString()})('probe-library-page')`, {
+  const result = await runMusicFixture(`(${musicPageAction.toString()})('probe-library-page')`, {
     location: { protocol: 'https:', hostname: 'vk.ru', pathname: '/audios' },
     document: { querySelector: () => null }, window: { vk: { id: 17 } },
     URLSearchParams, AbortSignal,

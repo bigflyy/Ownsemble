@@ -241,7 +241,9 @@ async function musicPageAction(action, id, options = {}) {
       }
       // Reject HTML, redirects and failures without reading their response bodies.
       // Classify the response format without forwarding its header text.
-      const jsonResponse = /^(?:application\/json|text\/plain)(?:;|$)/i.test(response.headers?.get('content-type') || '');
+      const contentType = response.headers?.get('content-type') || '';
+      // Validate the declared body type independently of its text encoding.
+      const jsonResponse = /^(?:application\/json|text\/plain)(?:;|$)/i.test(contentType);
       // Retain only a bounded HTTP status code for transport troubleshooting.
       const httpStatus = Number.isInteger(response.status) && response.status >= 100 && response.status <= 599 ? response.status : 0;
       // Stop before body access when transport or response format is unsupported.
@@ -251,7 +253,28 @@ async function musicPageAction(action, id, options = {}) {
       }
       // Bound the known music-list JSON before decoding it.
       failureStage = 2;
-      const body = await response.text();
+      // Fetch text() always assumes UTF-8, while VK can explicitly send Windows-1251.
+      const charset = /;\s*charset\s*=\s*["']?([^;\s"']+)/i.exec(contentType)?.[1]?.toLowerCase() || 'utf-8';
+      // Accept only known encodings, never guess from already damaged display text.
+      const windows1251 = ['windows-1251', 'cp1251', 'x-cp1251'].includes(charset);
+      // Reject unknown encodings before reading their bodies.
+      if (!windows1251 && !['utf-8', 'utf8'].includes(charset)) {
+        return { counts: { libraryEncodingUnsupported: 1 } };
+      }
+      // Read raw bytes once so invalid text cannot silently replace good saved metadata.
+      const bytes = await response.arrayBuffer();
+      // Recheck private-login consent before decoding any transferred bytes.
+      if (!musicRequestAllowed()) return { error: 'Sign-in is required; automatic music access is paused.' };
+      // Bound byte allocation before text decoding; retain the existing decoded-character cap below.
+      if (bytes.byteLength > 16 * 1024 * 1024) return { counts: { libraryResponseTooLarge: 1, libraryResponseBytes: bytes.byteLength } };
+      // Keep decoded text internal to the guarded music-list projection.
+      let body;
+      try {
+        body = new TextDecoder(windows1251 ? 'windows-1251' : 'utf-8', { fatal: true }).decode(bytes);
+      } catch {
+        // Report only the encoding category, never raw bytes or decoder exception text.
+        return { counts: { libraryEncodingFailed: 1, libraryWindows1251: Number(windows1251) } };
+      }
       responseCharacters = body.length;
       // Discard a completed body if private sign-in began during its transfer.
       if (!musicRequestAllowed()) {
@@ -270,7 +293,7 @@ async function musicPageAction(action, id, options = {}) {
       if (!playlist || !Array.isArray(playlist.list) || playlist.list.length > 5000) {
         return { counts: { libraryRequestOK: 1, libraryShapeUnsupported: 1 } };
       }
-      return { playlist, characters: body.length };
+      return { playlist, characters: body.length, windows1251, bytes: bytes.byteLength };
     }
     // Extract a recording identity internally without exporting its value.
     function recordingIdentity(record) {
@@ -292,7 +315,8 @@ async function musicPageAction(action, id, options = {}) {
       const playlist = first.playlist;
       // Keep only fixed numeric counters for import failures and pagination diagnostics.
       const importCounts = { libraryRequestOK: 1, libraryShapeSupported: 1,
-        libraryRows: playlist.list.length, libraryResponseCharacters: first.characters };
+        libraryRows: playlist.list.length, libraryResponseCharacters: first.characters,
+        libraryWindows1251: Number(first.windows1251), libraryResponseBytes: first.bytes };
       // Project typed provider counters without retaining server strings or music identities.
       for (const [key, value] of [['libraryNextOffset', playlist.nextOffset], ['libraryTotal', playlist.totalCount]]) {
         // Omit malformed counters rather than guessing their meaning.
@@ -323,7 +347,7 @@ async function musicPageAction(action, id, options = {}) {
           // Use a detached textarea; its content is never inserted into the page.
           const element = document.createElement('textarea');
           element.innerHTML = value;
-          return element.value;
+          return typeof element.value === 'string' && !element.value.includes(String.fromCharCode(65533)) ? element.value : null;
         }
         // Validate every row before exposing a page for merging.
         const tracks = [];
@@ -350,7 +374,8 @@ async function musicPageAction(action, id, options = {}) {
       }
       // Return numeric diagnostics only; retain no track objects or response body.
       const counts = { libraryRequestOK: 1, libraryShapeSupported: 1,
-        libraryRows: playlist.list.length, libraryResponseCharacters: first.characters };
+        libraryRows: playlist.list.length, libraryResponseCharacters: first.characters,
+        libraryWindows1251: Number(first.windows1251), libraryResponseBytes: first.bytes };
       // Preserve only explicit, well-typed continuation flags.
       if ([true, false, 0, 1].includes(playlist.hasMore)) counts.libraryHasMore = Number(playlist.hasMore);
       // Read only named pagination offsets and totals within the numeric budget.

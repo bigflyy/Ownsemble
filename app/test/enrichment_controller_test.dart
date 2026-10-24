@@ -417,6 +417,38 @@ void main() {
     await controller.shutdown();
     await folder.delete(recursive: true);
   });
+  test('metadata text quality diagnostics expose counts without recording text', () async {
+    // Keep every recording and the database generated for this privacy regression.
+    final folder = await Directory.systemTemp.createTemp(
+      'ownsemble-text-quality-',
+    );
+    // Construct Cyrillic and replacement characters without shell encoding dependencies.
+    final title = String.fromCharCodes([1050, 1088, 1072, 1081]);
+    // Mark a damaged generated value without exposing any real catalog content.
+    final replacement = String.fromCharCode(65533);
+    // Exercise numeric quality counters on all three relevant text shapes.
+    final store = LibraryStore(folder)
+      ..merge([
+        Track('17_1', title, 'Fixture', 60),
+        Track('17_2', replacement, 'Fixture', 60),
+        const Track('17_3', '???', 'Fixture', 60),
+      ]);
+    // Reuse the actual application-owned summary with a generated provider.
+    final controller = EnrichmentController(store, EnrichmentProvider());
+    try {
+      // Keep titles and artists internal while reporting only bounded aggregate counts.
+      final summary = controller.metadataSummary();
+      expect(summary['cyrillic_titles'], 1);
+      expect(summary['replacement_metadata'], 1);
+      expect(summary['question_mark_metadata'], 1);
+      expect(summary.toString().contains(title), isFalse);
+      expect(summary.toString().contains('Fixture'), isFalse);
+    } finally {
+      await controller.shutdown();
+      await folder.delete(recursive: true);
+    }
+  });
+
   test(
     'metadata diagnostics expose counts without titles, lyrics or source URLs',
     () async {

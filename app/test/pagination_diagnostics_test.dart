@@ -24,6 +24,10 @@ void main() {
     () {
       expect(
         paginationCounts({
+          'libraryWindows1251': 1,
+          'libraryEncodingFailed': 1,
+          'libraryEncodingUnsupported': 0,
+          'libraryResponseBytes': 123,
           'libraryMetadataUnsupported': 1,
           'libraryPaginationUnsupported': 0,
           'libraryProbeFailureStage': 3,
@@ -33,6 +37,10 @@ void main() {
           'rawBody': 'generated private reply',
         }),
         {
+          'libraryWindows1251': 1,
+          'libraryEncodingFailed': 1,
+          'libraryEncodingUnsupported': 0,
+          'libraryResponseBytes': 123,
           'libraryMetadataUnsupported': 1,
           'libraryPaginationUnsupported': 0,
           'libraryProbeFailureStage': 3,

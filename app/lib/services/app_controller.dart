@@ -289,6 +289,16 @@ class AppController extends ChangeNotifier {
         store.db.select(sql).first.values.first as int? ?? 0;
     return {
       'import_dates': number('SELECT COUNT(*) FROM tracks WHERE updated>0'),
+      // Report text quality as aggregate counts without exposing any recording text.
+      'cyrillic_titles': number(
+        "SELECT COUNT(*) FROM tracks WHERE title GLOB ('*[' || char(1024) || '-' || char(1279) || ']*')",
+      ),
+      'replacement_metadata': number(
+        'SELECT COUNT(*) FROM tracks WHERE instr(title,char(65533))>0 OR instr(artist,char(65533))>0',
+      ),
+      'question_mark_metadata': number(
+        "SELECT COUNT(*) FROM tracks WHERE instr(title,'???')>0 OR instr(artist,'???')>0",
+      ),
       'enriched_tracks': number('SELECT COUNT(*) FROM track_metadata'),
       'albums': number(
         "SELECT COUNT(*) FROM track_metadata WHERE json_type(body,'\$.album')='text'",

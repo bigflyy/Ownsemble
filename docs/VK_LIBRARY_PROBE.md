@@ -63,8 +63,11 @@ recording is unavailable or that earlier imports were recommendations.
 - Recheck the recognized route and sign-in-form presence before every request,
   after headers and after body transfer. Never read credential-field values.
 - Reject redirects and non-JSON/plain-text response types before body access.
-  Reject text over 8,388,608 characters before JSON decoding. This bounds parsing,
-  not bytes accumulated by `response.text()` before that check.
+  Read bytes and decode the declared Windows-1251 or UTF-8 encoding explicitly;
+  missing charset defaults to UTF-8. Reject unknown encodings and invalid bytes.
+  Reject buffers over 16 MiB before text decoding and text over 8 Mi characters
+  before JSON parsing. These checks occur after `arrayBuffer()` accumulates the
+  response; they do not impose a streaming network-byte cap.
 - Project only known basic recording fields. Drop response media URLs; exact
   Play source validation and cache bindings remain independent.
 - `library_listing_page` reports only allowlisted numeric page/total/transport
@@ -98,10 +101,35 @@ addition/removal was not induced on the account; new additions are generated-dat
 qualification, not a claim of a real account mutation test. Timing is host/network
 specific. Ordinary Linux qualification remains separate.
 
-Generated checks: 258 Flutter tests, 75 app-adapter/diagnostic Node tests and 66
+Generated checks: 260 Flutter tests, 78 app-adapter/diagnostic Node tests and 66
 preserved probe/CLI tests pass; Dart analysis is clean. The shared provider
 contract probe passes. Native Windows candidate Release browser isolation/input,
 1,200-row catalog/restart/SQLite, and streaming/seek/cache/offline checks pass.
 Streaming starts at 306 ms with the generated delayed source; the existing
 nonfatal decoder signal 4096 remains, while complete validation passes. These
 fixture results do not certify physical sound quality or other operating systems.
+
+## Cyrillic import regression and recovery
+
+The initial listing importer used Fetch `response.text()`, which decodes UTF-8
+regardless of a legacy response charset. Native VK replies declare Windows-1251.
+That importer therefore saved replacement characters in 1,541 catalog rows.
+ASCII-only import fixtures missed this defect; basic counts and complete page
+coverage did not prove text fidelity.
+
+The corrected importer reads bytes and uses a strict TextDecoder for the declared
+allowlisted encoding. Invalid bytes, unknown encodings and replacement characters
+in projected metadata are rejected before merging. Generated tests first reproduce
+Windows-1251 Cyrillic corruption and invalid UTF-8 being silently accepted. Further
+qualification covers UTF-8 Cyrillic/emoji, missing charset, privacy guards and
+metadata recovery across restart without changing IDs, cache, Piles, history or
+first-import timestamps. Public source files were also checked as strict UTF-8.
+
+Native corrected Debug qualification received Windows-1251 on both personal-list
+pages and completed the 2,616-member enumeration in 32,447 ms on this attempt.
+Earlier runs took 9,354-19,403 ms; provider/network/preparation latency varies.
+The corrected merge restored the saved text: replacement-character rows 1,541
+before repair, zero afterwards; Cyrillic titles 37 before, 1,527 afterwards.
+All 2,635 saved tracks, 2,632 optional-metadata records and 113 cached-artwork
+records remained. These are aggregate counts only; no recording text was exported.
+The repair reuses exact recording identities and does not redownload audio.

@@ -262,6 +262,48 @@ void main() {
     expect(store.track('1_4'), isNull);
     expect(store.count, 3);
   });
+  test('corrected Cyrillic metadata survives restart without changing identity, cache or organization', () {
+    // Keep a generated recording's organization and validated cache independent of display text.
+    final original = store.track('1_1')!;
+    // Preserve its first-import timestamp when corrected source metadata is merged later.
+    final imported = store.db
+        .select("SELECT updated FROM tracks WHERE id='1_1'")
+        .single['updated'];
+    // Retain a Pile occurrence and listening record through the same identity.
+    final pile = store.createPile('Generated');
+    store.addToPile(pile, '1_1');
+    store.pinTrack('1_1', true);
+    store.startPlay('1_1');
+    store.saveAsset(
+      const CachedAudio('1_1', 'generated.mp3', 'generated', 100, 120),
+    );
+    store.mergeMetadata('1_1', {'album': 'Generated album'});
+    // Model the damaged text already persisted by the old permissive decoder.
+    final damaged = String.fromCharCodes([65533, 65533, 65533]);
+    store.merge([Track('1_1', damaged, damaged, 120)]);
+    // A correctly decoded fresh listing restores text using the same stable identity.
+    store.merge([original], discoveredAt: store.now + 1000);
+    store.close();
+    store = LibraryStore(folder);
+    expect(store.track('1_1')!.title, original.title);
+    expect(store.track('1_1')!.artist, original.artist);
+    expect(store.count, 3);
+    expect(store.isPinned('1_1'), isTrue);
+    expect(store.asset('1_1')!.bytes, 100);
+    expect(store.metadata('1_1')['album'], 'Generated album');
+    expect(store.rows(pile: pile).single.track.id, '1_1');
+    expect(
+      store.db.select('SELECT COUNT(*) AS n FROM plays').single['n'],
+      1,
+    );
+    expect(
+      store.db
+          .select("SELECT updated FROM tracks WHERE id='1_1'")
+          .single['updated'],
+      imported,
+    );
+  });
+
   test('pins, settings and saved assets survive reopen without fixtures', () {
     store.pinTrack('1_2', true);
     store.setSetting('auto_sync', true);
