@@ -1,6 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
 task_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
+
+# Label compiled app payloads automatically without reading any runtime/private files.
+if [[ "${1:-}" == build || "${1:-}" == run ]]; then
+  # Distinguish the reviewed commit from any unpublished public source changes.
+  task_build_revision="$(bash "$task_root/scripts/build-revision.sh")"
+  set -- "$@" "--dart-define=OWNSEMBLE_BUILD_REVISION=$task_build_revision"
+fi
 task_windows_root="$(cd -- "$task_root" && pwd -W)"
 export APPDATA="$task_windows_root/.local/flutter-config"
 export LOCALAPPDATA="$task_windows_root/.local/flutter-config/local"

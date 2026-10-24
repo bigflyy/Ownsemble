@@ -39,8 +39,11 @@ String? repositoryRoot() {
 
 void main(List<String> args) {
   LibraryStore? store;
+  // Forward global failures after the application controller has been constructed.
+  void Function(Map<String, Object>)? diagnosticReporter;
   void reportError(Object error, StackTrace? stack) {
     try {
+      recordRuntimeFailure(error, stack, reporter: diagnosticReporter);
       store?.report(categoryOf(error));
       if (store != null) {
         File('${store!.directory.path}/runtime-error.json').writeAsStringSync(
@@ -104,6 +107,7 @@ void main(List<String> args) {
             ? '$root/.local/vk-proof/app-profile/flutter-webview'
             : '${directory.path}/private-webview',
       );
+      diagnosticReporter = controller.providerDiagnostic;
       if (args.contains('--offline') ||
           args.contains('--offline-check') ||
           preview) {

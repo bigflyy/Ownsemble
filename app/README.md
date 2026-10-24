@@ -1,5 +1,9 @@
 # Ownsemble desktop app
 
+For VK failures, run `node scripts/app-control.cjs diagnose` from the repository
+root with the app open. It collects a bounded, privacy-filtered report without
+triggering sign-in, sync or playback. See [VK diagnostics](../docs/VK_DIAGNOSTICS.md).
+
 Flutter/Dart/SQLite implementation, separate from both preserved feasibility probes.
 This is the first Windows candidate. Actual Android VK access and VK playlist
 membership are still acceptance gates; this is not a claim of a finished release.

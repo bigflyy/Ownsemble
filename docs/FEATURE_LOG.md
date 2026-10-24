@@ -506,6 +506,12 @@ Requested 2026-10-21; future work, not a change to the current task:
 
 ## Stage-level diagnostics without UI overhead or sensitive data
 
+2026-10-24: delivered the VK playback/sync/transfer foundation: correlated bounded
+journal, retained first-cause failures across restart, schema-filtered safe export,
+adapter/build identity, timings and passive collection command. See VK_DIAGNOSTICS.md.
+Remaining breadth includes deeper artwork/lyrics/persistence traces, installed-app
+export UI and broader instrumentation-on/off end-to-end performance comparisons.
+
 Requested 2026-10-21; extend existing sanitized diagnostics deliberately:
 
 - Trace critical operations through named stages with operation correlation,

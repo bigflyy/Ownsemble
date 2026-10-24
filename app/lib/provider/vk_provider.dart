@@ -552,7 +552,9 @@ class VkProvider implements MusicProvider, LibraryMembershipDiagnostics {
 
   Future<void> _install() async {
     _guard();
+    diagnostic?.call({'stage': 'adapter_install_started'});
     await _evaluate('(async()=>{${await loadAdapter()}return true;})()');
+    diagnostic?.call({'stage': 'adapter_install_finished'});
   }
 
   Future<void> _ensurePersonal({bool Function()? cancelled}) async {

@@ -16,6 +16,7 @@ import 'package:ownsemble/data/library_store.dart';
 import 'package:ownsemble/media/audio_cache.dart';
 import 'package:ownsemble/media/audio_policy.dart';
 import 'package:ownsemble/services/app_controller.dart';
+import 'package:ownsemble/services/diagnostic_store.dart';
 import 'package:ownsemble/services/playback_queue.dart';
 import 'package:ownsemble/ui/ownsemble_app.dart';
 import 'package:ownsemble/ui/app_shortcuts.dart';
@@ -45,6 +46,7 @@ class UiController extends AppController {
         playbackPlayer: MediaKitPlayback(Player(platformPlayer: native)),
         decodeAudio: decodeLocalAudio,
         musicProvider: FixtureProvider(),
+        diagnosticStore: DiagnosticStore.memory(),
       );
   @override
   Future<void> togglePlay({bool diagnostic = false}) async => toggles++;

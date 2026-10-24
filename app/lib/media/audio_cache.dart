@@ -47,6 +47,8 @@ class AudioCache {
   final void Function(int)? onProgress;
   final void Function(String)? onStage;
   final AudioResourceLoader? resourceLoader;
+  // Emit bounded lifecycle metrics without exposing request URLs or headers.
+  final void Function(Map<String, Object>)? onDiagnostic;
   int transferred = 0;
   bool _cancelled = false;
   HttpClient? _client;
@@ -70,8 +72,18 @@ class AudioCache {
     this.onProgress,
     this.onStage,
     this.resourceLoader,
+    this.onDiagnostic,
     CertificateVerifier certificateVerifier = const StrictCertificateVerifier(),
   }) : _platformCertificate = certificateVerifier;
+
+  /// Isolate optional diagnostic consumers from transport and playback behavior.
+  void _diagnose(Map<String, Object> event) {
+    try {
+      onDiagnostic?.call(event);
+    } catch (_) {
+      /* Diagnostics cannot fail a transfer. */
+    }
+  }
 
   Future<Uint8List> fetch(
     Uri source, {
@@ -99,6 +111,18 @@ class AudioCache {
       ..connectionTimeout = const Duration(seconds: 25)
       ..findProxy = (_) => 'DIRECT');
     _activeFetches++;
+    // Measure one fetch across redirects without changing its network ownership.
+    final transferWatch = Stopwatch()..start();
+    // Distinguish this fetch from concurrent manifest/key/segment requests.
+    final requestId = networkRequests + 1;
+    _diagnose({
+      'stage': 'transfer_started',
+      'request_id': requestId,
+      'destination': AudioDestinationFailure(
+        source,
+        redirect: false,
+      ).diagnostic,
+    });
     try {
       var uri = source;
       for (var hop = 0; hop < 6; hop++) {
@@ -109,6 +133,8 @@ class AudioCache {
           throw const ProofFailure('user_agent_invalid');
         }
         networkRequests++;
+        // Include DNS, socket connection and TLS in one accurately named measurement.
+        final connectionWatch = Stopwatch()..start();
         HttpClientRequest request;
         try {
           request = await client.getUrl(uri);
@@ -121,9 +147,20 @@ class AudioCache {
         }
         request.followRedirects = false;
         request.headers.set(HttpHeaders.userAgentHeader, userAgent);
+        // Record the combined connection duration before waiting for response headers.
+        final connectionMs = connectionWatch.elapsedMilliseconds;
         final response = await request.close().timeout(
           const Duration(seconds: 30),
         );
+        _diagnose({
+          'stage': 'transfer_headers',
+          'request_id': requestId,
+          'hop': hop,
+          'connect_ms': connectionMs,
+          'headers_ms': connectionWatch.elapsedMilliseconds - connectionMs,
+          'elapsed_ms': transferWatch.elapsedMilliseconds,
+          'http_status': response.statusCode,
+        });
         if ([301, 302, 303, 307, 308].contains(response.statusCode)) {
           final location = response.headers.value('location');
           if (location == null) {
@@ -138,10 +175,21 @@ class AudioCache {
         }
         onHeaders?.call(response.contentLength);
         final bytes = BytesBuilder(copy: false);
+        // Emit first-byte latency once, not on every chunk or progress callback.
+        var firstChunk = true;
         await for (final part in response.timeout(
           const Duration(seconds: 30),
         )) {
           if (cancelled?.call() == true) throw const ProofFailure('cancelled');
+          // Record the first actual body bytes, independently from header arrival.
+          if (firstChunk) {
+            firstChunk = false;
+            _diagnose({
+              'stage': 'transfer_first_bytes',
+              'request_id': requestId,
+              'first_byte_ms': transferWatch.elapsedMilliseconds,
+            });
+          }
           bytes.add(part);
           transferred += part.length;
           onProgress?.call(transferred);
@@ -151,16 +199,31 @@ class AudioCache {
           onChunk?.call(Uint8List.fromList(part));
         }
         if (bytes.isEmpty) throw const ProofFailure('audio_empty');
+        _diagnose({
+          'stage': 'transfer_finished',
+          'request_id': requestId,
+          'elapsed_ms': transferWatch.elapsedMilliseconds,
+          'bytes': bytes.length,
+        });
         return bytes.takeBytes();
       }
       throw const ProofFailure('audio_redirect_budget');
-    } on ProofFailure {
+    } on ProofFailure catch (error) {
+      _diagnose({
+        'stage': 'transfer_failed',
+        'request_id': requestId,
+        'elapsed_ms': transferWatch.elapsedMilliseconds,
+        'category': error.category,
+        if (error.code != null) 'code': error.code!,
+        if (error is AudioDestinationFailure) 'destination': error.diagnostic,
+      });
       rethrow;
     } catch (error) {
       if (_cancelled || cancelled?.call() == true) {
         throw const ProofFailure('cancelled');
       }
-      throw ProofFailure(switch (error) {
+      // Preserve the existing sanitized transport category while measuring failure latency.
+      final failure = ProofFailure(switch (error) {
         HandshakeException() =>
           error.toString().toLowerCase().contains('certificate_verify_failed')
               ? 'audio_certificate_failed'
@@ -170,6 +233,14 @@ class AudioCache {
         TimeoutException() => 'audio_network_timeout',
         _ => 'audio_network_failed',
       }, code: error is SocketException ? error.osError?.errorCode : null);
+      _diagnose({
+        'stage': 'transfer_failed',
+        'request_id': requestId,
+        'elapsed_ms': transferWatch.elapsedMilliseconds,
+        'category': failure.category,
+        if (failure.code != null) 'code': failure.code!,
+      });
+      throw failure;
     } finally {
       _activeFetches--;
       if (_activeFetches == 0 && identical(_client, client) && !_cancelled) {

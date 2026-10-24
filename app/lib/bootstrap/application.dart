@@ -1,5 +1,7 @@
+import 'dart:convert';
 import 'dart:io';
 
+import 'package:crypto/crypto.dart';
 import 'package:flutter/services.dart';
 
 import '../contracts/app_runtime.dart';
@@ -24,7 +26,15 @@ AppController createApplication(
   final browserFactory = createBrowserFactory(profilePath: profilePath);
   final provider = VkProvider(
     browserFactory: browserFactory,
-    loadAdapter: () => rootBundle.loadString('assets/vk_adapter.js'),
+    loadAdapter: () async {
+      // Fingerprint only bundled public code, never profile/page/account contents.
+      final source = await rootBundle.loadString('assets/vk_adapter.js');
+      controller.providerDiagnostic({
+        'stage': 'adapter_loaded',
+        'adapter_sha256': sha256.convert(utf8.encode(source)).toString(),
+      });
+      return source;
+    },
     status: (text) => controller.providerStatus(text),
     changed: () => controller.providerChanged(),
     diagnostic: (report) => controller.providerDiagnostic(report),

@@ -19,6 +19,8 @@ import '../provider/cached_source_witness.dart';
 import 'playback_queue.dart';
 
 import 'runtime_diagnostics.dart';
+import 'diagnostic_journal.dart';
+import 'diagnostic_store.dart';
 
 class AppController extends ChangeNotifier {
   final LibraryStore store;
@@ -88,7 +90,10 @@ class AppController extends ChangeNotifier {
   List<LibraryRow>? _rowCache;
   List<LibraryRow>? _oldAudioSample;
   AudioCache? _activeCache;
-  final _diagnostics = <Map<String, Object>>[];
+  // Correlate safe provider/media events without storing recording or account identifiers.
+  late final DiagnosticJournal diagnostics;
+  // Persist evidence asynchronously so filesystem latency cannot hold up Play.
+  late final DiagnosticStore _diagnosticStore;
   late final ArtworkCache artwork;
   final _artworkTasks = <String, Future<void>>{};
   final _artworkDemand = <String, Map<Object, int>>{};
@@ -115,8 +120,19 @@ class AppController extends ChangeNotifier {
     this.runtime = const UnsupportedAppRuntime(),
     this.certificateVerifierFactory = strictCertificateVerifier,
     ArtworkCache? artworkCache,
+    DiagnosticStore? diagnosticStore,
   }) : player = playbackPlayer,
        provider = musicProvider {
+    diagnostics =
+        diagnosticStore?.journal ??
+        DiagnosticJournal(
+          platform: Platform.operatingSystem,
+          buildRevision: const String.fromEnvironment(
+            'OWNSEMBLE_BUILD_REVISION',
+          ),
+        );
+    _diagnosticStore =
+        diagnosticStore ?? DiagnosticStore(store.directory, diagnostics);
     artwork =
         artworkCache ??
         ArtworkCache(
@@ -218,19 +234,28 @@ class AppController extends ChangeNotifier {
   void providerDiagnostic(Map<String, Object> report) =>
       _writeAudioDiagnostic(report);
 
+  /// Collect existing safe evidence without probing pages, scanning or downloading.
+  Future<void> writeDiagnosticReport(String reportId) async {
+    _writeAudioDiagnostic({
+      'stage': 'runtime_context',
+      'offline': offline,
+      'private_signin_active': provider.privateSignInActive,
+      'provider_connected': provider.connected,
+      'loading': loading,
+      'playing': player.state.playing,
+      'buffering': player.state.buffering,
+      'cached': current != null && store.asset(current!.id) != null,
+      'received_bytes': downloadBytes,
+      'scanning': syncing,
+    });
+    await _diagnosticStore.exportReport(reportId);
+  }
+
+  /// Record schema-approved evidence in memory and coalesce its optional disk writes.
   void _writeAudioDiagnostic(Map<String, Object> report) {
     if (disposed) return;
-    _diagnostics.add({
-      'updatedAt': DateTime.now().toUtc().toIso8601String(),
-      ...report,
-    });
-    if (_diagnostics.length > 40) _diagnostics.removeAt(0);
-    if (report['stage'] == 'music_binding') {
-      File('${store.directory.path}/source-binding.json')
-          .writeAsStringSync(jsonEncode(_diagnostics.last));
-    }
-    File('${store.directory.path}/audio-diagnostics.json')
-        .writeAsStringSync(jsonEncode({...report, 'events': _diagnostics}));
+    diagnostics.record(report);
+    _diagnosticStore.changed();
   }
 
   Track? get current =>
@@ -578,7 +603,12 @@ class AppController extends ChangeNotifier {
   }
 
   void _saveQueue() => store.setSetting('queue', queue.toJson());
-  Future<void> connectVk() async {
+
+  /// Correlate connection evidence independently from foreground playback.
+  Future<void> connectVk() => diagnostics.run('connection', _connectVk);
+
+  /// Preserve the existing explicit consent/private sign-in connection flow.
+  Future<void> _connectVk() async {
     if (demo) {
       message = 'This preview uses generated music. Open the regular app to connect VK.';
       _notify();
@@ -665,7 +695,12 @@ class AppController extends ChangeNotifier {
     if (!syncing && !loading && downloadId == null) unawaited(_pumpPins());
   }
 
-  Future<void> refresh({bool full = true}) async {
+  /// Keep sync evidence separate from concurrent playback attempts.
+  Future<void> refresh({bool full = true}) =>
+      diagnostics.run('sync', () => _refresh(full: full));
+
+  /// Run the existing bounded sync policy without changing import or deletion behavior.
+  Future<void> _refresh({bool full = true}) async {
     if (offline || syncing || demo) return;
     syncing = true;
     _notify();
@@ -678,6 +713,16 @@ class AppController extends ChangeNotifier {
     final checkpoint = store.syncHead;
     final before = store.count;
     void report(String phase, {String? reason, int checked = 0}) {
+      _writeAudioDiagnostic({
+        'stage': 'sync_status',
+        'phase': phase,
+        'mode': broad ? 'full' : 'head',
+        'manual': full,
+        'checkpoint_count': checkpoint.length,
+        'checked': checked,
+        'new_tracks': store.count - before,
+        'elapsed_ms': watch.elapsedMilliseconds,
+      });
       File('${store.directory.path}/sync-status.json').writeAsStringSync(
         jsonEncode({
           'updatedAt': DateTime.now().toUtc().toIso8601String(),
@@ -861,6 +906,17 @@ class AppController extends ChangeNotifier {
   }
 
   void _reportPlayback(String phase, Stopwatch watch, {String? category}) {
+    _writeAudioDiagnostic({
+      'stage': 'playback_status',
+      'phase': phase,
+      'elapsed_ms': watch.elapsedMilliseconds,
+      'loading': loading,
+      'playing': player.state.playing,
+      'buffering': player.state.buffering,
+      'cached': current != null && store.asset(current!.id) != null,
+      'received_bytes': downloadBytes,
+      'category': ?category,
+    });
     try {
       File('${store.directory.path}/playback-status.json').writeAsStringSync(
         jsonEncode({
@@ -884,7 +940,12 @@ class AppController extends ChangeNotifier {
     }
   }
 
-  Future<void> playCurrent({bool diagnostic = false}) async {
+  /// Keep every asynchronous source/native/cache event bound to this Play attempt.
+  Future<void> playCurrent({bool diagnostic = false}) =>
+      diagnostics.run('playback', () => _playCurrent(diagnostic: diagnostic));
+
+  /// Run the existing exact-recording startup and request ownership checks.
+  Future<void> _playCurrent({bool diagnostic = false}) async {
     final track = current;
     if (track == null) return;
     if (!diagnostic) _cancelCheck('selection_changed');
@@ -1261,6 +1322,7 @@ class AppController extends ChangeNotifier {
     final cache = AudioCache(
       cacheDirectory,
       decodeAudio,
+      onDiagnostic: _writeAudioDiagnostic,
       certificateVerifier: certificateVerifierFactory(),
       cancelled: () => disposed || token != _cancelDownload,
       onProgress: (bytes) {
@@ -1394,6 +1456,10 @@ class AppController extends ChangeNotifier {
         onStage: (stage) {
           if (disposed || token != _cancelDownload) return;
           downloadStage = stage;
+          _writeAudioDiagnostic({
+            'stage': 'cache_stage',
+            'download_stage': stage,
+          });
           _notify(library: false);
         },
       );
@@ -1614,6 +1680,7 @@ class AppController extends ChangeNotifier {
   }
 
   void _failure(Object error, [StackTrace? stack]) {
+    recordRuntimeFailure(error, stack, reporter: _writeAudioDiagnostic);
     final category =
         error is FileSystemException &&
             [28, 112].contains(error.osError?.errorCode)
@@ -1672,6 +1739,7 @@ class AppController extends ChangeNotifier {
             'inspect-old',
             'inspect-lyrics',
             'inspect-library',
+            'write-diagnostics',
             'repair-mismatched-cache',
             'check-repaired',
             'check-current',
@@ -1683,6 +1751,15 @@ class AppController extends ChangeNotifier {
         return;
       }
       store.setSetting('control_nonce', raw['nonce']);
+      // Export only existing evidence; this fixed command must not access VK pages.
+      if (raw['command'] == 'write-diagnostics') {
+        unawaited(
+          writeDiagnosticReport(raw['nonce'] as String)
+              .catchError((Object error) {
+                _failure(const ProofFailure('diagnostics_export_failed'));
+              }),
+        );
+      }
       if (raw['command'] == 'check-old') {
         final list = store.rows(view: 'vk');
         if (list.isNotEmpty) {
@@ -2141,6 +2218,12 @@ class AppController extends ChangeNotifier {
     await _checkTask;
     // Pending download work may still unwind; only close after it releases DB.
     await _downloadTail;
+    // Drain optional reports after producers stop, without holding shutdown indefinitely.
+    try {
+      await _diagnosticStore.close().timeout(const Duration(seconds: 2));
+    } catch (_) {
+      /* A failed optional report cannot prevent app closure. */
+    }
     store.report('app_closed', count: store.count);
     store.close();
   }

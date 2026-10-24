@@ -1,6 +1,7 @@
 import 'dart:convert';
+import 'dart:io';
 
-import '../lib/services/diagnostic_journal.dart';
+import 'package:ownsemble/services/diagnostic_journal.dart';
 
 /// Measure generated logging cost separately from network, native decoding and disk.
 Future<void> main() async {
@@ -37,7 +38,7 @@ Future<void> main() async {
   final report = journal.snapshot();
   // Report only generated counts/timings; never inspect runtime data or profiles.
   final bytes = utf8.encode(jsonEncode(report)).length;
-  print(
+  stdout.writeln(
     jsonEncode({
       'generated_events': timings.length,
       'median_us': timings[timings.length ~/ 2],

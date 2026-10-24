@@ -4,6 +4,31 @@ import 'package:ownsemble/services/runtime_diagnostics.dart';
 import 'package:ownsemble/media/audio_policy.dart';
 
 void main() {
+  test('global error forwarding emits only safe diagnostics and tolerates a failed sink', () {
+    // Collect one generated global error without launching Flutter/native services.
+    final reports = <Map<String, Object>>[];
+    recordRuntimeFailure(
+      StateError('Private exception message'),
+      StackTrace.fromString('private path in vk_provider.dart:10'),
+      reporter: reports.add,
+    );
+    expect(reports.single, {
+      'stage': 'operation_failed',
+      'category': 'operation_failed',
+      'kind': 'state',
+      'component': 'provider',
+    });
+    // A broken optional reporter must not replace the original application failure.
+    expect(
+      () => recordRuntimeFailure(
+        StateError('Private exception'),
+        null,
+        reporter: (_) => throw StateError('Generated broken sink'),
+      ),
+      returnsNormally,
+    );
+  });
+
   test(
     'transfer diagnostics retain fixed categories and numeric status only',
     () {

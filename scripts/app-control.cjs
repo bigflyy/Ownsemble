@@ -4,7 +4,14 @@ const path=require('node:path');
 const {randomUUID}=require('node:crypto');
 const root=path.resolve(__dirname,'../.local/ownsemble');
 const command=process.argv[2]||'status';
-if(command==='status') {
+// Collect a passive safe report through the same fixed control boundary as the app.
+if(command==='diagnose') {
+  // Reject extra arguments so this command cannot select paths or browser operations.
+  if(process.argv.length!==3){console.error('This command accepts no extra arguments.');process.exit(2);}
+  require('./diagnose-vk.cjs').collectDiagnostics(root)
+    .then(report=>console.log(JSON.stringify(report,null,2)))
+    .catch(()=>{console.error('Diagnostic collection failed; the app may be stopped or unresponsive.');process.exitCode=1;});
+} else if(command==='status') {
   const file=path.join(root,'status.json');
   if(!fs.existsSync(file)){console.log('Ownsemble has not written status yet.');process.exit(0);}
   const input=JSON.parse(fs.readFileSync(file,'utf8')),safe={};

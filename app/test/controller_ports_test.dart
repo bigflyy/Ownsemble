@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -222,6 +223,58 @@ class DelayedFailureCleanupPlayback extends PortablePlayback {
 }
 
 void main() {
+  test('diagnostic export retains a failed Play without contacting a private provider', () async {
+    // Keep generated diagnostic files separate from the real catalog and browser session.
+    final directory = await Directory.systemTemp.createTemp(
+      'ownsemble-controller-diagnostics-',
+    );
+    // Create one generated recording for a controlled native-open failure.
+    final store = LibraryStore(directory);
+    store.merge([const Track('17_1', 'Generated', 'Fixture', 10)]);
+    // Keep the provider in private sign-in mode throughout collection.
+    final provider = PrivateSessionProvider()..active = true;
+    // Reproduce a failure without invoking a native player or network.
+    final controller = PortableController(
+      store,
+      FailingBufferingPlayback(),
+      provider,
+      '${directory.path}/generated.mp3',
+    );
+    try {
+      await controller.playRows(store.rows(), 0);
+      // Fill the background ring after the failure to prove its evidence is retained.
+      for (var event = 0; event < 100; event++) {
+        controller.providerDiagnostic({
+          'stage': 'metadata_read',
+          'rows': 114,
+          'url': 'https://private.example/temporary',
+        });
+      }
+      await controller.writeDiagnosticReport(
+        '00000000-0000-4000-8000-000000000001',
+      );
+      // Read only this fixture's newly generated, app-owned diagnostic artifact.
+      final report = jsonDecode(
+        await File('${directory.path}/diagnostics-report.json').readAsString(),
+      ) as Map;
+      expect(report['report_id'], '00000000-0000-4000-8000-000000000001');
+      expect(
+        (report['failures'] as List).single['category'],
+        'decoder_open_failed',
+      );
+      expect(
+        (report['failures'] as List).single['operation_id'],
+        startsWith('playback-'),
+      );
+      expect(provider.calls, isEmpty);
+      expect(controller.loading, isFalse);
+      expect(jsonEncode(report), isNot(contains('private.example')));
+    } finally {
+      await controller.shutdown();
+      await directory.delete(recursive: true);
+    }
+  });
+
   test(
     'late failure cleanup cannot overwrite a newer successful Play',
     () async {

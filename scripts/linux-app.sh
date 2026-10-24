@@ -23,6 +23,8 @@ fi
 case "$action" in
   build)
     [[ "$mode" == debug || "$mode" == release ]] || exit 2
+    # Preserve the original source identity before staging a source-only build workspace.
+    build_revision="$(bash "$repo_root/scripts/build-revision.sh")"
     mkdir -p -- "$proof_root" "$workspace"
     python3 "$repo_root/scripts/linux-proof-source.py" "$proof_root/source.tar"
     tar -xf "$proof_root/source.tar" -C "$workspace"
@@ -32,7 +34,7 @@ case "$action" in
       export OWNSEMBLE_CEF_ROOT
       OWNSEMBLE_CEF_ROOT="$(python3 "$repo_root/scripts/prepare-linux-browser.py" "$proof_root/cef-runtime")"
     fi
-    "$flutter_cli" build linux "--$mode" --no-pub
+    "$flutter_cli" build linux "--$mode" --no-pub "--dart-define=OWNSEMBLE_BUILD_REVISION=$build_revision"
     ;;
   preview|smoke|streaming|browser)
     [[ "$mode" == debug || "$mode" == release ]] || exit 2
