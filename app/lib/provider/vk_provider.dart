@@ -708,18 +708,7 @@ class VkProvider implements MusicProvider, LibraryMembershipDiagnostics {
           },
       });
     }
-    final references = data['musicReferences'];
-    if (references is List && references.length <= 50000) {
-      for (final ref in references.whereType<Map>()) {
-        final id = ref['id'], key = ref['musicKey'];
-        if (id is String &&
-            key is String &&
-            RegExp(r'^-?\d+_\d+$').hasMatch(id) &&
-            RegExp(r'^[A-Za-z0-9_-]{1,256}$').hasMatch(key)) {
-          _musicReferences[id] = key;
-        }
-      }
-    }
+    _rememberMusicReferences(data);
     if (!_playbackOnly) {
       final userAgent = data['userAgent'];
       final userId = data['userId'];
@@ -758,6 +747,27 @@ class VkProvider implements MusicProvider, LibraryMembershipDiagnostics {
       }
     }
     return data;
+  }
+
+  /// Retain bounded reload references after the guarded reader validates music rows.
+  void _rememberMusicReferences(Map<String, dynamic> data) {
+    // Read only the adapter's explicit music-reference collection.
+    final references = data['musicReferences'];
+    // Reject oversized or unstructured reference batches before retaining any values.
+    if (references is List && references.length <= 50000) {
+      // Validate each music identity and opaque reference independently.
+      for (final ref in references.whereType<Map>()) {
+        // Keep the exact identity separate from the reload hash used only by this provider.
+        final id = ref['id'], key = ref['musicKey'];
+        // Retain only bounded values supported by the existing reload contract.
+        if (id is String &&
+            key is String &&
+            RegExp(r'^-?\d+_\d+$').hasMatch(id) &&
+            RegExp(r'^[A-Za-z0-9_-]{1,256}$').hasMatch(key)) {
+          _musicReferences[id] = key;
+        }
+      }
+    }
   }
 
   List<Track> _tracks(Map<String, dynamic> data) => (data['tracks'] as List)
@@ -900,6 +910,8 @@ class VkProvider implements MusicProvider, LibraryMembershipDiagnostics {
               data['tracks'] is List && (data['tracks'] as List).isEmpty
               ? <Track>[]
               : _tracks(data);
+          // Retain listing references before the merge callback persists this page.
+          _rememberMusicReferences(data);
           // Preserve provider order without changing identities or local cache bindings.
           for (var index = 0; index < tracks.length; index++) {
             _libraryPositions[tracks[index].id] = offset + index;
@@ -957,20 +969,26 @@ class VkProvider implements MusicProvider, LibraryMembershipDiagnostics {
     });
   }
 
+  /// Resolve an exact identity after consent, distinguishing requests from rejected witnesses.
   Future<ResolvedAudio?> _resolveReference(
     Track track, {
     String? musicKey,
+    void Function()? onRequested,
   }) async {
+    // Try the stable recording identity even when an older import saved no reload hashes.
     final key = _musicReferences[track.id] ?? musicKey;
-    if (key == null || !key.startsWith('r1_')) return null;
     final personal = await _action('verify-my-music');
     if (personal['personal'] != true) return null;
     Map<String, dynamic> result;
     try {
+      // Distinguish a real lookup from a document that rejected extraction before the request.
+      onRequested?.call();
       result = await _action(
         'resolve-reference',
         id: track.id,
-        musicKey: key.substring(3),
+        musicKey: key != null && key.startsWith('r1_')
+            ? key.substring(3)
+            : null,
       );
     } on ProofFailure catch (error) {
       if (error.category == 'private_signin_required' ||
@@ -985,6 +1003,8 @@ class VkProvider implements MusicProvider, LibraryMembershipDiagnostics {
       diagnostic?.call({
         'stage': 'reference_source',
         'counts': {
+          'reloadReferences': key != null && key.startsWith('r1_') ? 1 : 0,
+          'personal_listing_member': _libraryPositions.containsKey(track.id),
           for (final key in [
             'matched',
             'urlsFound',
@@ -1044,9 +1064,15 @@ class VkProvider implements MusicProvider, LibraryMembershipDiagnostics {
         }
       }
     }
-    final referenceTried = connected && !_closed;
-    if (referenceTried) {
-      final reference = await _resolveReference(track, musicKey: musicKey);
+    // Retain whether the main document actually sent an exact-recording lookup.
+    var referenceTried = false;
+    // Try the main document only while its provider connection remains active.
+    if (connected && !_closed) {
+      final reference = await _resolveReference(
+        track,
+        musicKey: musicKey,
+        onRequested: () => referenceTried = true,
+      );
       if (reference != null) return reference;
     }
     // Separate hidden pages share the application's environment/session, but

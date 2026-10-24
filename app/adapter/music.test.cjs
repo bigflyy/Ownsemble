@@ -27,6 +27,26 @@ const payload = () => ({ userId: 1, userAgent: 'test', tracks: [
   { id: '1_2', artist: 'Artist', title: 'Song', duration: 180, url: 'https://test.vkuseraudio.net/song.mp3' },
 ] });
 
+test('personal listing retains exact reload references without exporting source URLs or unrelated fields', async () => {
+  // Include valid, missing and malformed generated reload hashes in one music page.
+  const rows = [1,2,3].map(id => [id,17,'https://generated.vkuseraudio.net/private','Тестовая песня','Тестовый артист',60]);
+  rows[0][13] = 'ignored/ignored/action_hash/ignored/ignored/url_hash';
+  rows[2][13] = 'ignored/ignored/invalid value/ignored/ignored/url_hash';
+  // Exercise only the guarded personal-list action without a real browser or account.
+  const result = await runMusicFixture(`(${musicPageAction.toString()})('read-library-page',null,{libraryOffset:0})`, {
+    location:{protocol:'https:',hostname:'vk.ru',pathname:'/audios'},window:{vk:{id:17}},
+    navigator:{userAgent:'Generated'},URLSearchParams,AbortSignal,
+    document:{querySelector:()=>null,createElement:()=>({set innerHTML(value){this.value=value;}})},
+    fetch:async()=>new Response(JSON.stringify({data:[{list:rows,hasMore:false,nextOffset:3,totalCount:3}]}),
+      {headers:{'content-type':'application/json; charset=utf-8'}}),
+  });
+  assert.ok(Array.isArray(result.musicReferences),'listing must retain exact reload references');
+  assert.deepEqual(JSON.parse(JSON.stringify(result.musicReferences)),[{id:'17_1',musicKey:'r1_action_hash_url_hash'}]);
+  assert.equal(JSON.stringify(result).includes('https://'),false);
+  assert.equal(JSON.stringify(result).includes('ignored'),false);
+  assert.equal(result.counts.libraryReloadReferences,1);
+});
+
 test('personal-library import preserves Cyrillic from declared Windows-1251 response bytes', async () => {
   // Keep non-ASCII recording text generated and independent of any account content.
   const title=String.fromCodePoint(1050,1088,1072,1081),artist=String.fromCodePoint(1047,1077,1084,1083,1103);

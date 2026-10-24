@@ -67,6 +67,15 @@ class LibraryScopeBrowser extends GeneratedBrowser {
         'supported': true,
         'userId': 17,
         'userAgent': 'Generated',
+        'musicReferences': identities
+            .sublist(offset, offset + 100)
+            .map(
+              (id) => {
+                'id': '17_$id',
+                'musicKey': 'r1_generated_action_generated_url',
+              },
+            )
+            .toList(),
         'tracks': identities
             .sublist(offset, offset + 100)
             .map(
@@ -161,6 +170,11 @@ void main() {
       );
       expect(factory.offsets, [0, 100, 200, 300]);
       expect(factory.readOptions, isEmpty);
+      // Retain references from non-rendered listing pages before the controller persists them.
+      expect(
+        provider.musicReference('17_5299'),
+        'r1_generated_action_generated_url',
+      );
       expect(
         events
             .where((event) => event['stage'] == 'library_listing_page')

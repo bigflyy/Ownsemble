@@ -743,6 +743,8 @@ action: async function musicPageAction(action, id, options = {}) {
         }
         // Validate every row before exposing a page for merging.
         const tracks = [];
+        // Preserve only exact-recording reload hashes for later playback, never session credentials.
+        const musicReferences = [];
         // Detect duplicate recordings within this page before persisting any of them.
         const identities = new Set();
         // Read only the known array slots or named music fields.
@@ -760,9 +762,15 @@ action: async function musicPageAction(action, id, options = {}) {
               !Number.isFinite(duration) || duration < 0 || duration > 86400) return { supported: false, counts: { ...importCounts, libraryMetadataUnsupported: 1 } };
           identities.add(identity);
           tracks.push({ id: identity, title, artist, duration, url: '' });
+          // Read the same documented music hash slots used by the rendered-row adapter.
+          const hashParts = Array.isArray(record) && typeof record[13] === 'string' ? record[13].split('/') : [];
+          // Bind the two bounded reload components to this already validated recording identity.
+          const musicKey = hashParts[2] && hashParts[5] ? `r1_${hashParts[2]}_${hashParts[5]}` : '';
+          // Omit missing or malformed references without discarding otherwise valid metadata.
+          if (/^r1_[A-Za-z0-9_-]{1,253}$/.test(musicKey)) musicReferences.push({ id: identity, musicKey });
         }
-        return { supported: true, counts: importCounts, userId: ownerId, userAgent: navigator.userAgent,
-          tracks, pagination: { offset, nextOffset: hasMore ? nextOffset : consumed, total, hasMore } };
+        return { supported: true, counts: { ...importCounts, libraryReloadReferences: musicReferences.length }, userId: ownerId, userAgent: navigator.userAgent,
+          tracks, musicReferences, pagination: { offset, nextOffset: hasMore ? nextOffset : consumed, total, hasMore } };
       }
       // Return numeric diagnostics only; retain no track objects or response body.
       const counts = { libraryRequestOK: 1, libraryShapeSupported: 1,
