@@ -25,6 +25,7 @@ Map<String, int> paginationCounts(dynamic value) {
       'libraryJSONResponse',
       'libraryShapeSupported',
       'libraryRows',
+      'libraryReloadReferences',
       'libraryHasMore',
       'libraryNextOffset',
       'libraryTotal',

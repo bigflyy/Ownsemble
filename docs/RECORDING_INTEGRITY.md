@@ -1,5 +1,45 @@
 # Recording identity and cache repair
 
+## Exact reload references and unresolved historical entries - 2026-10-24
+
+The personal-list importer retained recording identities but discarded reload
+hashes. That made old, non-rendered recordings depend on title search even when
+the listing had supplied an exact lookup reference. Listing pages now project
+only bounded, identity-bound reload references alongside their existing metadata;
+the provider retains them before the controller's ordinary persistence callback.
+No media URLs are persisted by this change. Missing hashes do not prevent a bare
+exact-ID reload attempt. A main document that fails its personal-page witness
+before issuing a request no longer suppresses the request on a prepared personal
+playback document. Same-title recordings never establish identity.
+
+Tests first reproduced missing listing references, their loss at the provider
+merge boundary, skipped bare-ID reloads, skipped prepared-page lookup, and numeric
+reload outcomes being removed from diagnostic reports. Generated controls also
+cover a named, ambiguous recording lookup without starting or switching music.
+
+Live qualification did not restore the newly reported historical recording. A
+named lookup found exactly one saved entry, but its identity was absent from a
+fresh complete 2,617-recording provider listing. It had no saved reload reference;
+the direct reload returned zero matching recordings/sources, and the search
+fallback did not find that identity. These observations do not establish deletion,
+copyright restrictions, or permanent unavailability. The entry and existing data
+are retained; no alternate recording was substituted.
+
+An initial positional reproduction selected another entry after sorting changed.
+Its result was discarded as evidence for the reported song. Named diagnostics
+now verify the requested title/artist internally and expose only counts/flags.
+A separate old listed recording reached an exact reload match, then encountered
+a rejected HTTPS redirect to VK's site rather than an approved media CDN. The
+destination guard remains strict; that sample did not pass playback. A previously
+verified cached recording passed real Release controls in 1,100 ms with zero
+received bytes. That success does not qualify either failed recording.
+
+All 266 Flutter tests and 79 adapter/diagnostic Node tests passed, and analysis
+was clean. An earlier concurrent suite had one timing-dependent mute-control
+failure; the isolated test and complete sequential suite passed without changing
+the mute implementation. All native checks were silent. The reported recording
+remains an unresolved live-provider gate, not a completed playback repair.
+
 Updated 2026-10-21. The user reported one title playing the next recording.
 Read-only aggregate checks confirmed the reported pair shared a cached payload;
 one cached duration disagreed with its track by more than five seconds. SQLite

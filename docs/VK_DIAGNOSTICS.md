@@ -12,6 +12,38 @@ when the app is stopped. Collection does not sign in, connect, scan, play or cha
 the queue. It can collect existing evidence while private sign-in is active.
 This is currently a checkout tool; installed-app export UI is future work.
 
+For a user-named recording, use the bounded local metadata lookup instead of
+assuming a list ordinal still identifies the same song after synchronization:
+
+```bash
+node scripts/app-control.cjs inspect-recording 'Generated title' 'Generated artist'
+```
+
+Only this fixed command accepts a title and artist (at most 160 characters each).
+It writes `.local/ownsemble/named-recording-status.json` with counts and flags:
+`catalog_matches`, `listed_matches`, `selection_matches`, `ambiguous`, and
+`checking`. It does not export music text, IDs, references or source addresses,
+access a browser, change the queue, or play. Match names case-insensitively after
+normalizing whitespace; names are lookup hints, never source identity proof.
+
+After explicit playback authorization and a fresh native mute acknowledgement,
+`check-recording` accepts the same two arguments and invokes the normal diagnostic
+main-player check. It uses the current exact recording if its metadata matches,
+otherwise only one unique saved match. Ambiguous alternatives never auto-play.
+The check retains the ordinary diagnostic queue/history preservation behavior.
+Read a fresh sample-check result separately; `checking` is a request-selection
+flag and does not attest successful playback or provider connection.
+
+Passive runtime context now includes local `selection_listed` and same-title,
+artist/title and duration match counts for already observed listing identities.
+Reload traces retain `matched`, `urlsFound`, `responseNodes`, `responseBatch`,
+`reloadReferences` and `personal_listing_member`. Listing page counters include
+`libraryReloadReferences`. A false membership flag alone is inconclusive during
+a partial/head-only session. Require a fresh complete provider-end witness before
+reporting absence from that listing. Absence and zero exact reload matches do not
+establish a rights restriction, deletion or permanent unavailability; preserve the
+saved entry and never substitute a same-title recording automatically.
+
 For explicitly authorized live playback checks that must stay silent, first run
 `node scripts/app-control.cjs mute`. This affects only Ownsemble and preserves its
 remembered unmuted volume. Wait for a fresh app-owned `player-state.json` showing

@@ -238,6 +238,38 @@ class AppController extends ChangeNotifier {
 
   /// Collect existing safe evidence without probing pages, scanning or downloading.
   Future<void> writeDiagnosticReport(String reportId) async {
+    // Freeze the selected metadata before comparing locally observed listing identities.
+    final selection = current;
+    // Count lookalikes only among identities observed by this provider session.
+    final listed = selection == null
+        ? <Track>[]
+        : store
+              .rows(view: 'vk')
+              .map((row) => row.track)
+              .where((track) => provider.libraryPosition(track.id) != null)
+              .toList();
+
+    /// Compare display metadata for diagnosis only, never to bind or replace a recording.
+    String normalized(String value) =>
+        value.trim().replaceAll(RegExp(r'\s+'), ' ').toLowerCase();
+    // Retain title matches internally without exporting their content or recording identities.
+    final sameTitle = selection == null
+        ? <Track>[]
+        : listed
+              .where(
+                (track) =>
+                    normalized(track.title) == normalized(selection.title),
+              )
+              .toList();
+    // Separate other performers and versions without selecting a substitute automatically.
+    final sameArtistTitle = selection == null
+        ? <Track>[]
+        : sameTitle
+              .where(
+                (track) =>
+                    normalized(track.artist) == normalized(selection.artist),
+              )
+              .toList();
     _writeAudioDiagnostic({
       'stage': 'runtime_context',
       'offline': offline,
@@ -249,6 +281,14 @@ class AppController extends ChangeNotifier {
       'cached': current != null && store.asset(current!.id) != null,
       'received_bytes': downloadBytes,
       'scanning': syncing,
+      if (selection != null) ...{
+        'selection_listed': provider.libraryPosition(selection.id) != null,
+        'same_title_listed': sameTitle.length,
+        'same_artist_title_listed': sameArtistTitle.length,
+        'same_metadata_duration_listed': sameArtistTitle
+            .where((track) => track.duration == selection.duration)
+            .length,
+      },
     });
     await _diagnosticStore.exportReport(reportId);
   }
@@ -1823,12 +1863,78 @@ class AppController extends ChangeNotifier {
     _notify();
   }
 
+  /// Inspect a user-named recording locally without exporting catalog text or guessing a version.
+  void _inspectNamedRecording(Map request) {
+    /// Compare only the explicit display metadata supplied for this diagnostic request.
+    String normalized(String value) =>
+        value.trim().replaceAll(RegExp(r'\s+'), ' ').toLowerCase();
+    // Retain matching identities only inside the application boundary.
+    final matches = store
+        .rows(view: 'vk')
+        .where(
+          (row) =>
+              normalized(row.track.title) ==
+                  normalized(request['title'] as String) &&
+              normalized(row.track.artist) ==
+                  normalized(request['artist'] as String),
+        )
+        .toList();
+    // Prefer the already selected exact identity only when its metadata matches the report.
+    final selected = matches
+        .where((row) => row.track.id == current?.id)
+        .firstOrNull;
+    // Reject ambiguous names rather than silently choosing a different recording.
+    final target = selected ?? (matches.length == 1 ? matches.single : null);
+    File(
+      '${store.directory.path}/named-recording-status.json',
+    ).writeAsStringSync(
+      jsonEncode({
+        'updatedAt': DateTime.now().toUtc().toIso8601String(),
+        'report_id': request['nonce'],
+        'catalog_matches': matches.length,
+        'listed_matches': matches
+            .where((row) => provider.libraryPosition(row.track.id) != null)
+            .length,
+        'selection_matches': selected != null,
+        'ambiguous': matches.length > 1 && selected == null,
+        'checking': request['command'] == 'check-recording' && target != null,
+      }),
+    );
+    // Run existing main-player acceptance only for an unambiguous requested identity.
+    if (request['command'] == 'check-recording' && target != null) {
+      unawaited(_checkSample(targetId: target.track.id));
+    }
+  }
+
   void _pollControl() {
     if (demo || disposed || !enableLocalControls) return;
     final file = File('${store.directory.path}/control.json');
     try {
       if (!file.existsSync() || file.lengthSync() > 1024) return;
       final raw = jsonDecode(file.readAsStringSync());
+      // Permit only a bounded named-music diagnostic, never arbitrary paths, URLs or browser operations.
+      if (raw is Map &&
+          ['inspect-recording', 'check-recording'].contains(raw['command'])) {
+        // Reject malformed text and replayed requests before any catalog lookup.
+        if (raw.length != 4 ||
+            raw.keys.any(
+              (key) => !['command', 'nonce', 'title', 'artist'].contains(key),
+            ) ||
+            raw['nonce'] is! String ||
+            !RegExp(r'^[a-f0-9-]{36}$').hasMatch(raw['nonce'] as String) ||
+            store.setting('control_nonce') == raw['nonce'] ||
+            ['title', 'artist'].any(
+              (key) =>
+                  raw[key] is! String ||
+                  (raw[key] as String).trim().isEmpty ||
+                  (raw[key] as String).length > 160,
+            )) {
+          return;
+        }
+        store.setSetting('control_nonce', raw['nonce']);
+        _inspectNamedRecording(raw);
+        return;
+      }
       if (raw is! Map ||
           raw.length != 2 ||
           raw.keys.any((k) => !['command', 'nonce'].contains(k)) ||

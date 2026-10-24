@@ -10,6 +10,31 @@ import 'package:ownsemble/services/diagnostic_schema.dart';
 
 /// Verify private-data exclusion, asynchronous tracing and retained failure evidence.
 void main() {
+  test('exact reload outcomes remain numeric and diagnosable after privacy projection', () {
+    // Keep source lookup coverage counts while rejecting source URLs and raw identities.
+    final event = sanitizeDiagnosticEvent({
+      'stage': 'reference_source',
+      'counts': {
+        'matched': 0,
+        'urlsFound': 0,
+        'responseNodes': 1,
+        'responseBatch': 0,
+        'reloadReferences': 0,
+        'personal_listing_member': false,
+        'source': 'https://generated.invalid/private',
+        'recordingId': '17_2630',
+      },
+    });
+    expect(event['counts'], {
+      'matched': 0,
+      'urlsFound': 0,
+      'responseNodes': 1,
+      'responseBatch': 0,
+      'reloadReferences': 0,
+      'personal_listing_member': false,
+    });
+  });
+
   test('a timeout retains its last active phase even after context rotation and restart', () async {
     // Keep the source lookup phase distinct from the terminal failed outcome.
     final journal = DiagnosticJournal();

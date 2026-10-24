@@ -11,6 +11,17 @@ if(command==='diagnose') {
   require('./diagnose-vk.cjs').collectDiagnostics(root)
     .then(report=>console.log(JSON.stringify(report,null,2)))
     .catch(()=>{console.error('Diagnostic collection failed; the app may be stopped or unresponsive.');process.exitCode=1;});
+} else if(['inspect-recording','check-recording'].includes(command)) {
+  // Accept only user-supplied display metadata for an exact local lookup, never paths or browser commands.
+  if(process.argv.length!==5 || process.argv.slice(3).some(value=>!value.trim()||value.length>160)) {
+    console.error('Supply one title and one artist, each at most 160 characters.');process.exit(2);
+  }
+  // Keep metadata in the app control request; terminal evidence contains only counts and flags.
+  const file=path.join(root,'control.json');
+  fs.mkdirSync(root,{recursive:true});
+  fs.writeFileSync(file+'.tmp',JSON.stringify({command,nonce:randomUUID(),title:process.argv[3],artist:process.argv[4]}),'utf8');
+  fs.renameSync(file+'.tmp',file);
+  console.log('Ownsemble named-recording diagnostic queued.');
 } else if(command==='status') {
   const file=path.join(root,'status.json');
   if(!fs.existsSync(file)){console.log('Ownsemble has not written status yet.');process.exit(0);}
