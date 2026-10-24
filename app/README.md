@@ -59,17 +59,21 @@ sign-in UI, credentials or cookies. See the latest handoff for current evidence.
   does not silently release those retention references.
 - Several named Piles; each addition has its own occurrence ID. Repeated songs
   remain separate and removing one occurrence leaves the track and others intact.
-- One-time automatic-sync consent. Existing catalogs use a short newest-first
-  check on startup and every two minutes. A local checkpoint of up to 128 ordered
-  music IDs survives restart. Checks stop at a consecutive known block (12 IDs,
-  or the whole saved block for a smaller library). Reading stops at 256 unique
-  rows, eight pages, or a 15-second scanning budget; navigation is separate.
-  An incomplete check preserves its checkpoint and all saved tracks.
-- Initial import and manual **Refresh VK** use deeper, bounded 90-second slices.
-  Continuations keep the current viewport; initial-import pending state persists.
-  Coverage remains partial without a reliable provider end/total witness.
-  Automatic checks reload the guarded personal-library document so they examine
-  fresh entries rather than stale rows at the previous scroll position.
+- One-time automatic-sync consent. Existing catalogs use a bounded newest-first
+  personal-list check on startup and every two minutes. A checkpoint of up to 128
+  ordered music IDs survives restart. Checks stop at a consecutive known block
+  (12 IDs, or the whole saved block for a smaller library). Normal requests use
+  small provider pages, with at most 4,096 accepted rows, eight requests and a
+  15-second slice budget; navigation is separate. An in-flight request can finish
+  after that slice budget, within its own 20-second deadline. Partial checks
+  preserve their old checkpoint and all saved tracks.
+- Initial import and manual **Refresh VK** enumerate explicit personal-list pages
+  in bounded 90-second slices. Validated cursors and unique membership continue
+  across slices; pending discovery survives restart. Only a stable total, unique
+  recording count and explicit provider end verify coverage. The UI separates
+  the dated verified VK listing from all saved local tracks. An unsupported list
+  stays partial without importing rendered rows of uncertain membership.
+  See [listing contracts and evidence](../docs/VK_LIBRARY_PROBE.md).
 - One separate hidden playback page resolves independently. Muted metadata-only
   pages can be retained; activated or cancelled documents are destroyed. Playback
   does not paginate or await metadata refresh.

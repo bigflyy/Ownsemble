@@ -41,6 +41,12 @@ native streaming fixtures additionally use the null audio output driver.
   A timeout retains its last active phase through event rotation and restart.
   Investigation areas are routing hints, not assertions of root cause.
 
+Sync records `library_listing_page` with fixed row/total/cursor counters. Separate
+pagination/metadata projection flags identify contract drift; fixed fetch/body/
+JSON/envelope stages locate request failures. An unsupported listing stays
+partial and preserves saved data. See [listing contracts](VK_LIBRARY_PROBE.md)
+for budgets, terminal-cursor validation and the independent explicit probe.
+
 Background events cannot erase the last failure. Keep 64 recent events, 12
 operation summaries and four failure snapshots with up to 12 context events each.
 Reports are capped around 192 KiB. Failures survive restart with their original
