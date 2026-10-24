@@ -362,6 +362,15 @@ class StreamingAudio {
           length = (await resource.done).length;
         }
       }
+      // Frame an unfinished MP3 as a growing response so FFmpeg does not seek to
+      // its last 128 bytes for optional ID3v1 metadata before playing the prefix.
+      // Keep explicit seeks, completed responses, M4A and HLS range behavior intact.
+      final growingMp3 =
+          !_hls &&
+          !source.path.toLowerCase().endsWith('.m4a') &&
+          !resource.finished &&
+          start == 0 &&
+          end == null;
       if (length != null) {
         end = end == null ? length - 1 : min(end, length - 1);
         if (start >= length || start > end) {
@@ -369,13 +378,17 @@ class StreamingAudio {
           return;
         }
         request.response.headers.set(HttpHeaders.acceptRangesHeader, 'bytes');
-        request.response.contentLength = end - start + 1;
-        if (range != null) {
-          request.response.statusCode = 206;
-          request.response.headers.set(
-            HttpHeaders.contentRangeHeader,
-            'bytes $start-$end/$length',
-          );
+        // Omit total length only for the initial growing response; send all original bytes.
+        if (!growingMp3) {
+          request.response.contentLength = end - start + 1;
+          // Preserve standard 206 framing for genuine byte-range requests.
+          if (range != null) {
+            request.response.statusCode = 206;
+            request.response.headers.set(
+              HttpHeaders.contentRangeHeader,
+              'bytes $start-$end/$length',
+            );
+          }
         }
       }
       request.response.bufferOutput = false;

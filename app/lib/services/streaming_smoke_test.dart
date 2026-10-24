@@ -11,12 +11,16 @@ import '../media/audio_cache.dart';
 import '../media/audio_policy.dart';
 import '../media/local_audio.dart';
 import '../media/streaming_audio.dart';
+import 'progressive_startup_smoke.dart';
 
 Future<void> runStreamingSmoke(LibraryStore store) async {
   final report = <String, Object>{
     'transport': 'aes_mp3_in_ts',
     'updatedAt': DateTime.now().toUtc().toIso8601String(),
   };
+  // Check native early start separately from encrypted HLS and cache completion.
+  final progressive = await probeProgressiveStartup();
+  report['progressive_startup'] = progressive;
   final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
   final requests = <String, int>{};
   final tone = (await rootBundle.load('assets/preview.ts')).buffer
@@ -137,6 +141,7 @@ Future<void> runStreamingSmoke(LibraryStore store) async {
     await checkLocalPlayer(asset.entry);
     report['offline_play_seek'] = true;
     report['passed'] =
+        progressive['passed'] == true &&
         report['played_before_complete'] == true &&
         report['complete_validated'] == true &&
         report['upstream_once'] == true;

@@ -24,6 +24,10 @@
   must be measured to establish why this happens. Logged for the performance
   stage, alongside early-start optimization; not investigated/fixed by the active
   keyboard/hover-hint task. Preserve exact-recording and offline-publication checks.
+  Update2026-10-24: a generated native MP3 test reproduced an EOF metadata probe
+  blocking on the full sequential download. Growing-response framing reduced the
+  same fixture from6343ms to343ms, preserving seeking and one upstream request.
+  See PROGRESSIVE_STARTUP.md. This does not certify every provider/network case.
 
 - Completed 2026-10-21 controls/UI slice: search spaces, clickable speaker mute,
   overlapping success/failure indicators in SAVED, and header/row alignment

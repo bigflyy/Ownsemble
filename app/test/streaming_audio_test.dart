@@ -12,6 +12,61 @@ import 'package:ownsemble/media/streaming_audio.dart';
 import 'package:ownsemble/media/hls_mp3.dart';
 
 void main() {
+  test('an incomplete MP3 exposes a growing body without inviting a blocking EOF metadata probe', () async {
+    // Hold the final bytes while enough of the generated source is available to stream.
+    final tail = Completer<void>();
+    // Keep all network access on a generated local fixture server.
+    final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    server.listen((request) async {
+      request.response.bufferOutput = false;
+      request.response.contentLength = 8;
+      request.response.add([1, 2, 3, 4]);
+      await request.response.flush();
+      await tail.future;
+      request.response.add([5, 6, 7, 8]);
+      await request.response.close();
+    });
+    // Exercise the real relay without native audio or any persistent catalog.
+    final stream = StreamingAudio(
+      AudioCache(
+        Directory.systemTemp,
+        (_) async => 1,
+        fixturePort: server.port,
+      ),
+      Uri.parse('http://127.0.0.1:${server.port}/audio.mp3'),
+    );
+    // Keep host proxy settings from changing the generated loopback request.
+    final client = HttpClient()..findProxy = (_) => 'DIRECT';
+    try {
+      // Model FFmpeg's initial open-ended range probe, not a user seek.
+      final request = await client.getUrl(await stream.open());
+      request.headers.set(HttpHeaders.rangeHeader, 'bytes=0-');
+      // Require correct growing-response framing instead of a misleading complete length.
+      final response = await request.close();
+      expect(response.statusCode, 200);
+      expect(response.contentLength, -1);
+      expect(response.headers.value(HttpHeaders.acceptRangesHeader), 'bytes');
+      // Confirm bytes remain unchanged and the final response still ends normally.
+      tail.complete();
+      expect(await response.expand((chunk) => chunk).toList(), [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+      ]);
+    } finally {
+      // Release the held server callback after either the expected failure or success.
+      if (!tail.isCompleted) tail.complete();
+      client.close(force: true);
+      await stream.close(cancel: true);
+      await server.close(force: true);
+    }
+  });
+
   test(
     'source preparation warms only two segments and shares their requests',
     () async {
