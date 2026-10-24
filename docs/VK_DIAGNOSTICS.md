@@ -47,6 +47,12 @@ JSON/envelope stages locate request failures. An unsupported listing stays
 partial and preserves saved data. See [listing contracts](VK_LIBRARY_PROBE.md)
 for budgets, terminal-cursor validation and the independent explicit probe.
 
+Explicit report exports serialize access to their shared atomic destination.
+Concurrent requests cannot rename each other's temporary file; a failed write
+still reports an error to its caller and releases later requests. Ordinary event
+recording and playback do not await this export lane. Generated regressions cover
+concurrent publication, recovery after a failed write and blocked-sink playback.
+
 Background events cannot erase the last failure. Keep 64 recent events, 12
 operation summaries and four failure snapshots with up to 12 context events each.
 Reports are capped around 192 KiB. Failures survive restart with their original

@@ -18,6 +18,8 @@ class DiagnosticStore {
   Timer? _timer;
   // Allow at most one physical write batch at a time.
   Future<void>? _flushing;
+  // Serialize explicit exports that share one fixed temporary and destination filename.
+  Future<void> _exports = Future<void>.value();
   // Remember events arriving while a write is in progress without queueing more writes.
   bool _dirty = false;
   // Stop scheduling timers once the application is shutting down.
@@ -137,12 +139,21 @@ class DiagnosticStore {
     if (!RegExp(r'^[a-f0-9-]{36}$').hasMatch(reportId)) {
       throw ArgumentError('Invalid report identifier');
     }
-    await flush();
-    // Export only the current safe snapshot, never arbitrary existing report contents.
-    final report = journal.snapshot();
-    report['report_id'] = reportId;
-    report['write_failures'] = writeFailures;
-    await _write('diagnostics-report.json', jsonEncode(report));
+    // Reserve the shared destination before any awaited flush or file operation.
+    final exporting = _exports.then((_) async {
+      await flush();
+      // Export only the current safe snapshot, never arbitrary existing report contents.
+      final report = journal.snapshot();
+      report['report_id'] = reportId;
+      report['write_failures'] = writeFailures;
+      await _write('diagnostics-report.json', jsonEncode(report));
+    });
+    // Preserve this caller's error while allowing the next request after a failed write.
+    _exports = exporting.then<void>(
+      (_) {},
+      onError: (Object _, StackTrace _) {},
+    );
+    await exporting;
   }
 
   /// Drain the latest optional evidence without keeping a periodic writer alive.

@@ -98,7 +98,7 @@ addition/removal was not induced on the account; new additions are generated-dat
 qualification, not a claim of a real account mutation test. Timing is host/network
 specific. Ordinary Linux qualification remains separate.
 
-Generated checks: 256 Flutter tests, 75 app-adapter/diagnostic Node tests and 66
+Generated checks: 258 Flutter tests, 75 app-adapter/diagnostic Node tests and 66
 preserved probe/CLI tests pass; Dart analysis is clean. The shared provider
 contract probe passes. Native Windows candidate Release browser isolation/input,
 1,200-row catalog/restart/SQLite, and streaming/seek/cache/offline checks pass.

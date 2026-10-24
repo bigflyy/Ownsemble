@@ -218,6 +218,96 @@ void main() {
     expect(jsonEncode(report).length, lessThanOrEqualTo(196608));
   });
 
+  test('concurrent diagnostic exports serialize their shared atomic report destination', () async {
+    // Keep all IO generated and substitute the report sink with a controlled delay.
+    final directory = await Directory.systemTemp.createTemp(
+      'ownsemble-export-race-',
+    );
+    // Hold the first report while another valid command arrives.
+    final release = Completer<void>();
+    // Wait for the first export to reach the shared destination.
+    final started = Completer<void>();
+    // Count concurrent writers to reproduce the shared temporary-file race.
+    var active = 0, peak = 0;
+    // Preserve generated request acknowledgements in their committed order.
+    final written = <String>[];
+    // Exercise production export policy with a deterministic asynchronous sink.
+    final store = DiagnosticStore(
+      directory,
+      DiagnosticJournal(),
+      write: (name, contents) async {
+        // Ignore ordinary batched evidence; this regression targets explicit exports.
+        if (name != 'diagnostics-report.json') return;
+        active++;
+        peak = active > peak ? active : peak;
+        // Hold only the first export so concurrent execution becomes observable.
+        if (!started.isCompleted) {
+          started.complete();
+          await release.future;
+        }
+        written.add((jsonDecode(contents) as Map)['report_id'] as String);
+        active--;
+      },
+    );
+    try {
+      // Start two independently acknowledged requests while the first sink is blocked.
+      final first = store.exportReport('00000000-0000-0000-0000-000000000001');
+      await started.future;
+      // A second export must wait for the same atomic report destination.
+      final second = store.exportReport('00000000-0000-0000-0000-000000000002');
+      await Future<void>.delayed(Duration.zero);
+      release.complete();
+      await Future.wait([first, second]);
+      expect(peak, 1);
+      expect(written, [
+        '00000000-0000-0000-0000-000000000001',
+        '00000000-0000-0000-0000-000000000002',
+      ]);
+    } finally {
+      // Release generated work even when an assertion fails.
+      if (!release.isCompleted) release.complete();
+      await store.close();
+      await directory.delete(recursive: true);
+    }
+  });
+
+  test('failed export does not poison subsequent diagnostic requests', () async {
+    // Keep controlled report failures inside a generated report-only directory.
+    final directory = await Directory.systemTemp.createTemp(
+      'ownsemble-export-recovery-',
+    );
+    // Fail exactly one generated sink operation.
+    var fail = true;
+    // Retain the later successful acknowledgement without private evidence.
+    String? written;
+    // Reuse production serialization and error propagation with a generated sink.
+    final store = DiagnosticStore(
+      directory,
+      DiagnosticJournal(),
+      write: (name, contents) async {
+        // Restrict the failure to explicit report publication.
+        if (name != 'diagnostics-report.json') return;
+        // Preserve the original error for its caller while allowing later exports.
+        if (fail) {
+          fail = false;
+          throw const FileSystemException('Generated failure');
+        }
+        written = (jsonDecode(contents) as Map)['report_id'] as String;
+      },
+    );
+    try {
+      await expectLater(
+        store.exportReport('00000000-0000-0000-0000-000000000001'),
+        throwsA(isA<FileSystemException>()),
+      );
+      await store.exportReport('00000000-0000-0000-0000-000000000002');
+      expect(written, '00000000-0000-0000-0000-000000000002');
+    } finally {
+      await store.close();
+      await directory.delete(recursive: true);
+    }
+  });
+
   test('slow diagnostic writes cannot block recording or playback operations', () async {
     // Isolate the generated journal from application state and private profiles.
     final directory = await Directory.systemTemp.createTemp(
