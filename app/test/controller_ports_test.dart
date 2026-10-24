@@ -262,6 +262,40 @@ class DelayedFailureCleanupPlayback extends PortablePlayback {
 }
 
 void main() {
+  test('the fixed mute control silences native playback before any diagnostic Play', () async {
+    // Keep control polling inside an empty generated app directory.
+    final directory = await Directory.systemTemp.createTemp(
+      'ownsemble-silent-control-',
+    );
+    // Use a fake native volume so no sound device can be opened by this regression.
+    final player = PortablePlayback();
+    // Enable only this generated application's normal local control boundary.
+    final controller = AppController(
+      LibraryStore(directory),
+      playbackPlayer: player,
+      musicProvider: FixtureProvider(),
+      decodeAudio: (_) async => 10,
+      enableLocalControls: true,
+      diagnosticStore: DiagnosticStore.memory(),
+    );
+    try {
+      await File('${directory.path}/control.json').writeAsString(
+        jsonEncode({
+          'command': 'mute',
+          'nonce': '00000000-0000-4000-8000-000000000002',
+        }),
+      );
+      await Future<void>.delayed(const Duration(milliseconds: 2200));
+      expect(player.volume, 0);
+      expect(controller.muted, isTrue);
+      expect(player.opened, isEmpty);
+      expect(player.playing, isFalse);
+    } finally {
+      await controller.shutdown();
+      await directory.delete(recursive: true);
+    }
+  });
+
   test(
     'a stalled old source cannot hold the next selection or erase its progress',
     () async {

@@ -1791,6 +1791,7 @@ class AppController extends ChangeNotifier {
             'inspect-lyrics',
             'inspect-library',
             'write-diagnostics',
+            'mute',
             'repair-mismatched-cache',
             'check-repaired',
             'check-current',
@@ -1802,6 +1803,8 @@ class AppController extends ChangeNotifier {
         return;
       }
       store.setSetting('control_nonce', raw['nonce']);
+      // Silence only the app's own player before any separately requested live playback check.
+      if (raw['command'] == 'mute') unawaited(volume(0));
       // Export only existing evidence; this fixed command must not access VK pages.
       if (raw['command'] == 'write-diagnostics') {
         unawaited(

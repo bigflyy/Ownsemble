@@ -12,6 +12,13 @@ when the app is stopped. Collection does not sign in, connect, scan, play or cha
 the queue. It can collect existing evidence while private sign-in is active.
 This is currently a checkout tool; installed-app export UI is future work.
 
+For explicitly authorized live playback checks that must stay silent, first run
+`node scripts/app-control.cjs mute`. This affects only Ownsemble and preserves its
+remembered unmuted volume. Wait for a fresh app-owned `player-state.json` showing
+native `volume: 0` before sending any Play command; queued control writes alone
+are not acknowledgements. Leave the player stopped after the check. Generated
+native streaming fixtures additionally use the null audio output driver.
+
 ## Evidence
 
 - **Code identity:** schema version, platform family, compiled Git revision with
