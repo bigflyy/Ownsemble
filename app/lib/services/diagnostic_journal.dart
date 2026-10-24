@@ -142,6 +142,7 @@ class DiagnosticJournal {
         'updatedAt': event['updatedAt']!,
         'category': category,
         'area': diagnosticFailureArea(category, operation?.phase),
+        'phase': ?operation?.phase,
         'code': ?code,
         'adapter_sha256': ?_adapterDigest,
         'events': [
@@ -185,6 +186,25 @@ class DiagnosticJournal {
       ];
       // Recompute the area from a registered category rather than importing free text.
       final category = safeDiagnosticCategory(item['category']);
+      // Validate the saved active phase independently of the rotating event context.
+      final savedPhase =
+          sanitizeDiagnosticEvent({
+                'stage': 'playback_status',
+                'phase': item['phase'],
+              })['phase']
+              as String?;
+      // Recover older reports from their last nonterminal phase when one remains.
+      final activePhase =
+          savedPhase ??
+          events
+                  .where(
+                    (event) =>
+                        event['phase'] is String &&
+                        event['phase'] != 'failed' &&
+                        event['phase'] != 'finished',
+                  )
+                  .lastOrNull?['phase']
+              as String?;
       // Normalize historical timestamps instead of trusting arbitrary stored text.
       final observed =
           item['updatedAt'] is String &&
@@ -200,11 +220,8 @@ class DiagnosticJournal {
             RegExp(r'^[a-f0-9]{64}$')
                 .hasMatch(item['adapter_sha256'] as String))
           'adapter_sha256': item['adapter_sha256'] as String,
-        'area': diagnosticFailureArea(
-          category,
-          events.where((event) => event['phase'] is String).lastOrNull?['phase']
-              as String?,
-        ),
+        'area': diagnosticFailureArea(category, activePhase),
+        'phase': ?activePhase,
         'build_revision': DiagnosticJournal(
           buildRevision: item['build_revision'] is String
               ? item['build_revision'] as String
@@ -265,7 +282,7 @@ class _DiagnosticOperation {
   final String kind;
   // Retain only the last twelve safe events for this attempt.
   final List<Map<String, Object>> events = [];
-  // Remember the last observed stage for failure triage.
+  // Remember the last active phase after terminal events replace the visible status.
   String? phase;
   // Record whether the operation emitted a failure before finishing.
   String status = 'running';
@@ -278,8 +295,12 @@ class _DiagnosticOperation {
     events.add(event);
     // Bound per-attempt context even during a long provider timeout.
     if (events.length > 12) events.removeAt(0);
-    // Keep the native startup phase when subsequent provider events have no phase.
-    if (event['phase'] is String) phase = event['phase'] as String;
+    // Keep the active phase through terminal errors and events without a phase.
+    if (event['phase'] is String &&
+        event['phase'] != 'failed' &&
+        event['phase'] != 'finished') {
+      phase = event['phase'] as String;
+    }
     // Preserve failures through later completion/cleanup events.
     if (diagnosticEventIsFailure(event)) status = 'failed';
     // A completed callback does not by itself prove successful audio playback.

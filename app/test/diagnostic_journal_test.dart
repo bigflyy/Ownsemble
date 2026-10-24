@@ -10,6 +10,33 @@ import 'package:ownsemble/services/diagnostic_schema.dart';
 
 /// Verify private-data exclusion, asynchronous tracing and retained failure evidence.
 void main() {
+  test('a timeout retains its last active phase even after context rotation and restart', () async {
+    // Keep the source lookup phase distinct from the terminal failed outcome.
+    final journal = DiagnosticJournal();
+    await journal.run('playback', () async {
+      journal.record({'stage': 'playback_status', 'phase': 'resolving_source'});
+      // Rotate the ordinary context beyond the initial startup-phase event.
+      for (var event = 0; event < 100; event++) {
+        journal.record({'stage': 'waiting_source', 'requests': event});
+      }
+      journal.record({
+        'stage': 'playback_status',
+        'phase': 'failed',
+        'category': 'player_start_timeout',
+      });
+    });
+    // Require triage to identify source resolution rather than generic native playback.
+    final failure = (journal.snapshot()['failures'] as List).single as Map;
+    expect(failure['area'], 'source_resolution');
+    expect(failure['phase'], 'resolving_source');
+    // Preserve the same location after revalidating a saved report from the earlier run.
+    final restarted = DiagnosticJournal()..restoreFailures(journal.snapshot());
+    expect(
+      (restarted.snapshot()['failures'] as List).single['area'],
+      'source_resolution',
+    );
+  });
+
   test('unexpected failures retain a safe component and exception kind', () {
     // Preserve useful locations without exporting a stack, path or exception message.
     final journal = DiagnosticJournal();

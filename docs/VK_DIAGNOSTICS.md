@@ -31,6 +31,7 @@ This is currently a checkout tool; installed-app export UI is future work.
   omitted and counted. An absent observation is not a measured zero.
 - **Failure cause:** preserve the original registered category/status through
   generic native/cleanup symptoms. Recovered cache warnings remain observations.
+  A timeout retains its last active phase through event rotation and restart.
   Investigation areas are routing hints, not assertions of root cause.
 
 Background events cannot erase the last failure. Keep 64 recent events, 12
@@ -81,7 +82,7 @@ Tests cover correlation, first-cause retention, warnings, privacy, bounds, slow
 writes, restart/corruption, passive collection and automatic source labels. A
 registry test catches unregistered literal production error categories. Extend
 explicit schemas and generated tests; never serialize arbitrary page objects.
-234 Flutter and 68 Node tests passed; analysis was clean. Generated build-label,
+235 Flutter and 68 Node tests passed; analysis was clean. Generated build-label,
 launcher and source-archive tests passed (one platform-specific archive case skipped).
 
 A live uncached Windows attempt played and completed its cache. One operation ID
