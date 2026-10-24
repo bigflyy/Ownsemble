@@ -1,5 +1,15 @@
 # Feature queue
 
+2026-10-24 playback performance checkpoint: progressive MP3 startup no longer
+waits for a full sequential download just to probe trailing ID3 metadata. A
+generated native stalled-tail case improved from 6.34 s to 0.29-0.34 s, with seeking
+and one upstream download preserved. Superseded source callbacks no longer hold
+the next selection's lane. Tests first, 238 Flutter tests and clean analysis.
+Silent live samples: warm uncached 1.58 s, old uncached 3.29 s, cached 0.53-0.62 s; a
+fresh Release sample still took 9.89 s due to page readiness/network waits. Keep
+cold startup as remaining work. See PROGRESSIVE_STARTUP.md and
+PLAYBACK_CANCELLATION.md; whole-library availability is not certified.
+
 2026-10-23 continued verification: the full Windows page scan observed 2,630
 recordings while all 2,633 saved records remained intact. An explicit bounded
 library diagnostic capability now reports only numeric outcomes and does not run

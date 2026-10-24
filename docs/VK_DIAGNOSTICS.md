@@ -89,7 +89,7 @@ Tests cover correlation, first-cause retention, warnings, privacy, bounds, slow
 writes, restart/corruption, passive collection and automatic source labels. A
 registry test catches unregistered literal production error categories. Extend
 explicit schemas and generated tests; never serialize arbitrary page objects.
-235 Flutter and 68 Node tests passed; analysis was clean. Generated build-label,
+238 Flutter and 68 adapter/diagnostic Node tests passed; analysis was clean. Generated build-label,
 launcher and source-archive tests passed (one platform-specific archive case skipped).
 
 A live uncached Windows attempt played and completed its cache. One operation ID

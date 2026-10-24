@@ -18,7 +18,7 @@ of the playing relay. Cache verification/publication and exact recording identit
 remain required, and local saved music still bypasses unrelated network work.
 
 The failing regression preceded the implementation. It now requires the second
-lookup within a bounded500ms fixture window while the old source callback remains
+lookup within a bounded 500 ms fixture window while the old source callback remains
 pending, and checks that late cancellation cannot erase the new lookup state.
 Existing startup-deadline, failure-cleanup, unavailable-song and shutdown tests also
 pass. This bounds stale-request interference, not real network response time.
