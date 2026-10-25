@@ -969,11 +969,10 @@ class VkProvider implements MusicProvider, LibraryMembershipDiagnostics {
     });
   }
 
-  /// Resolve an exact identity after consent, distinguishing requests from rejected witnesses.
+  /// Resolve a legacy exact-ID reference only after current-page discovery has failed.
   Future<ResolvedAudio?> _resolveReference(
     Track track, {
     String? musicKey,
-    void Function()? onRequested,
   }) async {
     // Try the stable recording identity even when an older import saved no reload hashes.
     final key = _musicReferences[track.id] ?? musicKey;
@@ -981,8 +980,6 @@ class VkProvider implements MusicProvider, LibraryMembershipDiagnostics {
     if (personal['personal'] != true) return null;
     Map<String, dynamic> result;
     try {
-      // Distinguish a real lookup from a document that rejected extraction before the request.
-      onRequested?.call();
       result = await _action(
         'resolve-reference',
         id: track.id,
@@ -1042,6 +1039,37 @@ class VkProvider implements MusicProvider, LibraryMembershipDiagnostics {
     Future<Set<Uri>> Function(Uri, String)? manifestSegments,
   }) async {
     _requireBackgroundAccess();
+    // Prefer the current exact music row over legacy reload endpoints and older memory entries.
+    if (connected && !_closed) {
+      // Confirm personal-library consent before reading only the selected recording.
+      final personal = await _action('verify-my-music');
+      // Keep extraction paused while the main document lacks its personal-page witness.
+      if (personal['personal'] == true) {
+        try {
+          // Read current rendered metadata without scrolling, activating playback or fetching audio.
+          final currentData = await _read(targetId: track.id);
+          // Accept a source only from the exact owner/audio identity, never a title match.
+          final currentSource = _selectedSource(currentData, track.id);
+          // Retain the browser's public user agent for the separate media transport.
+          final currentAgent = currentData['userAgent'];
+          // Return a current source only when both source and transport metadata are supported.
+          if (currentSource != null &&
+              currentAgent is String &&
+              currentAgent.length <= 512) {
+            return ResolvedAudio(
+              currentSource,
+              currentAgent,
+              recordingId: track.id,
+              evidence: 'metadata_row',
+              timings: {'page_wait_ms': 0},
+            );
+          }
+        } on ProofFailure catch (error) {
+          // Fall back for a non-rendered recording while preserving private-session and cancellation failures.
+          if (error.category != 'music_adapter_unsupported') rethrow;
+        }
+      }
+    }
     if (connected && !_closed) {
       final remembered = _sourceMemory.lookup(track.id);
       if (remembered != null) {
@@ -1064,17 +1092,6 @@ class VkProvider implements MusicProvider, LibraryMembershipDiagnostics {
         }
       }
     }
-    // Retain whether the main document actually sent an exact-recording lookup.
-    var referenceTried = false;
-    // Try the main document only while its provider connection remains active.
-    if (connected && !_closed) {
-      final reference = await _resolveReference(
-        track,
-        musicKey: musicKey,
-        onRequested: () => referenceTried = true,
-      );
-      if (reference != null) return reference;
-    }
     // Separate hidden pages share the application's environment/session, but
     // never scroll or activate each other's document. No session is exported.
     final watch = Stopwatch()..start();
@@ -1090,7 +1107,6 @@ class VkProvider implements MusicProvider, LibraryMembershipDiagnostics {
       final pageReadyMs = watch.elapsedMilliseconds;
       final resolved = await playback._resolveSelected(
         track,
-        tryReference: !referenceTried,
         musicKey: _musicReferences[track.id] ?? musicKey,
         cancelled: cancelled,
         prepareCandidate: prepareCandidate,
@@ -1135,7 +1151,6 @@ class VkProvider implements MusicProvider, LibraryMembershipDiagnostics {
 
   Future<ResolvedAudio> _resolveSelected(
     Track track, {
-    bool tryReference = true,
     String? musicKey,
     bool Function()? cancelled,
     void Function(Uri, String)? prepareCandidate,
@@ -1149,13 +1164,6 @@ class VkProvider implements MusicProvider, LibraryMembershipDiagnostics {
       await _install();
       await _browser?.hide();
       await _action('verify-my-music');
-      if (tryReference) {
-        final reference = await _resolveReference(track, musicKey: musicKey);
-        if (reference != null) {
-          _reusableDocument = true;
-          return reference;
-        }
-      }
       await _browser!.activate();
       // requestWillBeSent also witnesses renderer/browser-cache requests that
       // may bypass WebResourceRequested. Read only the music URL, never request
@@ -1271,12 +1279,27 @@ class VkProvider implements MusicProvider, LibraryMembershipDiagnostics {
       );
       final seen = <String>{};
       Stopwatch? searchWatch;
+
+      /// Try a legacy exact-ID reference only after current-page discovery cannot supply the recording.
+      Future<ResolvedAudio?> legacyFallback() async {
+        await _resolutionGuard(cancelled);
+        // Keep fallback on a consented personal music document and retain exact identity checks.
+        final reference = await _resolveReference(track, musicKey: musicKey);
+        // Reuse a document only when the lookup returned without activating browser audio.
+        if (reference != null) _reusableDocument = true;
+        return reference;
+      }
+
       diagnostic?.call({'stage': 'finding_track'});
       while (position == null) {
         await _resolutionGuard(cancelled);
         Map<String, dynamic> data;
         if (searchWatch != null) {
           if (searchWatch.elapsed > const Duration(seconds: 10)) {
+            // Preserve a bounded exact-ID fallback after the current music search has had its chance.
+            final reference = await legacyFallback();
+            // Accept only a fallback that still binds the original recording identity.
+            if (reference != null) return reference;
             throw const ProofFailure('track_not_in_search_results');
           }
           try {
@@ -1519,6 +1542,10 @@ class VkProvider implements MusicProvider, LibraryMembershipDiagnostics {
                 error.category == 'cancelled') {
               rethrow;
             }
+            // Keep older browser layouts usable when their music search control is unsupported.
+            final reference = await legacyFallback();
+            // Retain exact-ID fallback support without making it the first source choice.
+            if (reference != null) return reference;
             throw const ProofFailure('music_search_unsupported');
           }
           diagnostic?.call({'stage': 'music_search', 'searched': true});

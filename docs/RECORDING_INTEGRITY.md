@@ -1,5 +1,37 @@
 # Recording identity and cache repair
 
+## Prefer current music sources over legacy reload results - 2026-10-26
+
+The resolver incorrectly preferred a legacy exact-ID reload URL over current
+music-page metadata. An ID match established which recording the response named,
+but did not establish that its URL still served audio. A fresh unchanged Release
+reproduced the uncached failure in 1,180 ms: the legacy URL redirected to VK's
+website, which the media destination guard correctly rejected. Restarting alone
+did not repair it.
+
+Resolution now reads the selected exact row on the consented music document
+first. If that row is absent, the existing temporary source memory remains
+available, followed by bounded current-page discovery and search. Legacy reload
+is retained only when current search is unsupported or has exhausted its bound.
+Search still requires the original owner/audio ID; a same-name recording cannot
+replace it. Playing a non-rendered recording does not scan the entire library.
+No redirect allowlist, TLS, identity, native mute or privacy guard was weakened.
+
+Tests first reproduced both priority errors: a rendered current source losing to
+legacy reload, and a non-rendered recording skipping current search because the
+legacy endpoint returned a URL. All 271 Flutter tests and 79 Node tests pass;
+analysis is clean. Silent native checks started the original uncached sample in
+1,830 ms, another uncached sample in 1,578 ms, and an old recording in 6,141 ms.
+Each completed its cache and passed main-player pause, resume, seek, stop and
+local replay. These sample results do not certify every saved recording or
+physical sound output. Alternative modern API experiments did not fix the old
+sample and are not part of this change.
+
+The previously reported named historical recording remains unresolved: its
+original identity was not returned by current search, and the latest check failed
+with `track_not_in_search_results` and zero received bytes. The saved entry is
+preserved. This does not establish provider deletion or a rights restriction.
+
 ## Exact reload references and unresolved historical entries - 2026-10-24
 
 The personal-list importer retained recording identities but discarded reload

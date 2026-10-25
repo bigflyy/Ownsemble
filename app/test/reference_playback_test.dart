@@ -17,8 +17,12 @@ class ReferenceBrowserFactory extends GeneratedBrowserFactory {
   int referenceRequests = 0;
   // Model a busy main document while the isolated playback page has valid consent.
   bool mainWitnessMissing = false;
+  // Expose a current rendered source while the legacy reload returns an older link.
+  bool modernSourceAvailable = false;
   // Model a recording available only through a sufficiently specific music query.
   bool requiresArtistSearch = false;
+  // Keep the legacy endpoint returning a stale-looking address while current search has the usable row.
+  bool legacyReturnsStaleSource = false;
   // Publish the exact generated recording only after the narrow search completes.
   bool searchedWithArtist = false;
   // Retain the bounded query expected by this generated search result.
@@ -60,7 +64,8 @@ class ReferenceBrowser extends GeneratedBrowser {
     if (expression.contains('"resolve-reference","17_2630"')) {
       (factory as ReferenceBrowserFactory).referenceRequests++;
       // Exercise search when the service has no usable saved or bare reload reference.
-      if ((factory as ReferenceBrowserFactory).requiresArtistSearch) {
+      if ((factory as ReferenceBrowserFactory).requiresArtistSearch &&
+          !(factory as ReferenceBrowserFactory).legacyReturnsStaleSource) {
         return jsonEncode({
           'source': '',
           'counts': {'matched': 0, 'urlsFound': 0},
@@ -90,6 +95,22 @@ class ReferenceBrowser extends GeneratedBrowser {
     }
     // Model a viewport that never contains the old selected recording.
     if (expression.contains('window.ownsembleMusic.read(')) {
+      // Prefer an exact current row over an obsolete legacy reload address.
+      if ((factory as ReferenceBrowserFactory).modernSourceAvailable) {
+        return jsonEncode({
+          'userId': 17,
+          'userAgent': 'Generated',
+          'tracks': [
+            {
+              'id': '17_2630',
+              'title': 'Тестовая песня',
+              'artist': 'Тестовый артист',
+              'duration': 60,
+              'url': 'https://generated.vkuseraudio.net/modern.mp3',
+            },
+          ],
+        });
+      }
       // Keep exact owner/audio identity binding mandatory after a metadata query.
       if ((factory as ReferenceBrowserFactory).searchedWithArtist) {
         return jsonEncode({
@@ -126,6 +147,60 @@ class ReferenceBrowser extends GeneratedBrowser {
 
 /// Cover exact-ID playback independently of viewport, title search and saved hashes.
 void main() {
+  test('non-rendered recordings use current exact-ID search before an available legacy URL', () async {
+    // Reproduce a legacy response that matches the ID but hides the working current row.
+    final factory = ReferenceBrowserFactory()
+      ..requiresArtistSearch = true
+      ..legacyReturnsStaleSource = true;
+    // Keep navigation and music responses generated while exercising production lookup order.
+    final provider = VkProvider(
+      browserFactory: factory,
+      loadAdapter: () async => 'generated-only',
+      status: (_) {},
+      changed: () {},
+    );
+    try {
+      await provider.connect();
+      // Require the current row to be searched before considering the legacy endpoint.
+      final result = await provider.resolve(
+        Track('17_2630', 'Тестовая песня', 'Тестовый артист', 60),
+      );
+      expect(factory.searchedWithArtist, true);
+      expect(factory.referenceRequests, 0);
+      expect(result.recordingId, '17_2630');
+      expect(result.evidence, 'metadata_row');
+    } finally {
+      await provider.disconnect();
+    }
+  });
+
+  test(
+    'an exact current rendered source takes precedence over legacy reload URLs',
+    () async {
+      // Keep the obsolete endpoint available to reproduce its former priority.
+      final factory = ReferenceBrowserFactory()..modernSourceAvailable = true;
+      // Exercise real lookup ordering without a browser profile or external IO.
+      final provider = VkProvider(
+        browserFactory: factory,
+        loadAdapter: () async => 'generated-only',
+        status: (_) {},
+        changed: () {},
+      );
+      try {
+        await provider.connect();
+        // Bind the current source to the original recording, independent of title similarity.
+        final result = await provider.resolve(
+          Track('17_2630', 'Тестовая песня', 'Тестовый артист', 60),
+        );
+        expect(result.source.path, '/modern.mp3');
+        expect(result.recordingId, '17_2630');
+        expect(factory.referenceRequests, 0);
+      } finally {
+        await provider.disconnect();
+      }
+    },
+  );
+
   test('long artist metadata preserves the working title-only search budget', () async {
     // Keep an overlong artist from pushing a short title beyond the input budget.
     final factory = ReferenceBrowserFactory()
@@ -209,7 +284,7 @@ void main() {
     }
   });
 
-  test('old recording without saved hashes uses exact reload before title search', () async {
+  test('old recording without saved hashes retains exact reload when current search is unsupported', () async {
     // Keep the entire provider lifecycle under generated browser contracts.
     final factory = ReferenceBrowserFactory();
     // Exercise production policy rather than an isolated helper implementation.
