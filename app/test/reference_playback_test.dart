@@ -23,6 +23,14 @@ class ReferenceBrowserFactory extends GeneratedBrowserFactory {
   bool requiresArtistSearch = false;
   // Keep the legacy endpoint returning a stale-looking address while current search has the usable row.
   bool legacyReturnsStaleSource = false;
+  // Keep the exact recording absent after an otherwise supported music search.
+  bool searchReturnsNoMatch = false;
+  // Count submitted searches to reject repeated searches during one bounded lookup.
+  int searchRequests = 0;
+  // Measure when a supported search starts without changing the production clock.
+  Stopwatch? searchStarted;
+  // Record the search age when the legacy endpoint is finally requested.
+  int? searchAgeAtReferenceMs;
   // Publish the exact generated recording only after the narrow search completes.
   bool searchedWithArtist = false;
   // Retain the bounded query expected by this generated search result.
@@ -63,6 +71,11 @@ class ReferenceBrowser extends GeneratedBrowser {
     // Resolve only the requested recording, even without a saved reload hash.
     if (expression.contains('"resolve-reference","17_2630"')) {
       (factory as ReferenceBrowserFactory).referenceRequests++;
+      // Observe fallback ordering without exposing generated source addresses in logs.
+      (factory as ReferenceBrowserFactory).searchAgeAtReferenceMs =
+          (factory as ReferenceBrowserFactory)
+              .searchStarted
+              ?.elapsedMilliseconds;
       // Exercise search when the service has no usable saved or bare reload reference.
       if ((factory as ReferenceBrowserFactory).requiresArtistSearch &&
           !(factory as ReferenceBrowserFactory).legacyReturnsStaleSource) {
@@ -80,6 +93,17 @@ class ReferenceBrowser extends GeneratedBrowser {
     }
     // Make the old search fallback fail promptly for a meaningful regression.
     if (expression.contains('"search-track"')) {
+      // Model a supported search that never returns the original recording identity.
+      final config = factory as ReferenceBrowserFactory;
+      config.searchRequests++;
+      // Leave the visible rows unchanged while production waits for its search deadline.
+      if (config.searchReturnsNoMatch) {
+        config.searchStarted = Stopwatch()..start();
+        return jsonEncode({
+          'searched': true,
+          'counts': {'musicSearchInputs': 1},
+        });
+      }
       // Match the generated artist and title rather than a common title alone.
       if ((factory as ReferenceBrowserFactory).requiresArtistSearch &&
           expression.contains(
@@ -147,6 +171,59 @@ class ReferenceBrowser extends GeneratedBrowser {
 
 /// Cover exact-ID playback independently of viewport, title search and saved hashes.
 void main() {
+  // Exercise both terminal outcomes of a supported search that never finds the exact ID.
+  for (final legacyAvailable in [true, false]) {
+    test(
+      'search timeout tries legacy exactly once, available=$legacyAvailable',
+      () async {
+        // Keep search usable but empty and independently control the exact legacy response.
+        final factory = ReferenceBrowserFactory()
+          ..searchReturnsNoMatch = true
+          ..requiresArtistSearch = true
+          ..legacyReturnsStaleSource = legacyAvailable;
+        // Exercise the real bounded resolver without native, account or network access.
+        final provider = VkProvider(
+          browserFactory: factory,
+          loadAdapter: () async => 'generated-only',
+          status: (_) {},
+          changed: () {},
+        );
+        try {
+          await provider.connect();
+          // Retain the original identity even when only the fallback supplies a URL.
+          final resolution = provider.resolve(
+            Track('17_2630', 'Тестовая песня', 'Тестовый артист', 60),
+          );
+          // Accept only the exact fallback after the current search has exhausted its bound.
+          if (legacyAvailable) {
+            // Keep the response separate so its recording evidence can be checked.
+            final result = await resolution;
+            expect(result.recordingId, '17_2630');
+            expect(result.evidence, 'exact_reload');
+          }
+          // Preserve an explicit terminal failure when neither path returns the original ID.
+          else {
+            await expectLater(
+              resolution,
+              throwsA(
+                isA<ProofFailure>().having(
+                  (failure) => failure.category,
+                  'category',
+                  'track_not_in_search_results',
+                ),
+              ),
+            );
+          }
+          expect(factory.searchRequests, 1);
+          expect(factory.referenceRequests, 1);
+          expect(factory.searchAgeAtReferenceMs, greaterThanOrEqualTo(10000));
+        } finally {
+          await provider.disconnect();
+        }
+      },
+    );
+  }
+
   test('non-rendered recordings use current exact-ID search before an available legacy URL', () async {
     // Reproduce a legacy response that matches the ID but hides the working current row.
     final factory = ReferenceBrowserFactory()
