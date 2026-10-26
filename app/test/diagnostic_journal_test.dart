@@ -10,6 +10,32 @@ import 'package:ownsemble/services/diagnostic_schema.dart';
 
 /// Verify private-data exclusion, asynchronous tracing and retained failure evidence.
 void main() {
+  test('legacy response shape survives privacy projection without response content', () {
+    // Retain only bounded envelope status and structural counters for unsupported music replies.
+    final event = sanitizeDiagnosticEvent({
+      'stage': 'reference_source',
+      'counts': {
+        'referenceStatusCode': 0,
+        'referenceEnvelopeSuccess': true,
+        'referencePayloadStructured': false,
+        'referenceArrayItems': 0,
+        'referenceObjectItems': 0,
+        'referenceStringItems': 2,
+        'referenceOtherItems': 1,
+        'rawReply': 'private response',
+      },
+    });
+    expect(event['counts'], {
+      'referenceStatusCode': 0,
+      'referenceEnvelopeSuccess': true,
+      'referencePayloadStructured': false,
+      'referenceArrayItems': 0,
+      'referenceObjectItems': 0,
+      'referenceStringItems': 2,
+      'referenceOtherItems': 1,
+    });
+  });
+
   test(
     'music search handler availability survives numeric privacy projection',
     () {

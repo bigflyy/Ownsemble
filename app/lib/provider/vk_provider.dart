@@ -1007,8 +1007,17 @@ class VkProvider implements MusicProvider, LibraryMembershipDiagnostics {
             'urlsFound',
             'responseNodes',
             'responseBatch',
+            'referenceStatusCode',
+            'referenceEnvelopeSuccess',
+            'referencePayloadStructured',
+            'referenceArrayItems',
+            'referenceObjectItems',
+            'referenceStringItems',
+            'referenceOtherItems',
           ])
-            if (counts[key] is num) key: counts[key] as num,
+            // Retain only fixed structural counters and flags from the music response.
+            if (counts[key] is num || counts[key] is bool)
+              key: counts[key] as Object,
         },
       });
     }

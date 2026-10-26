@@ -279,6 +279,8 @@ async function readMusicPage(inspectDOM = () => null, options = {}) {
         const text = await response.text();
         if (text.length > 2 * 1024 * 1024) throw new Error('Music response budget.');
         const reply = JSON.parse(text.replace(/^\s*<!--/, ''));
+        // Reject a failed legacy envelope before an ID-matching nested row can supply audio.
+        if (![0, '0'].includes(reply?.payload?.[0])) throw new Error('Music source status unsupported.');
         const music = reply?.payload?.[1]?.[0];
         if (Array.isArray(music) && music.length <= 100) {
           for (const candidate of music) {
@@ -314,6 +316,8 @@ async function readMusicPage(inspectDOM = () => null, options = {}) {
       });
       if (!response.ok) throw new Error('Music response unavailable.');
       const body = JSON.parse((await response.text()).replace(/^\s*<!--/, ''));
+      // Preserve known data-only replies, but never bypass a failed payload through another slot.
+      if (body.payload !== undefined && ![0, '0'].includes(body.payload?.[0])) throw new Error('Music source status unsupported.');
       const visit = (value, depth = 0) => {
         if (depth > 7 || !Array.isArray(value)) return;
         if (value.length >= 6 && Number.isSafeInteger(value[0]) && Number.isSafeInteger(value[1]) &&

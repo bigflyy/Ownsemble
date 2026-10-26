@@ -1,5 +1,45 @@
 # Recording identity and cache repair
 
+## Bound missing-recording lookups and reject failed legacy envelopes - 2026-10-26
+
+Regression coverage now exercises both outcomes after the existing ten-second
+current-search deadline: one exact legacy fallback can resolve the recording, or
+the resolver terminates with `track_not_in_search_results`. The tests require one
+search and one fallback, preserving the original recording ID. This adds coverage
+for an existing deadline; it does not introduce a new playback delay.
+
+Legacy response parsing previously accepted an ID-matching audio row even inside
+an unsuccessful response envelope. Tests first reproduced this in exact-reference,
+selected-row refresh and visible-row refresh paths. All three now require a known
+success status before accepting nested audio. Both numeric `0` and canonical
+string `"0"` are supported. An unsuccessful payload cannot bypass the guard through
+an alternate data slot. Good saved catalog entries and cached media are retained.
+
+Exact-reference diagnostics now preserve a bounded status code and fixed counts
+of arrays, objects, strings and other items. They also distinguish supported music
+structure from a primitive reply. Response text, field names, URLs, recording IDs
+and credentials are not exported by these metrics.
+
+The named historical recording still fails. Its exact legacy request returned
+status `8` and three string items, with no structured music result; the native
+Release check received zero audio bytes. This establishes a rejected request,
+not a deletion, rights restriction or authentication diagnosis. A bounded
+experimental music-search API fallback returned 20 rows with zero original-ID
+matches and did not restore playback. That experiment was removed rather than
+adding another unsuccessful request to normal Play.
+
+All 274 Flutter tests and 84 Node tests passed; analysis is clean. A fresh
+independent GPT Luna review found no material correctness, privacy or architecture
+blocker. Neither generated tests nor that review qualify the unresolved named
+recording as playable.
+
+The retained Release candidate streamed an uncached recording in 1,594 ms,
+before download completion, and completed its 10,179,531-byte cache. Main-player
+pause, resume, seek, stop and local replay passed. A separate offline process
+then started that new cache in 892 ms, received zero network bytes with VK
+disconnected, and passed the same controls. These sampled results do not establish
+physical sound or universal playback.
+
 ## Prefer current music sources over legacy reload results - 2026-10-26
 
 The resolver incorrectly preferred a legacy exact-ID reload URL over current

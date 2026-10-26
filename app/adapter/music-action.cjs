@@ -144,8 +144,35 @@ async function musicPageAction(action, id, options = {}) {
       const text = await response.text();
       if (text.length > 2 * 1024 * 1024) return {error:'Music response budget.'};
       const reply = JSON.parse(text.replace(/^\s*<!--/,''));
+      // Read only the protocol status slot, without touching any response messages.
+      const rawStatus = reply?.payload?.[0];
+      // Accept canonical numeric string codes as well as numeric JSON protocol codes.
+      const normalizedStatus = typeof rawStatus === 'string' && /^(?:0|[1-9]\d?|100)$/.test(rawStatus)
+        ? Number(rawStatus) : rawStatus;
+      // Retain only a bounded status number; never export an unknown string value.
+      const statusCode = Number.isInteger(normalizedStatus) && normalizedStatus >= 0 && normalizedStatus <= 100
+        ? normalizedStatus : -1;
+      // Restrict structural diagnosis to the known music slot of this response.
       const music = reply?.payload?.[1];
       if (!Array.isArray(music) || music.length > 100) return {error:'Music response format unsupported.'};
+      // Count primitive types without inspecting or exporting their private contents.
+      const shapeCounts = {
+        referenceStatusCode:statusCode,
+        referenceEnvelopeSuccess:statusCode === 0,
+        referenceArrayItems:music.filter(Array.isArray).length,
+        referenceObjectItems:music.filter(item => item !== null && typeof item === 'object' && !Array.isArray(item)).length,
+        referenceStringItems:music.filter(item => typeof item === 'string').length,
+        referenceOtherItems:music.filter(item => item === null || !['string','object'].includes(typeof item)).length,
+      };
+      // Recognize a direct recording row or supported music containers, not arbitrary page state.
+      const structured = music.length === 0 ||
+        music.length >= 6 && Number.isSafeInteger(music[0]) && Number.isSafeInteger(music[1]) && typeof music[2] === 'string' ||
+        music.some(item => Array.isArray(item) || item && typeof item === 'object' &&
+          (Array.isArray(item.audios) || Number.isSafeInteger(item.id) && Number.isSafeInteger(item.owner_id)));
+      shapeCounts.referencePayloadStructured = structured;
+      // Reject failure/unknown envelopes before any nested audio row can become a source.
+      if (statusCode !== 0 || !structured) return {source:'',userId:0,userAgent:navigator.userAgent,
+        counts:{matched:0,urlsFound:0,responseNodes:0,responseBatch:music.length,...shapeCounts}};
       const sources = new Set();let matched = 0, visited = 0;
       // Only bounded music response arrays and explicit audio collections. Do
       // not recurse through arbitrary objects, page stores or account fields.
@@ -166,7 +193,7 @@ async function musicPageAction(action, id, options = {}) {
       visit(music,0);
       if (sources.size > 1) return {error:'Music source response ambiguous.'};
       return {source:[...sources][0] || '',userId:Number(window.vk && window.vk.id) || 0,
-        userAgent:navigator.userAgent,counts:{matched,urlsFound:sources.size,responseNodes:visited,responseBatch:music.length}};
+        userAgent:navigator.userAgent,counts:{matched,urlsFound:sources.size,responseNodes:visited,responseBatch:music.length,...shapeCounts}};
     } catch { return {error:'Music source request unavailable.'}; }
   }
   if (action === 'begin-audio-capture') {

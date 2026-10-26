@@ -399,9 +399,10 @@ test('object music rows project only track fields and refresh their audio links'
     assert.equal(options.credentials, 'same-origin');
     assert.equal(options.body.get('ids'), '1_2_synthetic-action_synthetic-url');
     assert.equal(Object.keys(options.headers).some((key) => /cookie|authorization/i.test(key)), false);
-    return { ok: true, text: async () => JSON.stringify({ payload: [[
+    // Model the actual successful legacy envelope, including its protocol status.
+    return { ok: true, text: async () => JSON.stringify({ payload: [0, [[
       [2, 1, payload().tracks[0].url, 'Song', 'Artist', 180],
-    ]] }) };
+    ]]] }) };
   });
   assert.equal(requests, 1);
   assert.equal(result.diagnostics.objectRows, 1);
@@ -696,6 +697,32 @@ test('selected music refresh rejects non-music content before reading its body',
   assert.equal(result.resolutionFailed,true);assert.equal(result.tracks[0].url,'');
 });
 
+test('selected-row refresh also rejects matching audio inside a failed legacy envelope', async () => {
+  // Keep a rendered exact row with a missing source so production requests its refresh.
+  const row=[2,1,'','Generated','Generated',180];
+  // Place the same identity and a plausible URL in an explicitly failed response.
+  const result=await readSyntheticRows([row],async()=>({
+    ok:true,headers:{get:()=> 'application/json'},
+    text:async()=>JSON.stringify({payload:['8',[[[2,1,'https://music.vkuseraudio.ru/rejected.mp3','Generated','Generated',180]]]]}),
+  }),[],{metadataOnly:true,targetId:'1_2',resolveTarget:true});
+  assert.equal(result.tracks[0].url,'');
+  assert.equal(result.resolutionFailed,true);
+});
+
+test('visible-row refresh never accepts a failed legacy envelope through its data fallback', async () => {
+  // Supply a bounded reload reference so the preserved reader uses its ordinary visible-row refresh.
+  const row=[2,1,'','Generated','Generated',180];row[13]='//action///url';
+  // Keep an exact source inside both legacy response slots to detect partial guard fixes.
+  const rejected=[2,1,'https://music.vkuseraudio.ru/rejected.mp3','Generated','Generated',180];
+  // Exercise the preserved probe reader with generated transport only.
+  const result=await readSyntheticRows([row],async()=>({
+    ok:true,headers:{get:()=> 'application/json'},
+    text:async()=>JSON.stringify({payload:['8',[[rejected]]],data:[[rejected]]}),
+  }));
+  assert.equal(result.tracks[0].url,'');
+  assert.equal(result.resolutionFailed,true);
+});
+
 test('selected music reference resolves without scrolling or reading account state', async () => {
   let requested = 0;
   const invoke = (id, form=false) => runMusicFixture(`(${musicPageAction.toString()})('resolve-reference',${JSON.stringify(id)})`, {
@@ -723,6 +750,55 @@ test('music references are projected only for the app metadata path', async () =
   row.__reactProps$synthetic.track.entity.apiAudio.urlHash='generated_url';
   const legacy=await readSyntheticRows([],undefined,[row],{metadataOnly:true,includeReferences:true});
   assert.equal(legacy.musicReferences[0].musicKey,'r1_generated_action_generated_url');
+});
+
+test('legacy reload does not accept an exact row from a non-success envelope', async () => {
+  // Keep the identity valid so only the response status distinguishes failure from audio.
+  const row=[2,1,'https://music.vkuseraudio.ru/selected.mp3','Generated','Generated',180];
+  // Supply an unsuccessful generated envelope containing an otherwise valid recording.
+  const result=await runMusicFixture(`(${musicPageAction.toString()})('resolve-reference','1_2')`,{
+    location:{protocol:'https:',hostname:'vk.ru',pathname:'/audio'},document:{querySelector:()=>null},
+    fetch:async()=>({ok:true,headers:{get:()=> 'application/json'},text:async()=>JSON.stringify({payload:[8,[[row]]]})}),
+    URLSearchParams,AbortSignal,window:{vk:{id:1}},navigator:{userAgent:'Generated'},
+  });
+  assert.equal(result.source,'');
+  assert.equal(result.counts.referenceStatusCode,8);
+  assert.equal(result.counts.referenceEnvelopeSuccess,false);
+});
+
+test('legacy reload accepts canonical string success codes without accepting arbitrary strings', async () => {
+  // Keep the source valid while exercising only the legacy status representation.
+  const row=[2,1,'https://music.vkuseraudio.ru/selected.mp3','Generated','Generated',180];
+  // Compare a canonical string success code with a canonical failure and private unknown text.
+  for (const code of ['0','8','private status']) {
+    // Retain every status value inside this synthetic response boundary.
+    const result=await runMusicFixture(`(${musicPageAction.toString()})('resolve-reference','1_2')`,{
+      location:{protocol:'https:',hostname:'vk.ru',pathname:'/audio'},document:{querySelector:()=>null},
+      fetch:async()=>({ok:true,headers:{get:()=> 'application/json'},text:async()=>JSON.stringify({payload:[code,[[row]]]})}),
+      URLSearchParams,AbortSignal,window:{vk:{id:1}},navigator:{userAgent:'Generated'},
+    });
+    assert.equal(result.source,code==='0'?row[2]:'');
+    assert.equal(result.counts.referenceStatusCode,code==='private status'?-1:Number(code));
+    assert.equal(JSON.stringify(result).includes('private'),false);
+  }
+});
+
+test('legacy reload distinguishes primitive replies from supported empty music without exporting text', async () => {
+  // Exercise the observed structural ambiguity using synthetic values, never account content.
+  for (const batch of [['private placeholder','private link',0],[]]) {
+    // Keep the reply successful at the transport layer while varying only its music shape.
+    const result=await runMusicFixture(`(${musicPageAction.toString()})('resolve-reference','1_2')`,{
+      location:{protocol:'https:',hostname:'vk.ru',pathname:'/audio'},document:{querySelector:()=>null},
+      fetch:async()=>({ok:true,headers:{get:()=> 'application/json'},text:async()=>JSON.stringify({payload:[0,batch]})}),
+      URLSearchParams,AbortSignal,window:{vk:{id:1}},navigator:{userAgent:'Generated'},
+    });
+    assert.equal(result.source,'');
+    assert.equal(result.counts.referenceStatusCode,0);
+    assert.equal(result.counts.referenceEnvelopeSuccess,true);
+    assert.equal(result.counts.referencePayloadStructured,batch.length===0);
+    assert.equal(result.counts.referenceStringItems,batch.length===0?0:2);
+    assert.equal(JSON.stringify(result).includes('private'),false);
+  }
 });
 
 test('selected music response accepts bounded array wrappers but never mismatched audio', async () => {
