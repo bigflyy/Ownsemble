@@ -384,6 +384,13 @@ Requested 2026-10-21; fit these naturally into the existing library/player:
 
 ## Response-time benchmarks and large-library performance
 
+2026-10-27 local UI slice: fixed distant queue jumps laying out/querying preceding
+songs, eliminated repeated display SQL on playback ticks, and removed row-wide
+double-tap delays from adjacent buttons. Song-options styling and generated
+2,633/10,000-song regression budgets are included. See UI_PERFORMANCE.md for the
+before/after measurements and their test-host scope. Broader native frame/memory,
+interaction distributions and network timing benchmarks remain queued.
+
 Additional report/proposal 2026-10-22: the user sees 2–3–10 MB downloaded before
 hearing anything and asks for earlier playback instead of waiting for the full
 song. An uncached streaming path already exists, but that alone does not establish

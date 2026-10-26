@@ -146,8 +146,9 @@ void main() {
     });
   }
 
-  Finder row(String title) =>
-      find.ancestor(of: find.text(title), matching: find.byType(InkWell)).first;
+  Finder row(String title) => find
+      .ancestor(of: find.text(title), matching: find.byType(Material))
+      .first;
   Finder within(String title, Finder child) =>
       find.descendant(of: row(title), matching: child);
 

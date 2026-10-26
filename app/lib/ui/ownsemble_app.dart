@@ -43,6 +43,18 @@ class OwnsembleApp extends StatelessWidget {
         titleLarge: TextStyle(fontSize: 24, fontWeight: FontWeight.w600),
       ),
       dividerColor: Colors.white10,
+      // Match song/Pile menus to the library's dark panels and compact controls.
+      popupMenuTheme: PopupMenuThemeData(
+        color: panel,
+        surfaceTintColor: Colors.transparent,
+        elevation: 8,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(12),
+          side: const BorderSide(color: Colors.white10),
+        ),
+        textStyle: const TextStyle(color: Colors.white, fontSize: 14),
+        menuPadding: const EdgeInsets.symmetric(vertical: 6),
+      ),
       inputDecorationTheme: InputDecorationTheme(
         filled: true,
         fillColor: Colors.white.withValues(alpha: .045),
@@ -507,7 +519,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
                 label: const Text('Shuffle'),
               ),
               const Spacer(),
-              if (c.view == 'vk' || c.store.count == 0)
+              if (c.view == 'vk' || c.libraryCount == 0)
                 TextButton.icon(
                   onPressed: c.connecting ? null : c.connectVk,
                   icon: const Icon(Icons.link_rounded, size: 18),
@@ -590,7 +602,14 @@ class _LibraryScreenState extends State<LibraryScreen> {
                 : ListView.builder(
                     key: ValueKey('${c.view}:${c.pileId}:${c.query}'),
                     itemCount: rows.length,
-                    itemExtent: 66,
+                    // Keep direct jumps constant-work while allowing larger accessibility text.
+                    itemExtent: _twoLineRowExtent(
+                      context,
+                      minimum: 66,
+                      titleSize: 14,
+                      subtitleSize: 12,
+                      padding: 12,
+                    ),
                     itemBuilder: (context, index) => _trackRow(rows, index),
                   ),
           ),
@@ -677,7 +696,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
               : 'Connect VK once. Your library refreshes automatically.',
           style: const TextStyle(color: muted),
         ),
-        if (c.store.count == 0 && !c.demo) ...[
+        if (c.libraryCount == 0 && !c.demo) ...[
           const SizedBox(height: 24),
           FilledButton.icon(
             onPressed: c.connecting ? null : c.connectVk,
@@ -703,40 +722,41 @@ class _LibraryScreenState extends State<LibraryScreen> {
       child: Material(
         color: selected ? accent.withValues(alpha: .07) : Colors.transparent,
         borderRadius: BorderRadius.circular(10),
-        child: InkWell(
-          borderRadius: BorderRadius.circular(10),
-          onDoubleTap: () => c.playRows(rows, index),
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 8),
-            child: Row(
-              children: [
-                SizedBox(
-                  width: _playColumn,
-                  child: IconButton(
-                    tooltip: selected
-                        ? shortcutHint(AppCommand.playPause, playLabel)
-                        : playLabel,
-                    onPressed: selected
-                        ? c.togglePlay
-                        : () => c.playRows(rows, index),
-                    icon: selected && c.loading
-                        ? const SizedBox(
-                            width: 18,
-                            height: 18,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          )
-                        : Icon(
-                            selected && c.player.state.playing
-                                ? Icons.pause_rounded
-                                : Icons.play_arrow_rounded,
-                            size: 19,
-                            color: selected ? accent : muted,
-                          ),
-                  ),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 8),
+          child: Row(
+            children: [
+              SizedBox(
+                width: _playColumn,
+                child: IconButton(
+                  tooltip: selected
+                      ? shortcutHint(AppCommand.playPause, playLabel)
+                      : playLabel,
+                  onPressed: selected
+                      ? c.togglePlay
+                      : () => c.playRows(rows, index),
+                  icon: selected && c.loading
+                      ? const SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : Icon(
+                          selected && c.player.state.playing
+                              ? Icons.pause_rounded
+                              : Icons.play_arrow_rounded,
+                          size: 19,
+                          color: selected ? accent : muted,
+                        ),
                 ),
-                _cover(t.title, t.artist, 42, controller: c, id: t.id),
-                const SizedBox(width: 13),
-                Expanded(
+              ),
+              _cover(t.title, t.artist, 42, controller: c, id: t.id),
+              const SizedBox(width: 13),
+              Expanded(
+                // Keep double-tap recognition away from adjacent single-tap controls.
+                child: InkWell(
+                  borderRadius: BorderRadius.circular(10),
+                  onDoubleTap: () => c.playRows(rows, index),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     mainAxisAlignment: MainAxisAlignment.center,
@@ -780,91 +800,109 @@ class _LibraryScreenState extends State<LibraryScreen> {
                     ],
                   ),
                 ),
-                SizedBox(
-                  width: _savedColumn,
-                  child: Center(child: _savedStatus(row)),
+              ),
+              SizedBox(
+                width: _savedColumn,
+                child: Center(child: _savedStatus(row)),
+              ),
+              SizedBox(
+                width: _durationColumn,
+                child: Text(
+                  _time(t.duration),
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(color: muted, fontSize: 12),
                 ),
-                SizedBox(
-                  width: _durationColumn,
-                  child: Text(
-                    _time(t.duration),
-                    textAlign: TextAlign.center,
-                    style: const TextStyle(color: muted, fontSize: 12),
-                  ),
-                ),
-                SizedBox(
-                  width: _actionsColumn,
-                  child: Row(
-                    children: [
-                      Expanded(
-                        child: IconButton(
-                          tooltip: 'Add to Pile',
-                          onPressed: () => _addToPile(row),
-                          icon: const Icon(
+              ),
+              SizedBox(
+                width: _actionsColumn,
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: IconButton(
+                        tooltip: 'Add to Pile',
+                        onPressed: () => _addToPile(row),
+                        icon: const Icon(
+                          Icons.playlist_add_rounded,
+                          size: 21,
+                          color: muted,
+                        ),
+                      ),
+                    ),
+                    Expanded(
+                      child: IconButton(
+                        tooltip: c.individuallyPinned(t.id)
+                            ? 'Release individual pin'
+                            : 'Keep offline',
+                        onPressed: () => c.pinTrack(t.id),
+                        icon: Icon(
+                          c.individuallyPinned(t.id)
+                              ? Icons.push_pin_rounded
+                              : Icons.push_pin_outlined,
+                          size: 18,
+                          color: row.pinned ? accent : muted,
+                        ),
+                      ),
+                    ),
+                    Expanded(
+                      child: PopupMenuButton<String>(
+                        tooltip: 'Song options',
+                        icon: const Icon(
+                          Icons.more_horiz_rounded,
+                          color: muted,
+                          size: 21,
+                        ),
+                        // Keep local actions quick and honor reduced-motion preferences.
+                        popUpAnimationStyle:
+                            MediaQuery.disableAnimationsOf(context)
+                            ? AnimationStyle.noAnimation
+                            : const AnimationStyle(
+                                duration: Duration(milliseconds: 120),
+                                reverseDuration: Duration(milliseconds: 100),
+                              ),
+                        onSelected: (value) {
+                          if (value == 'details') _details(row.track);
+                          if (value == 'queue') c.enqueue(row);
+                          if (value == 'pile') _addToPile(row);
+                          if (value == 'remove' && row.occurrence != null) {
+                            c.removeOccurrence(row.occurrence!);
+                          }
+                          if (value == 'retry') c.playRows(rows, index);
+                        },
+                        itemBuilder: (_) => [
+                          _songMenuItem(
+                            'details',
+                            'Song details & lyrics',
+                            Icons.info_outline_rounded,
+                          ),
+                          _songMenuItem(
+                            'queue',
+                            'Add to queue',
+                            Icons.queue_music_rounded,
+                          ),
+                          _songMenuItem(
+                            'pile',
+                            'Add to Pile',
                             Icons.playlist_add_rounded,
-                            size: 21,
-                            color: muted,
                           ),
-                        ),
-                      ),
-                      Expanded(
-                        child: IconButton(
-                          tooltip: c.store.individuallyPinned(t.id)
-                              ? 'Release individual pin'
-                              : 'Keep offline',
-                          onPressed: () => c.pinTrack(t.id),
-                          icon: Icon(
-                            c.store.individuallyPinned(t.id)
-                                ? Icons.push_pin_rounded
-                                : Icons.push_pin_outlined,
-                            size: 18,
-                            color: row.pinned ? accent : muted,
-                          ),
-                        ),
-                      ),
-                      Expanded(
-                        child: PopupMenuButton<String>(
-                          tooltip: 'Song options',
-                          onSelected: (value) {
-                            if (value == 'details') _details(row.track);
-                            if (value == 'queue') c.enqueue(row);
-                            if (value == 'pile') _addToPile(row);
-                            if (value == 'remove' && row.occurrence != null) {
-                              c.removeOccurrence(row.occurrence!);
-                            }
-                            if (value == 'retry') c.playRows(rows, index);
-                          },
-                          itemBuilder: (_) => [
-                            const PopupMenuItem(
-                              value: 'details',
-                              child: Text('Song details & lyrics'),
+                          if (row.error != null)
+                            _songMenuItem(
+                              'retry',
+                              'Retry playback',
+                              Icons.refresh_rounded,
                             ),
-                            const PopupMenuItem(
-                              value: 'queue',
-                              child: Text('Add to queue'),
+                          if (row.occurrence != null)
+                            _songMenuItem(
+                              'remove',
+                              'Remove this occurrence',
+                              Icons.remove_circle_outline_rounded,
                             ),
-                            const PopupMenuItem(
-                              value: 'pile',
-                              child: Text('Add to Pile'),
-                            ),
-                            if (row.error != null)
-                              const PopupMenuItem(
-                                value: 'retry',
-                                child: Text('Retry playback'),
-                              ),
-                            if (row.occurrence != null)
-                              const PopupMenuItem(
-                                value: 'remove',
-                                child: Text('Remove this occurrence'),
-                              ),
-                          ],
-                        ),
+                        ],
                       ),
-                    ],
-                  ),
+                    ),
+                  ],
                 ),
-              ],
-            ),
+              ),
+            ],
           ),
         ),
       ),
@@ -1385,9 +1423,17 @@ class _LibraryScreenState extends State<LibraryScreen> {
                 ? const Center(child: Text('Your queue is empty.'))
                 : ListView.builder(
                     itemCount: c.queue.order.length,
+                    // Let the sliver calculate distant offsets without building preceding songs.
+                    itemExtent: _twoLineRowExtent(
+                      ctx,
+                      minimum: 72,
+                      titleSize: 16,
+                      subtitleSize: 14,
+                      padding: 24,
+                    ),
                     itemBuilder: (ctx, index) {
                       final entry = c.queue.entries[c.queue.order[index]],
-                          track = c.store.track(entry.id);
+                          track = c.displayTrack(entry.id);
                       return ListTile(
                         leading: Icon(
                           index == c.queue.cursor
@@ -1395,8 +1441,16 @@ class _LibraryScreenState extends State<LibraryScreen> {
                               : Icons.music_note,
                           color: index == c.queue.cursor ? accent : muted,
                         ),
-                        title: Text(track?.title ?? 'Unavailable track'),
-                        subtitle: Text(track?.artist ?? ''),
+                        title: Text(
+                          track?.title ?? 'Unavailable track',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        subtitle: Text(
+                          track?.artist ?? '',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
                         onTap: () {
                           c.queue.cursor = index;
                           Navigator.pop(ctx);
@@ -1411,6 +1465,40 @@ class _LibraryScreenState extends State<LibraryScreen> {
     );
   }
 }
+
+/// Reserve two scaled text lines plus spacing while retaining fixed scroll geometry.
+double _twoLineRowExtent(
+  BuildContext context, {
+  required double minimum,
+  required double titleSize,
+  required double subtitleSize,
+  required double padding,
+}) {
+  // Apply the actual text scaler separately to support nonlinear accessibility scaling.
+  final scaler = MediaQuery.textScalerOf(context);
+  return max(
+    minimum,
+    scaler.scale(titleSize) * 1.5 + scaler.scale(subtitleSize) * 1.5 + padding,
+  );
+}
+
+/// Render consistent icon, spacing and text for each recording action.
+PopupMenuItem<String> _songMenuItem(
+  String value,
+  String label,
+  IconData icon,
+) => PopupMenuItem<String>(
+  value: value,
+  height: 44,
+  padding: const EdgeInsets.symmetric(horizontal: 14),
+  child: Row(
+    children: [
+      Icon(icon, size: 18, color: muted),
+      const SizedBox(width: 12),
+      Expanded(child: Text(label)),
+    ],
+  ),
+);
 
 Widget _badge(String text, Color color) => Container(
   padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),

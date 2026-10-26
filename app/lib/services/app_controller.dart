@@ -90,6 +90,18 @@ class AppController extends ChangeNotifier {
   int? _checkGeneration;
   Future<void> _downloadTail = Future.value();
   List<LibraryRow>? _rowCache;
+  // Bound per-recording display lookups independently of total library/queue size.
+  static const _displayCacheLimit = 512;
+  // Reuse selected/visible recording metadata between playback-clock updates.
+  final _displayTracks = <String, Track?>{};
+  // Keep individual pin intent separate from aggregate Pile protection.
+  final _displayPins = <String, bool>{};
+  // Cache nullable cover keys while keeping file-existence checks in the artwork cache.
+  final _displayArtworkKeys = <String, String?>{};
+  // Reuse sidebar Piles until a library operation changes their names or counts.
+  List<Pile>? _displayPiles;
+  // Reuse the aggregate count between catalog mutations.
+  int? _displayLibraryCount;
   List<LibraryRow>? _oldAudioSample;
   AudioCache? _activeCache;
   // Correlate safe provider/media events without storing recording or account identifiers.
@@ -300,8 +312,38 @@ class AppController extends ChangeNotifier {
     _diagnosticStore.changed();
   }
 
-  Track? get current =>
-      queue.current == null ? null : store.track(queue.current!.id);
+  /// Read the selected identity through the same bounded cache as queue display rows.
+  Track? get current {
+    // Capture the current occurrence once so cursor changes cannot reuse another recording.
+    final entry = queue.current;
+    // Keep an empty queue independent of database reads.
+    if (entry == null) return null;
+    return displayTrack(entry.id);
+  }
+
+  /// Reuse one immutable display value while bounding lookups for distant scroll jumps.
+  Value _displayValue<Value>(
+    Map<String, Value> cache,
+    String id,
+    Value Function() read,
+  ) {
+    // Treat a cached null as a completed lookup rather than querying missing records every frame.
+    if (cache.containsKey(id)) return cache[id] as Value;
+    // Evict the oldest lookup before retaining another visible recording.
+    if (cache.length >= _displayCacheLimit) cache.remove(cache.keys.first);
+    return cache[id] = read();
+  }
+
+  /// Resolve only visible queue metadata and invalidate it with ordinary library changes.
+  Track? displayTrack(String id) =>
+      _displayValue(_displayTracks, id, () => store.track(id));
+
+  /// Read individual download intent without issuing SQL during every row rebuild.
+  bool individuallyPinned(String id) =>
+      _displayValue(_displayPins, id, () => store.individuallyPinned(id));
+
+  /// Read the full catalog count once per library mutation, independent of the active filter.
+  int get libraryCount => _displayLibraryCount ??= store.count;
   List<LibraryRow> get rows => _rowCache ??= _libraryRows();
   List<LibraryRow> _libraryRows() {
     final source = store.rows(view: view, query: query, pile: pileId);
@@ -322,7 +364,7 @@ class AppController extends ChangeNotifier {
     ];
   }
 
-  List<Pile> get piles => store.piles();
+  List<Pile> get piles => _displayPiles ??= store.piles();
   bool enriching(String id) => _metadataTasks.containsKey(id);
   Map<String, Object> metadataSummary() {
     int number(String sql) =>
@@ -374,7 +416,10 @@ class AppController extends ChangeNotifier {
     }
   }
 
-  File? artworkFile(String id) => artwork.localFile(store.artworkKey(id));
+  /// Reuse cover-key metadata while preserving file validation on each access.
+  File? artworkFile(String id) => artwork.localFile(
+    _displayValue(_displayArtworkKeys, id, () => store.artworkKey(id)),
+  );
 
   void _mergeObservedMetadata(String id, {Map<String, dynamic>? observed}) {
     final data = observed ?? provider.observedMetadata(id);
@@ -554,6 +599,8 @@ class AppController extends ChangeNotifier {
         );
         if (disposed || offline || !needed()) return;
         store.saveArtwork(id, key);
+        // Refresh a formerly missing key without invalidating the entire library for one cover.
+        _displayArtworkKeys.remove(id);
         _notify(library: false);
       } catch (error) {
         if (!disposed && needed() && categoryOf(error) != 'cancelled') {
@@ -638,7 +685,15 @@ class AppController extends ChangeNotifier {
           _ => 'Your library',
         };
   void _notify({bool library = true}) {
-    if (library) _rowCache = null;
+    // Refresh catalog-derived display values only for mutations, never playback-clock ticks.
+    if (library) {
+      _rowCache = null;
+      _displayTracks.clear();
+      _displayPins.clear();
+      _displayArtworkKeys.clear();
+      _displayPiles = null;
+      _displayLibraryCount = null;
+    }
     if (!disposed) notifyListeners();
   }
 
