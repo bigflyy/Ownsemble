@@ -1,5 +1,21 @@
 # Reported issues
 
+- HIGH PRIORITY - shuffle playback failures (2026-10-27): user reports that
+  Shuffle cannot find/play any or almost any selected audio and shows errors.
+  Exact affected count and cached/uncached distribution are unverified. Queue
+  this playback reliability investigation ahead of lyrics and new features;
+  do not interrupt the status UI release or claim shuffle fixed by it.
+  Existing generated shuffle/order tests pass, but they do not reproduce or
+  disprove live provider/source failures. Passive sanitized diagnostics around
+  the report show cdn_destination and page_or_adapter_contract failure areas;
+  neither establishes that shuffle itself is the cause. Compare the same exact
+  recording in normal/shuffled order, cached/uncached, recent/old and failed-next
+  recovery using bounded muted app-owned checks. Preserve strict TLS/CDN/identity/
+  cache guards and user data; no source substitution or full-library download.
+  Collect error categories/stages/timings automatically; never request manual
+  song clicks or error transcription. Add failing regressions for reproduced
+  causes before implementation, then fresh independent Luna review.
+
 - Repaired uncached Windows CDN compatibility (2026-10-23): a deep-library sample bound the exact
   recording source, then failed opening its local relay after 8,519 ms with no
   upstream bytes observed. The UI category was decoder_open_failed, which can

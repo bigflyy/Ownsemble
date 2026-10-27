@@ -1,8 +1,11 @@
 2026-10-27 checkpoint: the local queue/menu performance slice and clear sync,
 connection/download status slice are delivered; see UI_PERFORMANCE.md and
 LIBRARY_STATUS.md for exact scope. Native FPS/network distributions remain open.
-Recommended next corrective task: confirmed VK lyrics extraction failure, before
-larger UI research or new feature screens. The user must select the next slice.
+New report 2026-10-27: Shuffle fails to find/play many or all selected songs and
+shows errors. This is queued for high-priority playback investigation before
+lyrics or new features; see KNOWN_ISSUES.md. Generated queue tests do not establish
+live provider success. The user has queued the report, not selected a new feature
+implementation. Confirmed VK lyrics extraction remains the next separate bug.
 
 Current priority 2026-10-22: the user selected cross-platform-friendly architecture
 before further feature implementation. See ARCHITECTURE.md, ADR0001 and the latest
