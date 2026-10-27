@@ -1,6 +1,7 @@
 // Generated browser contracts also use relative imports for standalone probes.
 // ignore_for_file: avoid_relative_lib_imports
 
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -15,6 +16,7 @@ import '../tool/fixtures/generated_browser.dart';
 class ReferenceBrowserFactory extends GeneratedBrowserFactory {
   // Count exact-ID requests without relying on a search result or list position.
   int referenceRequests = 0;
+  bool standbyRowsMissing = false;
   // Model a busy main document while the isolated playback page has valid consent.
   bool mainWitnessMissing = false;
   // Expose a current rendered source while the legacy reload returns an older link.
@@ -66,7 +68,10 @@ class ReferenceBrowser extends GeneratedBrowser {
     }
     // Keep standby readiness independent of whether the selected row is visible.
     if (expression.contains('"readiness"')) {
-      return jsonEncode({'count': 12, 'loading': false});
+      final missing =
+          (factory as ReferenceBrowserFactory).standbyRowsMissing &&
+          !identical(this, factory.pages.first);
+      return jsonEncode({'count': missing ? 0 : 12, 'loading': missing});
     }
     // Resolve only the requested recording, even without a saved reload hash.
     if (expression.contains('"resolve-reference","17_2630"')) {
@@ -172,6 +177,143 @@ class ReferenceBrowser extends GeneratedBrowser {
 /// Cover exact-ID playback independently of viewport, title search and saved hashes.
 void main() {
   // Exercise both terminal outcomes of a supported search that never finds the exact ID.
+  test('cold playback resolves an exact reference without waiting for standby rows', () async {
+    final factory = ReferenceBrowserFactory()..standbyRowsMissing = true;
+    final provider = VkProvider(
+      browserFactory: factory,
+      loadAdapter: () async => 'generated-only',
+      status: (_) {},
+      changed: () {},
+    );
+    try {
+      await provider.connect();
+      final result = await provider
+          .resolve(
+            const Track('17_2630', 'Тестовая песня', 'Тестовый артист', 60),
+          )
+          .timeout(const Duration(milliseconds: 500));
+      expect(result.recordingId, '17_2630');
+      expect(result.evidence, 'exact_reload');
+      expect(factory.referenceRequests, 1);
+      expect(factory.searchRequests, 0);
+    } finally {
+      await provider.cancelResolution();
+      await provider.disconnect();
+    }
+  });
+
+  test(
+    'a rejected cold reference is replaced only by exact current discovery',
+    () async {
+      final factory = ReferenceBrowserFactory()..standbyRowsMissing = true;
+      final provider = VkProvider(
+        browserFactory: factory,
+        loadAdapter: () async => 'generated-only',
+        status: (_) {},
+        changed: () {},
+      );
+      const track = Track('17_2630', 'Тестовая песня', 'Тестовый артист', 60);
+      try {
+        await provider.connect();
+        final reference = await provider.resolve(track);
+        expect(provider, isA<RejectedSourceRecovery>());
+        final recovery = provider as RejectedSourceRecovery;
+        expect(recovery.rejectSource('17_9999', reference.source), isFalse);
+        expect(recovery.rejectSource(track.id, reference.source), isTrue);
+        expect(recovery.rejectSource(track.id, reference.source), isFalse);
+        factory
+          ..standbyRowsMissing = false
+          ..requiresArtistSearch = true
+          ..legacyReturnsStaleSource = true;
+        final current = await provider
+            .resolve(track)
+            .timeout(const Duration(seconds: 2));
+        expect(current.recordingId, track.id);
+        expect(current.evidence, 'metadata_row');
+        expect(factory.searchRequests, 1);
+        expect(factory.referenceRequests, 1);
+        // A known unusable reference stays disabled for this session after recovery.
+        factory
+          ..requiresArtistSearch = false
+          ..searchedWithArtist = false;
+        await expectLater(
+          provider.resolve(track),
+          throwsA(
+            isA<ProofFailure>().having(
+              (error) => error.category,
+              'category',
+              'music_search_unsupported',
+            ),
+          ),
+        );
+        expect(factory.referenceRequests, 1);
+      } finally {
+        await provider.cancelResolution();
+        await provider.disconnect();
+      }
+    },
+  );
+
+  test(
+    'a legacy reference from the warm independent page remains recoverable',
+    () async {
+      final factory = ReferenceBrowserFactory();
+      final provider = VkProvider(
+        browserFactory: factory,
+        loadAdapter: () async => 'generated-only',
+        status: (_) {},
+        changed: () {},
+      );
+      const track = Track('17_2630', 'Тестовая песня', 'Тестовый артист', 60);
+      try {
+        await provider.connect();
+        final reference = await provider.resolve(track);
+        expect(reference.evidence, 'exact_reload');
+        expect(factory.searchRequests, 1);
+        expect(
+          (provider as RejectedSourceRecovery).rejectSource(
+            track.id,
+            reference.source,
+          ),
+          isTrue,
+        );
+      } finally {
+        await provider.cancelResolution();
+        await provider.disconnect();
+      }
+    },
+  );
+
+  test(
+    'cold reference fallback cannot bypass a missing personal-page witness',
+    () async {
+      final factory = ReferenceBrowserFactory()
+        ..standbyRowsMissing = true
+        ..mainWitnessMissing = true;
+      final provider = VkProvider(
+        browserFactory: factory,
+        loadAdapter: () async => 'generated-only',
+        status: (_) {},
+        changed: () {},
+      );
+      try {
+        await provider.connect();
+        await expectLater(
+          provider
+              .resolve(
+                const Track('17_2630', 'Тестовая песня', 'Тестовый артист', 60),
+              )
+              .timeout(const Duration(milliseconds: 500)),
+          throwsA(isA<TimeoutException>()),
+        );
+        expect(factory.referenceRequests, 0);
+      } finally {
+        await provider.cancelResolution();
+        await provider.disconnect();
+      }
+    },
+  );
+
   for (final legacyAvailable in [true, false]) {
     test(
       'search timeout tries legacy exactly once, available=$legacyAvailable',

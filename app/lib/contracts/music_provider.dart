@@ -44,6 +44,13 @@ abstract interface class LibraryMembershipDiagnostics {
   Future<void> inspectLibraryMembership();
 }
 
+/// Optional same-recording recovery after a resolved source fails destination policy.
+abstract interface class RejectedSourceRecovery {
+  /// Forget this exact reference and require current discovery on the next resolve.
+  /// Return false when the source was not an eligible reference or was rejected before.
+  bool rejectSource(String recordingId, Uri source);
+}
+
 /// Application-facing music operations; implementations own provider policy.
 /// References and optional fields are opaque provider data, never credentials.
 abstract interface class MusicProvider {

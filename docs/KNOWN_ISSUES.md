@@ -1,20 +1,19 @@
 # Reported issues
 
-- HIGH PRIORITY - shuffle playback failures (2026-10-27): user reports that
-  Shuffle cannot find/play any or almost any selected audio and shows errors.
-  Exact affected count and cached/uncached distribution are unverified. Queue
-  this playback reliability investigation ahead of lyrics and new features;
-  do not interrupt the status UI release or claim shuffle fixed by it.
-  Existing generated shuffle/order tests pass, but they do not reproduce or
-  disprove live provider/source failures. Passive sanitized diagnostics around
-  the report show cdn_destination and page_or_adapter_contract failure areas;
-  neither establishes that shuffle itself is the cause. Compare the same exact
-  recording in normal/shuffled order, cached/uncached, recent/old and failed-next
-  recovery using bounded muted app-owned checks. Preserve strict TLS/CDN/identity/
-  cache guards and user data; no source substitution or full-library download.
-  Collect error categories/stages/timings automatically; never request manual
-  song clicks or error transcription. Add failing regressions for reproduced
-  causes before implementation, then fresh independent Luna review.
+- Shuffle playback reliability (2026-10-27): a muted uncached selected attempt
+  reproduced a 30-second source-resolution timeout while the independent music
+  page took 32.375 seconds to warm. The baseline did not isolate queue mode;
+  this is a shared-path suspect, not proof of a shuffle-order defect. The repair
+  allows an exact-ID request on the already-consented main music page when the
+  standby remains cold, preserving current-source priority and all identity,
+  native-mute, HTTPS/CDN and cache guards. Follow-up paired checks BOTH failed on
+  the same rejected CDN-to-VK-web redirect, with exact selection preserved. A
+  bounded same-recording current-discovery retry is implemented and source-tested;
+  native/live acceptance of that recovery is still pending. Fixed silent queue probes
+  compare one exact internal identity in normal and shuffled modes and restore
+  the prior queue without listening history. See SHUFFLE_PLAYBACK.md for scoped
+  evidence and remaining live/platform/latency gates. No full-library playback
+  certification or source substitution; other provider failures remain possible.
 
 - Repaired uncached Windows CDN compatibility (2026-10-23): a deep-library sample bound the exact
   recording source, then failed opening its local relay after 8,519 ms with no

@@ -28,7 +28,7 @@ if(command==='diagnose') {
   const input=JSON.parse(fs.readFileSync(file,'utf8')),safe={};
   for(const key of ['category','count','updatedAt'])if(Object.hasOwn(input,key))safe[key]=input[key];
   console.log(JSON.stringify(safe,null,2));
-} else if(['restart','check','play','play-current','play-uncached','play-deep','play-last','play-old-1','play-old-10','play-old-25','play-old-50','play-old-100','play-old-250','play-cached','audible','mute','pause','resume','seek-middle','stop','next','refresh-head','refresh-full','metadata-summary','inspect-current','inspect-old','inspect-lyrics','repair-mismatched-cache','check-repaired','check-current','check-old'].includes(command)) {
+} else if(['restart','check','play','play-current','play-uncached','play-deep','play-last','play-old-1','play-old-10','play-old-25','play-old-50','play-old-100','play-old-250','play-cached','audible','mute','pause','resume','seek-middle','stop','next','refresh-head','refresh-full','metadata-summary','inspect-current','inspect-old','inspect-lyrics','repair-mismatched-cache','check-repaired','check-current','check-old','check-queue-normal','check-queue-shuffle'].includes(command)) {
   if(process.argv.length!==3){console.error('This command accepts no extra arguments.');process.exit(2);}
   fs.mkdirSync(root,{recursive:true});
   const file=path.join(root,'control.json');

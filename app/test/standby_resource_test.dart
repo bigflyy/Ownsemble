@@ -103,4 +103,84 @@ void main() {
       expect(standby.isReady, isFalse);
     },
   );
+  test(
+    'readiness grace lets finishing preparation win without consuming it',
+    () async {
+      final gate = Completer<void>();
+      final standby = StandbyResource<int>(
+        create: () => 7,
+        prepare: (_) => gate.future,
+        dispose: (_) async {},
+      );
+      standby.warm();
+      final ready = standby.readyWithin(const Duration(milliseconds: 150));
+      gate.complete();
+      expect(await ready, isTrue);
+      expect(standby.isReady, isTrue);
+      final taken = standby.take();
+      expect(taken.value, 7);
+      await taken.close();
+    },
+  );
+
+  test(
+    'readiness timeout leaves pending preparation available to its owner',
+    () async {
+      final gate = Completer<void>();
+      var closed = 0;
+      final standby = StandbyResource<int>(
+        create: () => 7,
+        prepare: (_) => gate.future,
+        dispose: (_) async {
+          closed++;
+        },
+      );
+      expect(await standby.readyWithin(Duration.zero), isFalse);
+      standby.warm();
+      expect(await standby.readyWithin(Duration.zero), isFalse);
+      expect(closed, 0);
+      gate.complete();
+      await Future<void>.delayed(Duration.zero);
+      expect(standby.isReady, isTrue);
+      await standby.discard();
+      expect(closed, 1);
+    },
+  );
+
+  test('readiness grace rejects transferred and failed preparations', () async {
+    final gate = Completer<void>();
+    var closed = 0;
+    final standby = StandbyResource<int>(
+      create: () => 7,
+      prepare: (_) => gate.future,
+      dispose: (_) async {
+        closed++;
+      },
+    );
+    standby.warm();
+    final ready = standby.readyWithin(const Duration(milliseconds: 150));
+    final taken = standby.take();
+    gate.complete();
+    expect(await ready, isFalse);
+    await taken.close();
+    expect(closed, 1);
+
+    final failed = StandbyResource<int>(
+      create: () => 8,
+      prepare: (_) async {
+        throw StateError('synthetic failure');
+      },
+      dispose: (_) async {
+        closed++;
+      },
+    );
+    failed.warm();
+    expect(
+      await failed.readyWithin(const Duration(milliseconds: 150)),
+      isFalse,
+    );
+    await Future<void>.delayed(Duration.zero);
+    expect(failed.isReady, isFalse);
+    expect(closed, 2);
+  });
 }

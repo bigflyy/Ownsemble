@@ -34,6 +34,19 @@ class StandbyResource<T> {
   bool get isReady => _pending?.isReady == true;
   bool get isPreparing => _pending != null && !isReady;
 
+  /// Let an already-finishing warm-up win without blocking playback on a cold page.
+  Future<bool> readyWithin(Duration budget) async {
+    final resource = _pending;
+    if (resource == null) return false;
+    try {
+      await resource.ready.timeout(budget);
+    } catch (_) {
+      // Preparation errors already have an observer and their own cleanup path.
+      return false;
+    }
+    return identical(_pending, resource) && resource.isReady;
+  }
+
   PreparedResource<T> _new() {
     final resource = PreparedResource(create(), prepare, dispose);
     resource.ready.then<void>(

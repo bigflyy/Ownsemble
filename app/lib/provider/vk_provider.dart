@@ -21,7 +21,11 @@ import 'standby_resource.dart';
 
 /// The only module that owns VK page access. No cookies, auth responses,
 /// framework stores or arbitrary caller-supplied scripts leave this boundary.
-class VkProvider implements MusicProvider, LibraryMembershipDiagnostics {
+class VkProvider
+    implements
+        MusicProvider,
+        LibraryMembershipDiagnostics,
+        RejectedSourceRecovery {
   final MusicBrowserFactory browserFactory;
   final Future<String> Function() loadAdapter;
   final void Function(String) status;
@@ -51,6 +55,22 @@ class VkProvider implements MusicProvider, LibraryMembershipDiagnostics {
   final _candidates = <Uri>{};
   final _segmentWitnesses = <Uri>{};
   final _sourceMemory = SourceMemory();
+  // Bound transient recovery state; never persist or log source addresses.
+  final _referenceSources = <String, Uri>{};
+  final _currentSourceRequired = <String>{};
+
+  @override
+  bool rejectSource(String recordingId, Uri source) {
+    if (_referenceSources[recordingId] != source) return false;
+    _referenceSources.remove(recordingId);
+    _sourceMemory.forget(recordingId);
+    _currentSourceRequired.add(recordingId);
+    if (_currentSourceRequired.length > 64) {
+      _currentSourceRequired.remove(_currentSourceRequired.first);
+    }
+    return true;
+  }
+
   final _musicReferences = <String, String>{};
   final _knownUnavailable = <String, bool>{};
   final _libraryPositions = <String, int>{};
@@ -1028,6 +1048,10 @@ class VkProvider implements MusicProvider, LibraryMembershipDiagnostics {
         ? decodeAudioSource(value, user is num ? user.toInt() : 0)
         : null;
     if (source != null && agent is String && agent.length <= 512) {
+      _referenceSources[track.id] = source;
+      if (_referenceSources.length > 64) {
+        _referenceSources.remove(_referenceSources.keys.first);
+      }
       return ResolvedAudio(
         source,
         agent,
@@ -1047,6 +1071,8 @@ class VkProvider implements MusicProvider, LibraryMembershipDiagnostics {
     void Function(Uri, String)? prepareCandidate,
     Future<Set<Uri>> Function(Uri, String)? manifestSegments,
   }) async {
+    final currentSourceRequired = _currentSourceRequired.contains(track.id);
+    preparePlaybackPage();
     _requireBackgroundAccess();
     // Prefer the current exact music row over legacy reload endpoints and older memory entries.
     if (connected && !_closed) {
@@ -1101,6 +1127,33 @@ class VkProvider implements MusicProvider, LibraryMembershipDiagnostics {
         }
       }
     }
+    // A cold hidden document must not block an exact lookup on the already
+    // consented main music page. Keep current metadata and warm-page search first.
+    if (!currentSourceRequired && connected && !_closed && !_standby.isReady) {
+      // Preserve current-page search when warm-up is merely finishing this event turn.
+      await _standby.readyWithin(const Duration(milliseconds: 150));
+    }
+    if (!currentSourceRequired && connected && !_closed && !_standby.isReady) {
+      await _resolutionGuard(cancelled);
+      final referenceWatch = Stopwatch()..start();
+      final reference = await _resolveReference(track, musicKey: musicKey);
+      await _resolutionGuard(cancelled);
+      if (reference != null) {
+        final timings = <String, Object>{
+          ...reference.timings,
+          'prepared_before_selection': false,
+          'source_resolution_ms': referenceWatch.elapsedMilliseconds,
+        };
+        diagnostic?.call({'stage': 'resolve_finished', ...timings});
+        return ResolvedAudio(
+          reference.source,
+          reference.userAgent,
+          recordingId: reference.recordingId,
+          evidence: reference.evidence,
+          timings: timings,
+        );
+      }
+    }
     // Separate hidden pages share the application's environment/session, but
     // never scroll or activate each other's document. No session is exported.
     final watch = Stopwatch()..start();
@@ -1120,8 +1173,17 @@ class VkProvider implements MusicProvider, LibraryMembershipDiagnostics {
         cancelled: cancelled,
         prepareCandidate: prepareCandidate,
         manifestSegments: manifestSegments,
+        allowReference: !currentSourceRequired,
       );
       _metadata.addAll(playback._metadata);
+      // The outer provider owns transport recovery even when the reference was
+      // resolved inside its independent document.
+      if (resolved.timings['source_from_reference'] == true) {
+        _referenceSources[track.id] = resolved.source;
+        if (_referenceSources.length > 64) {
+          _referenceSources.remove(_referenceSources.keys.first);
+        }
+      }
       final timings = <String, Object>{
         ...resolved.timings,
         'prepared_before_selection': readyBeforeSelection,
@@ -1164,6 +1226,7 @@ class VkProvider implements MusicProvider, LibraryMembershipDiagnostics {
     bool Function()? cancelled,
     void Function(Uri, String)? prepareCandidate,
     Future<Set<Uri>> Function(Uri, String)? manifestSegments,
+    bool allowReference = true,
   }) async {
     return _lock.run(() async {
       _reusableDocument = false;
@@ -1291,6 +1354,7 @@ class VkProvider implements MusicProvider, LibraryMembershipDiagnostics {
 
       /// Try a legacy exact-ID reference only after current-page discovery cannot supply the recording.
       Future<ResolvedAudio?> legacyFallback() async {
+        if (!allowReference) return null;
         await _resolutionGuard(cancelled);
         // Keep fallback on a consented personal music document and retain exact identity checks.
         final reference = await _resolveReference(track, musicKey: musicKey);
@@ -1978,6 +2042,8 @@ class VkProvider implements MusicProvider, LibraryMembershipDiagnostics {
     _navigation.observe(null);
     _networkListening = false;
     _sourceMemory.clear();
+    _referenceSources.clear();
+    _currentSourceRequired.clear();
     _musicReferences.clear();
     _knownUnavailable.clear();
     _libraryPositions.clear();

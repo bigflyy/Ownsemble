@@ -139,6 +139,8 @@ class AppController extends ChangeNotifier {
   String? _playingStream;
   String? _checkingTrack;
   Future<void>? _checkTask;
+  // Retain one in-memory identity so normal/shuffle probes compare the same recording.
+  String? _queueStartupTarget;
   Completer<void>? _checkCancelled;
   String? _checkCancelReason;
   int? _checkGeneration;
@@ -1217,18 +1219,27 @@ class AppController extends ChangeNotifier {
       diagnostics.run('playback', () => _playCurrent(diagnostic: diagnostic));
 
   /// Run the existing exact-recording startup and request ownership checks.
-  Future<void> _playCurrent({bool diagnostic = false}) async {
+  Future<void> _playCurrent({
+    bool diagnostic = false,
+    int? recoveryRequest,
+    Stopwatch? startupWatch,
+    ProofFailure? originalSourceFailure,
+  }) async {
     final track = current;
     if (track == null) return;
-    if (!diagnostic) _cancelCheck('selection_changed');
-    if (!diagnostic) _saveQueue();
-    final request = ++_request;
+    if (!diagnostic && recoveryRequest == null) {
+      _cancelCheck('selection_changed');
+    }
+    if (!diagnostic && recoveryRequest == null) _saveQueue();
+    final request = recoveryRequest ?? ++_request;
+    if (request != _request || disposed) return;
     _finishListening();
     loading = true;
     store.trackError(track.id, null);
     message = 'Preparing ${track.title}…';
     _notify();
-    final watch = Stopwatch()..start();
+    final watch = startupWatch ?? (Stopwatch()..start());
+    var delegatedRecovery = false;
     var phase = 'stopping_previous';
     String? playbackError;
     // Keep the selected relay's original failure available throughout startup.
@@ -1237,7 +1248,8 @@ class AppController extends ChangeNotifier {
     final progress = Timer.periodic(const Duration(seconds: 1), (_) {
       if (request == _request) _reportPlayback(phase, watch);
     });
-    final deadline = Timer(startupTimeout, () {
+    final remainingBudget = startupTimeout - watch.elapsed;
+    final deadline = Timer(remainingBudget, () {
       if (request != _request || !loading || disposed) return;
       unawaited(stopPlayback());
       store.trackError(track.id, 'player_start_timeout');
@@ -1342,16 +1354,63 @@ class AppController extends ChangeNotifier {
         }
         // Keep late cleanup from replacing a newer request's successful status.
         if (request != _request || disposed) return;
+        final recovery = provider is RejectedSourceRecovery
+            ? provider as RejectedSourceRecovery
+            : null;
+        if (originalSourceFailure == null &&
+            failure is AudioDestinationFailure &&
+            failedStream != null &&
+            recovery != null &&
+            recovery.rejectSource(track.id, failedStream.source)) {
+          // Retry this identity once through current discovery. Do not follow the
+          // rejected destination, reset the total deadline, or publish its bytes.
+          final pending = _downloads.remove(track.id);
+          if (pending != null) {
+            try {
+              // Keep the original deadline and cancellation subscription active
+              // until the old download has relinquished its serialized lane.
+              await _awaitDownload(pending, _cancelDownload);
+            } catch (_) {
+              /* Original cause retained. */
+            }
+          }
+          if (request != _request || disposed) return;
+          if (startupTimeout - watch.elapsed > Duration.zero) {
+            _writeAudioDiagnostic({
+              'stage': 'reference_source_retry',
+              'category': failure.category,
+            });
+            progress.cancel();
+            deadline.cancel();
+            delegatedRecovery = true;
+            // Recovery belongs to the same foreground request, including a
+            // diagnostic's queue/history ownership and total startup deadline.
+            await _playCurrent(
+              diagnostic: diagnostic,
+              recoveryRequest: request,
+              startupWatch: watch,
+              originalSourceFailure: failure,
+            );
+            return;
+          }
+        }
+        if (originalSourceFailure != null) {
+          _writeAudioDiagnostic({
+            'stage': 'reference_source_retry_failed',
+            'category': categoryOf(failure),
+          });
+        }
+        final reportedFailure = originalSourceFailure ?? failure;
         phase = 'failed';
-        playbackError = categoryOf(failure);
-        store.trackError(track.id, categoryOf(failure));
-        _failure(failure, stack: stack);
-        _reportPlayback(phase, watch, category: categoryOf(failure));
+        playbackError = categoryOf(reportedFailure);
+        store.trackError(track.id, categoryOf(reportedFailure));
+        _failure(reportedFailure, stack: stack);
+        _reportPlayback(phase, watch, category: categoryOf(reportedFailure));
       }
     } finally {
       progress.cancel();
       deadline.cancel();
-      if (request == _request) {
+      if (!delegatedRecovery && request == _request) {
         loading = false;
         _reportPlayback(phase, watch, category: playbackError);
         _notify();
@@ -1787,12 +1846,15 @@ class AppController extends ChangeNotifier {
           _notify(library: false);
         },
       );
-      final asset = await sharedCache.save(
-        track,
-        resolved.source,
-        userAgent: resolved.userAgent,
-        recordingEvidence: resolved.evidence,
-        preserveExisting: true,
+      final asset = await _awaitDownload(
+        sharedCache.save(
+          track,
+          resolved.source,
+          userAgent: resolved.userAgent,
+          recordingEvidence: resolved.evidence,
+          preserveExisting: true,
+        ),
+        token,
       );
       if (disposed || token != _cancelDownload) {
         throw const ProofFailure('cancelled');
@@ -2138,6 +2200,8 @@ class AppController extends ChangeNotifier {
             'check-repaired',
             'check-current',
             'check-old',
+            'check-queue-normal',
+            'check-queue-shuffle',
           ].contains(raw['command']) ||
           raw['nonce'] is! String ||
           !RegExp(r'^[a-f0-9-]{36}$').hasMatch(raw['nonce'] as String) ||
@@ -2154,6 +2218,14 @@ class AppController extends ChangeNotifier {
               .catchError((Object error) {
                 _failure(const ProofFailure('diagnostics_export_failed'));
               }),
+        );
+      }
+      if ([
+        'check-queue-normal',
+        'check-queue-shuffle',
+      ].contains(raw['command'])) {
+        unawaited(
+          checkQueueStartup(shuffled: raw['command'] == 'check-queue-shuffle'),
         );
       }
       if (raw['command'] == 'check-old') {
@@ -2318,9 +2390,58 @@ class AppController extends ChangeNotifier {
     await _checkSample(targetId: id);
   }
 
-  Future<void> _checkSample({bool cachedOnly = false, String? targetId}) {
+  /// Probe one stable uncached recording through the real full-queue startup path.
+  /// The fixed control accepts no identities/paths and refuses audible playback.
+  Future<void> checkQueueStartup({required bool shuffled}) async {
+    if (disposed || _checking) return;
+    String? refusal;
+    if (!muted || player.state.volume != 0) {
+      refusal = 'diagnostic_requires_mute';
+    }
+    if (offline || !provider.connected) refusal ??= 'vk_not_connected';
+    if (refusal == null && _queueStartupTarget == null) {
+      final candidates = store
+          .rows()
+          .where((row) => !row.offline && !isProviderRestricted(row.error))
+          .toList();
+      if (candidates.isEmpty) {
+        refusal = 'diagnostic_no_uncached_tracks';
+      } else {
+        _queueStartupTarget = candidates[candidates.length ~/ 2].track.id;
+      }
+    }
+    if (refusal != null) {
+      File('${store.directory.path}/queue-check.json').writeAsStringSync(
+        jsonEncode({
+          'updatedAt': DateTime.now().toUtc().toIso8601String(),
+          'running': false,
+          'passed': false,
+          'category': refusal,
+          'queue_mode': shuffled ? 'shuffle' : 'normal',
+        }),
+      );
+      return;
+    }
+    await _checkSample(
+      targetId: _queueStartupTarget,
+      startupOnly: true,
+      queueShuffle: shuffled,
+    );
+  }
+
+  Future<void> _checkSample({
+    bool cachedOnly = false,
+    String? targetId,
+    bool startupOnly = false,
+    bool? queueShuffle,
+  }) {
     if (_checkTask != null) return _checkTask!;
-    final task = _runSampleCheck(cachedOnly: cachedOnly, targetId: targetId);
+    final task = _runSampleCheck(
+      cachedOnly: cachedOnly,
+      targetId: targetId,
+      startupOnly: startupOnly,
+      queueShuffle: queueShuffle,
+    );
     _checkTask = task;
     task.whenComplete(() {
       if (identical(_checkTask, task)) _checkTask = null;
@@ -2331,6 +2452,8 @@ class AppController extends ChangeNotifier {
   Future<void> _runSampleCheck({
     bool cachedOnly = false,
     String? targetId,
+    bool startupOnly = false,
+    bool? queueShuffle,
   }) async {
     if (_checking || (!cachedOnly && (offline || !provider.connected))) return;
     _acceptanceRequested = false;
@@ -2345,11 +2468,14 @@ class AppController extends ChangeNotifier {
     var lastBytes = 0;
     var lastProgress = 0;
     StreamingAudio? checkStream;
+    List<LibraryRow>? queueRows;
     final result = <String, Object>{
       'startedAt': DateTime.now().toUtc().toIso8601String(),
       'running': true,
       'fresh_offline_process': cachedOnly,
       'player': 'main',
+      if (queueShuffle != null)
+        'queue_mode': queueShuffle ? 'shuffle' : 'normal',
     };
     void checkpoint([String? next]) {
       if (next != null) stage = next;
@@ -2374,7 +2500,11 @@ class AppController extends ChangeNotifier {
         'cancel_reason': ?_checkCancelReason,
       });
       File(
-        '${store.directory.path}/${cachedOnly ? 'offline-check' : 'sample-check'}.json',
+        '${store.directory.path}/${startupOnly
+            ? 'queue-check'
+            : cachedOnly
+            ? 'offline-check'
+            : 'sample-check'}.json',
       ).writeAsStringSync(jsonEncode(result));
     }
 
@@ -2385,10 +2515,19 @@ class AppController extends ChangeNotifier {
       ),
     ]);
     Future<void> start(LibraryRow row) async {
-      final operation = playRows([row], 0, diagnostic: true);
+      final entries = queueRows ?? [row];
+      final selected = entries.indexWhere(
+        (entry) => entry.track.id == row.track.id,
+      );
+      if (selected < 0) throw const ProofFailure('main_control_start_failed');
+      if (queueShuffle != null) queue.shuffle = queueShuffle;
+      final operation = playRows(entries, selected, diagnostic: true);
       ownedRequest = _request;
       await checked(operation);
-      if (!player.state.playing || player.state.position.inMilliseconds < 100) {
+      result['selected_identity_preserved'] = current?.id == row.track.id;
+      if (current?.id != row.track.id ||
+          !player.state.playing ||
+          player.state.position.inMilliseconds < 100) {
         final failure = store
             .rows()
             .firstWhere((r) => r.track.id == row.track.id)
@@ -2416,6 +2555,7 @@ class AppController extends ChangeNotifier {
     );
     try {
       final rows = store.rows();
+      if (queueShuffle != null) queueRows = rows;
       final accepted = store.setting('acceptance_sample_id');
       final lastSample = accepted is String && store.asset(accepted) != null
           ? accepted
@@ -2430,6 +2570,8 @@ class AppController extends ChangeNotifier {
           : rows.firstWhere((row) => !row.offline, orElse: () => rows.first);
       final sample = row.track;
       final wasCached = row.offline;
+      result['was_cached'] = wasCached;
+      if (queueRows != null) result['queue_size'] = queueRows.length;
       result['selection_had_error'] = row.error != null;
       _checkingTrack = sample.id;
       checkpoint('main_play');
@@ -2449,6 +2591,11 @@ class AppController extends ChangeNotifier {
         'played_before_complete': store.asset(sample.id) == null,
         'main_play': true,
       });
+      if (startupOnly) {
+        result['passed'] = true;
+        checkpoint('startup_complete');
+        return;
+      }
       checkpoint('main_pause');
       await checked(togglePlay(diagnostic: true));
       await checked(
