@@ -17,6 +17,7 @@ import '../media/streaming_audio.dart';
 import '../contracts/music_provider.dart';
 import '../provider/cached_source_witness.dart';
 import 'playback_queue.dart';
+import 'sync_activity.dart';
 
 import 'runtime_diagnostics.dart';
 import 'diagnostic_journal.dart';
@@ -42,6 +43,59 @@ class AppController extends ChangeNotifier {
       connecting = false,
       loading = false;
   bool _continueSweep = false;
+  int _syncGeneration = 0;
+  int _connectionGeneration = 0;
+  SyncActivity? _syncActivity;
+  String? connectionError;
+
+  /// Restore only completed results; background work never restores as active.
+  SyncActivity get syncActivity =>
+      _syncActivity ??= SyncActivity.restore(store.setting('last_sync_result'));
+
+  void _saveSyncActivity(SyncActivity activity) {
+    _syncActivity = activity;
+    store.setSetting('last_sync_result', activity.toJson());
+  }
+
+  /// Include scheduled full-scan slices so cancellation remains available between them.
+  bool get syncPending => syncing || _continueSweep;
+
+  /// Invalidate late merge/completion callbacks before closing the provider.
+  void _cancelSyncActivity({bool includeContinuation = false}) {
+    final cancel = syncing || (includeContinuation && _continueSweep);
+    ++_syncGeneration;
+    _continueSweep = false;
+    if (!cancel) return;
+    if (store.setting('initial_sync_pending', false) == true) {
+      store.setSetting('initial_sync_paused', true);
+    }
+    _saveSyncActivity(
+      SyncActivity(
+        phase: 'cancelled',
+        mode: syncActivity.mode,
+        checked: syncActivity.checked,
+        added: syncActivity.added,
+        finishedAt: DateTime.now(),
+        reason: 'cancelled',
+      ),
+    );
+    _nextSync = DateTime.now().add(const Duration(minutes: 2));
+  }
+
+  /// Stop enumeration alone; the selected audio resolver uses a separate port.
+  Future<void> cancelSync() async {
+    if (!syncPending || syncActivity.phase == 'cancelled') return;
+    _cancelSyncActivity(includeContinuation: true);
+    _notify(library: false);
+    await provider.cancelSync();
+  }
+
+  /// Disable automatic reconnection while retaining private sign-in and local data.
+  Future<void> disconnectVk() async {
+    setAutoSync(false);
+    await setOffline(true);
+  }
+
   String message = 'Your music, in your own order.',
       view = 'library',
       query = '';
@@ -224,7 +278,7 @@ class AppController extends ChangeNotifier {
     _scheduler = Timer.periodic(const Duration(seconds: 2), (_) => _schedule());
   }
   void providerStatus(String text) {
-    if (!loading && downloadId == null && !player.state.playing) message = text;
+    // Provider progress belongs to connection/sync controls, never the audio footer.
     _notify(library: false);
   }
 
@@ -241,7 +295,7 @@ class AppController extends ChangeNotifier {
           .inspectLibraryMembership();
     } catch (error, stack) {
       // Keep private-access failures inside the existing sanitized error path.
-      _failure(error, stack);
+      _failure(error, stack: stack);
     }
   }
 
@@ -721,20 +775,27 @@ class AppController extends ChangeNotifier {
       _notify();
       return;
     }
+    if (connecting || disposed) return;
+    final generation = ++_connectionGeneration;
+    connectionError = null;
     offline = false;
     store.setSetting('offline', false);
     store.setSetting('auto_sync', true);
     connecting = true;
-    message = 'Connecting to your VK library in the background…';
     _notify();
     try {
       await provider.finishPrivateSignIn();
+      if (disposed || offline || generation != _connectionGeneration) return;
       await provider.connect();
+      if (disposed || offline || generation != _connectionGeneration) return;
       _nextSync = DateTime.now();
     } catch (e) {
-      _failure(e);
+      if (!disposed && generation == _connectionGeneration) {
+        connectionError = SyncActivity.safeReason(categoryOf(e));
+        _failure(e, audioMessage: false);
+      }
     } finally {
-      connecting = false;
+      if (generation == _connectionGeneration) connecting = false;
       _notify();
     }
   }
@@ -744,7 +805,10 @@ class AppController extends ChangeNotifier {
     try {
       await provider.signInPrivately();
     } catch (e) {
-      _failure(e);
+      if (!disposed) {
+        connectionError = SyncActivity.safeReason(categoryOf(e));
+        _failure(e, audioMessage: false);
+      }
     }
   }
 
@@ -773,13 +837,17 @@ class AppController extends ChangeNotifier {
       // Start only after persisted consent; leave login interaction private.
       if (!connecting) {
         connecting = true;
+        connectionError = null;
+        _notify(library: false);
         try {
           await provider.connect();
         } catch (e) {
-          _failure(e);
+          connectionError = SyncActivity.safeReason(categoryOf(e));
+          _failure(e, audioMessage: false);
           _nextSync = DateTime.now().add(const Duration(minutes: 2));
         } finally {
           connecting = false;
+          _notify(library: false);
         }
       }
       return;
@@ -806,6 +874,12 @@ class AppController extends ChangeNotifier {
   Future<void> refresh({bool full = true}) =>
       diagnostics.run('sync', () => _refresh(full: full));
 
+  /// Honor an explicit short check even when initial discovery is unfinished.
+  Future<void> checkNewest() {
+    if (syncPending) return Future.value();
+    return diagnostics.run('sync', () => _refresh(full: false, headOnly: true));
+  }
+
   /// Describe the dated provider witness separately from all preserved local recordings.
   String get libraryCoverageSummary {
     // Keep provider membership distinct from historical rows saved in this application.
@@ -819,16 +893,16 @@ class AppController extends ChangeNotifier {
         count is int &&
         count >= 0 &&
         verified != null) {
-      return 'Automatic refresh checks newest entries. $count ${count == 1 ? 'recording' : 'recordings'} in last verified VK listing (${verified.toIso8601String().split('T').first}); ${store.count} saved locally.';
+      return 'Automatic refresh checks newest entries. $count ${count == 1 ? 'recording' : 'recordings'} in last verified VK listing (${verified.toIso8601String().split('T').first}); $libraryCount saved locally.';
     }
-    return 'Automatic refresh checks newest entries. VK listing coverage is partial. Refresh VK checks the full listing; saved music stays available.';
+    return 'Automatic refresh checks newest entries. VK listing coverage is partial. Scan full library checks the full listing; saved music stays available.';
   }
 
   /// Run the existing bounded sync policy without changing import or deletion behavior.
-  Future<void> _refresh({bool full = true}) async {
-    if (offline || syncing || demo) return;
+  Future<void> _refresh({bool full = true, bool headOnly = false}) async {
+    if (disposed || offline || syncing || demo || !provider.connected) return;
+    final generation = ++_syncGeneration;
     syncing = true;
-    _notify();
     final watch = Stopwatch()..start();
     // Respect a completed empty library instead of repeating full discovery forever.
     final initial =
@@ -836,10 +910,18 @@ class AppController extends ChangeNotifier {
     // Keep quiet/incomplete initial imports pending without repeating broad scans every poll.
     final initialPaused = store.setting('initial_sync_paused', false) == true;
     // Resume active slices automatically; paused discovery still permits bounded head checks.
-    final broad = full || (initial && !initialPaused) || _continueSweep;
-    final fromTop = full || !_continueSweep;
+    final broad =
+        !headOnly && (full || (initial && !initialPaused) || _continueSweep);
+    final fromTop = headOnly || full || !_continueSweep;
     final checkpoint = store.syncHead;
     final before = store.count;
+    var received = 0;
+    _syncActivity = SyncActivity(
+      phase: 'running',
+      mode: broad ? 'full' : 'head',
+    );
+    _notify(library: false);
+    bool active() => !disposed && !offline && generation == _syncGeneration;
     void report(String phase, {String? reason, int checked = 0}) {
       _writeAudioDiagnostic({
         'stage': 'sync_status',
@@ -866,8 +948,9 @@ class AppController extends ChangeNotifier {
       );
     }
 
-    report('running');
     try {
+      report('running');
+      if (headOnly && initial) store.setSetting('initial_sync_paused', true);
       // Preserve incomplete discovery independently of whether the current request checks the head.
       if (initial) store.setSetting('initial_sync_pending', true);
       // Resume explicit or active broad discovery without treating its end as verified coverage.
@@ -876,6 +959,8 @@ class AppController extends ChangeNotifier {
       final epoch = store.setting('sweep_epoch', store.now) as int;
       final result = await provider.sync(
         (tracks) {
+          if (!active()) return;
+          received += tracks.length;
           store.merge(tracks, discoveredAt: epoch);
           store.transaction(() {
             for (final track in tracks) {
@@ -894,12 +979,19 @@ class AppController extends ChangeNotifier {
               _mergeObservedMetadata(track.id);
             }
           });
+          _syncActivity = SyncActivity(
+            phase: 'running',
+            mode: broad ? 'full' : 'head',
+            checked: received,
+            added: store.count - before,
+          );
           _notify();
         },
         fromTop: fromTop,
         newestOnly: !broad,
         checkpoint: checkpoint,
       );
+      if (!active()) return;
       _continueSweep = broad && result.continueSweep;
       // Accept complete membership only from the provider's validated unique end witness.
       final complete = result.reason == 'provider_end' && !result.continueSweep;
@@ -933,18 +1025,23 @@ class AppController extends ChangeNotifier {
       _nextSync = DateTime.now().add(
         Duration(seconds: _continueSweep ? 5 : 120),
       );
-      if (!loading && downloadId == null && !player.state.playing) {
-        message =
-            !broad &&
-                !complete &&
-                !['known_head', 'head_seeded'].contains(result.reason)
-            ? 'Newest-entry check was incomplete. Use Refresh VK for a deeper scan; your saved music is available.'
-            : '${store.count} tracks saved · ${complete
-                  ? '${result.discovered} in verified VK listing'
-                  : broad
-                  ? 'VK coverage partial'
-                  : 'newest entries checked'}';
-      }
+      final succeeded =
+          complete ||
+          (!broad && ['known_head', 'head_seeded'].contains(result.reason));
+      _saveSyncActivity(
+        SyncActivity(
+          phase: result.reason == 'cancelled'
+              ? 'cancelled'
+              : succeeded
+              ? 'succeeded'
+              : 'partial',
+          mode: broad ? 'full' : 'head',
+          checked: result.discovered,
+          added: store.count - before,
+          finishedAt: DateTime.now(),
+          reason: SyncActivity.safeReason(result.reason),
+        ),
+      );
       store.report(
         complete ? 'sync_complete' : 'sync_partial',
         count: store.count,
@@ -952,11 +1049,22 @@ class AppController extends ChangeNotifier {
       report('finished', reason: result.reason, checked: result.discovered);
       _reportMetadataSummary();
     } catch (e) {
+      if (!active()) return;
       _continueSweep = false;
       // Preserve pending initial discovery after a failed or revoked provider request.
       if (initial) store.setSetting('initial_sync_paused', true);
       _nextSync = DateTime.now().add(const Duration(minutes: 2));
-      _failure(e);
+      _saveSyncActivity(
+        SyncActivity(
+          phase: categoryOf(e) == 'cancelled' ? 'cancelled' : 'failed',
+          mode: broad ? 'full' : 'head',
+          checked: received,
+          added: store.count - before,
+          finishedAt: DateTime.now(),
+          reason: SyncActivity.safeReason(categoryOf(e)),
+        ),
+      );
+      _failure(e, audioMessage: false);
       report('failed', reason: categoryOf(e));
     } finally {
       syncing = false;
@@ -968,6 +1076,9 @@ class AppController extends ChangeNotifier {
     offline = value;
     store.setSetting('offline', value);
     if (value) {
+      ++_connectionGeneration;
+      connecting = false;
+      await cancelSync();
       artwork.cancel();
       _cancelCheck('offline');
       _cancelPendingDownloads();
@@ -1234,7 +1345,7 @@ class AppController extends ChangeNotifier {
         phase = 'failed';
         playbackError = categoryOf(failure);
         store.trackError(track.id, categoryOf(failure));
-        _failure(failure, stack);
+        _failure(failure, stack: stack);
         _reportPlayback(phase, watch, category: categoryOf(failure));
       }
     } finally {
@@ -1895,7 +2006,7 @@ class AppController extends ChangeNotifier {
     unawaited(stopPlayback());
   }
 
-  void _failure(Object error, [StackTrace? stack]) {
+  void _failure(Object error, {StackTrace? stack, bool audioMessage = true}) {
     recordRuntimeFailure(error, stack, reporter: _writeAudioDiagnostic);
     final category =
         error is FileSystemException &&
@@ -1914,7 +2025,7 @@ class AppController extends ChangeNotifier {
     } catch (_) {
       /* Status and controls still work if the report cannot save. */
     }
-    message = friendlyError(category);
+    if (audioMessage) message = friendlyError(category);
     _notify();
   }
 
@@ -2485,6 +2596,8 @@ class AppController extends ChangeNotifier {
     if (disposed) return;
     _finishListening();
     _saveQueue();
+    _cancelSyncActivity();
+    ++_connectionGeneration;
     _cancelCheck('shutdown');
     ++_request;
     disposed = true;

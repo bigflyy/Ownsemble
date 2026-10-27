@@ -228,10 +228,10 @@ void main() {
         store.addToPile(pile.id, '900000000000002_1');
         await controller.pinPile(pile.id, true);
         await tester.pump();
-        expect(find.byTooltip('Release individual pin'), findsNothing);
+        expect(find.byTooltip('Allow automatic cleanup'), findsNothing);
         await controller.pinTrack('900000000000002_1');
         await tester.pump();
-        expect(find.byTooltip('Release individual pin'), findsOneWidget);
+        expect(find.byTooltip('Allow automatic cleanup'), findsOneWidget);
         expect(store.isPinned('900000000000002_1'), isTrue);
         expect(tester.takeException(), isNull);
       } finally {

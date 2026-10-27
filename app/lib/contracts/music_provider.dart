@@ -55,6 +55,9 @@ abstract interface class MusicProvider {
   /// Only an explicit application action may resume background work.
   Future<void> finishPrivateSignIn();
   Future<void> disconnect();
+
+  /// Stop only library enumeration, without cancelling foreground audio resolution.
+  Future<void> cancelSync();
   Future<void> cancelResolution();
   Map<String, dynamic> observedMetadata(String id);
   Uri? artworkSource(String id);

@@ -348,11 +348,17 @@ result counts, clear/reset and saved presets. Filter local stored metadata witho
 starting a full provider scan; explain partial enrichment coverage. Preserve the
 chosen filters/sort consistently when playing/shuffling the resulting collection.
 
-## Dedicated sync status/control — future UI improvement
+## Dedicated sync status/control
 
-Requested 2026-10-21. Current library progress can be mistaken for song loading.
-Proposed placement: upper-right library-header corner, replacing/integrating the
-existing refresh control; agree order with the user after the active task.
+2026-10-27 delivery: separate top-right sync panel, explicit bounded newest/full
+scan actions, partial coverage and persisted last outcome, cancellation including
+continuation gaps, and clickable connection controls. Individual download icons
+and automatic-cache/kept/waiting/progress/failure labels preserve existing storage
+intent and integrity checks. See LIBRARY_STATUS.md. Favorites remain a later task.
+
+Original request 2026-10-21: background library progress looked like song loading.
+Delivered placement: upper-right header, integrating the refresh actions. The
+requirements below describe the completed slice.
 
 - Small sync icon spins only during VK sync. Player loading/buffering remains
   tied to the selected audio, visually distinct from metadata work.

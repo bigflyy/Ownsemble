@@ -1,3 +1,9 @@
+2026-10-27 checkpoint: the local queue/menu performance slice and clear sync,
+connection/download status slice are delivered; see UI_PERFORMANCE.md and
+LIBRARY_STATUS.md for exact scope. Native FPS/network distributions remain open.
+Recommended next corrective task: confirmed VK lyrics extraction failure, before
+larger UI research or new feature screens. The user must select the next slice.
+
 Current priority 2026-10-22: the user selected cross-platform-friendly architecture
 before further feature implementation. See ARCHITECTURE.md, ADR0001 and the latest
 handoff. Browser/provider/playback/runtime/trust boundaries are implemented; full

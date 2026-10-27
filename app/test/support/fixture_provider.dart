@@ -22,6 +22,8 @@ class FixtureProvider implements MusicProvider {
   @override
   Future<void> cancelResolution() async {}
   @override
+  Future<void> cancelSync() async {}
+  @override
   Map<String, dynamic> observedMetadata(String id) => {};
   @override
   Uri? artworkSource(String id) => null;

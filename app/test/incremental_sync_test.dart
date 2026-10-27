@@ -343,7 +343,11 @@ void main() {
       expect(store.setting('initial_sync_paused'), isFalse);
       expect(store.setting('coverage'), 'complete');
       expect(store.setting('provider_library_count'), 2616);
-      expect(controller.message, contains('2616 in verified VK listing'));
+      expect(controller.syncActivity.label, 'Full scan complete');
+      expect(
+        controller.libraryCoverageSummary,
+        contains('2616 recordings in last verified VK listing'),
+      );
       expect(store.count, 2633);
       expect(store.syncHead, known);
       await controller.shutdown();

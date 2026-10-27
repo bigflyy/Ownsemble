@@ -1964,6 +1964,12 @@ class VkProvider implements MusicProvider, LibraryMembershipDiagnostics {
     return null;
   }
 
+  /// Let the bounded scanner unwind without closing the separate playback session.
+  @override
+  Future<void> cancelSync() async {
+    _yieldScan = true;
+  }
+
   @override
   Future<void> disconnect() async {
     ++_privateSignInGeneration;

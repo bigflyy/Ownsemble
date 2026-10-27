@@ -12,6 +12,7 @@ import 'track_details.dart';
 import 'artwork_viewport.dart';
 import 'artwork_preview.dart';
 import 'app_shortcuts.dart';
+import 'library_status_controls.dart';
 
 const accent = Color(0xFFD5E9A4);
 const canvas = Color(0xFF171918);
@@ -410,16 +411,9 @@ class _LibraryScreenState extends State<LibraryScreen> {
                 ),
               ),
               const SizedBox(width: 18),
-              _badge(
-                c.demo
-                    ? 'PREVIEW'
-                    : c.offline
-                    ? 'OFFLINE'
-                    : c.provider.connected
-                    ? 'VK CONNECTED'
-                    : 'LOCAL LIBRARY',
-                c.offline ? muted : accent,
-              ),
+              LibraryConnectionControl(controller: c),
+              const SizedBox(width: 8),
+              LibrarySyncControl(controller: c),
               const SizedBox(width: 8),
               IconButton(
                 tooltip: shortcutHint(AppCommand.help),
@@ -527,16 +521,6 @@ class _LibraryScreenState extends State<LibraryScreen> {
                     c.provider.connected ? 'Reconnect' : 'Connect VK',
                   ),
                 ),
-              IconButton(
-                tooltip: 'Refresh VK · scan full library',
-                onPressed: c.syncing || c.offline || !c.provider.connected
-                    ? null
-                    : c.refresh,
-                icon: Icon(
-                  Icons.refresh_rounded,
-                  color: c.syncing ? accent : muted,
-                ),
-              ),
             ],
           ),
           const SizedBox(height: 20),
@@ -551,7 +535,6 @@ class _LibraryScreenState extends State<LibraryScreen> {
                 ),
               ),
             ),
-          if (c.syncing) const LinearProgressIndicator(minHeight: 2),
           const Divider(height: 1),
           Padding(
             padding: const EdgeInsets.fromLTRB(8, 14, 8, 12),
@@ -620,10 +603,8 @@ class _LibraryScreenState extends State<LibraryScreen> {
                 Icon(
                   c.downloadId != null
                       ? Icons.downloading_rounded
-                      : c.syncing
-                      ? Icons.sync_rounded
                       : Icons.circle,
-                  size: c.downloadId != null || c.syncing ? 15 : 6,
+                  size: c.downloadId != null ? 15 : 6,
                   color: c.offline ? muted : accent,
                 ),
                 const SizedBox(width: 9),
@@ -641,7 +622,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
                     style: const TextStyle(fontSize: 11, color: muted),
                   ),
                   IconButton(
-                    tooltip: 'Cancel download',
+                    tooltip: 'Stop playback and cancel download',
                     onPressed: c.cancelDownload,
                     icon: const Icon(Icons.close, size: 16),
                   ),
@@ -831,13 +812,13 @@ class _LibraryScreenState extends State<LibraryScreen> {
                     Expanded(
                       child: IconButton(
                         tooltip: c.individuallyPinned(t.id)
-                            ? 'Release individual pin'
+                            ? 'Allow automatic cleanup'
                             : 'Keep offline',
                         onPressed: () => c.pinTrack(t.id),
                         icon: Icon(
                           c.individuallyPinned(t.id)
-                              ? Icons.push_pin_rounded
-                              : Icons.push_pin_outlined,
+                              ? Icons.download_for_offline_rounded
+                              : Icons.file_download_outlined,
                           size: 18,
                           color: row.pinned ? accent : muted,
                         ),
@@ -936,9 +917,15 @@ class _LibraryScreenState extends State<LibraryScreen> {
     if (row.offline) {
       return Tooltip(
         message: row.pinned
-            ? 'Complete audio saved · kept offline'
-            : 'Complete audio saved',
+            ? 'Saved audio · kept offline'
+            : 'Saved audio · automatic cache',
         child: const Icon(Icons.check_circle_outline, size: 16, color: accent),
+      );
+    }
+    if (row.pinned) {
+      return const Tooltip(
+        message: 'Kept offline · waiting to download',
+        child: Icon(Icons.schedule_rounded, size: 16, color: muted),
       );
     }
     return const Text('—', style: TextStyle(color: muted, fontSize: 12));
@@ -1372,12 +1359,12 @@ class _LibraryScreenState extends State<LibraryScreen> {
                   ),
                   const SizedBox(height: 8),
                   Text(
-                    'Automatic: ${_size(c.store.usedBytes(pinned: false))}\nPinned: ${_size(c.store.usedBytes(pinned: true))}',
+                    'Automatic: ${_size(c.store.usedBytes(pinned: false))}\nKept offline: ${_size(c.store.usedBytes(pinned: true))}',
                     style: const TextStyle(color: muted, height: 1.7),
                   ),
                   const SizedBox(height: 10),
                   const Text(
-                    'Pins stay outside this budget. Playing songs and active downloads are protected.',
+                    'Keep offline protects downloads from automatic cleanup. Allow automatic cleanup releases your individual protection; a Pile can still keep the song. Playing songs and active downloads are protected.',
                     style: TextStyle(color: muted, fontSize: 12),
                   ),
                   const Divider(height: 28),
@@ -1500,30 +1487,6 @@ PopupMenuItem<String> _songMenuItem(
   ),
 );
 
-Widget _badge(String text, Color color) => Container(
-  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-  decoration: BoxDecoration(
-    color: color.withValues(alpha: .08),
-    border: Border.all(color: color.withValues(alpha: .17)),
-    borderRadius: BorderRadius.circular(20),
-  ),
-  child: Row(
-    mainAxisSize: MainAxisSize.min,
-    children: [
-      Icon(Icons.circle, size: 5, color: color),
-      const SizedBox(width: 7),
-      Text(
-        text,
-        style: TextStyle(
-          color: color,
-          fontSize: 9,
-          fontWeight: FontWeight.w600,
-          letterSpacing: .8,
-        ),
-      ),
-    ],
-  ),
-);
 Widget _cover(
   String title,
   String artist,
