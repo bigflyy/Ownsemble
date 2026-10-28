@@ -51,7 +51,8 @@ class UiController extends AppController {
   @override
   Future<void> togglePlay({bool diagnostic = false}) async => toggles++;
   @override
-  Future<void> next({bool automatic = false}) async => nextCalls++;
+  Future<void> next({bool automatic = false, bool diagnostic = false}) async =>
+      nextCalls++;
   @override
   Future<void> previous() async => previousCalls++;
   @override

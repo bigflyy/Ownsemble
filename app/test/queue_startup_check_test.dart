@@ -27,6 +27,7 @@ class QueueProbePlayback extends UiBenchmarkPlayback {
 class QueueProbeController extends AppController {
   final QueueProbePlayback playback;
   final selections = <String>[];
+  int? failAtStart;
   final sizes = <int>[];
   final modes = <bool>[];
   final diagnosticFlags = <bool>[];
@@ -45,7 +46,10 @@ class QueueProbeController extends AppController {
     sizes.add(queue.entries.length);
     modes.add(queue.shuffle);
     diagnosticFlags.add(diagnostic);
-    playback.playing = true;
+    playback.playing = selections.length != failAtStart;
+    if (!playback.playing) {
+      store.trackError(queue.current!.id, 'music_script_failed');
+    }
   }
 
   @override
@@ -97,6 +101,80 @@ void main() {
     );
     return jsonDecode(report.readAsStringSync()) as Map;
   }
+
+  for (final count in [1, 2]) {
+    testWidgets('sequence refuses a $count-track library without starting', (
+      tester,
+    ) async {
+      store.db.execute(
+        'DELETE FROM tracks WHERE id NOT IN (SELECT id FROM tracks LIMIT ?)',
+        [count],
+      );
+      final original = controller.queue.toJson();
+      final report = await request(tester, 'check-queue-sequence', 1);
+      expect(report['passed'], isFalse);
+      expect(report['category'], 'diagnostic_insufficient_tracks');
+      expect(controller.selections, isEmpty);
+      expect(controller.queue.toJson(), original);
+    });
+  }
+
+  testWidgets(
+    'sequence reports an initial failure as attempt one without advancing',
+    (tester) async {
+      controller.failAtStart = 1;
+      final original = controller.queue.toJson();
+      final report = await request(tester, 'check-queue-sequence', 1);
+      expect(report['passed'], isFalse);
+      expect(report['failed_attempt'], 1);
+      expect(report['attempts_count'], 0);
+      expect(controller.selections.length, 1);
+      expect(controller.queue.toJson(), original);
+    },
+  );
+  testWidgets('sequence refuses to interrupt existing muted playback', (
+    tester,
+  ) async {
+    controller.playback.playing = true;
+    final original = controller.queue.toJson();
+    final report = await request(tester, 'check-queue-sequence', 1);
+    expect(report['category'], 'diagnostic_requires_idle');
+    expect(controller.selections, isEmpty);
+    expect(controller.playback.playing, isTrue);
+    expect(controller.queue.toJson(), original);
+  });
+
+  testWidgets(
+    'fixed shuffle sequence exercises three Next starts and restores history/queue',
+    (tester) async {
+      final original = controller.queue.toJson();
+      final report = await request(tester, 'check-queue-sequence', 1);
+      expect(report['passed'], isTrue);
+      expect(report['attempts_count'], 3);
+      expect((report['attempts'] as List).length, 3);
+      expect(controller.selections.toSet().length, 3);
+      expect(controller.sizes, [2633, 2633, 2633]);
+      expect(controller.diagnosticFlags, [true, true, true]);
+      expect(controller.queue.toJson(), original);
+      expect(store.db.select('SELECT COUNT(*) AS n FROM plays').first['n'], 0);
+      expect(report.toString(), isNot(contains('900000000000002_')));
+    },
+  );
+
+  testWidgets(
+    'fixed shuffle sequence stops on its first failed Next and restores queue',
+    (tester) async {
+      final original = controller.queue.toJson();
+      controller.failAtStart = 2;
+      final report = await request(tester, 'check-queue-sequence', 1);
+      expect(report['passed'], isFalse);
+      expect(report['category'], 'music_script_failed');
+      expect(report['failed_attempt'], 2);
+      expect(controller.selections.length, 2);
+      expect(controller.queue.toJson(), original);
+      expect(store.db.select('SELECT COUNT(*) AS n FROM plays').first['n'], 0);
+    },
+  );
 
   testWidgets(
     'normal and shuffled startup checks preserve queue/history and select the same uncached identity',

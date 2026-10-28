@@ -144,6 +144,7 @@ class AppController extends ChangeNotifier {
   Completer<void>? _checkCancelled;
   String? _checkCancelReason;
   int? _checkGeneration;
+  int? _checkOwnedRequest;
   Future<void> _downloadTail = Future.value();
   List<LibraryRow>? _rowCache;
   // Bound per-recording display lookups independently of total library/queue size.
@@ -1151,11 +1152,9 @@ class AppController extends ChangeNotifier {
     await playCurrent(diagnostic: diagnostic);
   }
 
-  void enqueue(LibraryRow row) {
+  Future<void> enqueue(LibraryRow row) => _editQueue(() {
     queue.append(QueueEntry(row.track.id, row.occurrence));
-    _saveQueue();
-    _notify();
-  }
+  });
 
   void _reportPlayerState() {
     if (disposed) return;
@@ -1262,7 +1261,7 @@ class AppController extends ChangeNotifier {
     final remainingBudget = startupTimeout - watch.elapsed;
     final deadline = Timer(remainingBudget, () {
       if (request != _request || !loading || disposed) return;
-      unawaited(stopPlayback());
+      unawaited(stopPlayback(diagnostic: diagnostic));
       store.trackError(track.id, 'player_start_timeout');
       _failure(const ProofFailure('player_start_timeout'));
       _reportPlayback('failed', watch, category: 'player_start_timeout');
@@ -1447,7 +1446,11 @@ class AppController extends ChangeNotifier {
 
   Future<void> stopPlayback({bool diagnostic = false}) async {
     if (!diagnostic) _cancelCheck('user_stop');
+    final ownsCheck = diagnostic && _checkOwnedRequest == _request;
     ++_request;
+    // Internal diagnostic timeouts invalidate playback while retaining cleanup
+    // ownership. A newer user request must still keep its own player/queue.
+    if (ownsCheck) _checkOwnedRequest = _request;
     _cancelPendingDownloads();
     final stream = _streams.remove(_playingStream);
     final activeCache = _activeCache;
@@ -1472,13 +1475,13 @@ class AppController extends ChangeNotifier {
     }
   }
 
-  Future<void> next({bool automatic = false}) async {
+  Future<void> next({bool automatic = false, bool diagnostic = false}) async {
     _finishListening();
     if (queue.next(automatic: automatic) != null) {
-      _saveQueue();
-      await playCurrent();
+      if (!diagnostic) _saveQueue();
+      await playCurrent(diagnostic: diagnostic);
     } else {
-      await stopPlayback();
+      await stopPlayback(diagnostic: diagnostic);
     }
   }
 
@@ -1518,14 +1521,25 @@ class AppController extends ChangeNotifier {
     return pending;
   }
 
-  void shuffle() {
+  Future<void> shuffle() => _editQueue(() {
     queue.setShuffle(!queue.shuffle);
-    _saveQueue();
-    _notify();
-  }
+  });
 
-  void repeat() {
+  Future<void> repeat() => _editQueue(() {
     queue.repeat = QueueRepeat.values[(queue.repeat.index + 1) % 3];
+  });
+
+  /// Apply user edits to the real queue after diagnostic playback unwinds.
+  Future<void> _editQueue(void Function() edit) async {
+    if (_checking) {
+      final check = _checkTask;
+      // This action does not replace playback. Keep cleanup ownership so the
+      // original queue is restored before applying and persisting the edit.
+      _cancelCheck('queue_changed', preserveRequest: true);
+      await check;
+    }
+    if (disposed) return;
+    edit();
     _saveQueue();
     _notify();
   }
@@ -2213,6 +2227,7 @@ class AppController extends ChangeNotifier {
             'check-old',
             'check-queue-normal',
             'check-queue-shuffle',
+            'check-queue-sequence',
           ].contains(raw['command']) ||
           raw['nonce'] is! String ||
           !RegExp(r'^[a-f0-9-]{36}$').hasMatch(raw['nonce'] as String) ||
@@ -2234,9 +2249,13 @@ class AppController extends ChangeNotifier {
       if ([
         'check-queue-normal',
         'check-queue-shuffle',
+        'check-queue-sequence',
       ].contains(raw['command'])) {
         unawaited(
-          checkQueueStartup(shuffled: raw['command'] == 'check-queue-shuffle'),
+          checkQueueStartup(
+            shuffled: raw['command'] != 'check-queue-normal',
+            sequence: raw['command'] == 'check-queue-sequence',
+          ),
         );
       }
       if (raw['command'] == 'check-old') {
@@ -2369,10 +2388,12 @@ class AppController extends ChangeNotifier {
     }
   }
 
-  void _cancelCheck(String reason) {
+  void _cancelCheck(String reason, {bool preserveRequest = false}) {
     if (!_checking || _checkCancelled?.isCompleted == true) return;
     _checkCancelReason = reason;
-    if (reason != 'deadline' && reason != 'shutdown') ++_request;
+    if (!preserveRequest && reason != 'deadline' && reason != 'shutdown') {
+      ++_request;
+    }
     _checkCancelled?.complete();
     if (_checkGeneration == _cancelDownload) {
       _cancelPendingDownloads();
@@ -2403,13 +2424,30 @@ class AppController extends ChangeNotifier {
 
   /// Probe one stable uncached recording through the real full-queue startup path.
   /// The fixed control accepts no identities/paths and refuses audible playback.
-  Future<void> checkQueueStartup({required bool shuffled}) async {
+  Future<void> checkQueueStartup({
+    required bool shuffled,
+    bool sequence = false,
+  }) async {
     if (disposed || _checking) return;
     String? refusal;
     if (!muted || player.state.volume != 0) {
       refusal = 'diagnostic_requires_mute';
     }
+    if (sequence &&
+        (loading ||
+            player.state.playing ||
+            player.state.buffering ||
+            _playEvent != null ||
+            _playingStream != null ||
+            downloadId != null ||
+            syncing ||
+            connecting)) {
+      refusal ??= 'diagnostic_requires_idle';
+    }
     if (offline || !provider.connected) refusal ??= 'vk_not_connected';
+    if (sequence && store.count < 3) {
+      refusal ??= 'diagnostic_insufficient_tracks';
+    }
     if (refusal == null && _queueStartupTarget == null) {
       final candidates = store
           .rows()
@@ -2437,6 +2475,7 @@ class AppController extends ChangeNotifier {
       targetId: _queueStartupTarget,
       startupOnly: true,
       queueShuffle: shuffled,
+      sequence: sequence,
     );
   }
 
@@ -2445,6 +2484,7 @@ class AppController extends ChangeNotifier {
     String? targetId,
     bool startupOnly = false,
     bool? queueShuffle,
+    bool sequence = false,
   }) {
     if (_checkTask != null) return _checkTask!;
     final task = _runSampleCheck(
@@ -2452,6 +2492,7 @@ class AppController extends ChangeNotifier {
       targetId: targetId,
       startupOnly: startupOnly,
       queueShuffle: queueShuffle,
+      sequence: sequence,
     );
     _checkTask = task;
     task.whenComplete(() {
@@ -2465,6 +2506,7 @@ class AppController extends ChangeNotifier {
     String? targetId,
     bool startupOnly = false,
     bool? queueShuffle,
+    bool sequence = false,
   }) async {
     if (_checking || (!cachedOnly && (offline || !provider.connected))) return;
     _acceptanceRequested = false;
@@ -2474,17 +2516,23 @@ class AppController extends ChangeNotifier {
     _checkGeneration = _cancelDownload;
     final watch = Stopwatch()..start();
     final savedQueue = queue.toJson();
-    var ownedRequest = _request;
+    _checkOwnedRequest = _request;
     var stage = 'preparing';
     var lastBytes = 0;
     var lastProgress = 0;
     StreamingAudio? checkStream;
     List<LibraryRow>? queueRows;
+    final sequenceAttempts = <Map<String, Object>>[];
     final result = <String, Object>{
       'startedAt': DateTime.now().toUtc().toIso8601String(),
       'running': true,
       'fresh_offline_process': cachedOnly,
       'player': 'main',
+      if (sequence) ...{
+        'attempts': sequenceAttempts,
+        'attempts_count': 0,
+        'failed_attempt': 1,
+      },
       if (queueShuffle != null)
         'queue_mode': queueShuffle ? 'shuffle' : 'normal',
     };
@@ -2533,7 +2581,7 @@ class AppController extends ChangeNotifier {
       if (selected < 0) throw const ProofFailure('main_control_start_failed');
       if (queueShuffle != null) queue.shuffle = queueShuffle;
       final operation = playRows(entries, selected, diagnostic: true);
-      ownedRequest = _request;
+      _checkOwnedRequest = _request;
       await checked(operation);
       result['selected_identity_preserved'] = current?.id == row.track.id;
       if (current?.id != row.track.id ||
@@ -2549,7 +2597,7 @@ class AppController extends ChangeNotifier {
 
     Future<void> stop() async {
       final operation = stopPlayback(diagnostic: true);
-      ownedRequest = _request;
+      _checkOwnedRequest = _request;
       await checked(operation);
       if (loading || player.state.playing) {
         throw const ProofFailure('main_control_stop_failed');
@@ -2589,6 +2637,7 @@ class AppController extends ChangeNotifier {
       // Exercise the same controller methods bound to the visible UI, using
       // the app's real player/audio output. No separate muted stream player.
       // Diagnostic playback writes no history and does not persist its queue.
+      final initialStartup = Stopwatch()..start();
       await start(row);
       checkStream = _streams[sample.id];
       result.addAll({
@@ -2602,6 +2651,59 @@ class AppController extends ChangeNotifier {
         'played_before_complete': store.asset(sample.id) == null,
         'main_play': true,
       });
+      if (sequence) {
+        final attempts = sequenceAttempts;
+        void recordAttempt(bool cached, int elapsed) {
+          attempts.add({
+            'attempt': attempts.length + 1,
+            'passed': true,
+            'was_cached': cached,
+            'first_audio_ms': elapsed,
+            'selected_identity_preserved': true,
+            if (!cached)
+              for (final key in [
+                'source_return_ms',
+                'source_resolution_ms',
+                'page_wait_ms',
+                'identity_bound',
+                'identity_evidence',
+                'prepared_before_selection',
+              ])
+                if (_sourceTimings.containsKey(key)) key: _sourceTimings[key]!,
+          });
+          result['attempts_count'] = attempts.length;
+          result.remove('failed_attempt');
+        }
+
+        recordAttempt(wasCached, initialStartup.elapsedMilliseconds);
+        for (
+          var ordinal = 2;
+          ordinal <= 3 && queue.cursor + 1 < queue.order.length;
+          ordinal++
+        ) {
+          final expected = queue.entries[queue.order[queue.cursor + 1]].id;
+          final cached = store.asset(expected) != null;
+          final startup = Stopwatch()..start();
+          result['failed_attempt'] = ordinal;
+          checkpoint('queue_next');
+          _checkingTrack = expected;
+          final operation = next(diagnostic: true);
+          _checkOwnedRequest = _request;
+          await checked(operation);
+          _checkGeneration = _cancelDownload;
+          checkStream = _streams[expected];
+          if (current?.id != expected ||
+              !player.state.playing ||
+              player.state.position.inMilliseconds < 100) {
+            final row = store.rows().firstWhere(
+              (entry) => entry.track.id == expected,
+            );
+            throw ProofFailure(row.error ?? 'main_control_start_failed');
+          }
+          recordAttempt(cached, startup.elapsedMilliseconds);
+          result.remove('failed_attempt');
+        }
+      }
       if (startupOnly) {
         result['passed'] = true;
         checkpoint('startup_complete');
@@ -2726,13 +2828,17 @@ class AppController extends ChangeNotifier {
       timer.cancel();
       // A newer foreground request owns the player and queue immediately.
       // Never stop or restore over it while the cancelled check unwinds.
-      if (_request == ownedRequest) {
+      if (_request == _checkOwnedRequest) {
         final completionMessage = message;
         if (!disposed) {
           await stopPlayback(diagnostic: true);
-          message = completionMessage;
         }
-        queue.restore(savedQueue);
+        // Native Stop may acknowledge after a new user selection has started.
+        // Recheck ownership after that await before restoring any visible state.
+        if (_request == _checkOwnedRequest) {
+          message = completionMessage;
+          queue.restore(savedQueue);
+        }
       }
       final sampleId = _checkingTrack;
       _checkingTrack = null;
@@ -2745,6 +2851,7 @@ class AppController extends ChangeNotifier {
       result['running'] = false;
       checkpoint();
       _checkGeneration = null;
+      _checkOwnedRequest = null;
       _checking = false;
       _notify();
     }

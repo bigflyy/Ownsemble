@@ -64,8 +64,46 @@ separately. Do not interrupt the user's active playback to run a check or instal
 a new payload. The renewed thumbnail-latency report remains queued behind this
 playback task in FEATURE_LOG.md and KNOWN_ISSUES.md.
 
-Source checks pass 325 Flutter tests, analyzer, focused formatting, and the
+Initial lifecycle source checks passed 325 Flutter tests, analyzer, focused formatting, and the
 standalone generated provider contract probe. Fresh critical GPT Luna review and
 follow-up review found no material issue in the final source changes and confirmed
 the generated/native evidence distinction. Windows build and live incident
 acceptance remain separate from these source checks.
+
+## Bounded native shuffled-Next check
+
+`node scripts/app-control.cjs check-queue-sequence` is a fixed app-owned control
+with no track, path or browser-operation arguments. It requires acknowledged
+native volume zero, an idle player with no paused listening session, no active
+sync/connection/download, and at least three local catalog rows. It starts the
+stable internal sample in the full shuffled queue and advances Next twice,
+stopping at the first failure. It checks exact selected identity and actual native
+progress at each start without requiring a whole download. It performs at most
+three starts, with the existing per-start and overall diagnostic deadlines.
+
+The report contains only attempt ordinals, cache flags, safe identity evidence,
+fixed categories and timings. Per-attempt `first_audio_ms` starts immediately before
+each Play/Next; the top-level elapsed time includes check preparation and cleanup.
+No recording identity, display metadata, temporary URL or private session is
+exported. Successful starts suppress listening history and queue persistence.
+The original duplicate-occurrence queue is restored on owned cleanup. Internal
+startup timeout retains that ownership; newer user playback owns its queue and
+cannot be overwritten, including during delayed native Stop acknowledgement.
+Shuffle, Repeat and Add to queue cancel the check, await restoration, then apply
+and persist the user's edit to the original queue.
+
+Generated regressions reproduced the missing command, first/second failure
+accounting, paused-session interference, undersized-library false success,
+internal timeout misclassification, delayed-Stop queue overwrite, and lost
+shuffle/repeat/enqueue edits. Generated fixtures also cover acknowledged-mute and
+active-playback refusals. The queue-edit tests preceded their correction; the
+repeat fixture's expected enum step was corrected to Off -> All afterward and
+rerun against the original bindings, where all three queue edits still failed.
+Fresh critical GPT Luna follow-up found no remaining material source issue.
+These controls and tests improve the acceptance boundary;
+they are not themselves live playback proof. Native/live results are pending.
+
+Source verification on 2026-10-29 passes all 338 Flutter tests, analyzer and 81
+adapter tests. Fresh independent critical GPT Luna review of the complete diff
+from `5b61db8` found no material source/test issue. Native/live checks remain
+separate open gates until recorded below.
