@@ -5,8 +5,10 @@ Playback investigation 2026-10-28: the user selected the shuffle failure repair.
 Paired normal/shuffle full-queue live checks reproduced the same rejected audio
 redirect with exact selection preserved; queue order has not been established as
 the cause. Cold-page exact lookup and bounded same-recording current-source
-recovery are under verification. See SHUFFLE_PLAYBACK.md and KNOWN_ISSUES.md for
-actual acceptance and limits. Keep this ahead of lyrics or new features; generated
+recovery are implemented with 318 passing source tests. The new Windows Release
+passed an uncached normal/shuffle full-queue pair, a complete-cache/control sample
+and cached old-tail controls. The live rejected-reference retry branch itself
+remains unexercised; see SHUFFLE_PLAYBACK.md and KNOWN_ISSUES.md for exact limits. Keep this ahead of lyrics or new features; generated
 tests alone do not prove live playback. VK lyrics remains a separate confirmed bug.
 
 Current priority 2026-10-22: the user selected cross-platform-friendly architecture

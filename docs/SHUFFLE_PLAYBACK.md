@@ -117,6 +117,41 @@ adapter was rebundled without a byte change. Fresh critical GPT Luna reviews and
 follow-up reviews covered the recovery, deadline, cancellation and warm-reference
 ownership changes; material findings received failing regressions before fixes.
 
-Native and live results are recorded separately below once completed. Generated
-fixtures and independent source review alone do not certify actual VK playback,
-all recordings, acoustic output, or Linux/Android behavior.
+## Windows native and live checks
+
+Release source revision `ce189f836342` passed muted generated 1,200-row catalog,
+queue, cache, persistence, Cyrillic, SQLite integrity and parent/child restart
+checks. The same source also passed the Debug build and its isolated generated
+catalog/cache/queue/persistence/restart checks. Release generated native streaming
+also passed early progressive and encrypted
+HLS playback before completion, validated cache publication and offline play/seek.
+These fixtures use isolated generated data and do not certify VK.
+
+The same Release then passed these app-owned live checks at acknowledged native
+volume zero, with the real provider/session used internally by the application:
+
+| Check | Starting condition | First native progress | Outcome |
+| --- | --- | --- | --- |
+| Full normal queue | 2,617 entries, uncached | 2,971 ms | Exact identity preserved, playback before completion |
+| Full shuffled queue | Same internal recording, still uncached | 1,483 ms | Exact identity preserved, playback before completion |
+| Default complete-cache sample | Uncached, separate recording | 1,498 ms | Main controls, 9,641,408-byte cache, local replay/seek passed |
+| Old-tail sample | Previously validated cached recording | 823 ms | Main controls/local seek passed, 0 received network bytes |
+
+Both full-queue checks used a ready independent document (`page_wait_ms=0`) and
+current metadata binding. Their source-return timings were 1,265 and 58 ms.
+They do not show a full 2,617-song provider walk on every Play. No sustained native
+shuffle-next sequence or universal catalog coverage is claimed. The old-tail
+check in this build was cached; the earlier uncached old-tail pass described above
+was on the preceding implementation.
+
+The new paired process reuses one private in-memory target for its two modes.
+Its target is not persisted across restarts, so do not claim identity comparison
+with the previous build's failed pair. The actual rejected-reference recovery
+branch and stalled cleanup/deadline cases have controlled generated proof; these
+successful live attempts do not prove that branch recovered the earlier failed
+recording. Source availability, cold-page/network latency distributions and native
+Linux/Android acceptance remain separate gates. No acoustic output was tested.
+
+Safe results are retained under ignored `.local/linux-proof/evidence/shuffle-*`.
+No profile/authentication data, raw catalog, private source address or media file
+was inspected. The final normal app remains paused and muted with existing data.

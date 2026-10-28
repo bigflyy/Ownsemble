@@ -32,7 +32,11 @@ pages, choose browser engines, execute native input or open media themselves.
 - `contracts/` defines application and platform boundaries using application-owned
   types. Browser controllers, WebUri, DevTools maps and native Player instances
   never cross those interfaces. Certificate fallback uses Dart's X509Certificate,
-  keeping ordinary HttpClient TLS verification enabled.
+  keeping ordinary HttpClient TLS verification enabled. The optional
+  `RejectedSourceRecovery` port lets the application reject a provider's exact
+  previously returned source and request one same-recording current-source retry.
+  VK-specific reference state remains inside the provider; the controller retains
+  the original request ownership, deadline and transport destination guard.
 - `provider/vk_provider.dart` owns VK policy and sequencing. Its entire dependency
   graph is pure Dart: no Flutter assets, native IO, browser package or OS checks.
   A supplied asset loader installs the same guarded JS adapter. Routes, personal

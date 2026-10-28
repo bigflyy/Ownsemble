@@ -8,8 +8,12 @@
   standby remains cold, preserving current-source priority and all identity,
   native-mute, HTTPS/CDN and cache guards. Follow-up paired checks BOTH failed on
   the same rejected CDN-to-VK-web redirect, with exact selection preserved. A
-  bounded same-recording current-discovery retry is implemented and source-tested;
-  native/live acceptance of that recovery is still pending. Fixed silent queue probes
+  bounded same-recording current-discovery retry is implemented and source-tested.
+  New Release passed a same-process uncached normal/shuffle full-queue pair at
+  2971/1483ms, a separate uncached complete-cache/control check and cached old-tail
+  controls. These warm/current-source passes do not establish that the rejected-
+  reference recovery branch recovered the earlier failed recording; that branch
+  currently has controlled generated acceptance. Fixed silent queue probes
   compare one exact internal identity in normal and shuffled modes and restore
   the prior queue without listening history. See SHUFFLE_PLAYBACK.md for scoped
   evidence and remaining live/platform/latency gates. No full-library playback
