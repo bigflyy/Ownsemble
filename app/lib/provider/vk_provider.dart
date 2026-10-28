@@ -534,10 +534,20 @@ class VkProvider
     num? y,
   }) async {
     _guard();
-    // Serialize the fixed options for the app-owned guarded music adapter.
-    final value = await _evaluate(
-      '(async()=>JSON.stringify(await window.ownsembleMusic.action(${jsonEncode(action)},${jsonEncode(id)},${jsonEncode({'waitMs': waitMs, if (compareMembership) 'compareMembership': true, 'libraryOffset': ?libraryOffset, if (newestOnly) 'newestOnly': true, 'since': ?since, 'musicKey': ?musicKey, 'musicQuery': ?musicQuery, 'x': ?x, 'y': ?y})})))()',
-    );
+    // Serialize fixed options and retain the failed action, never raw script text.
+    final dynamic value;
+    try {
+      value = await _evaluate(
+        '(async()=>JSON.stringify(await window.ownsembleMusic.action(${jsonEncode(action)},${jsonEncode(id)},${jsonEncode({'waitMs': waitMs, if (compareMembership) 'compareMembership': true, 'libraryOffset': ?libraryOffset, if (newestOnly) 'newestOnly': true, 'since': ?since, 'musicKey': ?musicKey, 'musicQuery': ?musicQuery, 'x': ?x, 'y': ?y})})))()',
+      );
+    } catch (error) {
+      diagnostic?.call({
+        'stage': 'action_failed',
+        'action': action,
+        'category': categoryOf(error),
+      });
+      rethrow;
+    }
     final data = value is String ? jsonDecode(value) : value;
     if (data is Map && data['error'] != null) {
       final counts = data['counts'];
@@ -1077,6 +1087,11 @@ class VkProvider
     // Prefer the current exact music row over legacy reload endpoints and older memory entries.
     if (connected && !_closed) {
       // Confirm personal-library consent before reading only the selected recording.
+      // Adapter globals belong to the document, not the browser/session. A new
+      // document or a cleared global must work on the first Play without sync.
+      await _resolutionGuard(cancelled);
+      await _install();
+      await _resolutionGuard(cancelled);
       final personal = await _action('verify-my-music');
       // Keep extraction paused while the main document lacks its personal-page witness.
       if (personal['personal'] == true) {

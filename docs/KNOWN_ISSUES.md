@@ -1,5 +1,14 @@
 # Reported issues
 
+- HIGH PRIORITY - renewed first-attempt shuffle failure (2026-10-28): the user
+  reports a selected recording failed initially, then played later. Retained
+  generic script failures and later successes do not identify the recording or
+  establish the exact native cause. A generated lifecycle regression reproduces
+  the main-page fast path using an uninstalled document adapter; a separate
+  regression proves the old stopping_previous phase could be stale. Repair and
+  validation are tracked in FIRST_ATTEMPT_PLAYBACK.md. Previous selected-song
+  full-queue passes are not a sustained native shuffled Next acceptance test.
+
 - Shuffle playback reliability (2026-10-27): a muted uncached selected attempt
   reproduced a 30-second source-resolution timeout while the independent music
   page took 32.375 seconds to warm. The baseline did not isolate queue mode;
@@ -83,8 +92,8 @@
   internal button styling also needs to match the application.
 - Thumbnail appearance feels slow. Re-reported 2026-10-28 and queued after the
   active first-attempt playback investigation. Earlier viewport-aware work has
-  not resolved the renewed user report. Originally reported 2026-10-21; investigate during the
-  active artwork task. Measure cache/network/queue delays separately and preserve
+  not resolved the renewed user report. Originally reported 2026-10-21; investigate in the
+  queued artwork latency task. Measure cache/network/queue delays separately and preserve
   image validation, privacy and playback responsiveness.
 - Speaker mute/unmute is now implemented and verified, including remembered volume
   and restart persistence; see CONTROLS_UI_FIXES.md.

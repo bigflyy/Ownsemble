@@ -41,6 +41,9 @@ pages, choose browser engines, execute native input or open media themselves.
   graph is pure Dart: no Flutter assets, native IO, browser package or OS checks.
   A supplied asset loader installs the same guarded JS adapter. Routes, personal
   library/form guards, exact recording witnesses and cancellation stay shared.
+  Connection/session readiness does not imply adapter readiness in a new document:
+  source resolution installs its guarded adapter before the main-page action,
+  with cancellation checks around that initialization. See FIRST_ATTEMPT_PLAYBACK.md.
 - `platform/windows/` owns the existing patched WebView2 implementation, private
   environment, native input/focus/mute, resource observation, Windows certificate
   verification and checkout-executable selection/restart. Platform adapters own

@@ -1,3 +1,9 @@
+2026-10-28 renewed report: first-try playback failed while advancing through
+shuffle, then eventually succeeded. This reopens first-attempt reliability ahead
+of new features. See FIRST_ATTEMPT_PLAYBACK.md; do not infer a native Next sequence
+passed from the prior same-selected-song comparison. Thumbnail fetching was also
+reported slow again and is queued after this playback task, without interrupting it.
+
 2026-10-27 checkpoint: the local queue/menu performance slice and clear sync,
 connection/download status slice are delivered; see UI_PERFORMANCE.md and
 LIBRARY_STATUS.md for exact scope. Native FPS/network distributions remain open.

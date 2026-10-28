@@ -174,8 +174,178 @@ class ReferenceBrowser extends GeneratedBrowser {
   }
 }
 
+/// Model per-document JavaScript installation rather than assuming an immortal adapter.
+class InstallAwareReferenceFactory extends ReferenceBrowserFactory {
+  bool failAction = false;
+  Completer<void>? installGate;
+  final mainInstallStarted = Completer<void>();
+  @override
+  MusicBrowser create(BrowserEvents events) {
+    final page = InstallAwareReferenceBrowser(this, events);
+    pages.add(page);
+    return page;
+  }
+}
+
+class InstallAwareReferenceBrowser extends ReferenceBrowser {
+  bool adapterPresent = false;
+  int installs = 0, actions = 0;
+  InstallAwareReferenceBrowser(super.factory, super.events);
+  @override
+  void visit(Uri target) {
+    adapterPresent = false;
+    super.visit(target);
+  }
+
+  @override
+  Future<dynamic> evaluate(String expression) async {
+    if (expression.contains('generated-adapter-install-marker')) {
+      final config = factory as InstallAwareReferenceFactory;
+      if (identical(this, config.pages.first)) {
+        if (!config.mainInstallStarted.isCompleted) {
+          config.mainInstallStarted.complete();
+        }
+        await config.installGate?.future;
+      }
+      adapterPresent = true;
+      installs++;
+      return true;
+    }
+    if (expression.contains('window.ownsembleMusic.')) {
+      if (!adapterPresent) throw const ProofFailure('music_script_failed');
+      if (expression.contains('window.ownsembleMusic.action(')) {
+        actions++;
+        if ((factory as InstallAwareReferenceFactory).failAction) {
+          throw const ProofFailure('music_script_failed');
+        }
+      }
+    }
+    return super.evaluate(expression);
+  }
+}
+
 /// Cover exact-ID playback independently of viewport, title search and saved hashes.
 void main() {
+  test('Stop during main adapter installation prevents the subsequent music action', () async {
+    final gate = Completer<void>();
+    final factory = InstallAwareReferenceFactory()..installGate = gate;
+    var cancelled = false;
+    final provider = VkProvider(
+      browserFactory: factory,
+      loadAdapter: () async => 'generated-adapter-install-marker',
+      status: (_) {},
+      changed: () {},
+    );
+    try {
+      await provider.connect();
+      final resolving = provider.resolve(
+        const Track('17_2630', 'Fixture', 'Artist', 60),
+        cancelled: () => cancelled,
+      );
+      final cancelledResult = expectLater(
+        resolving,
+        throwsA(
+          isA<ProofFailure>().having(
+            (e) => e.category,
+            'category',
+            'cancelled',
+          ),
+        ),
+      );
+      await factory.mainInstallStarted.future;
+      cancelled = true;
+      gate.complete();
+      await cancelledResult;
+      expect((factory.pages.first as InstallAwareReferenceBrowser).actions, 0);
+      expect(factory.referenceRequests, 0);
+    } finally {
+      if (!gate.isCompleted) gate.complete();
+      await provider.cancelResolution();
+      await provider.disconnect();
+    }
+  });
+
+  test('a genuine action script failure reports its exact safe action without retrying', () async {
+    final factory = InstallAwareReferenceFactory();
+    final events = <Map<String, Object>>[];
+    final provider = VkProvider(
+      browserFactory: factory,
+      loadAdapter: () async => 'generated-adapter-install-marker',
+      status: (_) {},
+      changed: () {},
+      diagnostic: events.add,
+    );
+    try {
+      await provider.connect();
+      final page = factory.pages.first as InstallAwareReferenceBrowser;
+      await page.evaluate('generated-adapter-install-marker');
+      factory.failAction = true;
+      await expectLater(
+        provider.resolve(const Track('17_2630', 'Fixture', 'Artist', 60)),
+        throwsA(
+          isA<ProofFailure>().having(
+            (e) => e.category,
+            'category',
+            'music_script_failed',
+          ),
+        ),
+      );
+      expect(page.actions, 1);
+      expect(
+        events,
+        contains(
+          allOf(
+            containsPair('stage', 'action_failed'),
+            containsPair('action', 'verify-my-music'),
+            containsPair('category', 'music_script_failed'),
+          ),
+        ),
+      );
+    } finally {
+      await provider.cancelResolution();
+      await provider.disconnect();
+    }
+  });
+
+  for (final reset in ['fresh', 'navigation', 'same_document']) {
+    test(
+      'first playback prepares its adapter after $reset without sync or manual retry',
+      () async {
+        final factory = InstallAwareReferenceFactory()
+          ..modernSourceAvailable = true;
+        final provider = VkProvider(
+          browserFactory: factory,
+          loadAdapter: () async => 'generated-adapter-install-marker',
+          status: (_) {},
+          changed: () {},
+        );
+        const track = Track('17_2630', 'Тестовая песня', 'Тестовый артист', 60);
+        try {
+          await provider.connect();
+          final page = factory.pages.first as InstallAwareReferenceBrowser;
+          if (reset != 'fresh') {
+            // Model an earlier successful app sync that installed the adapter.
+            await page.evaluate('generated-adapter-install-marker');
+            if (reset == 'navigation') {
+              page.visit(Uri.parse('https://vk.ru/audios'));
+            } else {
+              page.adapterPresent = false;
+            }
+          }
+          final resolved = await provider.resolve(track);
+          expect(resolved.recordingId, track.id);
+          expect(resolved.evidence, 'metadata_row');
+          expect(page.adapterPresent, isTrue);
+          expect(page.installs, reset == 'fresh' ? 1 : 2);
+          expect(factory.referenceRequests, 0);
+        } finally {
+          await provider.cancelResolution();
+          await provider.disconnect();
+        }
+      },
+    );
+  }
+
   // Exercise both terminal outcomes of a supported search that never finds the exact ID.
   test('cold playback resolves an exact reference without waiting for standby rows', () async {
     final factory = ReferenceBrowserFactory()..standbyRowsMissing = true;

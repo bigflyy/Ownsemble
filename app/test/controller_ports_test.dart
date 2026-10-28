@@ -262,6 +262,40 @@ class DelayedFailureCleanupPlayback extends PortablePlayback {
 }
 
 void main() {
+  test('a subsecond source failure retains resolving phase instead of stale stopping phase', () async {
+    final folder = await Directory.systemTemp.createTemp(
+      'ownsemble-source-phase-',
+    );
+    final store = LibraryStore(folder)
+      ..merge([const Track('17_1', 'Fixture', 'Artist', 10)])
+      ..setSetting('auto_sync', false);
+    final provider = StalledSourceProvider();
+    final diagnostics = DiagnosticStore.memory();
+    final controller = AppController(
+      store,
+      playbackPlayer: PortablePlayback(),
+      musicProvider: provider,
+      decodeAudio: (_) async => 10,
+      diagnosticStore: diagnostics,
+    );
+    try {
+      final playing = controller.playRows(store.rows(), 0, diagnostic: true);
+      await provider.firstStarted.future;
+      provider.firstSource.completeError(
+        const ProofFailure('music_script_failed'),
+      );
+      await playing;
+      final failure =
+          (diagnostics.journal.snapshot()['failures'] as List).firstWhere(
+            (entry) => entry['category'] == 'music_script_failed',
+          ) as Map;
+      expect(failure['phase'], 'resolving_source');
+    } finally {
+      await controller.shutdown();
+      await folder.delete(recursive: true);
+    }
+  });
+
   test('the fixed mute control silences native playback before any diagnostic Play', () async {
     // Keep control polling inside an empty generated app directory.
     final directory = await Directory.systemTemp.createTemp(

@@ -1241,6 +1241,17 @@ class AppController extends ChangeNotifier {
     final watch = startupWatch ?? (Stopwatch()..start());
     var delegatedRecovery = false;
     var phase = 'stopping_previous';
+    void enterPhase(String next) {
+      phase = next;
+      // Update the in-memory journal immediately. Periodic disk snapshots alone
+      // misattribute subsecond failures to the preceding phase.
+      _writeAudioDiagnostic({
+        'stage': 'playback_status',
+        'phase': phase,
+        'elapsed_ms': watch.elapsedMilliseconds,
+      });
+    }
+
     String? playbackError;
     // Keep the selected relay's original failure available throughout startup.
     StreamingAudio? openingStream;
@@ -1275,11 +1286,11 @@ class AppController extends ChangeNotifier {
           await _streams.remove(previous)?.close();
         }
       }
-      phase = 'resolving_source';
+      enterPhase('resolving_source');
       final (asset, stream) = await _preparePlayback(track);
       openingStream = stream;
       if (request != _request || disposed) return;
-      phase = 'opening_native_player';
+      enterPhase('opening_native_player');
       final errorsBeforeOpen = _nativeErrors;
       final startup = Stopwatch()..start();
       if (asset != null) {
@@ -1288,7 +1299,7 @@ class AppController extends ChangeNotifier {
         _playingStream = track.id;
         await player.openStream(await stream!.open());
       }
-      phase = 'waiting_first_audio';
+      enterPhase('waiting_first_audio');
       await waitUntil(
         () =>
             request != _request ||
@@ -1326,7 +1337,7 @@ class AppController extends ChangeNotifier {
           ? 'Playing from your local cache'
           : 'Streaming · saving for offline playback';
       await enforceQuota();
-      phase = 'playing';
+      enterPhase('playing');
     } catch (e, stack) {
       if (request == _request) {
         // Preserve upstream transport errors even when the player reports a generic open failure.
