@@ -1,5 +1,12 @@
 # Feature queue
 
+2026-10-28 renewed bug report: thumbnails still take too long to appear. Keep
+this queued after the active first-attempt playback failure investigation; do not
+interrupt playback work. Measure visible-demand wait, provider metadata discovery,
+network time, decode/publication and cached rendering separately. Verify fast-scroll
+cancellation and current-viewport priority, shared-image deduplication and warm/offline
+cache hits. Earlier viewport-aware artwork work does not close this renewed report.
+
 2026-10-24 playback performance checkpoint: progressive MP3 startup no longer
 waits for a full sequential download just to probe trailing ID3 metadata. A
 generated native stalled-tail case improved from 6.34 s to 0.29-0.34 s, with seeking

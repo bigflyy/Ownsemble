@@ -81,7 +81,9 @@
   noticeable latency. Reported 2026-10-21; reproduce with generated large-library
   benchmarks and failing regression tests before implementation. The menu's
   internal button styling also needs to match the application.
-- Thumbnail appearance feels slow. Reported 2026-10-21; investigate during the
+- Thumbnail appearance feels slow. Re-reported 2026-10-28 and queued after the
+  active first-attempt playback investigation. Earlier viewport-aware work has
+  not resolved the renewed user report. Originally reported 2026-10-21; investigate during the
   active artwork task. Measure cache/network/queue delays separately and preserve
   image validation, privacy and playback responsiveness.
 - Speaker mute/unmute is now implemented and verified, including remembered volume
