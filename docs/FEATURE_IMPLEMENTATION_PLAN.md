@@ -1,3 +1,11 @@
+2026-10-29 checkpoint: the first-attempt lifecycle repair and fixed three-start
+shuffled Next diagnostic pass source checks, both Windows builds/generated native
+checks and a muted live sequence of three uncached exact recordings at
+4575/3531/3995 ms. This is bounded playback acceptance, not universal availability
+or proof of the earlier named incident. See FIRST_ATTEMPT_PLAYBACK.md. Suggested
+next repair is the queued thumbnail latency, followed by confirmed VK lyrics;
+no new backlog implementation is authorized solely by this proposal.
+
 2026-10-28 renewed report: first-try playback failed while advancing through
 shuffle, then eventually succeeded. This reopens first-attempt reliability ahead
 of new features. See FIRST_ATTEMPT_PLAYBACK.md; do not infer a native Next sequence

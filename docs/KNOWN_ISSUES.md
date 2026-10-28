@@ -1,13 +1,15 @@
 # Reported issues
 
-- HIGH PRIORITY - renewed first-attempt shuffle failure (2026-10-28): the user
-  reports a selected recording failed initially, then played later. Retained
-  generic script failures and later successes do not identify the recording or
-  establish the exact native cause. A generated lifecycle regression reproduces
-  the main-page fast path using an uninstalled document adapter; a separate
-  regression proves the old stopping_previous phase could be stale. Repair and
-  validation are tracked in FIRST_ATTEMPT_PLAYBACK.md. Previous selected-song
-  full-queue passes are not a sustained native shuffled Next acceptance test.
+- First-attempt shuffle follow-up (2026-10-28 report, scoped repair 2026-10-29):
+  the main music-page source path now installs its guarded document adapter before
+  dispatch, and immediate phase/action diagnostics expose subsecond failures.
+  Generated lifecycle-loss regressions and 338 source tests pass. New Windows
+  Release passed three first-attempt uncached starts through the full 2,617-song
+  shuffled queue's actual Play/Next path at 4575/3531/3995 ms, muted and exact-ID
+  bound. Both builds pass generated native restart checks. This bounded sequence
+  does not identify the earlier reported recording, establish its original failure
+  cause, or certify sustained/all-library availability. See FIRST_ATTEMPT_PLAYBACK.md
+  for evidence and limits; thumbnail loading and VK lyrics remain separate items.
 
 - Shuffle playback reliability (2026-10-27): a muted uncached selected attempt
   reproduced a 30-second source-resolution timeout while the independent music

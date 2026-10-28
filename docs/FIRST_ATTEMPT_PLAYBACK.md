@@ -101,9 +101,59 @@ repeat fixture's expected enum step was corrected to Off -> All afterward and
 rerun against the original bindings, where all three queue edits still failed.
 Fresh critical GPT Luna follow-up found no remaining material source issue.
 These controls and tests improve the acceptance boundary;
-they are not themselves live playback proof. Native/live results are pending.
+they are not themselves live playback proof. Native/live results follow below.
 
 Source verification on 2026-10-29 passes all 338 Flutter tests, analyzer and 81
 adapter tests. Fresh independent critical GPT Luna review of the complete diff
 from `5b61db8` found no material source/test issue. Native/live checks remain
 separate open gates until recorded below.
+
+## Windows acceptance - 2026-10-29 local date
+
+Both Windows Debug and Release built clean source `d90a9d65c7d4`. The adapter
+bundle is byte-identical (`ef80b82e86659600cd8818a945225af59ba94278f35e07fc6ca8d029dcbd7b51`).
+Both builds passed the isolated muted 1,200-row catalog/cache/queue/pin/quota/
+persistence/Cyrillic/restart fixture, with SQLite quick_check and parent/child
+exit zero. Release generated streaming passed early progressive start (308 ms),
+encrypted HLS, shared upstream, full validation, local reopen and offline seek.
+Generated timings are not live-provider latency measurements.
+
+The normal application was switched through its guarded app-owned restart while
+paused, then left on Release. A live full 2,617-song shuffled queue performed an
+initial Play followed by two actual Next calls. All three recordings were uncached
+at their respective starts and passed on the first attempt:
+
+| Attempt | Native playback progress | Source returned | Source lookup | Identity |
+| --- | ---: | ---: | ---: | --- |
+| Initial Play | 4,575 ms | 2,446 ms | 2,400 ms | Exact metadata row |
+| First Next | 3,531 ms | 1,915 ms | 1,881 ms | Exact metadata row |
+| Second Next | 3,995 ms | 1,733 ms | 1,698 ms | Exact metadata row |
+
+All attempts reported selected_identity_preserved and identity_bound, with
+prepared_before_selection true and page_wait_ms zero. The check took 12,132 ms
+including cleanup, stopped playback and restored the prior queue. Admission
+required acknowledged native volume zero. Diagnostic playback suppresses listening-
+history writes and makes no account changes.
+No real raw catalog/database, profile/authentication or cached media was inspected.
+The final runtime projection is connected, paused and not loading/buffering.
+A separate fixed-field player-state projection records native volume zero and no
+active download stage. Catalog coverage remains `sync_partial` at 2,617 preserved recordings.
+The retained historical page_or_adapter_contract failure is not a fresh failed
+Play from this check.
+
+This closes the bounded Windows build/native/three-start acceptance gate for this
+source milestone. It is not acoustic-output proof, a sustained shuffle stress
+run, an all-library availability guarantee, or Linux/Android certification. The
+three live sources were ready current metadata; the generated lifecycle-loss
+regression remains the direct proof of that repaired branch. The earlier named
+recording and the exact cause of its first failure were not identified by these
+sanitized samples. Thumbnail latency and confirmed VK lyrics retrieval remain
+separately queued.
+
+Sanitized local artifacts are `first-attempt-live-sequence.json`,
+`first-attempt-resume-final-runtime.json` and
+`first-attempt-resume-final-player-state.json` under
+`.local/linux-proof/evidence/`. Generated native/streaming outputs and source-check
+logs share the `first-attempt-resume-` prefix. Fresh critical GPT Luna evidence
+review corrected the distinction between a zero-volume admission guard and a
+continuous volume trace; no such continuous trace was collected.
