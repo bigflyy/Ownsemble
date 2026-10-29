@@ -1,0 +1,205 @@
+import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
+
+import 'package:flutter/material.dart';
+import 'package:path/path.dart' as p;
+
+import 'bench/speed_bench.dart';
+import 'library/library_store.dart';
+import 'playback/player_service.dart';
+import 'ui/library_controller.dart';
+import 'ui/library_screen.dart';
+import 'vk/vk_client.dart';
+
+/// Command-line options of the app.
+class AppOptions {
+  AppOptions({
+    required this.dataDir,
+    this.vkSession,
+    this.muted = false,
+    this.metricsFile,
+    this.benchFile,
+    this.benchParts,
+    this.mpvOptions = const {},
+    this.mpvLog = false,
+  });
+
+  /// Parses `--data-dir DIR --vk-session FILE --muted --metrics FILE
+  /// --bench FILE --bench-parts a,b --mpv name=value ... --mpv-log`.
+  factory AppOptions.parse(List<String> args) {
+    String? valueOf(String name) {
+      final index = args.indexOf(name);
+      return index >= 0 && index + 1 < args.length ? args[index + 1] : null;
+    }
+
+    return AppOptions(
+      dataDir:
+          valueOf('--data-dir') ??
+          p.join(
+            Platform.environment['LOCALAPPDATA'] ?? '.',
+            'Ownsemble',
+            'v2',
+          ),
+      vkSession: valueOf('--vk-session'),
+      muted: args.contains('--muted'),
+      metricsFile: valueOf('--metrics'),
+      benchFile: valueOf('--bench'),
+      benchParts: valueOf('--bench-parts')?.split(','),
+      mpvLog: args.contains('--mpv-log'),
+      mpvOptions: {
+        for (var i = 0; i + 1 < args.length; i++)
+          if (args[i] == '--mpv' && args[i + 1].contains('='))
+            args[i + 1].substring(0, args[i + 1].indexOf('=')): args[i + 1]
+                .substring(args[i + 1].indexOf('=') + 1),
+      },
+    );
+  }
+
+  /// Folder with library.db, cached audio and perf.log.
+  final String dataDir;
+
+  /// Saved VK session (cookies JSON); VK songs stream only when set.
+  final String? vkSession;
+  final bool muted;
+
+  /// Where to write startup timings (JSON), for the speed gate.
+  final String? metricsFile;
+
+  /// Where to write benchmark results (JSON); the app exits afterwards.
+  final String? benchFile;
+
+  /// Benchmark parts to run (search, scroll, playCached, playStream); all
+  /// when null.
+  final List<String>? benchParts;
+
+  /// mpv option overrides, for tuning playback start.
+  final Map<String, String> mpvOptions;
+
+  /// Write mpv's verbose log (links removed) to mpv.log in the data folder.
+  final bool mpvLog;
+}
+
+Future<void> main(List<String> args) async {
+  final mainStartedAt = DateTime.now();
+  final options = AppOptions.parse(args);
+  Directory(options.dataDir).createSync(recursive: true);
+
+  // The library is read before the first frame so that frame already shows
+  // the list; at 10,000 songs this takes a few milliseconds.
+  final loadClock = Stopwatch()..start();
+  final store = LibraryStore.open(p.join(options.dataDir, 'library.db'));
+  final tracks = store.loadAll();
+  final loadMs = loadClock.elapsedMilliseconds;
+
+  final sessionFile = options.vkSession == null
+      ? null
+      : File(options.vkSession!);
+  final vk = sessionFile != null && sessionFile.existsSync()
+      ? VkClient(SessionCookie.loadAll(sessionFile))
+      : null;
+  final player = PlayerService(
+    vk: vk,
+    muted: options.muted,
+    mpvOptions: options.mpvOptions,
+    mpvLog: options.mpvLog ? File(p.join(options.dataDir, 'mpv.log')) : null,
+  );
+  final library = LibraryController(store, tracks);
+
+  WidgetsFlutterBinding.ensureInitialized();
+  WidgetsBinding.instance.addPostFrameCallback((_) {
+    unawaited(
+      _afterFirstFrame(
+        options: options,
+        mainStartedAt: mainStartedAt,
+        loadMs: loadMs,
+        library: library,
+        player: player,
+        vk: vk,
+      ),
+    );
+  });
+  runApp(OwnsembleApp(library: library, player: player));
+}
+
+/// Startup work that must not delay the first frame: metrics, the player
+/// and a VK token, then the benchmark if requested.
+Future<void> _afterFirstFrame({
+  required AppOptions options,
+  required DateTime mainStartedAt,
+  required int loadMs,
+  required LibraryController library,
+  required PlayerService player,
+  required VkClient? vk,
+}) async {
+  final firstFrameAt = DateTime.now();
+  if (options.metricsFile != null) {
+    File(options.metricsFile!).writeAsStringSync(
+      jsonEncode({
+        'mainStartedEpochMs': mainStartedAt.millisecondsSinceEpoch,
+        'firstFrameEpochMs': firstFrameAt.millisecondsSinceEpoch,
+        'libraryLoadMs': loadMs,
+        'songsInFirstFrame': library.visible.length,
+      }),
+    );
+  }
+
+  await player.init();
+  _logPlayTimings(player, File(p.join(options.dataDir, 'perf.log')));
+  player.ended.listen((_) {
+    final current = player.current;
+    final next = current == null ? null : library.nextAfter(current);
+    if (next != null) player.play(next);
+  });
+  try {
+    await vk?.ensureToken();
+  } catch (_) {
+    // Offline or session expired: VK songs fail at play time with a message.
+  }
+
+  if (options.benchFile != null) {
+    final result = await SpeedBench(
+      library: library,
+      player: player,
+      vk: vk,
+    ).run(parts: options.benchParts);
+    File(options.benchFile!)
+        .writeAsStringSync(const JsonEncoder.withIndent('  ').convert(result));
+    exit(0);
+  }
+}
+
+/// Appends every play's timing to perf.log (no titles, links or tokens).
+void _logPlayTimings(PlayerService player, File log) {
+  player.timings.listen((timing) {
+    final kind = timing.cached ? 'cached' : 'stream';
+    final line = timing.ok
+        ? '$kind sound ${timing.toSoundMs} ms'
+              '${timing.cached ? '' : ' (VK link ${timing.resolveMs} ms)'}'
+        : '$kind failed after ${timing.toSoundMs} ms: ${timing.error}';
+    log.writeAsStringSync(
+      '${DateTime.now().toIso8601String()} $line\n',
+      mode: FileMode.append,
+    );
+  });
+}
+
+class OwnsembleApp extends StatelessWidget {
+  const OwnsembleApp({super.key, required this.library, required this.player});
+
+  final LibraryController library;
+  final PlayerService player;
+
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      title: 'Ownsemble v2',
+      debugShowCheckedModeBanner: false,
+      theme: ThemeData(
+        colorSchemeSeed: const Color(0xFF6D8BFF),
+        brightness: Brightness.dark,
+      ),
+      home: LibraryScreen(library: library, player: player),
+    );
+  }
+}
