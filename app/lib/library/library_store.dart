@@ -358,6 +358,50 @@ class LibraryStore {
   void removeAudioFile(int trackId) =>
       _db.execute('DELETE FROM audio_files WHERE track_id = ?', [trackId]);
 
+  /// Bytes of stored audio that is plain cache (not downloaded), counting
+  /// each file once even when several songs point at it.
+  int cachedBytes() =>
+      _db.select('''
+        SELECT coalesce(sum(bytes), 0) AS total FROM (
+          SELECT path, max(bytes) AS bytes FROM audio_files
+          WHERE pinned = 0 AND path NOT IN (
+            SELECT path FROM audio_files WHERE pinned = 1
+          )
+          GROUP BY path
+        )
+      ''').first['total']
+          as int;
+
+  /// Cached (not downloaded) songs in the order the cache limit removes
+  /// them: played longest ago first; never played counts from when the
+  /// file was stored. Files a downloaded song also uses are left out: they
+  /// stay anyway.
+  List<CachedAudio> evictionOrder() => [
+    for (final row in _db.select('''
+      SELECT a.track_id, a.path, a.bytes,
+             max(coalesce(max(h.played_at_ms), 0), a.stored_at_ms) AS used
+      FROM audio_files a LEFT JOIN history h ON h.track_id = a.track_id
+      WHERE a.pinned = 0 AND a.path NOT IN (
+        SELECT path FROM audio_files WHERE pinned = 1
+      )
+      GROUP BY a.track_id
+      ORDER BY used, a.track_id
+    '''))
+      CachedAudio(
+        trackId: row['track_id'] as int,
+        path: row['path'] as String,
+        bytes: row['bytes'] as int,
+        lastUsedMs: row['used'] as int,
+      ),
+  ];
+
+  /// How many songs' stored audio is the file at [path].
+  int audioPathUsers(String path) =>
+      _db.select('SELECT count(*) AS n FROM audio_files WHERE path = ?', [
+            path,
+          ]).first['n']
+          as int;
+
   // History.
 
   /// Records a play of [trackId]; returns the History entry id.

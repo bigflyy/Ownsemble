@@ -88,3 +88,22 @@ typedef KnownTrack = ({
   String? coverLargeUrl,
   int? goneAtMs,
 });
+
+/// A cached song's stored file, as the cache limit sees it.
+class CachedAudio {
+  const CachedAudio({
+    required this.trackId,
+    required this.path,
+    required this.bytes,
+    required this.lastUsedMs,
+  });
+
+  final int trackId;
+
+  /// Stored path, relative to the data folder (or absolute).
+  final String path;
+  final int bytes;
+
+  /// Last play, or when the file was stored if never played; Unix ms.
+  final int lastUsedMs;
+}
