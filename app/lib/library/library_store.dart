@@ -1,6 +1,5 @@
 import 'package:sqlite3/sqlite3.dart';
 
-import 'search_text.dart';
 import 'track.dart';
 
 /// A song to add or update, before it has a library id.
@@ -30,7 +29,7 @@ class NewTrack {
   final String? localPath;
 }
 
-/// The library database: songs plus a full-text search index.
+/// The library database.
 ///
 /// SQLite calls are synchronous; at 10,000 songs every query here takes a few
 /// milliseconds, so the UI thread calls them directly.
@@ -68,17 +67,8 @@ class LibraryStore {
     db.execute(
       'CREATE INDEX IF NOT EXISTS tracks_by_added ON tracks (added_at DESC, id DESC)',
     );
-    // Contentless index of normalized text; rowid = tracks.id. Prefix indexes
-    // keep one- to three-letter queries fast.
-    db.execute('''
-      CREATE VIRTUAL TABLE IF NOT EXISTS tracks_fts USING fts5 (
-        artist, title, album,
-        content = '',
-        contentless_delete = 1,
-        tokenize = 'unicode61',
-        prefix = '1 2 3'
-      )
-    ''');
+    // Leftover from the first speed-gate build, which searched with FTS5.
+    db.execute('DROP TABLE IF EXISTS tracks_fts');
   }
 
   /// Number of songs in the library.
@@ -102,10 +92,6 @@ class LibraryStore {
         local_path = coalesce(excluded.local_path, tracks.local_path)
       RETURNING id
     ''');
-    final unindex = _db.prepare('DELETE FROM tracks_fts WHERE rowid = ?');
-    final index = _db.prepare(
-      'INSERT INTO tracks_fts (rowid, artist, title, album) VALUES (?, ?, ?, ?)',
-    );
     final ids = <int>[];
     _db.execute('BEGIN');
     try {
@@ -123,13 +109,6 @@ class LibraryStore {
                   track.localPath,
                 ]).first['id']
                 as int;
-        unindex.execute([id]);
-        index.execute([
-          id,
-          normalizeForSearch(track.artist),
-          normalizeForSearch(track.title),
-          normalizeForSearch(track.album ?? ''),
-        ]);
         ids.add(id);
       }
       _db.execute('COMMIT');
@@ -138,8 +117,6 @@ class LibraryStore {
       rethrow;
     } finally {
       upsert.close();
-      unindex.close();
-      index.close();
     }
     return ids;
   }
@@ -151,8 +128,8 @@ class LibraryStore {
   /// The whole library, newest first.
   List<Track> loadAll() {
     final rows = _db.select('''
-      SELECT id, source, source_key, access_key, artist, title, duration_sec,
-             local_path
+      SELECT id, source, source_key, access_key, artist, title, album,
+             duration_sec, local_path
       FROM tracks ORDER BY added_at DESC, id DESC
     ''');
     return [
@@ -164,21 +141,11 @@ class LibraryStore {
           accessKey: row['access_key'] as String?,
           artist: row['artist'] as String,
           title: row['title'] as String,
+          album: row['album'] as String?,
           durationSec: row['duration_sec'] as int,
           localPath: row['local_path'] as String?,
         ),
     ];
-  }
-
-  /// Ids of songs matching what the user typed, or null for "no filter".
-  Set<int>? search(String input) {
-    final match = buildMatchQuery(input);
-    if (match == null) return null;
-    final rows = _db.select(
-      'SELECT rowid FROM tracks_fts WHERE tracks_fts MATCH ?',
-      [match],
-    );
-    return {for (final row in rows) row.columnAt(0) as int};
   }
 
   void close() => _db.close();

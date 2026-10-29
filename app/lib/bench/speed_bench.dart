@@ -132,7 +132,7 @@ class SpeedBench {
       'keystrokeToUiDoneMs': _stats([
         for (final k in keystrokes) (k.uiDoneUs - k.startUs) / 1000,
       ]),
-      'dbQueryMs': _stats([for (final k in keystrokes) k.queryUs / 1000]),
+      'searchMs': _stats([for (final k in keystrokes) k.queryUs / 1000]),
       'clockSkewMs': _stats(skewsMs),
       'resultsForFullQueries': {
         for (final query in queries)

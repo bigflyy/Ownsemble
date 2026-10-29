@@ -15,16 +15,18 @@ class Track {
     required this.artist,
     required this.title,
     required this.durationSec,
+    this.album,
     this.sourceKey,
     this.accessKey,
     this.localPath,
   });
 
-  /// Library row id; also the search index rowid.
+  /// Library row id.
   final int id;
   final TrackSource source;
   final String artist;
   final String title;
+  final String? album;
   final int durationSec;
 
   /// Id inside the source, for VK "ownerId_audioId".
@@ -33,7 +35,7 @@ class Track {
   /// VK access key needed to resolve a fresh stream URL.
   final String? accessKey;
 
-  /// Cached audio file on disk, if any.
+  /// Cached audio file, relative to the data folder (or absolute), if any.
   final String? localPath;
 
   /// Whether the player can start this song without the network.

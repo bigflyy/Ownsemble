@@ -105,7 +105,8 @@ Future<void> main(List<String> args) async {
     mpvOptions: options.mpvOptions,
     mpvLog: options.mpvLog ? File(p.join(options.dataDir, 'mpv.log')) : null,
   );
-  final library = LibraryController(store, tracks);
+  final library = LibraryController(tracks);
+  store.close();
 
   WidgetsFlutterBinding.ensureInitialized();
   WidgetsBinding.instance.addPostFrameCallback((_) {

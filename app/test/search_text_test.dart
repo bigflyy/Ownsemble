@@ -7,13 +7,16 @@ void main() {
     expect(normalizeForSearch('Metallica'), 'metallica');
   });
 
-  test('match query makes every word a prefix term', () {
-    expect(buildMatchQuery('Кино  звЁзд'), '"кино"* "звезд"*');
-    expect(buildMatchQuery('AC/DC'), '"ac"* "dc"*');
+  test('search words are normalized letters and digits', () {
+    expect(searchWords('Кино  звЁзд'), ['кино', 'звезд']);
+    expect(searchWords('AC/DC 2'), ['ac', 'dc', '2']);
+    expect(searchWords('  "*- '), isEmpty);
   });
 
-  test('input without letters or digits means no filter', () {
-    expect(buildMatchQuery(''), isNull);
-    expect(buildMatchQuery('  "*- '), isNull);
+  test('every word must occur somewhere, also inside words', () {
+    const text = 'metallica\nnothing else matters';
+    expect(matchesAllWords(text, ['tallica']), isTrue);
+    expect(matchesAllWords(text, ['matters', 'meta']), isTrue);
+    expect(matchesAllWords(text, ['tallica', 'kino']), isFalse);
   });
 }

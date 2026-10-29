@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ownsemble/library/library_store.dart';
+import 'package:ownsemble/library/search_index.dart';
 import 'package:ownsemble/library/song_generator.dart';
 import 'package:ownsemble/library/track.dart';
 import 'package:path/path.dart' as p;
@@ -35,28 +36,12 @@ void main() {
     dir.deleteSync(recursive: true);
   });
 
-  test('search folds ё, ignores case and matches word prefixes', () {
-    final ids = store.upsertAll([
-      song('1_1', 'Ёлка', 'Прованс'),
-      song('1_2', 'Кино', 'Звезда по имени Солнце'),
-      song('1_3', 'Metallica', 'Nothing Else Matters'),
-    ]);
-    expect(store.search('елка'), {ids[0]});
-    expect(store.search('ЁЛК'), {ids[0]});
-    expect(store.search('звезда солн'), {ids[1]});
-    expect(store.search('солнце кино'), {ids[1]});
-    expect(store.search('meta noth'), {ids[2]});
-    expect(store.search('кино metallica'), isEmpty);
-    expect(store.search('  '), isNull);
-  });
-
-  test('upsert updates an existing song and its search entry', () {
+  test('upsert updates an existing song', () {
     final first = store.upsertAll([song('1_1', 'Old Name', 'Song')]).single;
     final second = store.upsertAll([song('1_1', 'Новое Имя', 'Song')]).single;
     expect(second, first);
     expect(store.count(), 1);
-    expect(store.search('old'), isEmpty);
-    expect(store.search('новое'), {first});
+    expect(store.loadAll().single.artist, 'Новое Имя');
   });
 
   test('loadAll lists the newest songs first', () {
@@ -80,7 +65,22 @@ void main() {
     expect(generateSongs(2000).map((s) => s.title), songs.map((s) => s.title));
     store.upsertAll(songs);
     expect(store.count(), 2000);
-    expect(store.search('елка')!.length, greaterThan(0));
+    expect(SearchIndex(store.loadAll()).search('елка'), isNotEmpty);
     expect(store.loadAll().every((t) => t.isCached), isTrue);
+  });
+
+  test('album is stored and loaded', () {
+    store.upsertAll([
+      NewTrack(
+        source: TrackSource.vk,
+        sourceKey: '1_1',
+        artist: 'A',
+        title: 'B',
+        album: 'Альбом',
+        durationSec: 1,
+        addedAt: 0,
+      ),
+    ]);
+    expect(store.loadAll().single.album, 'Альбом');
   });
 }
