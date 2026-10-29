@@ -1,9 +1,9 @@
-/// Where a song in the library comes from.
+/// What kind of place a song comes from.
 enum TrackSource {
   /// Synthetic song made by the speed-gate generator.
   generated,
 
-  /// Song from the user's VK library.
+  /// Song from a VK account's library.
   vk,
 }
 
@@ -11,6 +11,7 @@ enum TrackSource {
 class Track {
   const Track({
     required this.id,
+    required this.sourceId,
     required this.source,
     required this.artist,
     required this.title,
@@ -18,11 +19,19 @@ class Track {
     this.album,
     this.sourceKey,
     this.accessKey,
+    this.coverUrl,
+    this.coverLargeUrl,
+    this.tint,
+    this.goneAtMs,
     this.localPath,
+    this.pinned = false,
   });
 
   /// Library row id.
   final int id;
+
+  /// Library id of the source (one VK account, the generator, ...).
+  final int sourceId;
   final TrackSource source;
   final String artist;
   final String title;
@@ -35,9 +44,31 @@ class Track {
   /// VK access key needed to resolve a fresh stream URL.
   final String? accessKey;
 
-  /// Cached audio file, relative to the data folder (or absolute), if any.
+  /// Small cover image (about 135 px) for list rows.
+  final String? coverUrl;
+
+  /// Large cover image (about 600 px) for the player panel.
+  final String? coverLargeUrl;
+
+  /// Main color of the cover as 0xAARRGGBB, for stand-in tiles.
+  final int? tint;
+
+  /// When a sync found the song gone from its source, Unix milliseconds.
+  final int? goneAtMs;
+
+  /// Stored audio file, relative to the data folder (or absolute), if any.
   final String? localPath;
+
+  /// Whether the stored file is a download: kept until the user removes it,
+  /// never evicted by the cache limit.
+  final bool pinned;
 
   /// Whether the player can start this song without the network.
   bool get isCached => localPath != null;
+
+  /// Whether the song is downloaded (pinned in storage).
+  bool get isDownloaded => localPath != null && pinned;
+
+  /// Whether the source no longer has this song; it plays only if stored.
+  bool get isGone => goneAtMs != null;
 }

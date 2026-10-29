@@ -1,5 +1,4 @@
 import '../library/library_store.dart';
-import '../library/track.dart';
 import 'vk_client.dart';
 
 /// Result of reading the VK library page by page.
@@ -50,7 +49,6 @@ String vkSourceKey(Map<String, dynamic> item) =>
 NewTrack vkItemToTrack(Map<String, dynamic> item) {
   final album = item['album'];
   return NewTrack(
-    source: TrackSource.vk,
     sourceKey: vkSourceKey(item),
     accessKey: item['access_key'] as String?,
     artist: (item['artist'] as String?)?.trim() ?? '',

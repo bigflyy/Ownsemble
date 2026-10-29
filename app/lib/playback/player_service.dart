@@ -3,8 +3,8 @@ import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:media_kit/media_kit.dart' hide Track;
-import 'package:path/path.dart' as p;
 
+import '../library/library_schema.dart' show resolveAudioPath;
 import '../library/track.dart';
 import '../vk/vk_client.dart';
 import 'stream_proxy.dart';
@@ -44,11 +44,6 @@ class PlayTiming {
   final int? sampleRate;
   final String? error;
 }
-
-/// Where a cached song's file is: stored paths are relative to the data
-/// folder, so the folder can move and the app can start from anywhere.
-String resolveAudioPath(String dataDir, String storedPath) =>
-    p.isAbsolute(storedPath) ? storedPath : p.join(dataDir, storedPath);
 
 /// mpv options tuned for fast start of single audio files.
 const defaultMpvOptions = <String, String>{

@@ -1,17 +1,13 @@
 import 'dart:math';
 
 import 'library_store.dart';
-import 'track.dart';
 
 /// Generates a realistic-looking library for speed checks: Russian and English
 /// artists and titles (including "ё"), varied lengths and dates.
 ///
-/// The same [seed] always gives the same songs.
-List<NewTrack> generateSongs(
-  int count, {
-  int seed = 2026,
-  List<String> audioFiles = const [],
-}) {
+/// The same [seed] always gives the same songs. They have no audio of their
+/// own; the gate tool lets them borrow cached files.
+List<NewTrack> generateSongs(int count, {int seed = 2026}) {
   final random = Random(seed);
   String pick(List<String> words) => words[random.nextInt(words.length)];
   String capitalize(String word) =>
@@ -48,16 +44,12 @@ List<NewTrack> generateSongs(
       List.generate(1 + random.nextInt(4), (_) => pick(words)).join(' '),
     );
     return NewTrack(
-      source: TrackSource.generated,
       sourceKey: 'gen-$seed-$index',
       artist: artists[random.nextInt(artists.length)],
       title: random.nextInt(10) == 0 ? '$title (Remix)' : title,
       album: random.nextInt(3) == 0 ? null : capitalize(pick(words)),
       durationSec: 120 + random.nextInt(300),
       addedAt: now - random.nextInt(fiveYears),
-      localPath: audioFiles.isEmpty
-          ? null
-          : audioFiles[index % audioFiles.length],
     );
   });
 }

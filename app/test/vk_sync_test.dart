@@ -1,5 +1,4 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:ownsemble/library/track.dart';
 import 'package:ownsemble/vk/vk_sync.dart';
 
 /// Fake `audio.get` over [total] songs where the ids in [blocked] are counted
@@ -72,7 +71,6 @@ void main() {
       'date': 1700000000,
       'album': {'title': 'Альбом'},
     });
-    expect(track.source, TrackSource.vk);
     expect(track.sourceKey, '-2001_77');
     expect(track.accessKey, 'k');
     expect(track.artist, 'Сплин');

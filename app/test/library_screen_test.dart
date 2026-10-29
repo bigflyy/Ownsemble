@@ -13,19 +13,25 @@ void main() {
 
   setUp(() {
     store = LibraryStore.open(':memory:');
-    store.upsertAll([
+    final generated = store.ensureSource(
+      TrackSource.generated,
+      account: 'generator',
+      name: 'Generated songs',
+    );
+    final vk = store.ensureSource(TrackSource.vk, account: '1', name: 'VK');
+    final fillerId = store.upsertAll(generated, [
       const NewTrack(
-        source: TrackSource.generated,
         sourceKey: 'gen-1',
         artist: 'Filler Artist',
         title: 'Filler Song',
         durationSec: 200,
         addedAt: 100,
-        localPath: 'cache/sample.mp3',
       ),
+    ]).single;
+    store.saveAudioFile(fillerId, 'cache/sample.mp3', 1, pinned: true);
+    store.upsertAll(vk, [
       for (var i = 0; i < 30; i++)
         NewTrack(
-          source: TrackSource.vk,
           sourceKey: '1_$i',
           artist: 'Artist $i',
           title: 'Song $i',

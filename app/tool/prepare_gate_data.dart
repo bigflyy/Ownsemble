@@ -43,7 +43,13 @@ Future<void> main(List<String> args) async {
       final clock = Stopwatch()..start();
       await vk.ensureToken();
       final library = await fetchVkLibrary(vk.call, vk.userId);
-      final ids = store.upsertAll(library.items.map(vkItemToTrack));
+      final sourceId = store.ensureSource(
+        TrackSource.vk,
+        account: '${vk.userId}',
+        name: 'VK',
+      );
+      final ids = store.upsertAll(sourceId, library.items.map(vkItemToTrack));
+      store.recordSync(sourceId);
       print(
         'VK sync: ${library.items.length}/${library.declaredCount} songs in '
         '${library.pages} page(s), ${clock.elapsedMilliseconds} ms.',
@@ -61,7 +67,7 @@ Future<void> main(List<String> args) async {
         );
         final file = File(p.join(dataDir, relative));
         if (!file.existsSync()) await _download(url, file);
-        store.setLocalPath(ids[i], relative);
+        store.saveAudioFile(ids[i], relative, file.lengthSync());
         cachedFiles.add(relative);
       }
       print('Cached ${cachedFiles.length} VK songs as local files.');
@@ -70,18 +76,44 @@ Future<void> main(List<String> args) async {
     }
   }
 
-  final clock = Stopwatch()..start();
-  store.upsertAll(generateSongs(generatedCount, audioFiles: cachedFiles));
-  print(
-    'Generated songs: $generatedCount in ${clock.elapsedMilliseconds} ms '
-    '(play the ${cachedFiles.length} cached files). '
-    'Library total: ${store.count()}.',
-  );
+  if (generatedCount > 0) {
+    _addGenerated(store, dataDir, generatedCount, cachedFiles);
+  }
   final generatedPlayable = store.loadAll().where(
     (t) => t.source == TrackSource.generated && t.isCached,
   );
   print('Generated songs with audio: ${generatedPlayable.length}.');
   store.close();
+}
+
+/// Adds [count] generated filler songs that borrow [cachedFiles]' audio.
+void _addGenerated(
+  LibraryStore store,
+  String dataDir,
+  int count,
+  List<String> cachedFiles,
+) {
+  final clock = Stopwatch()..start();
+  final generatedSource = store.ensureSource(
+    TrackSource.generated,
+    account: 'generator',
+    name: 'Generated songs',
+  );
+  final generatedIds = store.upsertAll(generatedSource, generateSongs(count));
+  // Filler songs borrow the cached files. They are pinned so the cache limit
+  // never deletes audio that filler songs point at.
+  if (cachedFiles.isNotEmpty) {
+    for (var i = 0; i < generatedIds.length; i++) {
+      final path = cachedFiles[i % cachedFiles.length];
+      final bytes = File(p.join(dataDir, path)).lengthSync();
+      store.saveAudioFile(generatedIds[i], path, bytes, pinned: true);
+    }
+  }
+  print(
+    'Generated songs: $count in ${clock.elapsedMilliseconds} ms '
+    '(play the ${cachedFiles.length} cached files). '
+    'Library total: ${store.count()}.',
+  );
 }
 
 /// Downloads [url] into [target] through a temporary file.

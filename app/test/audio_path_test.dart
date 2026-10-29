@@ -1,5 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:ownsemble/playback/player_service.dart';
+import 'package:ownsemble/library/library_schema.dart';
 import 'package:path/path.dart' as p;
 
 void main() {

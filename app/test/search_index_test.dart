@@ -4,6 +4,7 @@ import 'package:ownsemble/library/track.dart';
 
 Track song(int id, String artist, String title, {String? album}) => Track(
   id: id,
+  sourceId: 1,
   source: TrackSource.vk,
   artist: artist,
   title: title,
