@@ -487,10 +487,10 @@ void main() {
       of: find.byKey(const ValueKey('time')),
       matching: find.byType(Text),
     );
-    expect(tester.widget<Text>(timeLabel).data, isNot(contains('/ -')));
+    expect(tester.widget<Text>(timeLabel).data, isNot(startsWith('-')));
     await tester.tap(find.byKey(const ValueKey('time')));
     await tester.pump();
-    expect(tester.widget<Text>(timeLabel).data, contains('/ -'));
+    expect(tester.widget<Text>(timeLabel).data, startsWith('-'));
     await tester.tap(find.byKey(const ValueKey('time')));
     await tester.pump();
 

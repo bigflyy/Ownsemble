@@ -11,9 +11,12 @@ import 'playback/playback_controller.dart';
 import 'playback/player_service.dart';
 import 'storage/audio_storage.dart';
 import 'sync/background_sync.dart';
+import 'ui/collections_controller.dart';
 import 'ui/library_controller.dart';
 import 'ui/library_screen.dart';
+import 'ui/shell_settings.dart';
 import 'ui/sync_controller.dart';
+import 'ui/theme.dart';
 import 'vk/vk_client.dart';
 
 /// Command-line options of the app.
@@ -103,6 +106,14 @@ Future<void> main(List<String> args) async {
   final tracks = store.loadAll();
   final sources = store.sources();
   final loadMs = loadClock.elapsedMilliseconds;
+  // The store stays open while the app runs, for History, Stacks, stored
+  // audio and settings; the sync uses its own connection.
+  final storage = AudioStorage(dataDir: options.dataDir, store: store);
+  final collections = CollectionsController(store);
+  final settings = ShellSettings(
+    read: store.readSetting,
+    write: store.writeSetting,
+  );
 
   final sessionFile = options.vkSession == null
       ? null
@@ -116,15 +127,17 @@ Future<void> main(List<String> args) async {
     dataDir: options.dataDir,
     mpvOptions: options.mpvOptions,
     mpvLog: options.mpvLog ? File(p.join(options.dataDir, 'mpv.log')) : null,
-    storage: AudioStorage(dataDir: options.dataDir, store: store),
+    storage: storage,
     cacheWhileStreaming: options.cacheWhileStreaming,
   );
-  final library = LibraryController(tracks);
-  // The store stays open while the app runs, for History and stored audio;
-  // the sync uses its own connection.
+  final library = LibraryController(
+    tracks,
+    collections: collections,
+    storage: storage,
+  );
   final playback = PlaybackController(
     player: player,
-    recordPlay: (track) => store.addPlay(track.id),
+    recordPlay: collections.recordPlay,
   );
   final sync = SyncController(
     sources: sources,
@@ -153,7 +166,15 @@ Future<void> main(List<String> args) async {
       ),
     );
   });
-  runApp(OwnsembleApp(library: library, playback: playback, sync: sync));
+  runApp(
+    OwnsembleApp(
+      library: library,
+      playback: playback,
+      sync: sync,
+      collections: collections,
+      settings: settings,
+    ),
+  );
 }
 
 /// Startup work that must not delay the first frame: metrics, the player,
@@ -224,23 +245,33 @@ class OwnsembleApp extends StatelessWidget {
     super.key,
     required this.library,
     required this.playback,
+    required this.collections,
+    required this.settings,
     this.sync,
   });
 
   final LibraryController library;
   final PlaybackController playback;
+  final CollectionsController collections;
+  final ShellSettings settings;
   final SyncController? sync;
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'Ownsemble v2',
-      debugShowCheckedModeBanner: false,
-      theme: ThemeData(
-        colorSchemeSeed: const Color(0xFF6D8BFF),
-        brightness: Brightness.dark,
+    return ListenableBuilder(
+      listenable: settings,
+      builder: (context, _) => MaterialApp(
+        title: 'Ownsemble v2',
+        debugShowCheckedModeBanner: false,
+        theme: buildTheme(settings.dark ? OwnColors.dark : OwnColors.light),
+        home: LibraryScreen(
+          library: library,
+          playback: playback,
+          sync: sync,
+          collections: collections,
+          settings: settings,
+        ),
       ),
-      home: LibraryScreen(library: library, playback: playback, sync: sync),
     );
   }
 }

@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../library/library_store.dart';
 import '../vk/vk_sync.dart';
 import 'sync_controller.dart';
+import 'theme.dart';
 
 /// The bottom status bar: each synced source with its state, a thin progress
 /// line while a sync runs, and the Sync now button.
@@ -23,10 +24,15 @@ class SyncStatusBar extends StatelessWidget {
         final percent = progress == null
             ? 0
             : (progress.fraction * 100).round();
+        final own = OwnColors.of(context);
         return Stack(
           children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(20, 6, 12, 6),
+            Container(
+              decoration: BoxDecoration(
+                color: own.surface,
+                border: Border(top: BorderSide(color: own.line)),
+              ),
+              padding: const EdgeInsets.fromLTRB(20, 4, 12, 4),
               child: Row(
                 children: [
                   Expanded(
@@ -64,6 +70,13 @@ class SyncStatusBar extends StatelessWidget {
                   ),
                   const SizedBox(width: 12),
                   OutlinedButton.icon(
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: own.text,
+                      side: BorderSide(color: own.line),
+                      minimumSize: const Size(0, 30),
+                      padding: const EdgeInsets.symmetric(horizontal: 12),
+                      textStyle: const TextStyle(fontSize: 13),
+                    ),
                     key: const ValueKey('sync-now'),
                     onPressed: sync.canSync && !sync.running
                         ? sync.syncNow
@@ -112,6 +125,7 @@ class _SourceState extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = Theme.of(context).colorScheme;
+    final own = OwnColors.of(context);
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
@@ -119,7 +133,7 @@ class _SourceState extends StatelessWidget {
           width: 8,
           height: 8,
           decoration: BoxDecoration(
-            color: failed ? colors.error : colors.primary,
+            color: failed ? colors.error : own.source1,
             shape: BoxShape.circle,
           ),
         ),
