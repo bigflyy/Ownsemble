@@ -101,6 +101,7 @@ Future<void> main(List<String> args) async {
   final player = PlayerService(
     vk: vk,
     muted: options.muted,
+    dataDir: options.dataDir,
     mpvOptions: options.mpvOptions,
     mpvLog: options.mpvLog ? File(p.join(options.dataDir, 'mpv.log')) : null,
   );

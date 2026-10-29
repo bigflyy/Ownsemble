@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:media_kit/media_kit.dart' hide Track;
+import 'package:path/path.dart' as p;
 
 import '../library/track.dart';
 import '../vk/vk_client.dart';
@@ -44,6 +45,11 @@ class PlayTiming {
   final String? error;
 }
 
+/// Where a cached song's file is: stored paths are relative to the data
+/// folder, so the folder can move and the app can start from anywhere.
+String resolveAudioPath(String dataDir, String storedPath) =>
+    p.isAbsolute(storedPath) ? storedPath : p.join(dataDir, storedPath);
+
 /// mpv options tuned for fast start of single audio files.
 const defaultMpvOptions = <String, String>{
   // Give up on a stalled stream instead of waiting mpv's default 60 s.
@@ -55,9 +61,13 @@ class PlayerService {
   PlayerService({
     required this.vk,
     required this.muted,
+    required this.dataDir,
     this.mpvOptions = const {},
     this.mpvLog,
   });
+
+  /// Data folder that cached songs' stored paths are relative to.
+  final String dataDir;
 
   /// Resolves stream URLs for VK songs; null when no session is configured.
   final VkClient? vk;
@@ -153,11 +163,18 @@ class PlayerService {
     }
 
     ProxiedStream? proxied;
+    var cached = false;
     try {
       String uri;
-      if (track.localPath != null) {
-        uri = track.localPath!;
+      final localFile = track.localPath == null
+          ? null
+          : resolveAudioPath(dataDir, track.localPath!);
+      final hasFile = localFile != null && File(localFile).existsSync();
+      if (hasFile) {
+        cached = true;
+        uri = localFile;
       } else if (track.source == TrackSource.vk && vk != null) {
+        // Not cached, or the cached file is gone: stream it.
         final url = await vk!.resolveStreamUrl(
           track.sourceKey!,
           track.accessKey,
@@ -166,6 +183,8 @@ class PlayerService {
         if (url == null) throw StateError('VK has no stream for this song');
         proxied = _proxy.add(Uri.parse(url));
         uri = proxied.localUri.toString();
+      } else if (localFile != null) {
+        throw StateError('cached file is missing');
       } else {
         throw StateError('song has no audio source');
       }
@@ -179,19 +198,30 @@ class PlayerService {
         );
       }
 
-      // Positions from the previous song may still arrive until the new file
-      // is loaded, so only count advances after loadfile has returned.
+      // Errors from the previous song may still arrive until the new file is
+      // loaded, so only count them after loadfile returned.
       var opened = false;
       final sound = Completer<void>();
+      // A position larger than the time since the click still belongs to the
+      // previous song, which keeps playing until mpv has unloaded it.
       final positions = _player.stream.position.listen((position) {
-        if (opened && position > Duration.zero && !sound.isCompleted) {
+        if (opened &&
+            position > Duration.zero &&
+            position <= clock.elapsed &&
+            !sound.isCompleted) {
           sound.complete();
+        }
+      });
+      // mpv reports files it cannot open or decode as error log lines.
+      final errors = _player.stream.error.listen((message) {
+        if (opened && !sound.isCompleted) {
+          sound.completeError(StateError('player: $message'));
         }
       });
       try {
         _log?.writeln(
           '${_logClock.elapsedMilliseconds} === play '
-          '${track.isCached ? 'cached' : 'stream'} (link $resolveMs ms)',
+          '${cached ? 'cached' : 'stream'} (link $resolveMs ms)',
         );
         // mpv's loadfile instead of Player.open: open() writes the URI to a
         // temporary playlist file, and stream URLs must never reach disk.
@@ -201,11 +231,12 @@ class PlayerService {
         await sound.future.timeout(const Duration(seconds: 20));
       } finally {
         await positions.cancel();
+        await errors.cancel();
       }
       return finish(
         PlayTiming(
           ok: true,
-          cached: track.isCached,
+          cached: cached,
           resolveMs: resolveMs,
           toSoundMs: clock.elapsedMilliseconds,
           networkFirstChunkMs: await proxied?.networkFirstChunkMs,
@@ -213,10 +244,11 @@ class PlayerService {
         ),
       );
     } catch (error) {
+      if (generation == _generation) playing.value = false;
       return finish(
         PlayTiming(
           ok: false,
-          cached: track.isCached,
+          cached: cached,
           resolveMs: resolveMs,
           toSoundMs: clock.elapsedMilliseconds,
           // Error text never includes the stream URL.

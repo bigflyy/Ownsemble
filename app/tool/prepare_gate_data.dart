@@ -54,12 +54,15 @@ Future<void> main(List<String> args) async {
         if (cachedFiles.length >= cacheCount) break;
         final url = library.items[i]['url'] as String? ?? '';
         if (url.isEmpty) continue;
-        final file = File(
-          p.join(dataDir, 'cache', 'vk_${vkSourceKey(library.items[i])}.mp3'),
+        // Stored relative to the data folder, which the app resolves against.
+        final relative = p.join(
+          'cache',
+          'vk_${vkSourceKey(library.items[i])}.mp3',
         );
+        final file = File(p.join(dataDir, relative));
         if (!file.existsSync()) await _download(url, file);
-        store.setLocalPath(ids[i], file.path);
-        cachedFiles.add(file.path);
+        store.setLocalPath(ids[i], relative);
+        cachedFiles.add(relative);
       }
       print('Cached ${cachedFiles.length} VK songs as local files.');
     } finally {
