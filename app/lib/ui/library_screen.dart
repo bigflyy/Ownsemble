@@ -232,6 +232,10 @@ class _SongRow extends StatelessWidget {
                 ],
               ),
             ),
+            if (track.source == TrackSource.generated) ...[
+              const SizedBox(width: 16),
+              const _FillerTag(),
+            ],
             const SizedBox(width: 16),
             Text(
               formatDuration(Duration(seconds: track.durationSec)),
@@ -240,6 +244,25 @@ class _SongRow extends StatelessWidget {
           ],
         ),
       ),
+    );
+  }
+}
+
+/// Marks generated speed-test songs, whose names are made up and which play
+/// one of a few cached real songs.
+class _FillerTag extends StatelessWidget {
+  const _FillerTag();
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+      decoration: BoxDecoration(
+        border: Border.all(color: theme.colorScheme.outline),
+        borderRadius: BorderRadius.circular(4),
+      ),
+      child: Text('filler', style: theme.textTheme.labelSmall),
     );
   }
 }
@@ -285,7 +308,10 @@ class _PlayerBar extends StatelessWidget {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        '${track.artist} - ${track.title}',
+                        track.source == TrackSource.generated
+                            ? '${track.artist} - ${track.title}  '
+                                  '(test filler: plays a sample song)'
+                            : '${track.artist} - ${track.title}',
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                       ),

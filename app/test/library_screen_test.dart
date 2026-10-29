@@ -14,6 +14,15 @@ void main() {
   setUp(() {
     store = LibraryStore.open(':memory:');
     store.upsertAll([
+      const NewTrack(
+        source: TrackSource.generated,
+        sourceKey: 'gen-1',
+        artist: 'Filler Artist',
+        title: 'Filler Song',
+        durationSec: 200,
+        addedAt: 100,
+        localPath: 'cache/sample.mp3',
+      ),
       for (var i = 0; i < 30; i++)
         NewTrack(
           source: TrackSource.vk,
@@ -98,6 +107,28 @@ void main() {
     await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
     await tester.pump();
     expect(searchField(tester).focusNode.hasFocus, isTrue);
+  });
+
+  testWidgets('generated filler songs are marked, VK songs are not', (
+    tester,
+  ) async {
+    await pumpScreen(tester);
+    final fillerRow = find.ancestor(
+      of: find.text('Filler Song'),
+      matching: find.byType(InkWell),
+    );
+    final vkRow = find.ancestor(
+      of: find.text('Song 29'),
+      matching: find.byType(InkWell),
+    );
+    expect(
+      find.descendant(of: fillerRow, matching: find.text('filler')),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(of: vkRow, matching: find.text('filler')),
+      findsNothing,
+    );
   });
 
   testWidgets('Escape clears the search even without focus', (tester) async {
