@@ -724,43 +724,56 @@ class _SongRow extends StatelessWidget {
                   ),
                   const SizedBox(width: 14),
                   // Album, with the gone and filler tags at its end, so
-                  // a tag never shifts the columns.
+                  // a tag never shifts the columns. In a narrow column the
+                  // tags shrink to an icon with the same explanation.
                   Expanded(
                     flex: 10,
-                    child: Row(
-                      children: [
-                        Expanded(
-                          child: Text(
-                            track.album ?? '',
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: dimStyle,
-                          ),
-                        ),
-                        if (track.isGone) ...[
-                          const SizedBox(width: 8),
-                          _Tag(
-                            key: const ValueKey('gone-tag'),
-                            label: 'gone from VK',
-                            explanation: stored.path != null
-                                ? 'VK no longer has this song. It stays in '
-                                      'your library and plays from the '
-                                      'stored copy.'
-                                : 'VK no longer has this song. It stays in '
-                                      'your library, History and Stacks, '
-                                      'but there is no stored copy to play.',
-                          ),
-                        ],
-                        if (track.source == TrackSource.generated) ...[
-                          const SizedBox(width: 8),
-                          const _Tag(
-                            label: 'filler',
-                            explanation:
-                                'Generated speed-test song: made-up name, '
-                                'plays one of a few cached real songs.',
-                          ),
-                        ],
-                      ],
+                    child: LayoutBuilder(
+                      builder: (context, box) {
+                        final roomy = box.maxWidth >= 150;
+                        return Row(
+                          children: [
+                            Expanded(
+                              child: Text(
+                                track.album ?? '',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: dimStyle,
+                              ),
+                            ),
+                            if (track.isGone) ...[
+                              const SizedBox(width: 8),
+                              _Tag(
+                                key: const ValueKey('gone-tag'),
+                                label: 'gone from VK',
+                                icon: Icons.cloud_off_outlined,
+                                compact: !roomy,
+                                explanation: stored.path != null
+                                    ? 'VK no longer has this song. It stays '
+                                          'in your library and plays from the '
+                                          'stored copy.'
+                                    : 'VK no longer has this song. It stays '
+                                          'in your library, History and '
+                                          'Stacks, but there is no stored '
+                                          'copy to play.',
+                              ),
+                            ],
+                            if (track.source == TrackSource.generated) ...[
+                              const SizedBox(width: 8),
+                              _Tag(
+                                key: const ValueKey('filler-tag'),
+                                label: 'filler',
+                                icon: Icons.science_outlined,
+                                compact: !roomy,
+                                explanation:
+                                    'Generated speed-test song: made-up '
+                                    'name, plays one of a few cached real '
+                                    'songs.',
+                              ),
+                            ],
+                          ],
+                        );
+                      },
                     ),
                   ),
                   const SizedBox(width: 14),
@@ -794,10 +807,20 @@ class _SongRow extends StatelessWidget {
 
 /// A small outlined label on a song row, explained on hover.
 class _Tag extends StatelessWidget {
-  const _Tag({super.key, required this.label, required this.explanation});
+  const _Tag({
+    super.key,
+    required this.label,
+    required this.explanation,
+    required this.icon,
+    this.compact = false,
+  });
 
   final String label;
   final String explanation;
+
+  /// Shown instead of the label when [compact].
+  final IconData icon;
+  final bool compact;
 
   @override
   Widget build(BuildContext context) {
@@ -810,7 +833,13 @@ class _Tag extends StatelessWidget {
           border: Border.all(color: colors.line),
           borderRadius: BorderRadius.circular(6),
         ),
-        child: Text(label, style: TextStyle(fontSize: 11, color: colors.dim)),
+        child: compact
+            ? Icon(icon, size: 13, color: colors.dim)
+            : Text(
+                label,
+                maxLines: 1,
+                style: TextStyle(fontSize: 11, color: colors.dim),
+              ),
       ),
     );
   }

@@ -243,7 +243,7 @@ void main() {
         expect(
           find.descendant(
             of: find.byKey(ValueKey('song-${track.id}')),
-            matching: find.text('gone from VK'),
+            matching: find.byKey(const ValueKey('gone-tag')),
           ),
           findsOneWidget,
           reason: 'the gone song is marked in the list',

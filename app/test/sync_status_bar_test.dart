@@ -193,7 +193,10 @@ void main() {
       // Only the gone song carries the mark.
       final goneRow = find.byKey(const ValueKey('song-2'));
       expect(
-        find.descendant(of: goneRow, matching: find.text('gone from VK')),
+        find.descendant(
+          of: goneRow,
+          matching: find.byKey(const ValueKey('gone-tag')),
+        ),
         findsOneWidget,
       );
       expect(find.byKey(const ValueKey('gone-tag')), findsOneWidget);

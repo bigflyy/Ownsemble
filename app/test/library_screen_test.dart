@@ -132,11 +132,17 @@ void main() {
       matching: find.byType(InkWell),
     );
     expect(
-      find.descendant(of: fillerRow, matching: find.text('filler')),
+      find.descendant(
+        of: fillerRow,
+        matching: find.byKey(const ValueKey('filler-tag')),
+      ),
       findsOneWidget,
     );
     expect(
-      find.descendant(of: vkRow, matching: find.text('filler')),
+      find.descendant(
+        of: vkRow,
+        matching: find.byKey(const ValueKey('filler-tag')),
+      ),
       findsNothing,
     );
   });
