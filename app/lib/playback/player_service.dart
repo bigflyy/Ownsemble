@@ -87,6 +87,12 @@ class PlayerService {
   final _logClock = Stopwatch();
   int _generation = 0;
   Track? _current;
+  bool _loaded = false;
+
+  /// What the current play request loads, and whether mpv has switched to it
+  /// (see the 'path' observer in [init]).
+  String? _loadingUri;
+  bool _loadingUriActive = false;
 
   final _currentController = StreamController<Track?>.broadcast();
   final _timingController = StreamController<PlayTiming>.broadcast();
@@ -98,6 +104,10 @@ class PlayerService {
   bool get isReady => _ready;
   Player get player => _player;
   Track? get current => _current;
+
+  /// Whether [current] is loaded in mpv (its last play request succeeded),
+  /// so pausing and resuming applies to it.
+  bool get currentLoaded => _loaded;
   Stream<Track?> get currentStream => _currentController.stream;
 
   /// Every finished play request's timing, for the status line and logs.
@@ -141,6 +151,12 @@ class PlayerService {
     await _mpv.observeProperty('pause', (value) async {
       playing.value = value == 'no' && _current != null;
     });
+    // mpv reports properties in order and media_kit reads the value when it
+    // handles the event: once 'path' shows the file being loaded, every later
+    // position belongs to that file, not to the previous song.
+    await _mpv.observeProperty('path', (value) async {
+      if (value == _loadingUri) _loadingUriActive = true;
+    });
     await _mpv.observeProperty('eof-reached', (value) async {
       if (value == 'yes') {
         playing.value = false;
@@ -155,6 +171,7 @@ class PlayerService {
     final generation = ++_generation;
     final clock = Stopwatch()..start();
     _current = track;
+    _loaded = false;
     _currentController.add(track);
     var resolveMs = 0;
     PlayTiming finish(PlayTiming timing) {
@@ -165,6 +182,9 @@ class PlayerService {
     ProxiedStream? proxied;
     var cached = false;
     try {
+      // Silence the previous song at once: otherwise it keeps playing under
+      // the new title while the VK link loads, and forever if loading fails.
+      await _mpv.setProperty('pause', 'yes');
       String uri;
       final localFile = track.localPath == null
           ? null
@@ -202,10 +222,12 @@ class PlayerService {
       // loaded, so only count them after loadfile returned.
       var opened = false;
       final sound = Completer<void>();
-      // A position larger than the time since the click still belongs to the
-      // previous song, which keeps playing until mpv has unloaded it.
+      // Positions count only once mpv has switched to the new file; the
+      // previous song keeps reporting positions until it is unloaded.
+      _loadingUri = uri;
+      _loadingUriActive = false;
       final positions = _player.stream.position.listen((position) {
-        if (opened &&
+        if (_loadingUriActive &&
             position > Duration.zero &&
             position <= clock.elapsed &&
             !sound.isCompleted) {
@@ -216,6 +238,18 @@ class PlayerService {
       final errors = _player.stream.error.listen((message) {
         if (opened && !sound.isCompleted) {
           sound.completeError(StateError('player: $message'));
+        }
+      });
+      // The audio server answered with an error page instead of audio.
+      proxied?.upstreamFailure.then((status) {
+        if (!sound.isCompleted) {
+          sound.completeError(
+            StateError(
+              status == 0
+                  ? 'VK audio server unreachable'
+                  : 'VK audio server error (HTTP $status)',
+            ),
+          );
         }
       });
       try {
@@ -233,6 +267,7 @@ class PlayerService {
         await positions.cancel();
         await errors.cancel();
       }
+      if (generation == _generation) _loaded = true;
       return finish(
         PlayTiming(
           ok: true,
@@ -244,7 +279,12 @@ class PlayerService {
         ),
       );
     } catch (error) {
-      if (generation == _generation) playing.value = false;
+      if (generation == _generation) {
+        // Unload whatever is left, so resuming cannot bring back the
+        // previous song under this song's title.
+        await _mpv.command(['stop']);
+        playing.value = false;
+      }
       return finish(
         PlayTiming(
           ok: false,
@@ -252,9 +292,12 @@ class PlayerService {
           resolveMs: resolveMs,
           toSoundMs: clock.elapsedMilliseconds,
           // Error text never includes the stream URL.
-          error: error is TimeoutException
-              ? 'no sound within 20 s'
-              : error.toString().replaceAll(RegExp(r'https?://\S+'), '<url>'),
+          error: switch (error) {
+            TimeoutException() => 'no sound within 20 s',
+            StateError(:final message) => message,
+            VkException(:final message) => message,
+            _ => error.toString(),
+          }.replaceAll(RegExp(r'https?://\S+'), '<url>'),
         ),
       );
     }

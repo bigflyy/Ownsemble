@@ -73,9 +73,15 @@ class _LibraryScreenState extends State<LibraryScreen> {
     super.dispose();
   }
 
+  /// Plays [track]; clicking the song that is already loaded pauses or
+  /// resumes it instead of restarting it. A song that failed is retried.
   void _play(Track track) {
     if (!widget.player.isReady) return;
-    widget.player.play(track);
+    if (track.id == widget.player.current?.id && widget.player.currentLoaded) {
+      widget.player.playOrPause();
+    } else {
+      widget.player.play(track);
+    }
   }
 
   @override
@@ -125,6 +131,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
                     itemBuilder: (context, index) {
                       final track = library.visible[index];
                       return _SongRow(
+                        key: ValueKey('song-${track.id}'),
                         track: track,
                         isCurrent: track.id == current.data?.id,
                         onTap: () => _play(track),
@@ -181,6 +188,7 @@ class _StatusLine extends StatelessWidget {
 
 class _SongRow extends StatelessWidget {
   const _SongRow({
+    super.key,
     required this.track,
     required this.isCurrent,
     required this.onTap,
