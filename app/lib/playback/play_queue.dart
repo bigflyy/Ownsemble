@@ -95,6 +95,25 @@ class PlayQueue {
     return current;
   }
 
+  /// Indexes into [context] of up to [count] songs that play next by
+  /// themselves (Up next), without moving. Wraps only with repeat list.
+  List<int> upcoming(int count) {
+    if (_position < 0) return const [];
+    if (repeat == Repeat.one) return [_order[_position]];
+    final result = <int>[];
+    var position = _position;
+    while (result.length < count) {
+      position++;
+      if (position >= _order.length) {
+        if (repeat == Repeat.off || _order.length < 2) break;
+        position = 0;
+      }
+      if (position == _position) break;
+      result.add(_order[position]);
+    }
+    return result;
+  }
+
   /// Puts the current song first and the rest in random order after it.
   void _shuffleKeepingCurrent() {
     final currentIndex = _order[_position];

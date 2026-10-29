@@ -114,6 +114,17 @@ void main() {
     expect(queue.previous(Duration.zero)?.id, 0);
   });
 
+  test('Up next lists the following songs without moving', () {
+    queue.start(songs(5), 2);
+    expect(queue.upcoming(5), [3, 4]);
+    queue.repeat = Repeat.list;
+    expect(queue.upcoming(3), [3, 4, 0]);
+    expect(queue.upcoming(10), [3, 4, 0, 1], reason: 'each song once');
+    queue.repeat = Repeat.one;
+    expect(queue.upcoming(3), [2]);
+    expect(queue.current?.id, 2);
+  });
+
   test('nothing started: no next, no previous', () {
     expect(queue.current, isNull);
     expect(queue.next(auto: false), isNull);
