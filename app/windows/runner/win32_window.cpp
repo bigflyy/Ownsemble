@@ -150,6 +150,14 @@ bool Win32Window::Create(const std::wstring& title,
 }
 
 bool Win32Window::Show() {
+  // Agent checks set OWNSEMBLE_BACKGROUND_WINDOW: the window then opens far
+  // outside every monitor and is never activated, so automated runs neither
+  // cover the user's screen nor take their keyboard focus.
+  if (GetEnvironmentVariableW(L"OWNSEMBLE_BACKGROUND_WINDOW", nullptr, 0) > 0) {
+    SetWindowPos(window_handle_, HWND_BOTTOM, -20000, -20000, 0, 0,
+                 SWP_NOSIZE | SWP_NOACTIVATE);
+    return ShowWindow(window_handle_, SW_SHOWNOACTIVATE);
+  }
   return ShowWindow(window_handle_, SW_SHOWNORMAL);
 }
 
