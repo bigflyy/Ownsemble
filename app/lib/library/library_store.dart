@@ -37,6 +37,20 @@ class NewTrack {
   final String? coverUrl;
   final String? coverLargeUrl;
   final int? tint;
+
+  /// This song with other cover links.
+  NewTrack withCovers(String? coverUrl, String? coverLargeUrl) => NewTrack(
+    artist: artist,
+    title: title,
+    album: album,
+    durationSec: durationSec,
+    addedAt: addedAt,
+    sourceKey: sourceKey,
+    accessKey: accessKey,
+    coverUrl: coverUrl,
+    coverLargeUrl: coverLargeUrl,
+    tint: tint,
+  );
 }
 
 /// The library database.
@@ -55,6 +69,9 @@ class LibraryStore {
       db.execute('PRAGMA journal_mode = WAL');
       db.execute('PRAGMA synchronous = NORMAL');
       db.execute('PRAGMA foreign_keys = ON');
+      // The background sync writes through its own connection; wait for it
+      // instead of failing with "database is locked".
+      db.execute('PRAGMA busy_timeout = 5000');
       migrateLibrary(db, dataDir: path == ':memory:' ? null : p.dirname(path));
     } catch (_) {
       db.close();
@@ -157,7 +174,16 @@ class LibraryStore {
   /// Adds songs of [sourceId], or updates songs already present (same source
   /// and key). An updated song is no longer marked gone. Returns library ids
   /// in input order. Runs in one transaction.
-  List<int> upsertAll(int sourceId, Iterable<NewTrack> tracks) {
+  List<int> upsertAll(int sourceId, Iterable<NewTrack> tracks) =>
+      upsertTracks(sourceId, tracks).ids;
+
+  /// Like [upsertAll], and also tells which songs were added or changed.
+  ///
+  /// A song whose stored fields already match is not written again, so a
+  /// sync that finds nothing new leaves the database untouched.
+  UpsertResult upsertTracks(int sourceId, Iterable<NewTrack> tracks) {
+    // The WHERE clause skips the update when nothing differs; RETURNING then
+    // yields no row and the id is looked up instead.
     final upsert = _db.prepare('''
       INSERT INTO tracks (source_id, source_key, access_key, artist, title,
                           album, duration_sec, added_at, cover_url,
@@ -174,30 +200,94 @@ class LibraryStore {
         cover_large_url = excluded.cover_large_url,
         tint = excluded.tint,
         gone_at_ms = NULL
+      WHERE tracks.access_key IS NOT excluded.access_key
+         OR tracks.artist IS NOT excluded.artist
+         OR tracks.title IS NOT excluded.title
+         OR tracks.album IS NOT excluded.album
+         OR tracks.duration_sec IS NOT excluded.duration_sec
+         OR tracks.added_at IS NOT excluded.added_at
+         OR tracks.cover_url IS NOT excluded.cover_url
+         OR tracks.cover_large_url IS NOT excluded.cover_large_url
+         OR tracks.tint IS NOT excluded.tint
+         OR tracks.gone_at_ms IS NOT NULL
       RETURNING id
     ''');
+    final findId = _db.prepare(
+      'SELECT id FROM tracks WHERE source_id = ? AND source_key = ?',
+    );
     try {
       return _transaction(() {
-        return [
-          for (final track in tracks)
-            upsert.select([
-                  sourceId,
-                  track.sourceKey,
-                  track.accessKey,
-                  track.artist,
-                  track.title,
-                  track.album,
-                  track.durationSec,
-                  track.addedAt,
-                  track.coverUrl,
-                  track.coverLargeUrl,
-                  track.tint,
-                ]).first['id']
-                as int,
-        ];
+        final ids = <int>[];
+        final changedIds = <int>[];
+        for (final track in tracks) {
+          final written = upsert.select([
+            sourceId,
+            track.sourceKey,
+            track.accessKey,
+            track.artist,
+            track.title,
+            track.album,
+            track.durationSec,
+            track.addedAt,
+            track.coverUrl,
+            track.coverLargeUrl,
+            track.tint,
+          ]);
+          if (written.isNotEmpty) {
+            final id = written.first['id'] as int;
+            ids.add(id);
+            changedIds.add(id);
+          } else {
+            ids.add(
+              findId.select([sourceId, track.sourceKey]).first['id'] as int,
+            );
+          }
+        }
+        return UpsertResult(ids, changedIds);
       });
     } finally {
       upsert.close();
+      findId.close();
+    }
+  }
+
+  /// Every song key of [sourceId] with its gone mark, VK access key and
+  /// cover links, for comparing the library with what the source lists now.
+  Map<String, KnownTrack> trackKeys(int sourceId) => {
+    for (final row in _db.select(
+      'SELECT source_key, access_key, cover_url, cover_large_url, gone_at_ms '
+      'FROM tracks WHERE source_id = ?',
+      [sourceId],
+    ))
+      row['source_key'] as String: (
+        accessKey: row['access_key'] as String?,
+        coverUrl: row['cover_url'] as String?,
+        coverLargeUrl: row['cover_large_url'] as String?,
+        goneAtMs: row['gone_at_ms'] as int?,
+      ),
+  };
+
+  /// Marks the songs [keys] of [sourceId] as gone from their source. Songs
+  /// stay in the library (with their History, Stacks and stored audio);
+  /// songs already marked keep their first mark. Returns how many were
+  /// newly marked.
+  int markGone(int sourceId, Iterable<String> keys, {int? atMs}) {
+    final at = atMs ?? _now();
+    final mark = _db.prepare(
+      'UPDATE tracks SET gone_at_ms = ? '
+      'WHERE source_id = ? AND source_key = ? AND gone_at_ms IS NULL',
+    );
+    try {
+      return _transaction(() {
+        var marked = 0;
+        for (final key in keys) {
+          mark.execute([at, sourceId, key]);
+          marked += _db.updatedRows;
+        }
+        return marked;
+      });
+    } finally {
+      mark.close();
     }
   }
 

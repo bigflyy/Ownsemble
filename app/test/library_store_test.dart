@@ -166,6 +166,71 @@ void main() {
     });
   });
 
+  group('sync writes', () {
+    test('upsertTracks reports added and changed songs only', () {
+      final first = store.upsertTracks(vk, [
+        song('1_1', 'A', 'one'),
+        song('1_2', 'B', 'two'),
+      ]);
+      expect(first.changedIds, first.ids);
+
+      final same = store.upsertTracks(vk, [
+        song('1_1', 'A', 'one'),
+        song('1_2', 'B', 'two'),
+      ]);
+      expect(same.ids, first.ids);
+      expect(same.changedIds, isEmpty);
+
+      final renamed = store.upsertTracks(vk, [
+        song('1_1', 'A', 'one'),
+        song('1_2', 'Б', 'два'),
+        song('1_3', 'C', 'three'),
+      ]);
+      expect(renamed.ids.take(2), first.ids);
+      expect(renamed.changedIds, [first.ids[1], renamed.ids[2]]);
+      expect(store.loadAll().map((t) => t.title), contains('два'));
+    });
+
+    test('songs marked gone stay, and come back when listed again', () {
+      final ids = store.upsertAll(vk, [
+        song('1_1', 'A', 'one'),
+        song('1_2', 'B', 'two'),
+      ]);
+      store.saveAudioFile(ids[0], 'cache/a.mp3', 10);
+      store.addPlay(ids[0], atMs: 1);
+      final stack = store.createStack('Стек');
+      store.addToStack(stack, ids[0]);
+
+      expect(store.markGone(vk, ['1_1', '1_404'], atMs: 500), 1);
+      expect(store.markGone(vk, ['1_1'], atMs: 900), 0, reason: 'kept');
+      final gone = store.loadAll().firstWhere((t) => t.id == ids[0]);
+      expect(gone.isGone, isTrue);
+      expect(gone.goneAtMs, 500);
+      expect(gone.isCached, isTrue);
+      expect(store.count(), 2);
+      expect(store.history().single.trackId, ids[0]);
+      expect(store.stackEntries(stack).single.trackId, ids[0]);
+      expect(store.sources().single.goneCount, 1);
+      expect(store.trackKeys(vk)['1_1']?.goneAtMs, 500);
+      expect(store.trackKeys(vk)['1_2']?.goneAtMs, isNull);
+
+      final back = store.upsertTracks(vk, [song('1_1', 'A', 'one')]);
+      expect(back.changedIds, [ids[0]], reason: 'a cleared mark is a change');
+      expect(store.loadAll().every((t) => !t.isGone), isTrue);
+    });
+
+    test('marking gone only touches the given source', () {
+      final other = store.ensureSource(TrackSource.vk, account: '7', name: 'B');
+      store.upsertAll(vk, [song('1_1', 'A', 'B')]);
+      store.upsertAll(other, [song('1_1', 'A', 'B')]);
+      store.markGone(other, ['1_1']);
+      expect(store.loadAll().map((t) => (t.sourceId, t.isGone)).toSet(), {
+        (vk, false),
+        (other, true),
+      });
+    });
+  });
+
   group('stored audio', () {
     late int id;
     setUp(() => id = store.upsertAll(vk, [song('1_1', 'A', 'B')]).single);

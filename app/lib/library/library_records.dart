@@ -67,3 +67,24 @@ class StackEntry {
   final int trackId;
   final int addedAtMs;
 }
+
+/// What [LibraryStore.upsertTracks] wrote.
+class UpsertResult {
+  const UpsertResult(this.ids, this.changedIds);
+
+  /// Library ids of all given songs, in input order.
+  final List<int> ids;
+
+  /// Ids of songs that were added or whose stored fields changed (a cleared
+  /// gone mark counts as a change).
+  final List<int> changedIds;
+}
+
+/// A song key's state in the library: its VK access key, stored cover links
+/// and when it was marked gone (null while the source still has it).
+typedef KnownTrack = ({
+  String? accessKey,
+  String? coverUrl,
+  String? coverLargeUrl,
+  int? goneAtMs,
+});
