@@ -77,5 +77,40 @@ void main() {
     expect(track.title, 'Выхода нет');
     expect(track.album, 'Альбом');
     expect(track.durationSec, 236);
+    expect(track.coverUrl, isNull);
+  });
+
+  test('covers come from the song thumb, else from the album', () {
+    Map<String, String> thumb(String name) => {
+      'photo_34': '$name-34',
+      'photo_135': '$name-135',
+      'photo_600': '$name-600',
+      'photo_1200': '$name-1200',
+    };
+    final own = vkItemToTrack({
+      'owner_id': 1,
+      'id': 1,
+      'thumb': thumb('song'),
+      'album': {'title': 'Альбом', 'thumb': thumb('album')},
+      'main_color': '#1a2B3c',
+    });
+    expect(own.coverUrl, 'song-135');
+    expect(own.coverLargeUrl, 'song-600');
+    expect(own.tint, 0xFF1A2B3C);
+
+    final albumOnly = vkItemToTrack({
+      'owner_id': 1,
+      'id': 2,
+      'album': {'title': 'Альбом', 'thumb': thumb('album')},
+    });
+    expect(albumOnly.coverUrl, 'album-135');
+    expect(albumOnly.tint, isNull);
+  });
+
+  test('odd main colors are ignored', () {
+    expect(parseVkColor('#fff'), isNull);
+    expect(parseVkColor('зелёный'), isNull);
+    expect(parseVkColor(12), isNull);
+    expect(parseVkColor('ff0000'), 0xFFFF0000);
   });
 }

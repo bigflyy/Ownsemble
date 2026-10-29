@@ -46,8 +46,14 @@ String vkSourceKey(Map<String, dynamic> item) =>
     '${item['owner_id']}_${item['id']}';
 
 /// Converts one `audio.get` item into a library song.
+///
+/// Covers come from the item's own `thumb` (VK sends one for every song in
+/// the test library), else from its album's.
 NewTrack vkItemToTrack(Map<String, dynamic> item) {
   final album = item['album'];
+  final thumb =
+      _mapOrNull(item['thumb']) ??
+      (album is Map<String, dynamic> ? _mapOrNull(album['thumb']) : null);
   return NewTrack(
     sourceKey: vkSourceKey(item),
     accessKey: item['access_key'] as String?,
@@ -56,5 +62,19 @@ NewTrack vkItemToTrack(Map<String, dynamic> item) {
     album: album is Map<String, dynamic> ? album['title'] as String? : null,
     durationSec: item['duration'] as int? ?? 0,
     addedAt: item['date'] as int? ?? 0,
+    coverUrl: thumb?['photo_135'] as String?,
+    coverLargeUrl: thumb?['photo_600'] as String?,
+    tint: parseVkColor(item['main_color']),
   );
+}
+
+Map<String, dynamic>? _mapOrNull(Object? value) =>
+    value is Map<String, dynamic> ? value : null;
+
+/// Parses VK's "#rrggbb" color into opaque 0xAARRGGBB, or null.
+int? parseVkColor(Object? value) {
+  if (value is! String) return null;
+  final match = RegExp(r'^#?([0-9a-fA-F]{6})$').firstMatch(value.trim());
+  if (match == null) return null;
+  return 0xFF000000 | int.parse(match.group(1)!, radix: 16);
 }
