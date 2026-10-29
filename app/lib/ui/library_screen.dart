@@ -36,10 +36,36 @@ class _LibraryScreenState extends State<LibraryScreen> {
         (timing) => setState(() => _lastTiming = timing),
       ),
     );
+    HardwareKeyboard.instance.addHandler(_onKey);
+  }
+
+  /// App-wide keys. Handled before focus routing, so they work wherever the
+  /// focus is, including nowhere after clicking a song.
+  bool _onKey(KeyEvent event) {
+    if (event is! KeyDownEvent) return false;
+    final key = event.logicalKey;
+    // The physical key, so Ctrl+F also works with the Russian layout, where
+    // the same key types "а".
+    if (event.physicalKey == PhysicalKeyboardKey.keyF &&
+        HardwareKeyboard.instance.isControlPressed) {
+      _searchFocus.requestFocus();
+      library.searchText.selection = TextSelection(
+        baseOffset: 0,
+        extentOffset: library.searchText.text.length,
+      );
+      return true;
+    }
+    if (key == LogicalKeyboardKey.escape &&
+        library.searchText.text.isNotEmpty) {
+      library.searchText.clear();
+      return true;
+    }
+    return false;
   }
 
   @override
   void dispose() {
+    HardwareKeyboard.instance.removeHandler(_onKey);
     for (final subscription in _subscriptions) {
       subscription.cancel();
     }
@@ -55,71 +81,63 @@ class _LibraryScreenState extends State<LibraryScreen> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    return CallbackShortcuts(
-      bindings: {
-        const SingleActivator(LogicalKeyboardKey.keyF, control: true): () =>
-            _searchFocus.requestFocus(),
-        const SingleActivator(LogicalKeyboardKey.escape): () =>
-            library.searchText.clear(),
-      },
-      child: Scaffold(
-        body: Column(
-          children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
-              child: TextField(
-                controller: library.searchText,
-                focusNode: _searchFocus,
-                autofocus: true,
-                decoration: const InputDecoration(
-                  prefixIcon: Icon(Icons.search),
-                  hintText: 'Search artist, title or album  (Ctrl+F)',
-                  border: OutlineInputBorder(),
-                  isDense: true,
-                ),
-                onSubmitted: (_) {
-                  if (library.visible.isNotEmpty) _play(library.visible.first);
-                },
+    return Scaffold(
+      body: Column(
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+            child: TextField(
+              controller: library.searchText,
+              focusNode: _searchFocus,
+              autofocus: true,
+              decoration: const InputDecoration(
+                prefixIcon: Icon(Icons.search),
+                hintText: 'Search artist, title or album  (Ctrl+F)',
+                border: OutlineInputBorder(),
+                isDense: true,
               ),
+              onSubmitted: (_) {
+                if (library.visible.isNotEmpty) _play(library.visible.first);
+              },
             ),
-            ListenableBuilder(
+          ),
+          ListenableBuilder(
+            listenable: library,
+            builder: (context, _) => _StatusLine(
+              shown: library.visible.length,
+              total: library.all.length,
+              timing: _lastTiming,
+            ),
+          ),
+          const Divider(height: 1),
+          Expanded(
+            child: ListenableBuilder(
               listenable: library,
-              builder: (context, _) => _StatusLine(
-                shown: library.visible.length,
-                total: library.all.length,
-                timing: _lastTiming,
-              ),
-            ),
-            const Divider(height: 1),
-            Expanded(
-              child: ListenableBuilder(
-                listenable: library,
-                builder: (context, _) => StreamBuilder<Track?>(
-                  stream: widget.player.currentStream,
-                  initialData: widget.player.current,
-                  builder: (context, current) => Scrollbar(
+              builder: (context, _) => StreamBuilder<Track?>(
+                stream: widget.player.currentStream,
+                initialData: widget.player.current,
+                builder: (context, current) => Scrollbar(
+                  controller: library.scroll,
+                  child: ListView.builder(
                     controller: library.scroll,
-                    child: ListView.builder(
-                      controller: library.scroll,
-                      itemExtent: rowHeight,
-                      itemCount: library.visible.length,
-                      itemBuilder: (context, index) {
-                        final track = library.visible[index];
-                        return _SongRow(
-                          track: track,
-                          isCurrent: track.id == current.data?.id,
-                          onTap: () => _play(track),
-                        );
-                      },
-                    ),
+                    itemExtent: rowHeight,
+                    itemCount: library.visible.length,
+                    itemBuilder: (context, index) {
+                      final track = library.visible[index];
+                      return _SongRow(
+                        track: track,
+                        isCurrent: track.id == current.data?.id,
+                        onTap: () => _play(track),
+                      );
+                    },
                   ),
                 ),
               ),
             ),
-            const Divider(height: 1),
-            _PlayerBar(player: widget.player, theme: theme),
-          ],
-        ),
+          ),
+          const Divider(height: 1),
+          _PlayerBar(player: widget.player, theme: theme),
+        ],
       ),
     );
   }
