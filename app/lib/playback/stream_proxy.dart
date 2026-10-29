@@ -4,14 +4,38 @@ import 'dart:math';
 
 /// One upstream stream made reachable for mpv through [StreamProxy].
 class ProxiedStream {
-  ProxiedStream._(this.localUri, this._upstream);
+  ProxiedStream._(this.localUri, this._upstream, this._cacheTo);
 
   /// Loopback address mpv opens instead of the real link.
   final Uri localUri;
   final Uri _upstream;
 
+  /// Where the whole audio is saved while it streams; null: not saved.
+  final File? _cacheTo;
+
   final _firstChunk = Completer<int>();
   final _failure = Completer<int>();
+  final _stored = Completer<int?>();
+  bool _teeStarted = false;
+  bool _cachingCanceled = false;
+
+  /// Ends a running save early (canceled or the proxy closing).
+  Completer<bool>? _teeDone;
+
+  /// Completes with the size once the whole audio is saved to the cache
+  /// file, or with null when it is not (no cache file, canceled, failed).
+  Future<int?> get stored => _stored.future;
+
+  /// Stops saving this stream (another song started). The part already
+  /// fetched is thrown away; what mpv is playing is not affected.
+  void cancelCaching() {
+    _cachingCanceled = true;
+    if (!_teeStarted) _finishStored(null);
+  }
+
+  void _finishStored(int? bytes) {
+    if (!_stored.isCompleted) _stored.complete(bytes);
+  }
 
   /// Milliseconds from sending the first upstream request to receiving its
   /// first body bytes: the network's share of the start time.
@@ -31,6 +55,11 @@ class ProxiedStream {
 /// The app does all network I/O itself, so it can time the network exactly,
 /// apply its own timeouts and keep links away from mpv, its logs and disk.
 /// Range requests are passed through, so seeking works as with a direct link.
+///
+/// The first request for the whole file is also saved to the stream's cache
+/// file while mpv plays it. If mpv drops that connection (a seek), saving
+/// goes on in the background until the file is complete or caching is
+/// canceled, so a song played once plays from disk afterwards.
 class StreamProxy {
   StreamProxy._(this._server) {
     _server.listen(_handle);
@@ -46,9 +75,13 @@ class StreamProxy {
     ..connectionTimeout = const Duration(seconds: 10)
     ..idleTimeout = const Duration(seconds: 30);
 
-  /// Registers [upstream] and returns the stream mpv should open. Only the
-  /// most recent streams stay registered.
-  ProxiedStream add(Uri upstream) {
+  /// Saves still running, including those of streams no longer registered.
+  final _caching = <ProxiedStream>{};
+
+  /// Registers [upstream] and returns the stream mpv should open; the whole
+  /// audio is also saved to [cacheTo] when given. Only the most recent
+  /// streams stay registered.
+  ProxiedStream add(Uri upstream, {File? cacheTo}) {
     final id = List.generate(
       16,
       (_) => _random.nextInt(16).toRadixString(16),
@@ -56,12 +89,25 @@ class StreamProxy {
     final stream = ProxiedStream._(
       Uri.parse('http://127.0.0.1:${_server.port}/s/$id.mp3'),
       upstream,
+      cacheTo,
     );
     _streams[id] = stream;
     while (_streams.length > 4) {
-      _streams.remove(_streams.keys.first);
+      _streams.remove(_streams.keys.first)?.cancelCaching();
     }
     return stream;
+  }
+
+  /// Cancels saving every stream except [keep], so downloads of songs no
+  /// longer playing do not take bandwidth from the new one.
+  void cancelCachingExcept(ProxiedStream? keep) {
+    for (final stream in {..._streams.values, ..._caching}) {
+      if (identical(stream, keep)) continue;
+      stream.cancelCaching();
+      // A save whose mpv connection is gone stops at once.
+      final done = stream._teeDone;
+      if (done != null && !done.isCompleted) done.complete(false);
+    }
   }
 
   Future<void> _handle(HttpRequest request) async {
@@ -74,11 +120,20 @@ class StreamProxy {
       await response.close();
       return;
     }
+    final range = request.headers.value(HttpHeaders.rangeHeader);
+    final wholeFile = range == null || range.trim() == 'bytes=0-';
+    // A seek: the save still fetching from the start would share the line
+    // with it and make it slow, so saving stops; the song is saved the next
+    // time it plays through.
+    final saving = stream._teeDone;
+    if (!wholeFile && saving != null && !saving.isCompleted) {
+      stream.cancelCaching();
+      saving.complete(false);
+    }
     final clock = Stopwatch()..start();
     HttpClientResponse upstream;
     try {
       final outgoing = await _http.getUrl(stream._upstream);
-      final range = request.headers.value(HttpHeaders.rangeHeader);
       if (range != null) outgoing.headers.set(HttpHeaders.rangeHeader, range);
       upstream = await outgoing.close().timeout(const Duration(seconds: 15));
     } catch (_) {
@@ -112,6 +167,17 @@ class StreamProxy {
     }
     response.bufferOutput = false;
 
+    final cacheTo = stream._cacheTo;
+    if (cacheTo != null &&
+        wholeFile &&
+        !stream._teeStarted &&
+        !stream._cachingCanceled &&
+        upstream.statusCode < 300) {
+      stream._teeStarted = true;
+      await _serveAndSave(stream, upstream, response, cacheTo, clock);
+      return;
+    }
+
     final body = upstream.transform<List<int>>(
       StreamTransformer.fromHandlers(
         handleData: (chunk, sink) {
@@ -130,7 +196,111 @@ class StreamProxy {
     }
   }
 
+  /// Sends [upstream] to mpv and writes it to [cacheTo] at the same time;
+  /// keeps writing after mpv hangs up, until the file is whole or caching
+  /// is canceled.
+  Future<void> _serveAndSave(
+    ProxiedStream stream,
+    HttpClientResponse upstream,
+    HttpResponse response,
+    File cacheTo,
+    Stopwatch clock,
+  ) async {
+    // The total size: from Content-Range for "bytes=0-", else the length.
+    final contentRange = upstream.headers.value(HttpHeaders.contentRangeHeader);
+    final total = contentRange == null
+        ? upstream.contentLength
+        : int.tryParse(contentRange.split('/').last) ?? -1;
+    final part = File('${cacheTo.path}.part');
+    IOSink? file;
+    try {
+      part.parent.createSync(recursive: true);
+      file = part.openWrite();
+    } on FileSystemException {
+      file = null;
+    }
+    var written = 0;
+    var mpvGone = false;
+    response.done.then(
+      (_) {},
+      onError: (Object _) {
+        mpvGone = true;
+      },
+    );
+    _caching.add(stream);
+    final done = stream._teeDone = Completer<bool>();
+    final subscription = upstream.listen(
+      (chunk) {
+        if (!stream._firstChunk.isCompleted) {
+          stream._firstChunk.complete(clock.elapsedMilliseconds);
+        }
+        file?.add(chunk);
+        written += chunk.length;
+        if (!mpvGone) {
+          try {
+            response.add(chunk);
+          } catch (_) {
+            mpvGone = true;
+          }
+        }
+        // Canceled: go on only while mpv still listens.
+        if (stream._cachingCanceled && mpvGone && !done.isCompleted) {
+          done.complete(false);
+        }
+      },
+      onError: (Object _) {
+        if (!done.isCompleted) done.complete(false);
+      },
+      onDone: () {
+        if (!done.isCompleted) done.complete(true);
+      },
+      cancelOnError: true,
+    );
+    // VK sometimes stops sending without closing the connection.
+    var lastWritten = -1;
+    final watchdog = Timer.periodic(const Duration(seconds: 30), (_) {
+      if (written == lastWritten && !done.isCompleted) done.complete(false);
+      lastWritten = written;
+    });
+    final complete = await done.future;
+    watchdog.cancel();
+    if (!complete) await subscription.cancel();
+    _caching.remove(stream);
+    if (!mpvGone) {
+      try {
+        await response.close();
+      } catch (_) {
+        // mpv hung up meanwhile.
+      }
+    }
+    var saved = false;
+    if (file != null) {
+      try {
+        await file.close();
+        if (complete &&
+            !stream._cachingCanceled &&
+            written > 0 &&
+            (total < 0 || written == total)) {
+          if (cacheTo.existsSync()) cacheTo.deleteSync();
+          part.renameSync(cacheTo.path);
+          saved = true;
+        }
+      } on FileSystemException {
+        saved = false;
+      }
+      if (!saved && part.existsSync()) {
+        try {
+          part.deleteSync();
+        } on FileSystemException {
+          // Still open somewhere; the next save of this song replaces it.
+        }
+      }
+    }
+    stream._finishStored(saved ? written : null);
+  }
+
   Future<void> close() async {
+    cancelCachingExcept(null);
     _http.close(force: true);
     await _server.close(force: true);
   }
