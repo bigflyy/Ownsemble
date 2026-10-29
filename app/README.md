@@ -35,6 +35,12 @@ dart run tool/speed_gate.dart --data-dir ../.local/v2-test/gate \
     --vk-session ../.local/v2-test/session.json
 ```
 
+Acceptance test switches (add as `--dart-define`): `OWNSEMBLE_QUICK=true` plays
+only 15 songs (for iterating, never for a handover), `OWNSEMBLE_MPV_LOG=true`
+writes mpv.log into the copied data folder.
+
 App options: `--data-dir DIR`, `--vk-session FILE`, `--muted`,
-`--metrics FILE` (startup timings), `--bench FILE [--bench-parts a,b]`,
-`--mpv name=value` (mpv option override), `--mpv-log` (mpv log without links).
+`--metrics FILE` (startup timings), `--bench FILE [--bench-parts a,b]`
+(parts: search, scroll, playCached, playStream, seekStream),
+`--mpv name=value` (mpv option override), `--mpv-log` (mpv log without links),
+`--no-stream-cache` (do not save streamed songs; the speed gate uses it).
