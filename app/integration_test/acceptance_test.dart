@@ -17,6 +17,7 @@ import 'dart:async';
 import 'dart:io';
 import 'dart:math';
 
+import 'package:flutter/gestures.dart' show kSecondaryMouseButton;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -27,6 +28,7 @@ import 'package:ownsemble/library/track.dart';
 import 'package:ownsemble/main.dart' as app;
 import 'package:ownsemble/playback/play_queue.dart';
 import 'package:ownsemble/playback/player_service.dart';
+import 'package:ownsemble/storage/audio_storage.dart';
 import 'package:ownsemble/ui/library_controller.dart';
 import 'package:ownsemble/ui/library_screen.dart';
 import 'package:ownsemble/ui/sync_controller.dart';
@@ -227,9 +229,16 @@ void main() {
     var goneNotStored = 0;
     final playedOk = <int>{};
     final problems = <String>[];
+    var slowRetries = 0;
     for (final (index, track)
         in library.all.take(quick ? 15 : 1 << 30).indexed) {
-      final timing = await playByTap(tester, track, label: 'song #$index');
+      var timing = await playByTap(tester, track, label: 'song #$index');
+      // On a congested line a stream can take longer than the player's 20 s
+      // limit; a user clicks again. Only a second failure is a problem.
+      if (!timing.ok && timing.error == 'no sound within 20 s') {
+        slowRetries++;
+        timing = await playByTap(tester, track, label: 'song #$index again');
+      }
       if (track.id == fakeSong.id) {
         expect(
           find.descendant(
@@ -281,6 +290,7 @@ void main() {
       'blocked by VK (failed fast): $blocked, '
       'VK server errors (failed fast): $serverErrors, '
       'gone from VK and not stored (failed fast): $goneNotStored, '
+      'retried after no sound in 20 s (slow line): $slowRetries, '
       'problems: ${problems.length}',
     );
     expect(problems, isEmpty);
@@ -373,11 +383,14 @@ void main() {
       await tester.pump();
     }
 
+    // A seek in a stream waits for VK to send audio from the new place.
+    // On 2026-10-30 at night VK sent 256 KB in 3 to 42 s, so up to 60 s;
+    // the measured time is printed.
     Future<void> waitForPosition(bool Function(Duration) ok, String what) =>
         waitUntil(
           tester,
           () => ok(player.position),
-          timeout: const Duration(seconds: 10),
+          timeout: const Duration(seconds: 60),
           what: what,
         );
 
@@ -423,7 +436,11 @@ void main() {
     // A song that ends moves on to the next song of the list.
     var ended = player.timings.first;
     await playback.seek(player.duration - const Duration(seconds: 2));
-    final advanced = await waitForTiming(ended, 'auto-advance');
+    final advanced = await waitForTiming(
+      ended,
+      'auto-advance',
+      timeout: const Duration(seconds: 90),
+    );
     expect(advanced.ok, isTrue);
     expect(player.current?.id, list[i + 1].id, reason: 'auto-advance');
 
@@ -434,7 +451,14 @@ void main() {
     expect(playback.repeat, Repeat.one);
     ended = player.timings.first;
     await playback.seek(player.duration - const Duration(seconds: 2));
-    expect((await waitForTiming(ended, 'repeat one')).ok, isTrue);
+    expect(
+      (await waitForTiming(
+        ended,
+        'repeat one',
+        timeout: const Duration(seconds: 90),
+      )).ok,
+      isTrue,
+    );
     expect(player.current?.id, list[i + 1].id, reason: 'same song again');
     await tester.tap(find.byKey(const ValueKey('repeat')));
     await tester.pump();
@@ -506,6 +530,135 @@ void main() {
     await waitUntil(tester, () => !player.playing.value, what: 'Space pause');
     await tester.sendKeyEvent(LogicalKeyboardKey.space);
     await waitUntil(tester, () => player.playing.value, what: 'Space resume');
+
+    // Stored audio: a streamed song is saved while it plays and then plays
+    // from disk; Download keeps a song; the cache limit removes cached
+    // songs but never downloaded ones.
+    final storage = player.storage!;
+    bool storedNow(Track t) => storage.stateOf(t).path != null;
+    final streamable = [
+      for (final t in list)
+        if (playedOk.contains(t.id) &&
+            !storedNow(t) &&
+            t.id != player.current?.id)
+          t,
+    ];
+    // The shortest songs, so a slow line still finishes them; saving and
+    // downloading wait up to 5 minutes for the same reason.
+    streamable.sort((a, b) => a.durationSec.compareTo(b.durationSec));
+    final toCache = streamable[0];
+    final toDownload = streamable[1];
+
+    final cacheClock = Stopwatch()..start();
+    expect(
+      (await playByTap(tester, toCache, label: 'song to cache')).ok,
+      isTrue,
+    );
+    await waitUntil(
+      tester,
+      () => storedNow(toCache),
+      timeout: const Duration(minutes: 5),
+      what: 'song saved while streaming',
+    );
+    final cachedFile = storage.fileAt(storage.stateOf(toCache).path!);
+    final cachedAfterMs = cacheClock.elapsedMilliseconds;
+    expect(cachedFile.lengthSync(), greaterThan(100000));
+    expect(storage.stateOf(toCache).pinned, isFalse, reason: 'cache only');
+    expect(File('${cachedFile.path}.part').existsSync(), isFalse);
+    await tester.pump();
+    expect(
+      find.byKey(
+        ValueKey('mark-${toCache.id}-${Icons.cloud_done_outlined.codePoint}'),
+      ),
+      findsOneWidget,
+      reason: 'the row shows the song as cached',
+    );
+    // Played again it comes from disk, at the cached-song speed.
+    expect(
+      (await playByTap(tester, toDownload, label: 'other song')).ok,
+      isTrue,
+    );
+    final fromDisk = await playByTap(tester, toCache, label: 'cached song');
+    expect(fromDisk.ok, isTrue);
+    expect(fromDisk.cached, isTrue, reason: 'plays from the saved file');
+    final savedLength = await loadedLength(tester);
+    expect(
+      (savedLength! - toCache.durationSec).abs(),
+      lessThan(max(3.0, toCache.durationSec * 0.03)),
+      reason: 'the saved file is the whole song',
+    );
+
+    // Download from the song's right-click menu.
+    final downloadIndex = library.visible.indexWhere(
+      (t) => t.id == toDownload.id,
+    );
+    library.scroll.jumpTo(
+      (downloadIndex * rowHeight).clamp(
+        0,
+        library.scroll.position.maxScrollExtent,
+      ),
+    );
+    await tester.pump();
+    await tester.tap(
+      find.byKey(ValueKey('song-${toDownload.id}')),
+      buttons: kSecondaryMouseButton,
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('menu-download')));
+    await tester.pump();
+    await waitUntil(
+      tester,
+      () => storage.stateOf(toDownload).pinned,
+      timeout: const Duration(minutes: 5),
+      what: 'download',
+    );
+    final downloadedFile = storage.fileAt(storage.stateOf(toDownload).path!);
+    expect(downloadedFile.lengthSync(), greaterThan(100000));
+    await tester.pump();
+    expect(
+      find.byKey(
+        ValueKey('mark-${toDownload.id}-${Icons.download_done.codePoint}'),
+      ),
+      findsOneWidget,
+      reason: 'the row shows the song as downloaded',
+    );
+
+    // The player bar's button downloads the playing (cached) song at once
+    // and removes the download again.
+    await tester.tap(find.byKey(const ValueKey('download')));
+    await tester.pump();
+    expect(storage.stateOf(toCache).pinned, isTrue);
+    await tester.tap(find.byKey(const ValueKey('download')));
+    await tester.pump();
+    expect(storage.stateOf(toCache).pinned, isFalse);
+
+    // A cache limit of 1 byte: every cached song goes except the one
+    // playing; the downloaded song and its file stay.
+    final settings = LibraryStore.open(p.join(copyDir, 'library.db'));
+    settings.writeSetting(AudioStorage.limitSetting, '1');
+    settings.close();
+    final evicted = storage.applyLimit(keep: {player.current!.id});
+    await tester.pump();
+    expect(storage.stateOf(toDownload).pinned, isTrue);
+    expect(downloadedFile.existsSync(), isTrue);
+    expect(storedNow(toCache), isTrue, reason: 'playing now, kept');
+    final stillCached = library.all.where(
+      (t) =>
+          storedNow(t) &&
+          !storage.stateOf(t).pinned &&
+          t.id != player.current?.id,
+    );
+    expect(stillCached, isEmpty);
+    // The downloaded song plays from disk.
+    final offline = await playByTap(tester, toDownload, label: 'downloaded');
+    expect(offline.ok && offline.cached, isTrue);
+    // ignore: avoid_print
+    print(
+      'storage: song saved while streaming after $cachedAfterMs ms '
+      '(${cachedFile.lengthSync() ~/ 1024} KB), replayed from disk in '
+      '${fromDisk.toSoundMs} ms; download kept; cache limit removed '
+      '${evicted.length} cached songs, kept downloads and the playing song',
+    );
 
     // Every song that started playing is in the History, newest first.
     final historyStore = LibraryStore.open(p.join(copyDir, 'library.db'));

@@ -103,6 +103,8 @@ class PlayerBar extends StatelessWidget {
                           ),
                   ),
                   const SizedBox(width: 12),
+                  if (hasSong && player.storage != null)
+                    _DownloadButton(playback: playback, track: track),
                   IconButton(
                     key: const ValueKey('mute'),
                     tooltip: playback.mutedByUser ? 'Unmute' : 'Mute',
@@ -129,6 +131,57 @@ class PlayerBar extends StatelessWidget {
           },
         ),
       ),
+    );
+  }
+}
+
+/// Downloads the current song, or removes its download.
+class _DownloadButton extends StatelessWidget {
+  const _DownloadButton({required this.playback, required this.track});
+
+  final PlaybackController playback;
+  final Track track;
+
+  @override
+  Widget build(BuildContext context) {
+    final storage = playback.player.storage!;
+    return ListenableBuilder(
+      listenable: storage,
+      builder: (context, _) {
+        final downloading = storage.isDownloading(track);
+        final downloaded = storage.stateOf(track).pinned;
+        return IconButton(
+          key: const ValueKey('download'),
+          tooltip: downloading
+              ? 'Downloading...'
+              : downloaded
+              ? 'Downloaded. Click to remove the download'
+              : 'Download: keep this song on this computer',
+          isSelected: downloaded,
+          onPressed: downloading
+              ? null
+              : () async {
+                  if (downloaded) {
+                    playback.removeDownload(track);
+                    return;
+                  }
+                  final messenger = ScaffoldMessenger.of(context);
+                  final error = await playback.download(track);
+                  if (error != null) {
+                    messenger.showSnackBar(
+                      SnackBar(content: Text('Download failed: $error')),
+                    );
+                  }
+                },
+          icon: Icon(
+            downloading
+                ? Icons.downloading
+                : downloaded
+                ? Icons.download_done
+                : Icons.download,
+          ),
+        );
+      },
     );
   }
 }

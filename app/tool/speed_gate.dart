@@ -74,6 +74,9 @@ Future<void> main(List<String> args) async {
     dataDir,
     if (session != null) ...['--vk-session', p.absolute(session)],
     '--muted',
+    // Streamed songs are not cached, so every run measures the same songs
+    // streaming and the gate data does not grow.
+    '--no-stream-cache',
   ];
   final starts = int.parse(valueOf('--starts') ?? '6');
 

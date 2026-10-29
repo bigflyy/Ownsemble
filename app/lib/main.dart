@@ -9,6 +9,7 @@ import 'bench/speed_bench.dart';
 import 'library/library_store.dart';
 import 'playback/playback_controller.dart';
 import 'playback/player_service.dart';
+import 'storage/audio_storage.dart';
 import 'sync/background_sync.dart';
 import 'ui/library_controller.dart';
 import 'ui/library_screen.dart';
@@ -26,6 +27,7 @@ class AppOptions {
     this.benchParts,
     this.mpvOptions = const {},
     this.mpvLog = false,
+    this.cacheWhileStreaming = true,
   });
 
   /// Parses `--data-dir DIR --vk-session FILE --muted --metrics FILE
@@ -50,6 +52,7 @@ class AppOptions {
       benchFile: valueOf('--bench'),
       benchParts: valueOf('--bench-parts')?.split(','),
       mpvLog: args.contains('--mpv-log'),
+      cacheWhileStreaming: !args.contains('--no-stream-cache'),
       mpvOptions: {
         for (var i = 0; i + 1 < args.length; i++)
           if (args[i] == '--mpv' && args[i + 1].contains('='))
@@ -81,6 +84,10 @@ class AppOptions {
 
   /// Write mpv's verbose log (links removed) to mpv.log in the data folder.
   final bool mpvLog;
+
+  /// Save streamed songs to the cache while they play; off with
+  /// --no-stream-cache (the speed gate, to keep its data unchanged).
+  final bool cacheWhileStreaming;
 }
 
 Future<void> main(List<String> args) async {
@@ -109,9 +116,12 @@ Future<void> main(List<String> args) async {
     dataDir: options.dataDir,
     mpvOptions: options.mpvOptions,
     mpvLog: options.mpvLog ? File(p.join(options.dataDir, 'mpv.log')) : null,
+    storage: AudioStorage(dataDir: options.dataDir, store: store),
+    cacheWhileStreaming: options.cacheWhileStreaming,
   );
   final library = LibraryController(tracks);
-  // Stays open while the app runs, for History; the sync uses its own.
+  // The store stays open while the app runs, for History and stored audio;
+  // the sync uses its own connection.
   final playback = PlaybackController(
     player: player,
     recordPlay: (track) => store.addPlay(track.id),

@@ -6,6 +6,7 @@ import 'package:media_kit/media_kit.dart' hide Track;
 
 import '../library/library_schema.dart' show resolveAudioPath;
 import '../library/track.dart';
+import '../storage/audio_storage.dart';
 import '../vk/vk_client.dart';
 import 'stream_proxy.dart';
 
@@ -45,6 +46,16 @@ class PlayTiming {
   final String? error;
 }
 
+/// A short reason for a failed play or download; never contains links.
+String describePlayError(Object error) => switch (error) {
+  TimeoutException() => 'the audio server did not answer in time',
+  StateError(:final message) => message,
+  VkException(:final message) => message,
+  HttpException(:final message) => message,
+  SocketException() => 'no connection',
+  _ => error.toString(),
+}.replaceAll(RegExp(r'https?://\S+'), '<url>');
+
 /// mpv options tuned for fast start of single audio files.
 const defaultMpvOptions = <String, String>{
   // Give up on a stalled stream instead of waiting mpv's default 60 s.
@@ -59,10 +70,19 @@ class PlayerService {
     required this.dataDir,
     this.mpvOptions = const {},
     this.mpvLog,
+    this.storage,
+    this.cacheWhileStreaming = true,
   });
 
   /// Data folder that cached songs' stored paths are relative to.
   final String dataDir;
+
+  /// Stored audio: where songs are cached and downloaded. Without it songs
+  /// play from their loaded paths and nothing is cached.
+  final AudioStorage? storage;
+
+  /// Whether streamed songs are saved to the cache while they play.
+  final bool cacheWhileStreaming;
 
   /// Resolves stream URLs for VK songs; null when no session is configured.
   final VkClient? vk;
@@ -180,10 +200,13 @@ class PlayerService {
       // Silence the previous song at once: otherwise it keeps playing under
       // the new title while the VK link loads, and forever if loading fails.
       await _mpv.setProperty('pause', 'yes');
+      // Saves of songs no longer playing stop, so they do not slow this one.
+      _proxy.cancelCachingExcept(null);
       String uri;
-      final localFile = track.localPath == null
+      final storedPath = storage?.stateOf(track).path ?? track.localPath;
+      final localFile = storedPath == null
           ? null
-          : resolveAudioPath(dataDir, track.localPath!);
+          : resolveAudioPath(dataDir, storedPath);
       final hasFile = localFile != null && File(localFile).existsSync();
       if (hasFile) {
         cached = true;
@@ -202,7 +225,26 @@ class PlayerService {
                 : 'VK has no stream for this song',
           );
         }
-        proxied = _proxy.add(Uri.parse(url));
+        final storage = this.storage;
+        final cachePath = storage != null && cacheWhileStreaming
+            ? storage.relativePathFor(track)
+            : null;
+        proxied = _proxy.add(
+          Uri.parse(url),
+          cacheTo: cachePath == null ? null : storage!.fileAt(cachePath),
+        );
+        if (cachePath != null) {
+          storage!.noteSaving(track, proxied.stored);
+          proxied.stored.then((bytes) {
+            if (bytes == null) return;
+            storage.recordStored(
+              track,
+              cachePath,
+              bytes,
+              keep: {?_current?.id},
+            );
+          });
+        }
         uri = proxied.localUri.toString();
       } else if (localFile != null) {
         throw StateError('cached file is missing');
@@ -297,13 +339,9 @@ class PlayerService {
           cached: cached,
           resolveMs: resolveMs,
           toSoundMs: clock.elapsedMilliseconds,
-          // Error text never includes the stream URL.
-          error: switch (error) {
-            TimeoutException() => 'no sound within 20 s',
-            StateError(:final message) => message,
-            VkException(:final message) => message,
-            _ => error.toString(),
-          }.replaceAll(RegExp(r'https?://\S+'), '<url>'),
+          error: error is TimeoutException
+              ? 'no sound within 20 s'
+              : describePlayError(error),
         ),
       );
     }

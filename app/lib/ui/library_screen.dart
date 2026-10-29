@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import '../library/track.dart';
 import '../playback/playback_controller.dart';
 import '../playback/player_service.dart';
+import '../storage/audio_storage.dart';
 import 'library_controller.dart';
 import 'player_bar.dart';
 import 'sync_controller.dart';
@@ -109,6 +110,50 @@ class _LibraryScreenState extends State<LibraryScreen> {
     super.dispose();
   }
 
+  AudioStorage? get _storage => widget.player.storage;
+
+  /// The right-click menu of a song: Download, or Remove download.
+  Future<void> _showSongMenu(Track track, Offset position) async {
+    final storage = _storage!;
+    final downloaded = storage.stateOf(track).pinned;
+    final choice = await showMenu<String>(
+      context: context,
+      position: RelativeRect.fromLTRB(
+        position.dx,
+        position.dy,
+        position.dx,
+        position.dy,
+      ),
+      items: [
+        if (!downloaded)
+          const PopupMenuItem(
+            key: ValueKey('menu-download'),
+            value: 'download',
+            child: Text('Download'),
+          )
+        else
+          const PopupMenuItem(
+            key: ValueKey('menu-remove-download'),
+            value: 'remove',
+            child: Text('Remove download'),
+          ),
+      ],
+    );
+    if (choice == 'download') await _download(track);
+    if (choice == 'remove') widget.playback.removeDownload(track);
+  }
+
+  /// Downloads [track]; a failure is shown at the bottom of the window.
+  Future<void> _download(Track track) async {
+    final messenger = ScaffoldMessenger.of(context);
+    final error = await widget.playback.download(track);
+    if (error != null) {
+      messenger.showSnackBar(
+        SnackBar(content: Text('Download failed: $error')),
+      );
+    }
+  }
+
   /// Plays the visible song at [index], with the visible list as the list
   /// next and previous move in; clicking the song that is already loaded
   /// pauses or resumes it instead of restarting it.
@@ -147,7 +192,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
           const Divider(height: 1),
           Expanded(
             child: ListenableBuilder(
-              listenable: library,
+              listenable: Listenable.merge([library, ?_storage]),
               builder: (context, _) => StreamBuilder<Track?>(
                 stream: widget.player.currentStream,
                 initialData: widget.player.current,
@@ -162,8 +207,15 @@ class _LibraryScreenState extends State<LibraryScreen> {
                       return _SongRow(
                         key: ValueKey('song-${track.id}'),
                         track: track,
+                        stored:
+                            _storage?.stateOf(track) ??
+                            (path: track.localPath, pinned: track.pinned),
+                        downloading: _storage?.isDownloading(track) ?? false,
                         isCurrent: track.id == current.data?.id,
                         onTap: () => _play(index),
+                        onMenu: _storage == null
+                            ? null
+                            : (position) => _showSongMenu(track, position),
                       );
                     },
                   ),
@@ -223,13 +275,23 @@ class _SongRow extends StatelessWidget {
   const _SongRow({
     super.key,
     required this.track,
+    required this.stored,
+    required this.downloading,
     required this.isCurrent,
     required this.onTap,
+    this.onMenu,
   });
 
   final Track track;
+
+  /// How the song's audio is stored now (may be newer than [track]).
+  final StoredState stored;
+  final bool downloading;
   final bool isCurrent;
   final VoidCallback onTap;
+
+  /// Opens the song's menu at a position on screen (right click).
+  final void Function(Offset position)? onMenu;
 
   @override
   Widget build(BuildContext context) {
@@ -237,9 +299,28 @@ class _SongRow extends StatelessWidget {
     final accent = theme.colorScheme.primary;
     final dim = theme.textTheme.bodySmall?.color;
     // A song gone from VK without stored audio cannot play: shown faded.
-    final unplayable = track.isGone && !track.isCached;
+    final unplayable = track.isGone && stored.path == null;
+    final (icon, meaning) = switch (stored) {
+      _ when downloading => (Icons.downloading, 'Downloading'),
+      (path: String _, pinned: true) => (
+        Icons.download_done,
+        'Downloaded: kept until you remove it',
+      ),
+      (path: String _, pinned: false) => (
+        Icons.cloud_done_outlined,
+        'Cached: plays without the network',
+      ),
+      _ when track.source == TrackSource.vk => (
+        Icons.cloud_outlined,
+        'Streams from VK',
+      ),
+      _ => (Icons.music_note_outlined, 'Generated test song'),
+    };
     return InkWell(
       onTap: onTap,
+      onSecondaryTapUp: onMenu == null
+          ? null
+          : (details) => onMenu!(details.globalPosition),
       child: Container(
         color: isCurrent ? accent.withValues(alpha: 0.12) : null,
         padding: const EdgeInsets.symmetric(horizontal: 20),
@@ -249,12 +330,14 @@ class _SongRow extends StatelessWidget {
             children: [
               SizedBox(
                 width: 28,
-                child: Icon(
-                  track.source == TrackSource.vk
-                      ? Icons.cloud_outlined
-                      : Icons.music_note_outlined,
-                  size: 16,
-                  color: isCurrent ? accent : dim,
+                child: Tooltip(
+                  message: meaning,
+                  child: Icon(
+                    icon,
+                    key: ValueKey('mark-${track.id}-${icon.codePoint}'),
+                    size: 16,
+                    color: isCurrent ? accent : dim,
+                  ),
                 ),
               ),
               Expanded(
@@ -282,7 +365,7 @@ class _SongRow extends StatelessWidget {
                 _Tag(
                   key: const ValueKey('gone-tag'),
                   label: 'gone from VK',
-                  explanation: track.isCached
+                  explanation: stored.path != null
                       ? 'VK no longer has this song. It stays in your '
                             'library and plays from the stored copy.'
                       : 'VK no longer has this song. It stays in your '

@@ -81,6 +81,31 @@ class PlaybackController extends ChangeNotifier {
 
   Future<void> seek(Duration to) => player.seek(to);
 
+  /// Downloads [track] (keeps its audio for good). Returns why it failed,
+  /// or null on success.
+  Future<String?> download(Track track) async {
+    final storage = player.storage;
+    final vk = player.vk;
+    if (storage == null) return 'no storage';
+    try {
+      await storage.download(track, () async {
+        if (vk == null || track.sourceKey == null) return null;
+        final url = await vk.resolveStreamUrl(
+          track.sourceKey!,
+          track.accessKey,
+        );
+        return url == null ? null : Uri.parse(url);
+      });
+      return null;
+    } catch (error) {
+      return describePlayError(error);
+    }
+  }
+
+  /// Makes a downloaded song plain cache again.
+  void removeDownload(Track track) =>
+      player.storage?.removeDownload(track, keep: {?player.current?.id});
+
   void toggleShuffle() {
     queue.shuffle = !queue.shuffle;
     notifyListeners();
