@@ -54,7 +54,14 @@ typedef VkApiCall = Future<Object?> Function(
 /// Gets a short-lived web token from the session cookies and refreshes it
 /// shortly before it expires.
 class VkClient {
-  VkClient(this._cookies) : _http = HttpClient()..userAgent = _userAgent;
+  VkClient(this._cookies)
+    : _http = HttpClient()
+        ..userAgent = _userAgent
+        ..connectionTimeout = const Duration(seconds: 10);
+
+  /// Longest wait for one VK request; without it a stalled request would
+  /// leave a click hanging forever.
+  static const requestTimeout = Duration(seconds: 15);
 
   final List<SessionCookie> _cookies;
   final HttpClient _http;
@@ -113,10 +120,15 @@ class VkClient {
   }
 
   /// POSTs a form with the session cookies and decodes the JSON reply.
-  Future<Map<String, dynamic>> _postForm(
-    Uri uri,
-    Map<String, String> form,
-  ) async {
+  Future<Map<String, dynamic>> _postForm(Uri uri, Map<String, String> form) =>
+      _send(uri, form).timeout(
+        requestTimeout,
+        onTimeout: () => throw VkException(
+          'VK did not answer within ${requestTimeout.inSeconds} s',
+        ),
+      );
+
+  Future<Map<String, dynamic>> _send(Uri uri, Map<String, String> form) async {
     final cookieHeader = _cookies
         .where((cookie) => cookie.appliesTo(uri.host))
         .map((cookie) => '${cookie.name}=${cookie.value}')
