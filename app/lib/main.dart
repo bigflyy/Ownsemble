@@ -7,6 +7,7 @@ import 'package:path/path.dart' as p;
 
 import 'bench/speed_bench.dart';
 import 'library/library_store.dart';
+import 'playback/playback_controller.dart';
 import 'playback/player_service.dart';
 import 'sync/background_sync.dart';
 import 'ui/library_controller.dart';
@@ -110,7 +111,11 @@ Future<void> main(List<String> args) async {
     mpvLog: options.mpvLog ? File(p.join(options.dataDir, 'mpv.log')) : null,
   );
   final library = LibraryController(tracks);
-  store.close();
+  // Stays open while the app runs, for History; the sync uses its own.
+  final playback = PlaybackController(
+    player: player,
+    recordPlay: (track) => store.addPlay(track.id),
+  );
   final sync = SyncController(
     sources: sources,
     runner: vk == null
@@ -138,7 +143,7 @@ Future<void> main(List<String> args) async {
       ),
     );
   });
-  runApp(OwnsembleApp(library: library, player: player, sync: sync));
+  runApp(OwnsembleApp(library: library, playback: playback, sync: sync));
 }
 
 /// Startup work that must not delay the first frame: metrics, the player,
@@ -168,11 +173,6 @@ Future<void> _afterFirstFrame({
   // The library syncs itself on every start, in the background.
   final startSync = sync.syncNow();
   _logPlayTimings(player, File(p.join(options.dataDir, 'perf.log')));
-  player.ended.listen((_) {
-    final current = player.current;
-    final next = current == null ? null : library.nextAfter(current);
-    if (next != null) player.play(next);
-  });
   try {
     await vk?.ensureToken();
   } catch (_) {
@@ -213,12 +213,12 @@ class OwnsembleApp extends StatelessWidget {
   const OwnsembleApp({
     super.key,
     required this.library,
-    required this.player,
+    required this.playback,
     this.sync,
   });
 
   final LibraryController library;
-  final PlayerService player;
+  final PlaybackController playback;
   final SyncController? sync;
 
   @override
@@ -230,7 +230,7 @@ class OwnsembleApp extends StatelessWidget {
         colorSchemeSeed: const Color(0xFF6D8BFF),
         brightness: Brightness.dark,
       ),
-      home: LibraryScreen(library: library, player: player, sync: sync),
+      home: LibraryScreen(library: library, playback: playback, sync: sync),
     );
   }
 }

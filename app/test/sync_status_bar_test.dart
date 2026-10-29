@@ -5,6 +5,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:ownsemble/library/library_store.dart';
 import 'package:ownsemble/library/search_index.dart';
 import 'package:ownsemble/library/track.dart';
+import 'package:ownsemble/playback/playback_controller.dart';
 import 'package:ownsemble/playback/player_service.dart';
 import 'package:ownsemble/sync/background_sync.dart';
 import 'package:ownsemble/ui/library_controller.dart';
@@ -129,7 +130,10 @@ void main() {
         MaterialApp(
           home: LibraryScreen(
             library: library,
-            player: PlayerService(vk: null, muted: true, dataDir: '.'),
+            playback: PlaybackController(
+              player: PlayerService(vk: null, muted: true, dataDir: '.'),
+              recordPlay: (_) {},
+            ),
             sync: sync,
           ),
         ),

@@ -45,13 +45,6 @@ class LibraryController extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// The song after [track] in the visible list, for auto-advance.
-  Track? nextAfter(Track track) {
-    final index = _visible.indexWhere((t) => t.id == track.id);
-    if (index < 0 || index + 1 >= _visible.length) return null;
-    return _visible[index + 1];
-  }
-
   @override
   void dispose() {
     searchText.dispose();

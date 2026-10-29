@@ -4,8 +4,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../library/track.dart';
+import '../playback/playback_controller.dart';
 import '../playback/player_service.dart';
 import 'library_controller.dart';
+import 'player_bar.dart';
 import 'sync_controller.dart';
 import 'sync_status_bar.dart';
 
@@ -17,12 +19,14 @@ class LibraryScreen extends StatefulWidget {
   const LibraryScreen({
     super.key,
     required this.library,
-    required this.player,
+    required this.playback,
     this.sync,
   });
 
   final LibraryController library;
-  final PlayerService player;
+  final PlaybackController playback;
+
+  PlayerService get player => playback.player;
 
   /// Sync state for the status bar; no status bar when null.
   final SyncController? sync;
@@ -70,8 +74,30 @@ class _LibraryScreenState extends State<LibraryScreen> {
       library.searchText.clear();
       return true;
     }
+    // Media keys of keyboards and headsets.
+    if (key == LogicalKeyboardKey.mediaPlayPause) {
+      widget.playback.playOrPause();
+      return true;
+    }
+    if (key == LogicalKeyboardKey.mediaTrackNext) {
+      widget.playback.next();
+      return true;
+    }
+    if (key == LogicalKeyboardKey.mediaTrackPrevious) {
+      widget.playback.previous();
+      return true;
+    }
+    // Space plays or pauses, except while typing in a text field.
+    if (key == LogicalKeyboardKey.space && !_typing) {
+      widget.playback.playOrPause();
+      return true;
+    }
     return false;
   }
+
+  /// Whether the keyboard focus is in a text field.
+  bool get _typing =>
+      FocusManager.instance.primaryFocus?.context?.widget is EditableText;
 
   @override
   void dispose() {
@@ -83,20 +109,13 @@ class _LibraryScreenState extends State<LibraryScreen> {
     super.dispose();
   }
 
-  /// Plays [track]; clicking the song that is already loaded pauses or
-  /// resumes it instead of restarting it. A song that failed is retried.
-  void _play(Track track) {
-    if (!widget.player.isReady) return;
-    if (track.id == widget.player.current?.id && widget.player.currentLoaded) {
-      widget.player.playOrPause();
-    } else {
-      widget.player.play(track);
-    }
-  }
+  /// Plays the visible song at [index], with the visible list as the list
+  /// next and previous move in; clicking the song that is already loaded
+  /// pauses or resumes it instead of restarting it.
+  void _play(int index) => widget.playback.playFrom(library.visible, index);
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
     return Scaffold(
       body: Column(
         children: [
@@ -113,7 +132,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
                 isDense: true,
               ),
               onSubmitted: (_) {
-                if (library.visible.isNotEmpty) _play(library.visible.first);
+                if (library.visible.isNotEmpty) _play(0);
               },
             ),
           ),
@@ -144,7 +163,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
                         key: ValueKey('song-${track.id}'),
                         track: track,
                         isCurrent: track.id == current.data?.id,
-                        onTap: () => _play(track),
+                        onTap: () => _play(index),
                       );
                     },
                   ),
@@ -153,7 +172,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
             ),
           ),
           const Divider(height: 1),
-          _PlayerBar(player: widget.player, theme: theme),
+          PlayerBar(playback: widget.playback),
           if (widget.sync case final sync?) ...[
             const Divider(height: 1),
             SyncStatusBar(sync: sync),
@@ -315,103 +334,4 @@ class _Tag extends StatelessWidget {
       ),
     );
   }
-}
-
-class _PlayerBar extends StatelessWidget {
-  const _PlayerBar({required this.player, required this.theme});
-
-  final PlayerService player;
-  final ThemeData theme;
-
-  @override
-  Widget build(BuildContext context) {
-    return SizedBox(
-      height: 72,
-      child: StreamBuilder<Track?>(
-        stream: player.currentStream,
-        initialData: player.current,
-        builder: (context, current) {
-          final track = current.data;
-          if (track == null || !player.isReady) {
-            return Center(
-              child: Text(
-                'Click a song to play it',
-                style: theme.textTheme.bodySmall,
-              ),
-            );
-          }
-          return Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 12),
-            child: Row(
-              children: [
-                ValueListenableBuilder(
-                  valueListenable: player.playing,
-                  builder: (context, playing, _) => IconButton.filledTonal(
-                    onPressed: player.playOrPause,
-                    icon: Icon(playing ? Icons.pause : Icons.play_arrow),
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        track.source == TrackSource.generated
-                            ? '${track.artist} - ${track.title}  '
-                                  '(test filler: plays a sample song)'
-                            : '${track.artist} - ${track.title}',
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                      const SizedBox(height: 8),
-                      _Progress(player: player, theme: theme),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-          );
-        },
-      ),
-    );
-  }
-}
-
-class _Progress extends StatelessWidget {
-  const _Progress({required this.player, required this.theme});
-
-  final PlayerService player;
-  final ThemeData theme;
-
-  @override
-  Widget build(BuildContext context) {
-    return StreamBuilder<Duration>(
-      stream: player.player.stream.position,
-      builder: (context, position) {
-        final now = position.data ?? Duration.zero;
-        final total = player.player.state.duration;
-        final fraction = total.inMilliseconds == 0
-            ? 0.0
-            : (now.inMilliseconds / total.inMilliseconds).clamp(0.0, 1.0);
-        return Row(
-          children: [
-            Expanded(child: LinearProgressIndicator(value: fraction)),
-            const SizedBox(width: 12),
-            Text(
-              '${formatDuration(now)} / ${formatDuration(total)}',
-              style: theme.textTheme.bodySmall,
-            ),
-          ],
-        );
-      },
-    );
-  }
-}
-
-/// Formats a duration as m:ss.
-String formatDuration(Duration duration) {
-  final seconds = duration.inSeconds;
-  return '${seconds ~/ 60}:${(seconds % 60).toString().padLeft(2, '0')}';
 }

@@ -260,8 +260,13 @@ class PlayerService {
         );
         // mpv's loadfile instead of Player.open: open() writes the URI to a
         // temporary playlist file, and stream URLs must never reach disk.
+        // Unpaused before loadfile, so the song loads playing (starting a
+        // paused load and unpausing later is slower), and again after it:
+        // mpv runs with keep-open, so right after a song ended the first
+        // unpause hits the old song's end again and mpv pauses once more.
         await _mpv.setProperty('pause', 'no');
         await _mpv.command(['loadfile', uri, 'replace']);
+        await _mpv.setProperty('pause', 'no');
         opened = true;
         await sound.future.timeout(const Duration(seconds: 20));
       } finally {
@@ -308,6 +313,32 @@ class PlayerService {
     if (_current == null) return;
     await _mpv.setProperty('pause', playing.value ? 'yes' : 'no');
   }
+
+  /// Position in the loaded song (zero when nothing is loaded).
+  Duration get position => _loaded ? _player.state.position : Duration.zero;
+
+  /// Length of the loaded song as mpv knows it, else the listed length.
+  Duration get duration {
+    final known = _player.state.duration;
+    if (_loaded && known > Duration.zero) return known;
+    return Duration(seconds: _current?.durationSec ?? 0);
+  }
+
+  /// Moves within the loaded song; does nothing while none is loaded.
+  Future<void> seek(Duration to) async {
+    if (!_loaded) return;
+    final seconds = to.inMilliseconds / 1000;
+    await _mpv.command(['seek', seconds.toStringAsFixed(3), 'absolute']);
+  }
+
+  /// Sets the volume, 0 to 100.
+  Future<void> setVolume(double volume) =>
+      _mpv.setProperty('volume', volume.clamp(0, 100).toStringAsFixed(1));
+
+  /// Mutes or unmutes. An app started with --muted (agent checks) stays
+  /// muted whatever the user's mute button says.
+  Future<void> setMuted(bool mute) =>
+      _mpv.setProperty('mute', mute || muted ? 'yes' : 'no');
 
   Future<void> stop() async {
     await _mpv.command(['stop']);

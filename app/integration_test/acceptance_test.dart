@@ -25,6 +25,7 @@ import 'package:media_kit/media_kit.dart' show NativePlayer;
 import 'package:ownsemble/library/library_store.dart';
 import 'package:ownsemble/library/track.dart';
 import 'package:ownsemble/main.dart' as app;
+import 'package:ownsemble/playback/play_queue.dart';
 import 'package:ownsemble/playback/player_service.dart';
 import 'package:ownsemble/ui/library_controller.dart';
 import 'package:ownsemble/ui/library_screen.dart';
@@ -35,6 +36,14 @@ import 'package:sqlite3/sqlite3.dart';
 
 const dataDir = String.fromEnvironment('OWNSEMBLE_DATA');
 const sessionFile = String.fromEnvironment('OWNSEMBLE_SESSION');
+
+/// OWNSEMBLE_QUICK=true plays only the first songs instead of every song,
+/// for iterating on the test; never for the check before a handover.
+const quick = bool.fromEnvironment('OWNSEMBLE_QUICK');
+
+/// OWNSEMBLE_MPV_LOG=true writes mpv's log (links removed) to mpv.log in the
+/// copied data folder, for finding playback problems.
+const mpvLog = bool.fromEnvironment('OWNSEMBLE_MPV_LOG');
 
 /// Song key of the made-up song put into the copy: no such song exists on VK.
 const fakeAudioId = '999999999';
@@ -158,12 +167,19 @@ void main() {
       '--vk-session',
       sessionFile,
       '--muted',
+      if (mpvLog) '--mpv-log',
     ]);
     await tester.pump();
     final screen = tester.widget<LibraryScreen>(find.byType(LibraryScreen));
     library = screen.library;
     player = screen.player;
+    final playback = screen.playback;
     sync = screen.sync!;
+    // Every song that starts playing must get a History entry.
+    var soundStarts = 0;
+    player.timings.listen((timing) {
+      if (timing.ok) soundStarts++;
+    });
     final progressSeen = <SyncStage>{};
     sync.addListener(() {
       if (sync.progress case final progress?) progressSeen.add(progress.stage);
@@ -209,8 +225,10 @@ void main() {
     var blocked = 0;
     var serverErrors = 0;
     var goneNotStored = 0;
+    final playedOk = <int>{};
     final problems = <String>[];
-    for (final (index, track) in library.all.indexed) {
+    for (final (index, track)
+        in library.all.take(quick ? 15 : 1 << 30).indexed) {
       final timing = await playByTap(tester, track, label: 'song #$index');
       if (track.id == fakeSong.id) {
         expect(
@@ -255,6 +273,7 @@ void main() {
         continue;
       }
       played++;
+      playedOk.add(track.id);
     }
     // ignore: avoid_print
     print(
@@ -265,7 +284,7 @@ void main() {
       'problems: ${problems.length}',
     );
     expect(problems, isEmpty);
-    expect(goneNotStored, 1);
+    if (!quick) expect(goneNotStored, 1);
 
     // Clicking the playing song pauses it; clicking it again resumes.
     final song = library.all.firstWhere((t) => t.isCached);
@@ -320,6 +339,187 @@ void main() {
     await tester.pump();
     expect(library.searchText.text, isEmpty, reason: 'Esc clears search');
     expect(library.visible.length, library.all.length);
+
+    // Player controls on real playback, used through the player bar.
+    Future<PlayTiming> waitForTiming(
+      Future<PlayTiming> result,
+      String what, {
+      Duration timeout = const Duration(seconds: 25),
+    }) async {
+      PlayTiming? timing;
+      unawaited(result.then((t) => timing = t));
+      await waitUntil(
+        tester,
+        () => timing != null,
+        timeout: timeout,
+        what: what,
+      );
+      return timing!;
+    }
+
+    Future<PlayTiming> tapForTiming(String key) async {
+      final result = player.timings.first;
+      await tester.tap(find.byKey(ValueKey(key)));
+      await tester.pump();
+      return waitForTiming(result, 'play result of $key');
+    }
+
+    /// Clicks the seek bar at [fraction] of its length, like a mouse click.
+    Future<void> tapSeekAt(double fraction) async {
+      final bar = tester.getRect(find.byKey(const ValueKey('seek')));
+      // The track is inset by the handle's overlay radius (12 px) per side.
+      final x = bar.left + 12 + (bar.width - 24) * fraction;
+      await tester.tapAt(Offset(x, bar.center.dy));
+      await tester.pump();
+    }
+
+    Future<void> waitForPosition(bool Function(Duration) ok, String what) =>
+        waitUntil(
+          tester,
+          () => ok(player.position),
+          timeout: const Duration(seconds: 10),
+          what: what,
+        );
+
+    // A streamed song whose neighbours in the list play, long enough to seek.
+    final list = library.visible;
+    final i = [for (var k = 1; k + 1 < list.length; k++) k].firstWhere(
+      (k) =>
+          !list[k].isCached &&
+          list[k].id != player.current?.id &&
+          list[k].durationSec >= 60 &&
+          playedOk.containsAll([list[k - 1].id, list[k].id, list[k + 1].id]),
+    );
+    expect((await playByTap(tester, list[i], label: 'stream song')).ok, isTrue);
+
+    // Seek: a click at the middle of the bar moves the streamed song there
+    // and it keeps playing from there.
+    final length = player.duration;
+    final seekClock = Stopwatch()..start();
+    await tapSeekAt(0.5);
+    await waitForPosition(
+      (at) => (at - length * 0.5).abs() < length * 0.06,
+      'seek to the middle',
+    );
+    final afterSeek = player.position;
+    // A stream continues once mpv's new ranged request brings audio.
+    await waitForPosition(
+      (at) => at > afterSeek + const Duration(milliseconds: 300),
+      'playing on after the seek',
+    );
+    final seekResumeMs = seekClock.elapsedMilliseconds;
+
+    // Previous after 3 s restarts the song; right after that it goes to the
+    // previous song of the list; Next comes back.
+    await tester.tap(find.byKey(const ValueKey('prev')));
+    await tester.pump();
+    await waitForPosition((at) => at < const Duration(seconds: 2), 'restart');
+    expect(player.current?.id, list[i].id, reason: 'same song restarted');
+    expect((await tapForTiming('prev')).ok, isTrue);
+    expect(player.current?.id, list[i - 1].id, reason: 'previous song');
+    expect((await tapForTiming('next')).ok, isTrue);
+    expect(player.current?.id, list[i].id, reason: 'Next');
+
+    // A song that ends moves on to the next song of the list.
+    var ended = player.timings.first;
+    await playback.seek(player.duration - const Duration(seconds: 2));
+    final advanced = await waitForTiming(ended, 'auto-advance');
+    expect(advanced.ok, isTrue);
+    expect(player.current?.id, list[i + 1].id, reason: 'auto-advance');
+
+    // Repeat one plays the same song again when it ends.
+    await tester.tap(find.byKey(const ValueKey('repeat')));
+    await tester.tap(find.byKey(const ValueKey('repeat')));
+    await tester.pump();
+    expect(playback.repeat, Repeat.one);
+    ended = player.timings.first;
+    await playback.seek(player.duration - const Duration(seconds: 2));
+    expect((await waitForTiming(ended, 'repeat one')).ok, isTrue);
+    expect(player.current?.id, list[i + 1].id, reason: 'same song again');
+    await tester.tap(find.byKey(const ValueKey('repeat')));
+    await tester.pump();
+    expect(playback.repeat, Repeat.off);
+
+    // Shuffle: Next picks another song of the list.
+    await tester.tap(find.byKey(const ValueKey('shuffle')));
+    await tester.pump();
+    expect(playback.shuffle, isTrue);
+    await tapForTiming('next');
+    expect(player.current?.id, isNot(list[i + 1].id));
+    expect(list.map((t) => t.id), contains(player.current?.id));
+    await tester.tap(find.byKey(const ValueKey('shuffle')));
+    await tester.pump();
+    expect(playback.shuffle, isFalse);
+
+    // The time label switches between total and remaining time. (The song
+    // shuffle picked may be one VK blocks; then a known good one is used.)
+    if (!player.currentLoaded) {
+      expect(
+        (await playByTap(tester, list[i], label: 'stream song')).ok,
+        isTrue,
+      );
+    }
+    final timeLabel = find.descendant(
+      of: find.byKey(const ValueKey('time')),
+      matching: find.byType(Text),
+    );
+    expect(tester.widget<Text>(timeLabel).data, isNot(contains('/ -')));
+    await tester.tap(find.byKey(const ValueKey('time')));
+    await tester.pump();
+    expect(tester.widget<Text>(timeLabel).data, contains('/ -'));
+    await tester.tap(find.byKey(const ValueKey('time')));
+    await tester.pump();
+
+    // Volume reaches mpv; mute and unmute never unmute an app started with
+    // --muted.
+    final mpv = player.player.platform as NativePlayer;
+    final volumeBar = tester.getRect(find.byKey(const ValueKey('volume')));
+    await tester.tapAt(
+      Offset(
+        volumeBar.left + 12 + (volumeBar.width - 24) * 0.3,
+        volumeBar.center.dy,
+      ),
+    );
+    await tester.pump();
+    await waitUntil(
+      tester,
+      () => (playback.volume - 30).abs() < 8,
+      what: 'volume slider',
+    );
+    await Future<void>.delayed(const Duration(milliseconds: 200));
+    final mpvVolume = double.parse(await mpv.getProperty('volume'));
+    expect((mpvVolume - playback.volume).abs(), lessThan(0.6));
+    await tester.tap(find.byKey(const ValueKey('mute')));
+    await tester.pump();
+    expect(playback.mutedByUser, isTrue);
+    await tester.tap(find.byKey(const ValueKey('mute')));
+    await tester.pump();
+    expect(playback.mutedByUser, isFalse);
+    await Future<void>.delayed(const Duration(milliseconds: 200));
+    expect(await mpv.getProperty('mute'), 'yes', reason: 'agent runs muted');
+
+    // Space pauses and resumes when no text field has the focus.
+    FocusManager.instance.primaryFocus?.unfocus();
+    await tester.pump();
+    expect(player.playing.value, isTrue);
+    await tester.sendKeyEvent(LogicalKeyboardKey.space);
+    await waitUntil(tester, () => !player.playing.value, what: 'Space pause');
+    await tester.sendKeyEvent(LogicalKeyboardKey.space);
+    await waitUntil(tester, () => player.playing.value, what: 'Space resume');
+
+    // Every song that started playing is in the History, newest first.
+    final historyStore = LibraryStore.open(p.join(copyDir, 'library.db'));
+    final history = historyStore.history(limit: 1 << 30);
+    historyStore.close();
+    // ignore: avoid_print
+    print(
+      'controls: seek, previous (restart and back), next, auto-advance, '
+      'repeat one, shuffle, time label, volume, mute, Space checked; '
+      'stream seek: click to playing on ${seekResumeMs - 300} ms or less; '
+      'History entries ${history.length} for $soundStarts sound starts',
+    );
+    expect(history.length, soundStarts);
+    expect(history.first.trackId, player.current?.id);
 
     // Sync now right after the start sync finds nothing new and leaves the
     // library as it is.
