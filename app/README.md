@@ -35,6 +35,10 @@ dart run tool/speed_gate.dart --data-dir ../.local/v2-test/gate \
     --vk-session ../.local/v2-test/session.json
 ```
 
+Screenshots of the main window with made-up songs (real fonts, dark, light,
+bottom bar, narrow), to check the look without opening the app:
+`flutter test tool/screenshots_test.dart --dart-define=OWNSEMBLE_SHOTS=<folder>`.
+
 Acceptance test switches (add as `--dart-define`): `OWNSEMBLE_QUICK=true` plays
 only 15 songs (for iterating, never for a handover), `OWNSEMBLE_MPV_LOG=true`
 writes mpv.log into the copied data folder.
