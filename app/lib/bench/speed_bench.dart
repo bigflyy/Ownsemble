@@ -37,6 +37,7 @@ class SpeedBench {
       'scroll': _scrollBench,
       'playCached': _cachedPlayBench,
       'playStream': _streamPlayBench,
+      'seekStream': _streamSeekBench,
     };
     final result = <String, Object?>{
       'displayRefreshHz': display.refreshRate,
@@ -272,6 +273,73 @@ class SpeedBench {
       'resolveMs': _stats(values('resolveMs')),
       'networkFirstChunkMs': _stats(values('networkFirstChunkMs')),
       'overheadMs': _stats(values('overheadMs')),
+    };
+  }
+
+  /// Seeks to the middle of streamed songs, 2 s after their sound started,
+  /// and times the seek until the position moves on from the new place.
+  Future<Map<String, Object?>> _streamSeekBench() async {
+    if (vk == null) return {'skipped': 'no VK session'};
+    final candidates =
+        library.all
+            .where(
+              (t) =>
+                  t.source == TrackSource.vk &&
+                  !t.isCached &&
+                  t.durationSec >= 60,
+            )
+            .toList()
+          ..shuffle(Random(11));
+    final samples = <Map<String, Object?>>[];
+    for (final track in candidates.take(6)) {
+      final timing = await player.play(track);
+      if (!timing.ok) {
+        samples.add({'ok': false, 'error': timing.error});
+        continue;
+      }
+      await Future<void>.delayed(const Duration(seconds: 2));
+      final target = Duration(seconds: track.durationSec ~/ 2);
+      final before = player.position;
+      final clock = Stopwatch()..start();
+      await player.seek(target);
+      // Done when playback runs again away from where it was: the first
+      // position more than 5 s from the old one, then 300 ms further on.
+      Duration? landed;
+      var ok = true;
+      try {
+        await player.player.stream.position
+            .firstWhere((at) {
+              if (landed == null) {
+                if ((at - before).abs() > const Duration(seconds: 5)) {
+                  landed = at;
+                }
+                return false;
+              }
+              return at > landed! + const Duration(milliseconds: 300);
+            })
+            .timeout(const Duration(seconds: 40));
+      } on TimeoutException {
+        ok = false;
+      }
+      samples.add({
+        'ok': ok,
+        'seekToSoundMs': clock.elapsedMilliseconds,
+        'targetS': target.inSeconds,
+        'landedS': landed?.inMilliseconds == null
+            ? null
+            : landed!.inMilliseconds / 1000,
+        'lengthS': track.durationSec,
+        'mpvLengthS': player.duration.inMilliseconds / 1000,
+      });
+      await player.stop();
+      await Future<void>.delayed(const Duration(milliseconds: 300));
+    }
+    return {
+      'samples': samples,
+      'seekToSoundMs': _stats([
+        for (final s in samples)
+          if (s['ok'] == true) (s['seekToSoundMs'] as int).toDouble(),
+      ]),
     };
   }
 
