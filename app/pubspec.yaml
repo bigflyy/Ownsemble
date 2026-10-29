@@ -1,0 +1,24 @@
+name: ownsemble
+description: "Personal, local-first music library and player."
+publish_to: 'none'
+version: 0.1.0+1
+
+environment:
+  sdk: ^3.13.5
+
+dependencies:
+  flutter:
+    sdk: flutter
+  media_kit: ^1.2.6
+  media_kit_libs_windows_audio: ^1.0.9
+  path: ^1.9.1
+  sqlite3: ^3.8.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+  ffi: ^2.2.0
+
+flutter:
+  uses-material-design: true
