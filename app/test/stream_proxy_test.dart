@@ -13,6 +13,15 @@ void main() {
     // Stand-in for the CDN: serves [audio] with Range support.
     upstream = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
     upstream.listen((request) async {
+      if (request.uri.path == '/broken') {
+        // What VK's audio server sometimes answers: an HTML error page.
+        request.response
+          ..statusCode = HttpStatus.gatewayTimeout
+          ..headers.contentType = ContentType.html
+          ..write('<!DOCTYPE HTML PUBLIC><html>504</html>');
+        await request.response.close();
+        return;
+      }
       final range = request.headers.value(HttpHeaders.rangeHeader);
       final response = request.response
         ..headers.contentType = ContentType('audio', 'mpeg');
@@ -74,6 +83,16 @@ void main() {
     final unknown = stream.localUri.replace(path: '/s/0000.mp3');
     final (response, _) = await get(unknown);
     expect(response.statusCode, HttpStatus.notFound);
+  });
+
+  test('an error page from upstream is reported, not passed on', () async {
+    final stream = proxy.add(
+      Uri.parse('http://127.0.0.1:${upstream.port}/broken'),
+    );
+    final (response, body) = await get(stream.localUri);
+    expect(response.statusCode, HttpStatus.badGateway);
+    expect(body, isEmpty);
+    expect(await stream.upstreamFailure, HttpStatus.gatewayTimeout);
   });
 
   test('upstream failure becomes a bad gateway', () async {

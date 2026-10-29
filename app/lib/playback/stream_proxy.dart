@@ -11,10 +11,19 @@ class ProxiedStream {
   final Uri _upstream;
 
   final _firstChunk = Completer<int>();
+  final _failure = Completer<int>();
 
   /// Milliseconds from sending the first upstream request to receiving its
   /// first body bytes: the network's share of the start time.
   Future<int> get networkFirstChunkMs => _firstChunk.future;
+
+  /// Completes with the HTTP status (0 when unreachable) if the audio server
+  /// answered with an error instead of audio. Never completes on success.
+  Future<int> get upstreamFailure => _failure.future;
+
+  void _fail(int status) {
+    if (!_failure.isCompleted) _failure.complete(status);
+  }
 }
 
 /// Local HTTP proxy between mpv and the VK CDN.
@@ -73,6 +82,16 @@ class StreamProxy {
       if (range != null) outgoing.headers.set(HttpHeaders.rangeHeader, range);
       upstream = await outgoing.close().timeout(const Duration(seconds: 15));
     } catch (_) {
+      stream._fail(0);
+      response.statusCode = HttpStatus.badGateway;
+      await response.close();
+      return;
+    }
+    // An error page is not audio: mpv may misread it as a song, so report
+    // the failure and give mpv nothing.
+    if (upstream.statusCode >= 400) {
+      stream._fail(upstream.statusCode);
+      await upstream.drain<void>();
       response.statusCode = HttpStatus.badGateway;
       await response.close();
       return;
