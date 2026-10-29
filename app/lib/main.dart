@@ -8,8 +8,10 @@ import 'package:path/path.dart' as p;
 import 'bench/speed_bench.dart';
 import 'library/library_store.dart';
 import 'playback/player_service.dart';
+import 'sync/background_sync.dart';
 import 'ui/library_controller.dart';
 import 'ui/library_screen.dart';
+import 'ui/sync_controller.dart';
 import 'vk/vk_client.dart';
 
 /// Command-line options of the app.
@@ -88,8 +90,10 @@ Future<void> main(List<String> args) async {
   // The library is read before the first frame so that frame already shows
   // the list; at 10,000 songs this takes a few milliseconds.
   final loadClock = Stopwatch()..start();
-  final store = LibraryStore.open(p.join(options.dataDir, 'library.db'));
+  final dbPath = p.join(options.dataDir, 'library.db');
+  final store = LibraryStore.open(dbPath);
   final tracks = store.loadAll();
+  final sources = store.sources();
   final loadMs = loadClock.elapsedMilliseconds;
 
   final sessionFile = options.vkSession == null
@@ -107,6 +111,18 @@ Future<void> main(List<String> args) async {
   );
   final library = LibraryController(tracks);
   store.close();
+  final sync = SyncController(
+    sources: sources,
+    runner: vk == null
+        ? null
+        : (onProgress) => syncVkInBackground(
+            dbPath: dbPath,
+            sessionPath: sessionFile!.path,
+            onProgress: onProgress,
+          ),
+    onLibraryChanged: (loaded) =>
+        library.replaceTracks(loaded.tracks, loaded.index),
+  );
 
   WidgetsFlutterBinding.ensureInitialized();
   WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -118,14 +134,15 @@ Future<void> main(List<String> args) async {
         library: library,
         player: player,
         vk: vk,
+        sync: sync,
       ),
     );
   });
-  runApp(OwnsembleApp(library: library, player: player));
+  runApp(OwnsembleApp(library: library, player: player, sync: sync));
 }
 
-/// Startup work that must not delay the first frame: metrics, the player
-/// and a VK token, then the benchmark if requested.
+/// Startup work that must not delay the first frame: metrics, the player,
+/// a VK token and the start sync, then the benchmark if requested.
 Future<void> _afterFirstFrame({
   required AppOptions options,
   required DateTime mainStartedAt,
@@ -133,6 +150,7 @@ Future<void> _afterFirstFrame({
   required LibraryController library,
   required PlayerService player,
   required VkClient? vk,
+  required SyncController sync,
 }) async {
   final firstFrameAt = DateTime.now();
   if (options.metricsFile != null) {
@@ -147,6 +165,8 @@ Future<void> _afterFirstFrame({
   }
 
   await player.init();
+  // The library syncs itself on every start, in the background.
+  final startSync = sync.syncNow();
   _logPlayTimings(player, File(p.join(options.dataDir, 'perf.log')));
   player.ended.listen((_) {
     final current = player.current;
@@ -160,6 +180,9 @@ Future<void> _afterFirstFrame({
   }
 
   if (options.benchFile != null) {
+    // Measure the library as it is after the start sync, not while the
+    // sync may swap it out.
+    await startSync;
     final result = await SpeedBench(
       library: library,
       player: player,
@@ -187,10 +210,16 @@ void _logPlayTimings(PlayerService player, File log) {
 }
 
 class OwnsembleApp extends StatelessWidget {
-  const OwnsembleApp({super.key, required this.library, required this.player});
+  const OwnsembleApp({
+    super.key,
+    required this.library,
+    required this.player,
+    this.sync,
+  });
 
   final LibraryController library;
   final PlayerService player;
+  final SyncController? sync;
 
   @override
   Widget build(BuildContext context) {
@@ -201,7 +230,7 @@ class OwnsembleApp extends StatelessWidget {
         colorSchemeSeed: const Color(0xFF6D8BFF),
         brightness: Brightness.dark,
       ),
-      home: LibraryScreen(library: library, player: player),
+      home: LibraryScreen(library: library, player: player, sync: sync),
     );
   }
 }

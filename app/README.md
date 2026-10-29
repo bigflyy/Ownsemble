@@ -18,11 +18,17 @@ flutter build windows --release
 dart run tool/prepare_gate_data.dart --data-dir ../.local/v2-test/feel \
     --vk-session ../.local/v2-test/session.json --songs 0
 
-# Acceptance test before every handover: the real app on the test library,
-# muted, in an off-screen window that never takes focus (about 3 min).
+# Acceptance test before every handover: the real app on a fresh copy of the
+# test library (feel-acceptance, with one made-up song the sync must mark
+# gone), muted, in an off-screen window that never takes focus (about 3 min).
 OWNSEMBLE_BACKGROUND_WINDOW=1 flutter test integration_test -d windows \
     --dart-define=OWNSEMBLE_DATA=<absolute path>/.local/v2-test/feel \
     --dart-define=OWNSEMBLE_SESSION=<absolute path>/.local/v2-test/session.json
+
+# Check the "gone from VK" rule against real VK on a copy of a library (the
+# folder itself is not written).
+dart run tool/check_gone_marks.dart --data-dir ../.local/v2-test/feel \
+    --vk-session ../.local/v2-test/session.json
 
 # Speed gate against the release build (playback muted).
 dart run tool/speed_gate.dart --data-dir ../.local/v2-test/gate \

@@ -9,8 +9,8 @@ class LibraryController extends ChangeNotifier {
     searchText.addListener(_onSearchChanged);
   }
 
-  final SearchIndex _index;
-  final List<Track> _all;
+  SearchIndex _index;
+  List<Track> _all;
   List<Track> _visible;
   String _appliedQuery = '';
 
@@ -33,6 +33,15 @@ class LibraryController extends ChangeNotifier {
     _visible = _index.search(query) ?? _all;
     lastQueryTime = clock.elapsed;
     if (scroll.hasClients) scroll.jumpTo(0);
+    notifyListeners();
+  }
+
+  /// Shows a new version of the library (after a sync), keeping the search
+  /// and the scroll position. [index] must be built from [tracks].
+  void replaceTracks(List<Track> tracks, SearchIndex index) {
+    _all = tracks;
+    _index = index;
+    _visible = _index.search(_appliedQuery) ?? _all;
     notifyListeners();
   }
 

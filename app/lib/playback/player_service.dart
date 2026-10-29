@@ -195,7 +195,13 @@ class PlayerService {
           track.accessKey,
         );
         resolveMs = clock.elapsedMilliseconds;
-        if (url == null) throw StateError('VK has no stream for this song');
+        if (url == null) {
+          throw StateError(
+            track.isGone
+                ? 'gone from VK and not stored'
+                : 'VK has no stream for this song',
+          );
+        }
         proxied = _proxy.add(Uri.parse(url));
         uri = proxied.localUri.toString();
       } else if (localFile != null) {

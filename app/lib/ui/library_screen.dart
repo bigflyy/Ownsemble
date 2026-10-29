@@ -6,16 +6,26 @@ import 'package:flutter/services.dart';
 import '../library/track.dart';
 import '../playback/player_service.dart';
 import 'library_controller.dart';
+import 'sync_controller.dart';
+import 'sync_status_bar.dart';
 
 /// Height of one song row; fixed so the list can skip layout of hidden rows.
 const rowHeight = 52.0;
 
-/// The whole speed-gate UI: search box, song list and player bar.
+/// The whole UI for now: search box, song list, player bar and sync status.
 class LibraryScreen extends StatefulWidget {
-  const LibraryScreen({super.key, required this.library, required this.player});
+  const LibraryScreen({
+    super.key,
+    required this.library,
+    required this.player,
+    this.sync,
+  });
 
   final LibraryController library;
   final PlayerService player;
+
+  /// Sync state for the status bar; no status bar when null.
+  final SyncController? sync;
 
   @override
   State<LibraryScreen> createState() => _LibraryScreenState();
@@ -144,6 +154,10 @@ class _LibraryScreenState extends State<LibraryScreen> {
           ),
           const Divider(height: 1),
           _PlayerBar(player: widget.player, theme: theme),
+          if (widget.sync case final sync?) ...[
+            const Divider(height: 1),
+            SyncStatusBar(sync: sync),
+          ],
         ],
       ),
     );
@@ -203,74 +217,102 @@ class _SongRow extends StatelessWidget {
     final theme = Theme.of(context);
     final accent = theme.colorScheme.primary;
     final dim = theme.textTheme.bodySmall?.color;
+    // A song gone from VK without stored audio cannot play: shown faded.
+    final unplayable = track.isGone && !track.isCached;
     return InkWell(
       onTap: onTap,
       child: Container(
         color: isCurrent ? accent.withValues(alpha: 0.12) : null,
         padding: const EdgeInsets.symmetric(horizontal: 20),
-        child: Row(
-          children: [
-            SizedBox(
-              width: 28,
-              child: Icon(
-                track.source == TrackSource.vk
-                    ? Icons.cloud_outlined
-                    : Icons.music_note_outlined,
-                size: 16,
-                color: isCurrent ? accent : dim,
+        child: Opacity(
+          opacity: unplayable ? 0.5 : 1,
+          child: Row(
+            children: [
+              SizedBox(
+                width: 28,
+                child: Icon(
+                  track.source == TrackSource.vk
+                      ? Icons.cloud_outlined
+                      : Icons.music_note_outlined,
+                  size: 16,
+                  color: isCurrent ? accent : dim,
+                ),
               ),
-            ),
-            Expanded(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    track.title,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(color: isCurrent ? accent : null),
-                  ),
-                  Text(
-                    track.artist,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: theme.textTheme.bodySmall,
-                  ),
-                ],
+              Expanded(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      track.title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(color: isCurrent ? accent : null),
+                    ),
+                    Text(
+                      track.artist,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.bodySmall,
+                    ),
+                  ],
+                ),
               ),
-            ),
-            if (track.source == TrackSource.generated) ...[
+              if (track.isGone) ...[
+                const SizedBox(width: 16),
+                _Tag(
+                  key: const ValueKey('gone-tag'),
+                  label: 'gone from VK',
+                  explanation: track.isCached
+                      ? 'VK no longer has this song. It stays in your '
+                            'library and plays from the stored copy.'
+                      : 'VK no longer has this song. It stays in your '
+                            'library, History and Stacks, but there is no '
+                            'stored copy to play.',
+                ),
+              ],
+              if (track.source == TrackSource.generated) ...[
+                const SizedBox(width: 16),
+                const _Tag(
+                  label: 'filler',
+                  explanation:
+                      'Generated speed-test song: made-up name, plays one of a '
+                      'few cached real songs.',
+                ),
+              ],
               const SizedBox(width: 16),
-              const _FillerTag(),
+              Text(
+                formatDuration(Duration(seconds: track.durationSec)),
+                style: theme.textTheme.bodySmall,
+              ),
             ],
-            const SizedBox(width: 16),
-            Text(
-              formatDuration(Duration(seconds: track.durationSec)),
-              style: theme.textTheme.bodySmall,
-            ),
-          ],
+          ),
         ),
       ),
     );
   }
 }
 
-/// Marks generated speed-test songs, whose names are made up and which play
-/// one of a few cached real songs.
-class _FillerTag extends StatelessWidget {
-  const _FillerTag();
+/// A small outlined label on a song row, explained on hover.
+class _Tag extends StatelessWidget {
+  const _Tag({super.key, required this.label, required this.explanation});
+
+  final String label;
+  final String explanation;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
-      decoration: BoxDecoration(
-        border: Border.all(color: theme.colorScheme.outline),
-        borderRadius: BorderRadius.circular(4),
+    return Tooltip(
+      message: explanation,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+        decoration: BoxDecoration(
+          border: Border.all(color: theme.colorScheme.outline),
+          borderRadius: BorderRadius.circular(4),
+        ),
+        child: Text(label, style: theme.textTheme.labelSmall),
       ),
-      child: Text('filler', style: theme.textTheme.labelSmall),
     );
   }
 }
