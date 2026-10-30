@@ -28,6 +28,7 @@ import 'package:ownsemble/library/track.dart';
 import 'package:ownsemble/main.dart' as app;
 import 'package:ownsemble/playback/play_queue.dart';
 import 'package:ownsemble/playback/player_service.dart';
+import 'package:ownsemble/playback/stream_proxy.dart' show ProxyRequestLog;
 import 'package:ownsemble/storage/audio_storage.dart';
 import 'package:ownsemble/ui/library_controller.dart';
 import 'package:ownsemble/ui/library_screen.dart';
@@ -423,7 +424,10 @@ void main() {
     // Seek: a click at the middle of the bar moves the streamed song there
     // and it keeps playing from there.
     final length = player.duration;
+    final seekRequests = <ProxyRequestLog>[];
+    final seekListening = player.proxyRequests.listen(seekRequests.add);
     final seekClock = Stopwatch()..start();
+    final seekStartedAt = DateTime.now();
     await tapSeekAt(0.5);
     await waitForPosition(
       (at) => (at - length * 0.5).abs() < length * 0.06,
@@ -436,6 +440,18 @@ void main() {
       'playing on after the seek',
     );
     final seekResumeMs = seekClock.elapsedMilliseconds;
+    final seekEndedAt = DateTime.now();
+    // A seek past what mpv holds must ask VK for a range; reading the song
+    // up to the new place took up to 22 s (bug of 2026-10-30). A seek
+    // inside what is already buffered may skip the request, and is quick.
+    // The ranged request is logged when it ends, so it is checked after
+    // the next song starts (below).
+    bool seekRanged() => seekRequests.any(
+      (r) =>
+          r.fromByte != null &&
+          !r.startedAt.isBefore(seekStartedAt) &&
+          r.startedAt.isBefore(seekEndedAt),
+    );
 
     // Previous after 3 s restarts the song; right after that it goes to the
     // previous song of the list; Next comes back.
@@ -677,6 +693,12 @@ void main() {
 
     // Every song that started playing is in the History, newest first.
     final historyStore = LibraryStore.open(p.join(copyDir, 'library.db'));
+    await seekListening.cancel();
+    expect(
+      seekRanged() || seekResumeMs < 5000,
+      isTrue,
+      reason: 'stream seek took $seekResumeMs ms without a ranged request',
+    );
     final history = historyStore.history(limit: 1 << 30);
     historyStore.close();
     final historyAdded = history.length - historyBefore;
@@ -684,7 +706,8 @@ void main() {
     print(
       'controls: seek, previous (restart and back), next, auto-advance, '
       'repeat one, shuffle, time label, volume, mute, Space checked; '
-      'stream seek: click to playing on ${seekResumeMs - 300} ms or less; '
+      'stream seek: click to playing on ${seekResumeMs - 300} ms or less '
+      '(${seekRanged() ? 'ranged request' : 'from buffer'}); '
       'History entries added $historyAdded for $soundStarts sound starts',
     );
     expect(historyAdded, soundStarts);

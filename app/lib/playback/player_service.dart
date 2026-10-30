@@ -60,6 +60,11 @@ String describePlayError(Object error) => switch (error) {
 const defaultMpvOptions = <String, String>{
   // Give up on a stalled stream instead of waiting mpv's default 60 s.
   'network-timeout': '20',
+  // Seek in MP3s by byte position (from the bitrate). Without it, songs
+  // with no seek table in their header are seeked by reading every frame
+  // up to the target, so a stream seek waited for the download to get
+  // there (up to 22 s on a fast line) instead of asking for a range (~1 s).
+  'demuxer-lavf-o': 'fflags=+fastseek',
 };
 
 /// Plays songs with libmpv (media_kit) and measures how fast sound starts.
