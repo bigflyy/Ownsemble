@@ -280,13 +280,15 @@ String vkSourceKey(Map<String, dynamic> item) =>
 
 /// Converts one `audio.get` item into a library song.
 ///
-/// Covers come from the item's own `thumb` (VK sends one for every song in
-/// the test library), else from its album's.
+/// Covers come from the item's own `thumb`, else from its album's. A song
+/// without an album has no cover of its own: VK then sends one of its generic
+/// gradient placeholders as `thumb` (all 18 such songs of the test library),
+/// and the song's stand-in tile says more than that.
 NewTrack vkItemToTrack(Map<String, dynamic> item) {
   final album = item['album'];
-  final thumb =
-      _mapOrNull(item['thumb']) ??
-      (album is Map<String, dynamic> ? _mapOrNull(album['thumb']) : null);
+  final thumb = album is Map<String, dynamic>
+      ? _mapOrNull(item['thumb']) ?? _mapOrNull(album['thumb'])
+      : null;
   return NewTrack(
     sourceKey: vkSourceKey(item),
     accessKey: item['access_key'] as String?,

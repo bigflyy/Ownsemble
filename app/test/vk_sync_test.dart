@@ -189,6 +189,16 @@ void main() {
     });
     expect(albumOnly.coverUrl, 'album-135');
     expect(albumOnly.tint, isNull);
+
+    // VK's generic placeholder: a thumb on a song without an album.
+    final noAlbum = vkItemToTrack({
+      'owner_id': 1,
+      'id': 3,
+      'thumb': thumb('placeholder'),
+      'main_color': '#1a2B3c',
+    });
+    expect(noAlbum.coverUrl, isNull);
+    expect(noAlbum.coverLargeUrl, isNull);
   });
 
   group('syncVkSource', () {
@@ -244,6 +254,7 @@ void main() {
     test('a cover served from another host is not a change', () async {
       Map<String, dynamic> withCover(FakeSong song, String host, String sign) =>
           song.toItem()
+            ..['album'] = {'title': 'Альбом'}
             ..['thumb'] = {
               'photo_135': 'https://$host/c/1.jpg?size=135&sign=$sign',
               'photo_600': 'https://$host/c/1.jpg?size=600&sign=$sign',
