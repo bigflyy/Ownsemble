@@ -614,6 +614,7 @@ class VolumeRow extends StatelessWidget {
               max: 100,
               label: 'Volume ${shown.round()}',
               onChanged: playback.setVolume,
+              onChangeEnd: (_) => playback.saveVolume(),
             ),
           ),
         ),

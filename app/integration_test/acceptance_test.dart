@@ -27,6 +27,7 @@ import 'package:ownsemble/library/library_store.dart';
 import 'package:ownsemble/library/track.dart';
 import 'package:ownsemble/main.dart' as app;
 import 'package:ownsemble/playback/play_queue.dart';
+import 'package:ownsemble/playback/playback_controller.dart';
 import 'package:ownsemble/playback/player_service.dart';
 import 'package:ownsemble/playback/stream_proxy.dart' show ProxyRequestLog;
 import 'package:ownsemble/storage/audio_storage.dart';
@@ -657,6 +658,14 @@ void main() {
     await Future<void>.delayed(const Duration(milliseconds: 200));
     final mpvVolume = double.parse(await mpv.getProperty('volume'));
     expect((mpvVolume - playback.volume).abs(), lessThan(0.6));
+    // The speed gate proves a saved volume comes back after a restart.
+    final savedVolume = LibraryStore.open(p.join(copyDir, 'library.db'));
+    expect(
+      double.parse(savedVolume.readSetting(PlaybackController.volumeSetting)!),
+      closeTo(playback.volume, 0.1),
+      reason: 'letting go of the slider saves the volume',
+    );
+    savedVolume.close();
     await tester.tap(find.byKey(const ValueKey('mute')));
     await tester.pump();
     expect(playback.mutedByUser, isTrue);

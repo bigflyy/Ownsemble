@@ -6,8 +6,10 @@ import 'dart:ui' show FramePhase, FrameTiming;
 
 import 'package:flutter/scheduler.dart';
 import 'package:flutter/widgets.dart';
+import 'package:media_kit/media_kit.dart' show NativePlayer;
 
 import '../library/track.dart';
+import '../playback/playback_controller.dart';
 import '../playback/player_service.dart';
 import '../playback/stream_proxy.dart' show ProxyRequestLog;
 import '../ui/library_controller.dart';
@@ -19,15 +21,27 @@ import '../vk/vk_client.dart';
 /// Timestamps use [Timeline.now], which on Windows reads the same monotonic
 /// clock as the engine's frame timings; [run] checks that and reports the skew.
 class SpeedBench {
-  SpeedBench({required this.library, required this.player, required this.vk});
+  SpeedBench({
+    required this.library,
+    required this.player,
+    required this.playback,
+    required this.vk,
+  });
+
+  /// Volume the speed gate saves in one run and expects back in the next.
+  static const savedVolumeProbe = 37.0;
 
   final LibraryController library;
   final PlayerService player;
+  final PlaybackController playback;
   final VkClient? vk;
 
   final _frames = <FrameTiming>[];
 
   /// Runs the benchmark [parts] (all when null) and returns the results.
+  /// Two parts run only when named, since they are not speed measurements:
+  /// saveVolume saves [savedVolumeProbe] the way the volume slider does, and
+  /// savedVolume reports what mpv holds before any sound in a later run.
   Future<Map<String, Object?>> run({List<String>? parts}) async {
     SchedulerBinding.instance.addTimingsCallback(_frames.addAll);
     FocusManager.instance.primaryFocus?.unfocus();
@@ -44,6 +58,18 @@ class SpeedBench {
       'displayRefreshHz': display.refreshRate,
       'songs': library.all.length,
     };
+    if (parts?.contains('saveVolume') ?? false) {
+      await playback.setVolume(savedVolumeProbe);
+      playback.saveVolume();
+      result['saveVolume'] = {'volume': savedVolumeProbe};
+    }
+    if (parts?.contains('savedVolume') ?? false) {
+      final mpv = player.player.platform as NativePlayer;
+      result['savedVolume'] = {
+        'mpvVolume': double.parse(await mpv.getProperty('volume')),
+        'mutedByUser': playback.mutedByUser,
+      };
+    }
     for (final bench in benches.entries) {
       if (parts == null || parts.contains(bench.key)) {
         result[bench.key] = await bench.value();

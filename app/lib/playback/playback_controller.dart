@@ -15,13 +15,23 @@ class PlaybackController extends ChangeNotifier {
     required this.player,
     required this.recordPlay,
     PlayQueue? queue,
+    String? Function(String key)? readSetting,
+    this._writeSetting,
   }) : queue = queue ?? PlayQueue() {
+    final saved = double.tryParse(readSetting?.call(volumeSetting) ?? '');
+    if (saved != null) _volume = saved.clamp(0, 100);
+    _mutedByUser = readSetting?.call(muteSetting) == 'on';
     _ended = player.ended.listen((_) => unawaited(_onEnded()));
     player.playing.addListener(_onPlayingChanged);
   }
 
+  /// Settings with the chosen volume and whether the user muted.
+  static const volumeSetting = 'player.volume';
+  static const muteSetting = 'player.mute';
+
   final PlayerService player;
   final PlayQueue queue;
+  final void Function(String key, String? value)? _writeSetting;
 
   /// Writes a History entry for a song that started playing.
   final void Function(Track track) recordPlay;
@@ -181,7 +191,8 @@ class PlaybackController extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Sets the volume (0 to 100); moving the slider also unmutes.
+  /// Sets the volume (0 to 100); moving the slider also unmutes. Called for
+  /// every step of a drag, so it does not save: see [saveVolume].
   Future<void> setVolume(double volume) async {
     _volume = volume.clamp(0, 100);
     if (_mutedByUser && _volume > 0) {
@@ -192,8 +203,18 @@ class PlaybackController extends ChangeNotifier {
     await player.setVolume(_volume);
   }
 
+  /// Keeps the volume for the next run, once the slider is let go.
+  void saveVolume() {
+    _writeSetting?.call(volumeSetting, _volume.toStringAsFixed(1));
+    _saveMute();
+  }
+
+  void _saveMute() =>
+      _writeSetting?.call(muteSetting, _mutedByUser ? 'on' : 'off');
+
   Future<void> toggleMute() async {
     _mutedByUser = !_mutedByUser;
+    _saveMute();
     notifyListeners();
     await player.setMuted(_mutedByUser);
   }

@@ -107,15 +107,61 @@ Future<void> main(List<String> args) async {
       ? jsonDecode(File(benchFile).readAsStringSync())
       : {'error': 'bench exited $benchExit without results'};
 
+  print('Saved volume across a restart...');
+  final savedVolume = await _checkSavedVolume(benchFile);
+  print('  ${jsonEncode(savedVolume)}');
+
   final report = {
     'measuredAt': DateTime.now().toIso8601String(),
     'starts': startRuns,
     'idleMemory': memory,
     'bench': benchResult,
+    'savedVolume': savedVolume,
   };
   File(outFile)
       .writeAsStringSync(const JsonEncoder.withIndent('  ').convert(report));
   print('Full report: $outFile');
+}
+
+/// One release run saves a volume the way the slider does; the next run
+/// reports what mpv holds before any sound. Not a speed target: it is here
+/// because only this tool restarts the real app.
+Future<Map<String, Object?>> _checkSavedVolume(String benchFile) async {
+  Future<Map<String, Object?>> run(String part) async {
+    final file = File(benchFile);
+    if (file.existsSync()) file.deleteSync();
+    final process = await Process.start(exe, [
+      ...appArgs,
+      '--bench',
+      benchFile,
+      '--bench-parts',
+      part,
+    ]);
+    await process.exitCode.timeout(
+      const Duration(minutes: 1),
+      onTimeout: () {
+        process.kill();
+        return -1;
+      },
+    );
+    if (!file.existsSync()) return {};
+    return (jsonDecode(file.readAsStringSync()) as Map).cast();
+  }
+
+  final saved = (await run('saveVolume'))['saveVolume'] as Map?;
+  final restored = (await run('savedVolume'))['savedVolume'] as Map?;
+  final expected = saved?['volume'] as num?;
+  final actual = restored?['mpvVolume'] as num?;
+  return {
+    'saved': expected,
+    'mpvAfterRestart': actual,
+    'mutedByUser': restored?['mutedByUser'],
+    'ok':
+        expected != null &&
+        actual != null &&
+        (actual - expected).abs() < 0.6 &&
+        restored?['mutedByUser'] == false,
+  };
 }
 
 /// Launches the app and times process start to visible window (= first

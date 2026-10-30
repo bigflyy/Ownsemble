@@ -52,3 +52,5 @@ App options: `--data-dir DIR`, `--vk-session FILE`, `--muted`,
 (parts: search, scroll, playCached, playStream, seekStream),
 `--mpv name=value` (mpv option override), `--mpv-log` (mpv log without links),
 `--no-stream-cache` (do not save streamed songs; the speed gate uses it).
+Bench parts `saveVolume` and `savedVolume` run only when named: the speed gate
+uses them to prove a saved volume reaches mpv after a real restart.

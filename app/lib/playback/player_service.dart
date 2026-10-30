@@ -152,9 +152,9 @@ class PlayerService {
   /// Fires when the current song plays to its end.
   Stream<void> get ended => _endedController.stream;
 
-  /// Loads libmpv and creates the player. Called after the first frame so it
-  /// does not delay startup.
-  Future<void> init() async {
+  /// Loads libmpv and creates the player at [volume] (muted when [mute]).
+  /// Called after the first frame so it does not delay startup.
+  Future<void> init({double volume = 100, bool mute = false}) async {
     MediaKit.ensureInitialized();
     _proxy = await StreamProxy.start();
     _player = Player(
@@ -182,6 +182,9 @@ class PlayerService {
     for (final option in {...defaultMpvOptions, ...mpvOptions}.entries) {
       await _mpv.setProperty(option.key, option.value);
     }
+    // Before isReady: no song can start at mpv's default volume.
+    await setVolume(volume);
+    await setMuted(mute);
     // Play state comes straight from mpv because songs are loaded with mpv's
     // own loadfile command (see play), which media_kit's state does not track.
     await _mpv.observeProperty('pause', (value) async {

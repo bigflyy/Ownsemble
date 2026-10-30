@@ -78,8 +78,9 @@ class AppOptions {
   /// Where to write benchmark results (JSON); the app exits afterwards.
   final String? benchFile;
 
-  /// Benchmark parts to run (search, scroll, playCached, playStream); all
-  /// when null.
+  /// Benchmark parts to run (search, scroll, playCached, playStream,
+  /// seekStream); all when null. See [SpeedBench.run] for saveVolume and
+  /// savedVolume, which only run when named.
   final List<String>? benchParts;
 
   /// mpv option overrides, for tuning playback start.
@@ -138,6 +139,8 @@ Future<void> main(List<String> args) async {
   final playback = PlaybackController(
     player: player,
     recordPlay: collections.recordPlay,
+    readSetting: store.readSetting,
+    writeSetting: store.writeSetting,
   );
   final sync = SyncController(
     sources: sources,
@@ -161,6 +164,7 @@ Future<void> main(List<String> args) async {
         loadMs: loadMs,
         library: library,
         player: player,
+        playback: playback,
         vk: vk,
         sync: sync,
       ),
@@ -185,6 +189,7 @@ Future<void> _afterFirstFrame({
   required int loadMs,
   required LibraryController library,
   required PlayerService player,
+  required PlaybackController playback,
   required VkClient? vk,
   required SyncController sync,
 }) async {
@@ -200,7 +205,7 @@ Future<void> _afterFirstFrame({
     );
   }
 
-  await player.init();
+  await player.init(volume: playback.volume, mute: playback.mutedByUser);
   // The library syncs itself on every start, in the background.
   final startSync = sync.syncNow();
   _logPlayTimings(player, File(p.join(options.dataDir, 'perf.log')));
@@ -217,6 +222,7 @@ Future<void> _afterFirstFrame({
     final result = await SpeedBench(
       library: library,
       player: player,
+      playback: playback,
       vk: vk,
     ).run(parts: options.benchParts);
     File(options.benchFile!)

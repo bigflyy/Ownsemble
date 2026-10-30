@@ -202,6 +202,73 @@ void main() {
     expect(player.played.length, lessThan(10));
   });
 
+  group('saved volume', () {
+    late Map<String, String?> saved;
+
+    PlaybackController started() => PlaybackController(
+      player: player,
+      recordPlay: (_) {},
+      readSetting: (key) => saved[key],
+      writeSetting: (key, value) => saved[key] = value,
+    );
+
+    setUp(() => saved = {});
+
+    test('with nothing saved the volume is full and not muted', () {
+      final fresh = started();
+      addTearDown(fresh.dispose);
+      expect(fresh.volume, 100);
+      expect(fresh.mutedByUser, isFalse);
+    });
+
+    test('the volume and mute survive a restart', () async {
+      final first = started();
+      await first.setVolume(35);
+      first.saveVolume();
+      await first.toggleMute();
+      first.dispose();
+
+      final second = started();
+      addTearDown(second.dispose);
+      expect(second.volume, 35);
+      expect(second.mutedByUser, isTrue);
+    });
+
+    test('moving the slider does not write until it is let go', () async {
+      final first = started();
+      addTearDown(first.dispose);
+      await first.setVolume(35);
+      await first.setVolume(36);
+      expect(saved, isEmpty);
+      first.saveVolume();
+      expect(double.parse(saved[PlaybackController.volumeSetting]!), 36);
+    });
+
+    test('unmuting by the slider is saved too', () async {
+      final first = started();
+      await first.toggleMute();
+      await first.setVolume(20);
+      first.saveVolume();
+      first.dispose();
+
+      final second = started();
+      addTearDown(second.dispose);
+      expect(second.mutedByUser, isFalse);
+    });
+
+    test('a saved value out of range or unreadable is not used', () {
+      saved[PlaybackController.volumeSetting] = '500';
+      final loud = started();
+      addTearDown(loud.dispose);
+      expect(loud.volume, 100);
+
+      saved[PlaybackController.volumeSetting] = 'loud';
+      final unreadable = started();
+      addTearDown(unreadable.dispose);
+      expect(unreadable.volume, 100);
+    });
+  });
+
   test('moving the volume unmutes; mute is passed to the player', () async {
     await playback.toggleMute();
     expect(player.lastMuted, isTrue);
