@@ -199,6 +199,15 @@ void main() {
     });
     expect(noAlbum.coverUrl, isNull);
     expect(noAlbum.coverLargeUrl, isNull);
+
+    // Withdrawn songs: an album with no title, and the same placeholder.
+    final untitledAlbum = vkItemToTrack({
+      'owner_id': 1,
+      'id': 4,
+      'thumb': thumb('placeholder'),
+      'album': {'title': ' '},
+    });
+    expect(untitledAlbum.coverUrl, isNull);
   });
 
   group('syncVkSource', () {
