@@ -36,13 +36,15 @@ class AppOptions {
     this.metricsFile,
     this.benchFile,
     this.benchParts,
+    this.benchVolume = 100,
     this.mpvOptions = const {},
     this.mpvLog = false,
     this.cacheWhileStreaming = true,
   });
 
   /// Parses `--data-dir DIR --vk-session FILE --muted --metrics FILE
-  /// --bench FILE --bench-parts a,b --mpv name=value ... --mpv-log`.
+  /// --bench FILE --bench-parts a,b --bench-volume N --mpv name=value ...
+  /// --mpv-log`.
   factory AppOptions.parse(List<String> args) {
     String? valueOf(String name) {
       final index = args.indexOf(name);
@@ -62,6 +64,7 @@ class AppOptions {
       metricsFile: valueOf('--metrics'),
       benchFile: valueOf('--bench'),
       benchParts: valueOf('--bench-parts')?.split(','),
+      benchVolume: double.parse(valueOf('--bench-volume') ?? '100'),
       mpvLog: args.contains('--mpv-log'),
       cacheWhileStreaming: !args.contains('--no-stream-cache'),
       mpvOptions: {
@@ -90,6 +93,9 @@ class AppOptions {
   /// seekStream); all when null. See [SpeedBench.run] for saveVolume and
   /// savedVolume, which only run when named.
   final List<String>? benchParts;
+
+  /// Player volume during the benchmark, under mute.
+  final double benchVolume;
 
   /// mpv option overrides, for tuning playback start.
   final Map<String, String> mpvOptions;
@@ -243,6 +249,7 @@ Future<void> _afterFirstFrame({
       playback: playback,
       vk: vk,
       covers: covers,
+      volume: options.benchVolume,
     ).run(parts: options.benchParts);
     File(options.benchFile!)
         .writeAsStringSync(const JsonEncoder.withIndent('  ').convert(result));

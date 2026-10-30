@@ -29,6 +29,7 @@ class SpeedBench {
     required this.playback,
     required this.vk,
     required this.covers,
+    this.volume = 100,
   });
 
   /// Volume the speed gate saves in one run and expects back in the next.
@@ -39,6 +40,10 @@ class SpeedBench {
   final PlaybackController playback;
   final VkClient? vk;
   final CoverStore covers;
+
+  /// mpv volume while measuring, always under mute. Set for each run and not
+  /// saved, so results do not depend on what the data folder last saved.
+  final double volume;
 
   final _frames = <FrameTiming>[];
 
@@ -75,6 +80,8 @@ class SpeedBench {
         'mutedByUser': playback.mutedByUser,
       };
     }
+    await player.setVolume(volume);
+    result['volume'] = volume;
     for (final bench in benches.entries) {
       if (parts == null || parts.contains(bench.key)) {
         result[bench.key] = await bench.value();
