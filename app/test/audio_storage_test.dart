@@ -134,6 +134,56 @@ void main() {
     expect(fetched, isTrue);
   });
 
+  group('progress of a save', () {
+    test('a song not stored has nothing saved; a stored one all of it', () {
+      cache(0, 100);
+      expect(storage.savedShare(songs[0]), 1);
+      expect(storage.savedShare(songs[1]), 0);
+    });
+
+    test('the saved part grows while the song is saved, then the state '
+        'takes over', () async {
+      final save = Completer<int?>();
+      storage.noteSaving(songs[1], save.future);
+      expect(storage.isSaving(songs[1]), isTrue);
+      expect(storage.savedShare(songs[1]), 0);
+      storage.noteProgress(songs[1], 25, 100);
+      expect(storage.savedShare(songs[1]), 0.25);
+
+      save.complete(null);
+      await save.future;
+      await Future<void>.delayed(Duration.zero);
+      expect(storage.isSaving(songs[1]), isFalse);
+      expect(storage.savedShare(songs[1]), 0, reason: 'nothing was kept');
+    });
+
+    test('the list hears only when a save starts and ends', () async {
+      var listRebuilds = 0;
+      var progressEvents = 0;
+      storage.addListener(() => listRebuilds++);
+      storage.progress.addListener(() => progressEvents++);
+      final save = Completer<int?>();
+      storage.noteSaving(songs[1], save.future);
+      expect(listRebuilds, 1);
+      for (var bytes = 0; bytes <= 1000; bytes += 7) {
+        storage.noteProgress(songs[1], bytes, 1000);
+      }
+      expect(listRebuilds, 1);
+      // Whole percents only, however small the chunks are.
+      expect(progressEvents, lessThanOrEqualTo(101));
+      expect(progressEvents, greaterThan(50));
+      save.complete(null);
+      await Future<void>.delayed(Duration.zero);
+      expect(listRebuilds, 2);
+    });
+
+    test('an unknown size shows no progress', () {
+      storage.noteSaving(songs[1], Completer<int?>().future);
+      storage.noteProgress(songs[1], 500, -1);
+      expect(storage.savedShare(songs[1]), 0);
+    });
+  });
+
   group('downloads over HTTP', () {
     late HttpServer server;
     final audio = List<int>.generate(70000, (i) => i % 253);
@@ -169,6 +219,21 @@ void main() {
 
       final reopened = store.loadAll().firstWhere((t) => t.id == songs[4].id);
       expect(reopened.isDownloaded, isTrue);
+    });
+
+    test('a download reports how far it got and ends fully stored', () async {
+      final shares = <double>[];
+      storage.progress.addListener(
+        () => shares.add(storage.savedShare(songs[4])),
+      );
+      await storage.download(
+        songs[4],
+        () async => Uri.parse('http://127.0.0.1:${server.port}/a.mp3'),
+      );
+      expect(shares, isNotEmpty);
+      expect(shares, orderedEquals([...shares]..sort()));
+      expect(shares.last, 1);
+      expect(storage.savedShare(songs[4]), 1);
     });
 
     test('a failed download leaves nothing behind', () async {

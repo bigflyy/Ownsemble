@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -5,6 +7,7 @@ import 'package:ownsemble/library/library_store.dart';
 import 'package:ownsemble/library/track.dart';
 import 'package:ownsemble/playback/playback_controller.dart';
 import 'package:ownsemble/playback/player_service.dart';
+import 'package:ownsemble/storage/audio_storage.dart';
 import 'package:ownsemble/ui/collections_controller.dart';
 import 'package:ownsemble/ui/library_controller.dart';
 import 'package:ownsemble/ui/library_screen.dart';
@@ -16,7 +19,7 @@ import 'package:ownsemble/ui/theme.dart';
 /// A player that accepts songs without opening any audio, so the panel shows
 /// a song as it does in the app.
 class _StartedPlayer extends PlayerService {
-  _StartedPlayer() : super(vk: null, muted: true, dataDir: '.');
+  _StartedPlayer({super.storage}) : super(vk: null, muted: true, dataDir: '.');
 
   Track? _track;
   final played = <int>[];
@@ -27,6 +30,12 @@ class _StartedPlayer extends PlayerService {
   Track? get current => _track;
   @override
   bool get currentLoaded => true;
+  @override
+  Stream<Duration> get positions => const Stream.empty();
+  @override
+  Duration get position => const Duration(seconds: 20);
+  @override
+  Duration get duration => const Duration(seconds: 200);
 
   @override
   Future<PlayTiming> play(Track track) async {
@@ -338,6 +347,106 @@ void main() {
 
   // Bug of 2026-10-30: "Cannot play: ..." covered the whole window bottom
   // for 4 s, so a click on the seek bar under it did nothing.
+  group('save progress', () {
+    late AudioStorage storage;
+    late Track song;
+
+    Future<void> showPlaying(WidgetTester tester) async {
+      final player = _StartedPlayer(storage: storage);
+      await player.play(song);
+      await pumpShell(tester, player: player);
+    }
+
+    /// How much of the row's icon is filled, from what its clip keeps.
+    double fillOf(WidgetTester tester, Finder icon) {
+      final clip = tester.widget<ClipRect>(
+        find.descendant(of: icon, matching: find.byType(ClipRect)),
+      );
+      return 1 - clip.clipper!.getClip(const Size(100, 100)).top / 100;
+    }
+
+    double? band(WidgetTester tester) => tester
+        .widget<Slider>(find.byKey(const ValueKey('seek')))
+        .secondaryTrackValue;
+
+    setUp(() {
+      storage = AudioStorage(dataDir: '.', store: store);
+      song = library.all.firstWhere((t) => t.id == ids[0]);
+    });
+
+    testWidgets('a song saved while streaming: the row\'s cloud and the seek '
+        'bar\'s band follow it', (tester) async {
+      await showPlaying(tester);
+      final saving = find.byKey(ValueKey('filling-${song.id}'));
+      expect(saving, findsNothing, reason: 'not saving yet');
+      expect(band(tester), 0);
+
+      final save = Completer<int?>();
+      storage.noteSaving(song, save.future);
+      await tester.pump();
+      expect(fillOf(tester, saving), 0);
+
+      storage.noteProgress(song, 40, 100);
+      await tester.pump();
+      expect(fillOf(tester, saving), closeTo(0.4, 0.001));
+      expect(band(tester), closeTo(0.4 * 200, 0.001));
+
+      // Stored: the plain cached mark, and the whole bar is saved.
+      save.complete(100);
+      storage.recordStored(song, 'cache/a.mp3', 100);
+      await tester.pump();
+      await tester.pump();
+      expect(saving, findsNothing);
+      expect(
+        find.byKey(
+          ValueKey('mark-${song.id}-${Icons.cloud_done_outlined.codePoint}'),
+        ),
+        findsOneWidget,
+      );
+      expect(band(tester), 200);
+    });
+
+    testWidgets('a canceled save takes the band back to nothing', (
+      tester,
+    ) async {
+      await showPlaying(tester);
+      final save = Completer<int?>();
+      storage.noteSaving(song, save.future);
+      storage.noteProgress(song, 40, 100);
+      await tester.pump();
+      save.complete(null);
+      await tester.pump();
+      await tester.pump();
+      expect(band(tester), 0);
+      expect(find.byKey(ValueKey('filling-${song.id}')), findsNothing);
+    });
+
+    testWidgets('a download fills the row\'s mark and the Download button', (
+      tester,
+    ) async {
+      await showPlaying(tester);
+      final release = Completer<void>();
+      final download = storage.download(song, () async {
+        await release.future;
+        return null;
+      });
+      storage.noteProgress(song, 30, 100);
+      await tester.pump();
+      expect(
+        fillOf(tester, find.byKey(ValueKey('filling-${song.id}'))),
+        closeTo(0.3, 0.001),
+      );
+      expect(
+        fillOf(tester, find.byKey(const ValueKey('download'))),
+        closeTo(0.3, 0.001),
+      );
+      release.complete();
+      await expectLater(download, throwsA(isA<StateError>()));
+      await tester.pump();
+      expect(find.byKey(ValueKey('filling-${song.id}')), findsNothing);
+    });
+  });
+
   testWidgets('messages never cover the player or the sidebar', (tester) async {
     for (final size in const [Size(1400, 900), Size(900, 700)]) {
       await pumpShell(tester, size: size);

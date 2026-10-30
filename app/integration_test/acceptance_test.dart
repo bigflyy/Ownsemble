@@ -710,7 +710,40 @@ void main() {
     final toCache = streamable[0];
     final toDownload = streamable[1];
 
+    /// Watches a save of [song] the way the user sees it: the shares it
+    /// goes through, and whether the row's mark filled and (when [playing])
+    /// the seek bar's band moved. Returns what stops the watching.
+    ({List<double> shares, bool Function() filled, VoidCallback stop})
+    watchSave(WidgetTester tester, Track song, {required bool playing}) {
+      final shares = <double>[];
+      var filled = false;
+      var bandSeen = !playing;
+      void look() {
+        final share = storage.savedShare(song);
+        shares.add(share);
+        filled =
+            filled ||
+            find.byKey(ValueKey('filling-${song.id}')).evaluate().isNotEmpty;
+        if (playing && share > 0 && share < 1) {
+          // Not tester.widget: a listener can run while a pump is under way.
+          final seek =
+              find.byKey(const ValueKey('seek')).evaluate().single.widget
+                  as Slider;
+          final band = seek.secondaryTrackValue ?? 0;
+          bandSeen = bandSeen || (band > 0 && band < seek.max);
+        }
+      }
+
+      storage.progress.addListener(look);
+      return (
+        shares: shares,
+        filled: () => filled && bandSeen,
+        stop: () => storage.progress.removeListener(look),
+      );
+    }
+
     final cacheClock = Stopwatch()..start();
+    final cacheWatch = watchSave(tester, toCache, playing: true);
     expect(
       (await playByTap(tester, toCache, label: 'song to cache')).ok,
       isTrue,
@@ -720,6 +753,31 @@ void main() {
       () => storedNow(toCache),
       timeout: const Duration(minutes: 5),
       what: 'song saved while streaming',
+    );
+    cacheWatch.stop();
+    expect(
+      cacheWatch.shares.where((s) => s > 0 && s < 1).length,
+      greaterThan(3),
+      reason: 'the saved part grows along the way',
+    );
+    expect(
+      cacheWatch.shares,
+      orderedEquals([...cacheWatch.shares]..sort()),
+      reason: 'the saved part only grows',
+    );
+    expect(
+      cacheWatch.filled(),
+      isTrue,
+      reason: 'the row filled and the seek bar showed the saved part',
+    );
+    await tester.pump();
+    final seekWhenSaved = tester.widget<Slider>(
+      find.byKey(const ValueKey('seek')),
+    );
+    expect(
+      seekWhenSaved.secondaryTrackValue,
+      seekWhenSaved.max,
+      reason: 'a stored song is saved all the way along the seek bar',
     );
     final cachedFile = storage.fileAt(storage.stateOf(toCache).path!);
     final cachedAfterMs = cacheClock.elapsedMilliseconds;
@@ -765,6 +823,9 @@ void main() {
       buttons: kSecondaryMouseButton,
     );
     await tester.pumpAndSettle();
+    // On a fast line the song may have been saved while it played.
+    final downloadFetches = !storedNow(toDownload);
+    final downloadWatch = watchSave(tester, toDownload, playing: false);
     await tester.tap(find.byKey(const ValueKey('menu-download')));
     await tester.pump();
     await waitUntil(
@@ -773,6 +834,19 @@ void main() {
       timeout: const Duration(minutes: 5),
       what: 'download',
     );
+    downloadWatch.stop();
+    if (downloadFetches) {
+      expect(
+        downloadWatch.shares.where((s) => s > 0 && s < 1).length,
+        greaterThan(3),
+        reason: 'a download shows how far it got',
+      );
+      expect(
+        downloadWatch.filled(),
+        isTrue,
+        reason: 'the row filled during the download',
+      );
+    }
     final downloadedFile = storage.fileAt(storage.stateOf(toDownload).path!);
     expect(downloadedFile.lengthSync(), greaterThan(100000));
     await tester.pump();

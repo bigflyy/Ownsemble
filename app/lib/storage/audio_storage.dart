@@ -37,12 +37,42 @@ class AudioStorage extends ChangeNotifier {
   /// Saves running while songs stream (track id to the save's result).
   final _saving = <int, Future<int?>>{};
 
+  /// How far running saves and downloads are (track id to whole percent).
+  final _percent = <int, int>{};
+  final _progress = ValueNotifier<int>(0);
+
+  /// Fires when a running save or download gets further. Apart from this
+  /// notifier itself, which rebuilds the song list: a save reports up to a
+  /// hundred times.
+  Listenable get progress => _progress;
+
   /// How [track]'s audio is stored now.
   StoredState stateOf(Track track) =>
       _changed[track.id] ?? (path: track.localPath, pinned: track.pinned);
 
   /// Whether a Download of [track] is in progress.
   bool isDownloading(Track track) => _downloading.contains(track.id);
+
+  /// Whether [track] is being saved while it streams.
+  bool isSaving(Track track) => _saving.containsKey(track.id);
+
+  /// How much of [track]'s audio is stored, 0 to 1: the part saved so far
+  /// during a save or download, else all or nothing.
+  double savedShare(Track track) {
+    final percent = _percent[track.id];
+    if (percent != null) return percent / 100;
+    return stateOf(track).path == null ? 0 : 1;
+  }
+
+  /// Notes that a save of [track] reached [bytes] of [total] (negative:
+  /// size unknown, no progress to show).
+  void noteProgress(Track track, int bytes, int total) {
+    if (total <= 0) return;
+    final percent = bytes * 100 ~/ total;
+    if (_percent[track.id] == percent) return;
+    _percent[track.id] = percent;
+    _progress.value++;
+  }
 
   /// Cache limit for songs that are not downloaded, in bytes.
   int get limitBytes =>
@@ -60,8 +90,12 @@ class AudioStorage extends ChangeNotifier {
   /// instead of fetching the song a second time.
   void noteSaving(Track track, Future<int?> stored) {
     _saving[track.id] = stored;
+    notifyListeners();
     stored.whenComplete(() {
-      if (identical(_saving[track.id], stored)) _saving.remove(track.id);
+      if (!identical(_saving[track.id], stored)) return;
+      _saving.remove(track.id);
+      _percent.remove(track.id);
+      notifyListeners();
     });
   }
 
@@ -140,17 +174,20 @@ class AudioStorage extends ChangeNotifier {
       final url = await resolveUrl();
       if (url == null) throw StateError('VK has no stream for this song');
       final path = relativePathFor(track);
+      void onProgress(int bytes, int total) =>
+          noteProgress(track, bytes, total);
       int bytes;
       try {
-        bytes = await fetchToFile(url, fileAt(path));
+        bytes = await fetchToFile(url, fileAt(path), onProgress: onProgress);
       } on AudioServerException {
         final other = await alternative?.call();
         if (other == null) rethrow;
-        bytes = await fetchToFile(other, fileAt(path));
+        bytes = await fetchToFile(other, fileAt(path), onProgress: onProgress);
       }
       recordStored(track, path, bytes, pinned: true);
     } finally {
       _downloading.remove(track.id);
+      _percent.remove(track.id);
       notifyListeners();
     }
   }
@@ -177,8 +214,14 @@ class AudioServerException extends HttpException {
 
 /// Fetches [url] completely into [target] through a `.part` file; returns
 /// the size. Fails on an HTTP error, a stall of 30 s or a short body, and
-/// then leaves no file behind.
-Future<int> fetchToFile(Uri url, File target, {HttpClient? client}) async {
+/// then leaves no file behind. [onProgress] gets the bytes so far and the
+/// whole size (negative when unknown).
+Future<int> fetchToFile(
+  Uri url,
+  File target, {
+  HttpClient? client,
+  void Function(int bytes, int total)? onProgress,
+}) async {
   final http =
       client ?? (HttpClient()..connectionTimeout = const Duration(seconds: 10));
   final part = File('${target.path}.part');
@@ -197,6 +240,7 @@ Future<int> fetchToFile(Uri url, File target, {HttpClient? client}) async {
       await for (final chunk in response.timeout(const Duration(seconds: 30))) {
         sink.add(chunk);
         bytes += chunk.length;
+        onProgress?.call(bytes, response.contentLength);
       }
     } finally {
       await sink.close();

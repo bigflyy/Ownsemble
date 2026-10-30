@@ -9,6 +9,7 @@ class ProxiedStream {
     this._upstream,
     this._cacheTo,
     this._alternative,
+    this._onSaved,
   );
 
   /// Loopback address mpv opens instead of the real link.
@@ -20,6 +21,9 @@ class ProxiedStream {
 
   /// Gets another link to the same audio; null: there is no other.
   final Future<Uri?> Function()? _alternative;
+
+  /// Told how much is saved so far and the whole size.
+  final void Function(int written, int total)? _onSaved;
   Future<Uri?>? _switching;
 
   /// Moves this stream to its alternative link, asked for only once, so
@@ -232,11 +236,13 @@ class StreamProxy {
   /// Registers [upstream] and returns the stream mpv should open; the whole
   /// audio is also saved to [cacheTo] when given. [alternative] gets another
   /// link to the same audio for when the audio server answers [upstream]
-  /// with an error. Only the most recent streams stay registered.
+  /// with an error. [onSaved] is told how far the save has got. Only the
+  /// most recent streams stay registered.
   ProxiedStream add(
     Uri upstream, {
     File? cacheTo,
     Future<Uri?> Function()? alternative,
+    void Function(int written, int total)? onSaved,
   }) {
     final id = List.generate(
       16,
@@ -247,6 +253,7 @@ class StreamProxy {
       upstream,
       cacheTo,
       alternative,
+      onSaved,
     );
     _streams[id] = stream;
     while (_streams.length > 4) {
@@ -430,6 +437,9 @@ class StreamProxy {
         trace.firstByteMs ??= trace.clock.elapsedMilliseconds;
         file?.add(chunk);
         written += chunk.length;
+        if (file != null && !stream._cachingCanceled) {
+          stream._onSaved?.call(written, total);
+        }
         if (!mpvGone) {
           try {
             response.add(chunk);

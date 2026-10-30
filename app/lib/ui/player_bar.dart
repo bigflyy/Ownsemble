@@ -5,6 +5,7 @@ import '../playback/play_queue.dart';
 import '../playback/playback_controller.dart';
 import '../storage/audio_storage.dart';
 import 'collections_controller.dart';
+import 'filling_icon.dart';
 import 'theme.dart';
 
 /// Width of the side panel.
@@ -506,72 +507,86 @@ class _SeekRowState extends State<SeekRow> {
       color: colors.dim,
       fontFeatures: const [FontFeature.tabularFigures()],
     );
-    return StreamBuilder<Duration>(
-      stream: player.isReady ? player.player.stream.position : null,
-      builder: (context, _) {
-        final hasSong = player.isReady && player.current != null;
-        final total = hasSong ? player.duration : Duration.zero;
-        final totalSeconds = total.inMilliseconds / 1000;
-        final playingSeconds = hasSong
-            ? (player.position.inMilliseconds / 1000).clamp(0.0, totalSeconds)
-            : 0.0;
-        final shown = _dragSeconds ?? playingSeconds;
-        final at = Duration(milliseconds: (shown * 1000).round());
-        final end = playback.showRemaining
-            ? '-${formatDuration(total - at)}'
-            : formatDuration(total);
-        final slider = Slider(
-          key: const ValueKey('seek'),
-          value: shown,
-          max: totalSeconds <= 0 ? 1 : totalSeconds,
-          label: formatDuration(at),
-          onChangeStart: totalSeconds <= 0
-              ? null
-              : (value) => setState(() => _dragSeconds = value),
-          onChanged: totalSeconds <= 0
-              ? null
-              : (value) => setState(() => _dragSeconds = value),
-          onChangeEnd: (value) async {
-            await playback.seek(Duration(milliseconds: (value * 1000).round()));
-            if (mounted) setState(() => _dragSeconds = null);
-          },
-        );
-        final position = Text(formatDuration(at), style: style);
-        final endButton = TextButton(
-          key: const ValueKey('time'),
-          onPressed: playback.toggleRemaining,
-          style: TextButton.styleFrom(
-            minimumSize: const Size(0, 24),
-            padding: const EdgeInsets.symmetric(horizontal: 4),
-            foregroundColor: colors.dim,
-          ),
-          child: Text(end, style: style),
-        );
-        return switch (widget.layout) {
-          SeekLayout.panel => Column(
-            children: [
-              SizedBox(height: 28, child: slider),
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 8),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [position, endButton],
+    final storage = player.storage;
+    return ListenableBuilder(
+      // A paused song keeps saving, so the band moves without positions.
+      listenable: Listenable.merge([?storage?.progress]),
+      builder: (context, _) => StreamBuilder<Duration>(
+        stream: player.isReady ? player.positions : null,
+        builder: (context, _) {
+          final hasSong = player.isReady && player.current != null;
+          final total = hasSong ? player.duration : Duration.zero;
+          final totalSeconds = total.inMilliseconds / 1000;
+          final playingSeconds = hasSong
+              ? (player.position.inMilliseconds / 1000).clamp(0.0, totalSeconds)
+              : 0.0;
+          final shown = _dragSeconds ?? playingSeconds;
+          final at = Duration(milliseconds: (shown * 1000).round());
+          final end = playback.showRemaining
+              ? '-${formatDuration(total - at)}'
+              : formatDuration(total);
+          final max = totalSeconds <= 0 ? 1.0 : totalSeconds;
+          final slider = Slider(
+            key: const ValueKey('seek'),
+            value: shown,
+            max: max,
+            secondaryTrackValue: hasSong && storage != null
+                ? storage.savedShare(player.current!) * max
+                : null,
+            label: formatDuration(at),
+            onChangeStart: totalSeconds <= 0
+                ? null
+                : (value) => setState(() => _dragSeconds = value),
+            onChanged: totalSeconds <= 0
+                ? null
+                : (value) => setState(() => _dragSeconds = value),
+            onChangeEnd: (value) async {
+              await playback.seek(
+                Duration(milliseconds: (value * 1000).round()),
+              );
+              if (mounted) setState(() => _dragSeconds = null);
+            },
+          );
+          final position = Text(formatDuration(at), style: style);
+          final endButton = TextButton(
+            key: const ValueKey('time'),
+            onPressed: playback.toggleRemaining,
+            style: TextButton.styleFrom(
+              minimumSize: const Size(0, 24),
+              padding: const EdgeInsets.symmetric(horizontal: 4),
+              foregroundColor: colors.dim,
+            ),
+            child: Text(end, style: style),
+          );
+          return switch (widget.layout) {
+            SeekLayout.panel => Column(
+              children: [
+                SizedBox(height: 28, child: slider),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 8),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [position, endButton],
+                  ),
                 ),
-              ),
-            ],
-          ),
-          SeekLayout.dock => Row(
-            children: [
-              SizedBox(
-                width: 44,
-                child: Align(alignment: Alignment.centerRight, child: position),
-              ),
-              Expanded(child: SizedBox(height: 28, child: slider)),
-              SizedBox(width: 52, child: endButton),
-            ],
-          ),
-        };
-      },
+              ],
+            ),
+            SeekLayout.dock => Row(
+              children: [
+                SizedBox(
+                  width: 44,
+                  child: Align(
+                    alignment: Alignment.centerRight,
+                    child: position,
+                  ),
+                ),
+                Expanded(child: SizedBox(height: 28, child: slider)),
+                SizedBox(width: 52, child: endButton),
+              ],
+            ),
+          };
+        },
+      ),
     );
   }
 }
@@ -798,14 +813,19 @@ class DownloadButton extends StatelessWidget {
                 );
               }
             },
-      icon: Icon(
-        downloading
-            ? Icons.downloading
-            : downloaded
-            ? Icons.download_done
-            : Icons.download_outlined,
-        color: downloaded ? colors.accent : null,
-      ),
+      icon: downloading
+          ? FillingIcon(
+              storage: storage,
+              track: track,
+              icon: Icons.download_outlined,
+              filled: Icons.download,
+              size: 24,
+              color: colors.accent,
+            )
+          : Icon(
+              downloaded ? Icons.download_done : Icons.download_outlined,
+              color: downloaded ? colors.accent : null,
+            ),
     );
   }
 }

@@ -5,6 +5,7 @@
 //   flutter test tool/screenshots_test.dart \
 //       --dart-define=OWNSEMBLE_SHOTS=<folder>
 
+import 'dart:async';
 import 'dart:io';
 import 'dart:ui' as ui;
 
@@ -16,6 +17,7 @@ import 'package:ownsemble/library/library_store.dart';
 import 'package:ownsemble/library/track.dart';
 import 'package:ownsemble/playback/playback_controller.dart';
 import 'package:ownsemble/playback/player_service.dart';
+import 'package:ownsemble/storage/audio_storage.dart';
 import 'package:ownsemble/ui/collections_controller.dart';
 import 'package:ownsemble/ui/library_controller.dart';
 import 'package:ownsemble/ui/library_screen.dart';
@@ -27,6 +29,33 @@ const shotsDir = String.fromEnvironment(
   'OWNSEMBLE_SHOTS',
   defaultValue: 'build/screenshots',
 );
+
+/// A player showing a song without opening any audio.
+class _ShownPlayer extends PlayerService {
+  _ShownPlayer(AudioStorage storage)
+    : super(vk: null, muted: true, dataDir: '.', storage: storage);
+
+  Track? _track;
+
+  @override
+  bool get isReady => true;
+  @override
+  Track? get current => _track;
+  @override
+  bool get currentLoaded => true;
+  @override
+  Stream<Duration> get positions => const Stream.empty();
+  @override
+  Duration get position => const Duration(seconds: 42);
+  @override
+  Duration get duration => const Duration(minutes: 3);
+
+  @override
+  Future<PlayTiming> play(Track track) async {
+    _track = track;
+    return const PlayTiming(ok: true, cached: true, resolveMs: 0, toSoundMs: 1);
+  }
+}
 
 Future<void> loadFont(String family, List<String> files) async {
   final loader = FontLoader(family);
@@ -63,6 +92,8 @@ void main() {
     Size size = const Size(1440, 900),
     bool rail = false,
     PlayerDock dock = PlayerDock.side,
+    bool saving = false,
+    double pixelRatio = 1,
   }) async {
     final store = LibraryStore.open(':memory:');
     addTearDown(store.close);
@@ -108,8 +139,23 @@ void main() {
     if (rail) settings.toggleRail();
     settings.dockTo(dock);
 
-    tester.view.physicalSize = size;
-    tester.view.devicePixelRatio = 1;
+    // A song playing while it is saved, and another one downloading.
+    final storage = AudioStorage(dataDir: '.', store: store);
+    final player = saving
+        ? _ShownPlayer(storage)
+        : PlayerService(vk: null, muted: true, dataDir: '.');
+    if (saving) {
+      final tracks = library.visible;
+      await player.play(tracks[0]);
+      storage.noteSaving(tracks[0], Completer<int?>().future);
+      storage.noteProgress(tracks[0], 55, 100);
+      final never = Completer<Uri?>();
+      unawaited(storage.download(tracks[2], () => never.future));
+      storage.noteProgress(tracks[2], 30, 100);
+    }
+
+    tester.view.physicalSize = size * pixelRatio;
+    tester.view.devicePixelRatio = pixelRatio;
     addTearDown(tester.view.reset);
     final boundary = GlobalKey();
     await tester.pumpWidget(
@@ -120,10 +166,7 @@ void main() {
           theme: buildTheme(dark ? OwnColors.dark : OwnColors.light),
           home: LibraryScreen(
             library: library,
-            playback: PlaybackController(
-              player: PlayerService(vk: null, muted: true, dataDir: '.'),
-              recordPlay: (_) {},
-            ),
+            playback: PlaybackController(player: player, recordPlay: (_) {}),
             collections: collections,
             settings: settings,
           ),
@@ -134,7 +177,7 @@ void main() {
     await tester.runAsync(() async {
       final render =
           boundary.currentContext!.findRenderObject()! as RenderRepaintBoundary;
-      final image = await render.toImage();
+      final image = await render.toImage(pixelRatio: pixelRatio);
       final png = await image.toByteData(format: ui.ImageByteFormat.png);
       Directory(shotsDir).createSync(recursive: true);
       File(p.join(shotsDir, '$name.png'))
@@ -152,6 +195,21 @@ void main() {
       dark: true,
       rail: true,
       dock: PlayerDock.bottom,
+    ),
+  );
+  testWidgets(
+    'dark, side panel, saving',
+    (t) => shoot(t, 'dark-saving', dark: true, saving: true, pixelRatio: 2),
+  );
+  testWidgets(
+    'light, bottom bar, saving',
+    (t) => shoot(
+      t,
+      'light-saving',
+      dark: false,
+      saving: true,
+      dock: PlayerDock.bottom,
+      pixelRatio: 2,
     ),
   );
   testWidgets(

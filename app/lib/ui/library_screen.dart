@@ -8,6 +8,7 @@ import '../playback/playback_controller.dart';
 import '../playback/player_service.dart';
 import '../storage/audio_storage.dart';
 import 'collections_controller.dart';
+import 'filling_icon.dart';
 import 'library_controller.dart';
 import 'player_bar.dart';
 import 'shell_settings.dart';
@@ -471,6 +472,8 @@ class _LibraryScreenState extends State<LibraryScreen> {
                     _storage?.stateOf(track) ??
                     (path: track.localPath, pinned: track.pinned),
                 downloading: _storage?.isDownloading(track) ?? false,
+                saving: _storage?.isSaving(track) ?? false,
+                storage: _storage,
                 thumbnails: _settings.thumbnails,
                 isCurrent: track.id == current.data?.id,
                 playing: playing,
@@ -628,6 +631,8 @@ class _SongRow extends StatelessWidget {
     required this.track,
     required this.stored,
     required this.downloading,
+    required this.saving,
+    required this.storage,
     required this.thumbnails,
     required this.isCurrent,
     required this.playing,
@@ -642,6 +647,10 @@ class _SongRow extends StatelessWidget {
   /// How the song's audio is stored now (may be newer than [track]).
   final StoredState stored;
   final bool downloading;
+
+  /// Being saved to the cache while it streams.
+  final bool saving;
+  final AudioStorage? storage;
   final bool thumbnails;
   final bool isCurrent;
 
@@ -658,7 +667,8 @@ class _SongRow extends StatelessWidget {
     // A song gone from VK without stored audio cannot play: shown faded.
     final unplayable = track.isGone && stored.path == null;
     final (icon, meaning) = switch (stored) {
-      _ when downloading => (Icons.downloading, 'Downloading'),
+      _ when downloading => (Icons.download_outlined, 'Downloading'),
+      _ when saving => (Icons.cloud_outlined, 'Saving to the cache'),
       (path: String _, pinned: true) => (
         Icons.download_done,
         'Downloaded: kept until you remove it',
@@ -817,12 +827,22 @@ class _SongRow extends StatelessWidget {
                   const SizedBox(width: 14),
                   Tooltip(
                     message: meaning,
-                    child: Icon(
-                      icon,
-                      key: ValueKey('mark-${track.id}-${icon.codePoint}'),
-                      size: 18,
-                      color: sourceColor(colors, track),
-                    ),
+                    child: storage != null && (downloading || saving)
+                        ? FillingIcon(
+                            key: ValueKey('filling-${track.id}'),
+                            storage: storage!,
+                            track: track,
+                            icon: icon,
+                            filled: downloading ? Icons.download : Icons.cloud,
+                            size: 18,
+                            color: sourceColor(colors, track),
+                          )
+                        : Icon(
+                            icon,
+                            key: ValueKey('mark-${track.id}-${icon.codePoint}'),
+                            size: 18,
+                            color: sourceColor(colors, track),
+                          ),
                   ),
                   const SizedBox(width: 14),
                   SizedBox(

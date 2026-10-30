@@ -160,6 +160,8 @@ ThemeData buildTheme(OwnColors colors) {
       trackHeight: 6,
       activeTrackColor: colors.accent,
       inactiveTrackColor: colors.line,
+      // The saved part of a song on the seek bar.
+      secondaryActiveTrackColor: colors.accent.withValues(alpha: 0.35),
       thumbColor: colors.text,
       overlayColor: colors.accent.withValues(alpha: 0.12),
       thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 8),

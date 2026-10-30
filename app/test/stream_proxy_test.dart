@@ -308,6 +308,20 @@ void main() {
       expect(part().existsSync(), isFalse);
     });
 
+    test('reports how much is saved, out of the whole size', () async {
+      final seen = <(int, int)>[];
+      final stream = proxy.add(
+        Uri.parse('http://127.0.0.1:${upstream.port}/slow'),
+        cacheTo: target(),
+        onSaved: (written, total) => seen.add((written, total)),
+      );
+      await get(stream.localUri);
+      await stream.stored;
+      expect(seen.length, greaterThan(1), reason: 'reported along the way');
+      expect(seen.last, (audio.length, audio.length));
+      expect(seen.first.$1, lessThan(audio.length));
+    });
+
     test('a "bytes=0-" request is saved too', () async {
       final stream = proxy.add(
         Uri.parse('http://127.0.0.1:${upstream.port}/a'),

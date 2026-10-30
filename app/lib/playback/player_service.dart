@@ -258,6 +258,8 @@ class PlayerService {
           link,
           cacheTo: cachePath == null ? null : storage!.fileAt(cachePath),
           alternative: () => vk!.releaseLink(stream),
+          onSaved: (written, total) =>
+              storage?.noteProgress(track, written, total),
         );
         if (cachePath != null) {
           storage!.noteSaving(track, proxied.stored);
@@ -371,6 +373,9 @@ class PlayerService {
     if (_current == null) return;
     await _mpv.setProperty('pause', playing.value ? 'yes' : 'no');
   }
+
+  /// Every position mpv reports while a song plays.
+  Stream<Duration> get positions => _player.stream.position;
 
   /// Position in the loaded song (zero when nothing is loaded).
   Duration get position => _loaded ? _player.state.position : Duration.zero;
