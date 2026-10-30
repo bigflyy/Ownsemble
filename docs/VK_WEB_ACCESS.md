@@ -36,6 +36,13 @@ VK moved to `vk.ru`; `vk.com` redirects there and the session cookies live on
 | `audio.getById`, 5 tracks | 5/5 fresh URL, 0.25 - 0.28 s |
 | `audio.search` | "кино", "kino", "metallica": 20/20 playable each, 0.74 - 1.5 s |
 
+## Session
+
+The login page's session is the `.vk.ru` cookie `remixsid` plus the rest of the
+web client's cookies; `act=web_token` tells whether VK takes them. A dead session
+answers with a type other than `okay`. Access keys change more often than daily
+(seen twice within an hour), which makes a sync report every song as updated.
+
 ## Rules the real sync must follow
 
 - **Paged replies omit blocked tracks but still count them in the offset.**
@@ -46,6 +53,25 @@ VK moved to `vk.ru`; `vk.com` redirects there and the session cookies live on
   track "gone from VK", check it with `audio.getById`.
 - Stream URLs expire; resolve a fresh one with `audio.getById` at play time
   instead of re-syncing.
+
+## Cover images (test account, 2026-10-30)
+
+A cover comes in seven sizes, `photo_34` to `photo_1200`, and each size has its
+own signed link. Two faults, both seen on the same 3 of 108 covers:
+
+- **One size is missing.** A single size answers 404 or 424 every time while the
+  others answer 200, so a client needs more than one size to try.
+- **The image is only on some hosts.** The host in a link changes with every
+  request, and not every host has every image: in about 1 sync in 4 all sizes of
+  those 3 images failed, and the next sync's links worked. A link that failed once
+  is worth replacing, so store the newest link.
+
+## Answers that are not the song (test account, 2026-10-30)
+
+`206` for `Range: bytes=0-` is normal: 305 of 738 whole-file answers were 206 with
+the full file. Two kinds of bad answer on songs that play a moment later: a single
+504 (1 of 738; the same link then answered at once) and a 206 of 1.7 KB followed
+by the end of the connection (twice in about 300 plays; not caught by the probe).
 
 ## Songs that do not play (test account, 2026-10-30)
 
