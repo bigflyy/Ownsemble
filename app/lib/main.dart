@@ -116,6 +116,8 @@ class AppOptions {
 
 Future<void> main(List<String> args) async {
   final mainStartedAt = DateTime.now();
+  // First: the login window's channel below needs the binding.
+  WidgetsFlutterBinding.ensureInitialized();
   final options = AppOptions.parse(args);
   Directory(options.dataDir).createSync(recursive: true);
 
@@ -194,7 +196,6 @@ Future<void> main(List<String> args) async {
     loggedIn = account.loggedIn;
   });
 
-  WidgetsFlutterBinding.ensureInitialized();
   // Far below Flutter's 100 MB default: decoded covers are the app's largest
   // memory use, and a screen of rows needs about 20 of them.
   PaintingBinding.instance.imageCache
