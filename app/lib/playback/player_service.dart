@@ -46,15 +46,28 @@ class PlayTiming {
   final String? error;
 }
 
-/// A short reason for a failed play or download; never contains links.
+/// Shown after "Cannot play: " or "Download failed: ", so it says what
+/// happened in the user's terms. The technical detail, such as the audio
+/// server's HTTP status, is in perf.log. Never contains links.
 String describePlayError(Object error) => switch (error) {
-  TimeoutException() => 'the audio server did not answer in time',
+  AudioServerException(status: 0) =>
+    "VK's audio server did not answer. Check your connection",
+  AudioServerException() =>
+    "VK's server is not delivering this song right now. Try again later",
+  TimeoutException() => "VK's audio server did not answer in time",
   StateError(:final message) => message,
-  VkException(:final message) => message,
+  VkException(transient: true) =>
+    'VK is not answering right now. Try again in a moment',
+  VkException(:final message) => 'VK refused the request ($message)',
   HttpException(:final message) => message,
-  SocketException() => 'no connection',
+  SocketException() => 'no connection to VK',
   _ => error.toString(),
 }.replaceAll(RegExp(r'https?://\S+'), '<url>');
+
+/// Why VK gives no link for a song.
+String noStreamReason(VkStream stream) => stream.restricted
+    ? 'the artist or their representative made it unavailable on VK'
+    : 'VK does not offer this song';
 
 /// mpv options tuned for fast start of single audio files.
 const defaultMpvOptions = <String, String>{
@@ -221,16 +234,17 @@ class PlayerService {
         uri = localFile;
       } else if (track.source == TrackSource.vk && vk != null) {
         // Not cached, or the cached file is gone: stream it.
-        final url = await vk!.resolveStreamUrl(
+        final stream = await vk!.resolveStream(
           track.sourceKey!,
           track.accessKey,
         );
         resolveMs = clock.elapsedMilliseconds;
-        if (url == null) {
+        final link = stream.link;
+        if (link == null) {
           throw StateError(
             track.isGone
                 ? 'gone from VK and not stored'
-                : 'VK has no stream for this song',
+                : noStreamReason(stream),
           );
         }
         final storage = this.storage;
@@ -238,8 +252,9 @@ class PlayerService {
             ? storage.relativePathFor(track)
             : null;
         proxied = _proxy.add(
-          Uri.parse(url),
+          link,
           cacheTo: cachePath == null ? null : storage!.fileAt(cachePath),
+          alternative: () => vk!.releaseLink(stream),
         );
         if (cachePath != null) {
           storage!.noteSaving(track, proxied.stored);
@@ -294,13 +309,7 @@ class PlayerService {
       // The audio server answered with an error page instead of audio.
       proxied?.upstreamFailure.then((status) {
         if (!sound.isCompleted) {
-          sound.completeError(
-            StateError(
-              status == 0
-                  ? 'VK audio server unreachable'
-                  : 'VK audio server error (HTTP $status)',
-            ),
-          );
+          sound.completeError(AudioServerException(status));
         }
       });
       try {
@@ -348,7 +357,7 @@ class PlayerService {
           resolveMs: resolveMs,
           toSoundMs: clock.elapsedMilliseconds,
           error: error is TimeoutException
-              ? 'no sound within 20 s'
+              ? 'no sound after 20 s. The connection may be too slow'
               : describePlayError(error),
         ),
       );

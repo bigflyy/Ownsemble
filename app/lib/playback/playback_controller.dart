@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 
 import '../library/track.dart';
+import '../vk/vk_client.dart';
 import 'play_queue.dart';
 import 'player_service.dart';
 
@@ -88,14 +89,24 @@ class PlaybackController extends ChangeNotifier {
     final vk = player.vk;
     if (storage == null) return 'no storage';
     try {
-      await storage.download(track, () async {
-        if (vk == null || track.sourceKey == null) return null;
-        final url = await vk.resolveStreamUrl(
-          track.sourceKey!,
-          track.accessKey,
-        );
-        return url == null ? null : Uri.parse(url);
-      });
+      VkStream? stream;
+      await storage.download(
+        track,
+        () async {
+          if (vk == null || track.sourceKey == null) return null;
+          final resolved = await vk.resolveStream(
+            track.sourceKey!,
+            track.accessKey,
+          );
+          if (resolved.link == null) {
+            throw StateError(noStreamReason(resolved));
+          }
+          stream = resolved;
+          return resolved.link;
+        },
+        alternative: () async =>
+            stream == null ? null : vk?.releaseLink(stream!),
+      );
       return null;
     } catch (error) {
       return describePlayError(error);

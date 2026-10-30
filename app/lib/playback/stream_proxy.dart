@@ -4,14 +4,36 @@ import 'dart:math';
 
 /// One upstream stream made reachable for mpv through [StreamProxy].
 class ProxiedStream {
-  ProxiedStream._(this.localUri, this._upstream, this._cacheTo);
+  ProxiedStream._(
+    this.localUri,
+    this._upstream,
+    this._cacheTo,
+    this._alternative,
+  );
 
   /// Loopback address mpv opens instead of the real link.
   final Uri localUri;
-  final Uri _upstream;
+  Uri _upstream;
 
   /// Where the whole audio is saved while it streams; null: not saved.
   final File? _cacheTo;
+
+  /// Gets another link to the same audio; null: there is no other.
+  final Future<Uri?> Function()? _alternative;
+  Future<Uri?>? _switching;
+
+  /// Moves this stream to its alternative link, asked for only once, so
+  /// later requests (seeks) use it too. Null when there is none. If asking
+  /// fails the audio server's own failure is the one to report.
+  Future<Uri?> _switchLink() => _switching ??= () async {
+    try {
+      final other = await _alternative?.call();
+      if (other != null) _upstream = other;
+      return other;
+    } catch (_) {
+      return null;
+    }
+  }();
 
   final _firstChunk = Completer<int>();
   final _failure = Completer<int>();
@@ -208,9 +230,14 @@ class StreamProxy {
   final _caching = <ProxiedStream>{};
 
   /// Registers [upstream] and returns the stream mpv should open; the whole
-  /// audio is also saved to [cacheTo] when given. Only the most recent
-  /// streams stay registered.
-  ProxiedStream add(Uri upstream, {File? cacheTo}) {
+  /// audio is also saved to [cacheTo] when given. [alternative] gets another
+  /// link to the same audio for when the audio server answers [upstream]
+  /// with an error. Only the most recent streams stay registered.
+  ProxiedStream add(
+    Uri upstream, {
+    File? cacheTo,
+    Future<Uri?> Function()? alternative,
+  }) {
     final id = List.generate(
       16,
       (_) => _random.nextInt(16).toRadixString(16),
@@ -219,6 +246,7 @@ class StreamProxy {
       Uri.parse('http://127.0.0.1:${_server.port}/s/$id.mp3'),
       upstream,
       cacheTo,
+      alternative,
     );
     _streams[id] = stream;
     while (_streams.length > 4) {
@@ -268,11 +296,17 @@ class StreamProxy {
       saving.complete(false);
     }
     final clock = Stopwatch()..start();
-    final upstream = await _connectUpstream(
-      stream._upstream,
-      range,
-      trace.tries,
-    );
+    var upstream = await _connectUpstream(stream._upstream, range, trace.tries);
+    // The audio server cannot deliver this file. Nothing has reached mpv, so
+    // the other link can take over without mpv noticing.
+    if (upstream != null && upstream.statusCode >= 400) {
+      final other = await stream._switchLink();
+      if (other != null) {
+        trace.tries.add('status ${upstream.statusCode}, trying the other link');
+        await upstream.drain<void>();
+        upstream = await _connectUpstream(other, range, trace.tries);
+      }
+    }
     if (upstream == null) {
       stream._fail(0);
       response.statusCode = HttpStatus.badGateway;

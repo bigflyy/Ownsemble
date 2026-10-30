@@ -110,8 +110,13 @@ class AudioStorage extends ChangeNotifier {
 
   /// Downloads [track]: keeps its audio until the user removes it. A song
   /// already cached is just marked downloaded; otherwise its audio is
-  /// fetched from the link [resolveUrl] gives. Throws when that fails.
-  Future<void> download(Track track, Future<Uri?> Function() resolveUrl) async {
+  /// fetched from the link [resolveUrl] gives, or from the one [alternative]
+  /// gives if the audio server fails on the first. Throws when that fails.
+  Future<void> download(
+    Track track,
+    Future<Uri?> Function() resolveUrl, {
+    Future<Uri?> Function()? alternative,
+  }) async {
     final state = stateOf(track);
     if (state.path != null && fileAt(state.path!).existsSync()) {
       _store.setPinned(track.id, true);
@@ -135,7 +140,14 @@ class AudioStorage extends ChangeNotifier {
       final url = await resolveUrl();
       if (url == null) throw StateError('VK has no stream for this song');
       final path = relativePathFor(track);
-      final bytes = await fetchToFile(url, fileAt(path));
+      int bytes;
+      try {
+        bytes = await fetchToFile(url, fileAt(path));
+      } on AudioServerException {
+        final other = await alternative?.call();
+        if (other == null) rethrow;
+        bytes = await fetchToFile(other, fileAt(path));
+      }
       recordStored(track, path, bytes, pinned: true);
     } finally {
       _downloading.remove(track.id);
@@ -155,6 +167,14 @@ class AudioStorage extends ChangeNotifier {
   }
 }
 
+/// The audio server answered with an error instead of audio, or not at all
+/// ([status] 0).
+class AudioServerException extends HttpException {
+  AudioServerException(this.status) : super('audio server answered $status');
+
+  final int status;
+}
+
 /// Fetches [url] completely into [target] through a `.part` file; returns
 /// the size. Fails on an HTTP error, a stall of 30 s or a short body, and
 /// then leaves no file behind.
@@ -168,7 +188,7 @@ Future<int> fetchToFile(Uri url, File target, {HttpClient? client}) async {
         .timeout(const Duration(seconds: 15));
     if (response.statusCode != HttpStatus.ok) {
       await response.drain<void>();
-      throw HttpException('audio server answered ${response.statusCode}');
+      throw AudioServerException(response.statusCode);
     }
     part.parent.createSync(recursive: true);
     final sink = part.openWrite();

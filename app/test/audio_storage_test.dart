@@ -142,6 +142,9 @@ void main() {
       server.listen((request) async {
         if (request.uri.path == '/missing') {
           request.response.statusCode = HttpStatus.notFound;
+        } else if (request.uri.path == '/broken') {
+          // What VK's audio server answers for a file it cannot deliver.
+          request.response.statusCode = HttpStatus.gatewayTimeout;
         } else {
           request.response.contentLength = audio.length;
           request.response.add(audio);
@@ -180,6 +183,39 @@ void main() {
       expect(storage.isDownloading(songs[4]), isFalse);
       final cacheDir = Directory(p.join(dir.path, 'cache'));
       expect(cacheDir.existsSync() ? cacheDir.listSync() : [], isEmpty);
+    });
+
+    test(
+      'a file the server cannot deliver comes from the alternative',
+      () async {
+        await storage.download(
+          songs[4],
+          () async => Uri.parse('http://127.0.0.1:${server.port}/broken'),
+          alternative: () async =>
+              Uri.parse('http://127.0.0.1:${server.port}/a.mp3'),
+        );
+        final state = storage.stateOf(songs[4]);
+        expect(state.pinned, isTrue);
+        expect(storage.fileAt(state.path!).readAsBytesSync(), audio);
+      },
+    );
+
+    test('with no alternative the server failure is reported', () async {
+      await expectLater(
+        storage.download(
+          songs[4],
+          () async => Uri.parse('http://127.0.0.1:${server.port}/broken'),
+          alternative: () async => null,
+        ),
+        throwsA(
+          isA<AudioServerException>().having(
+            (error) => error.status,
+            'status',
+            HttpStatus.gatewayTimeout,
+          ),
+        ),
+      );
+      expect(storage.stateOf(songs[4]).path, isNull);
     });
 
     test('a song VK has no stream for cannot be downloaded', () async {

@@ -4,7 +4,94 @@ import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ownsemble/vk/vk_client.dart';
 
+/// [VkClient] answering `audio.getById` from a map of song ids to audio.
+class FakeVkAudio extends VkClient {
+  FakeVkAudio(this.songs) : super(const []);
+
+  final Map<String, Map<String, dynamic>> songs;
+
+  @override
+  Future<Object?> call(String method, Map<String, String> params) async {
+    expect(method, 'audio.getById');
+    return [?songs[params['audios']]];
+  }
+}
+
 void main() {
+  group('resolveStream', () {
+    const copy = '660306161_456239124';
+    const release = '-2001514945_75514945';
+    Map<String, dynamic> audio(
+      String url, {
+      int? trackId = 20587574,
+      String? releaseId = release,
+      int? restricted,
+    }) => {
+      'url': url,
+      'track_id': ?trackId,
+      'release_audio_id': ?releaseId,
+      'content_restricted': ?restricted,
+    };
+
+    test('gives the link, the recording and its official release', () async {
+      final vk = FakeVkAudio({'${copy}_key': audio('https://a.invalid/1.mp3')});
+      final stream = await vk.resolveStream(copy, 'key');
+      expect(stream.link, Uri.parse('https://a.invalid/1.mp3'));
+      expect(stream.restricted, isFalse);
+      expect(stream.trackId, 20587574);
+      expect(stream.releaseKey, release);
+    });
+
+    test('a song VK withdrew has no link and is marked restricted', () async {
+      final vk = FakeVkAudio({copy: audio('', restricted: 1)});
+      final stream = await vk.resolveStream(copy, null);
+      expect(stream.link, isNull);
+      expect(stream.restricted, isTrue);
+    });
+
+    test('other restriction codes are not read as withdrawn', () async {
+      final vk = FakeVkAudio({copy: audio('', restricted: 2)});
+      expect((await vk.resolveStream(copy, null)).restricted, isFalse);
+    });
+
+    test('a song VK does not know has no link', () async {
+      final stream = await FakeVkAudio({}).resolveStream(copy, null);
+      expect(stream.link, isNull);
+      expect(stream.restricted, isFalse);
+    });
+
+    test('the release link comes from the official release', () async {
+      final vk = FakeVkAudio({
+        copy: audio('https://a.invalid/broken.mp3'),
+        release: audio('https://b.invalid/good.mp3'),
+      });
+      final stream = await vk.resolveStream(copy, null);
+      expect(
+        await vk.releaseLink(stream),
+        Uri.parse('https://b.invalid/good.mp3'),
+      );
+    });
+
+    test('another recording is never used as the release link', () async {
+      final vk = FakeVkAudio({
+        copy: audio('https://a.invalid/broken.mp3'),
+        release: audio('https://b.invalid/other.mp3', trackId: 1),
+      });
+      final stream = await vk.resolveStream(copy, null);
+      expect(await vk.releaseLink(stream), isNull);
+    });
+
+    test('no release link without a release or a known recording', () async {
+      final vk = FakeVkAudio({
+        'a': audio('https://a.invalid/1.mp3', releaseId: null),
+        'b': audio('https://a.invalid/2.mp3', trackId: null),
+        release: audio('https://b.invalid/good.mp3', trackId: null),
+      });
+      expect(await vk.releaseLink(await vk.resolveStream('a', null)), isNull);
+      expect(await vk.releaseLink(await vk.resolveStream('b', null)), isNull);
+    });
+  });
+
   group('postVkForm', () {
     late HttpServer server;
     final http = HttpClient();

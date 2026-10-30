@@ -251,7 +251,7 @@ void main() {
       var timing = await playByTap(tester, track, label: 'song #$index');
       // On a congested line a stream can take longer than the player's 20 s
       // limit; a user clicks again. Only a second failure is a problem.
-      if (!timing.ok && timing.error == 'no sound within 20 s') {
+      if (!timing.ok && timing.error!.startsWith('no sound after 20 s')) {
         slowRetries++;
         timing = await playByTap(tester, track, label: 'song #$index again');
       }
@@ -270,16 +270,30 @@ void main() {
             timing.error!.contains('gone from VK') &&
             timing.toSoundMs < 5000) {
           goneNotStored++;
-        } else if (timing.error!.contains('no stream') &&
+        } else if (timing.error!.contains('unavailable on VK') &&
             timing.toSoundMs < 5000) {
+          await waitUntil(
+            tester,
+            () => find
+                .textContaining('Cannot play: the artist or their rep')
+                .evaluate()
+                .isNotEmpty,
+            what: 'the message for a withdrawn song',
+          );
           blocked++;
-        } else if (timing.error!.contains('VK audio server') &&
+        } else if (timing.error!.contains("VK's server is not delivering") &&
             timing.toSoundMs < 5000) {
           // VK's own server failed; the app must say so quickly.
           serverErrors++;
         } else {
           problems.add('song #$index: ${timing.error}');
         }
+        continue;
+      }
+      // Checked first: if the test stalls, the song ends and auto-advance
+      // moves on, and the length below would be another song's.
+      if (player.current?.id != track.id || !player.playing.value) {
+        problems.add('song #$index: not the current, playing song');
         continue;
       }
       // mpv estimates a stream's length from its bitrate, so allow 3% (at
@@ -293,9 +307,16 @@ void main() {
         );
         continue;
       }
-      if (player.current?.id != track.id || !player.playing.value) {
-        problems.add('song #$index: not the current, playing song');
-        continue;
+      // That song's own file is broken: a seek must reach the official
+      // release too.
+      if (track.title == 'Вуаля') {
+        await playback.seek(const Duration(seconds: 150));
+        await waitUntil(
+          tester,
+          () => player.position >= const Duration(seconds: 151),
+          timeout: const Duration(seconds: 20),
+          what: 'seek in the song playing from its release',
+        );
       }
       played++;
       playedOk.add(track.id);
@@ -311,6 +332,12 @@ void main() {
     );
     expect(problems, isEmpty);
     if (!quick) expect(goneNotStored, 1);
+    // This copy's file is broken on VK's audio server (always 504): it plays
+    // from the official release, which is the same recording.
+    if (!quick) {
+      final voila = library.all.firstWhere((t) => t.title == 'Вуаля');
+      expect(playedOk, contains(voila.id), reason: 'plays from its release');
+    }
 
     // Clicking the playing song pauses it; clicking it again resumes.
     final song = library.all.firstWhere((t) => t.isCached);
@@ -690,6 +717,21 @@ void main() {
       '${fromDisk.toSoundMs} ms; download kept; cache limit removed '
       '${evicted.length} cached songs, kept downloads and the playing song',
     );
+    // Download of the song whose own file is broken: the audio comes from
+    // the official release, and from disk it is the whole song. Last here:
+    // it applies the 1-byte limit again, removing the song cached above.
+    if (!quick) {
+      final voila = library.all.firstWhere((t) => t.title == 'Вуаля');
+      expect(storedNow(voila), isFalse);
+      expect(await playback.download(voila), isNull);
+      final saved = await playByTap(tester, voila, label: 'downloaded Вуаля');
+      expect(saved.ok && saved.cached, isTrue);
+      expect(
+        (await loadedLength(tester))! - voila.durationSec,
+        inInclusiveRange(-3, 3),
+        reason: 'the downloaded file is the whole song',
+      );
+    }
 
     // Every song that started playing is in the History, newest first.
     final historyStore = LibraryStore.open(p.join(copyDir, 'library.db'));

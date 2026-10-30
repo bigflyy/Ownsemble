@@ -48,6 +48,32 @@ class VkException implements Exception {
   String toString() => 'VkException: $message';
 }
 
+/// What VK offers for one song. Never logged: [link] is a private link.
+class VkStream {
+  const VkStream({
+    this.link,
+    this.restricted = false,
+    this.trackId,
+    this.releaseKey,
+  });
+
+  /// Fresh link to the audio; null when VK gives none.
+  final Uri? link;
+
+  /// VK's `content_restricted` is 1: `audio.getRestrictionPopup` says the
+  /// musician or their representative decided the song is unavailable.
+  /// Other codes were never seen, so nothing is claimed about them.
+  final bool restricted;
+
+  /// VK's id of the recording, the same for every copy of it.
+  final int? trackId;
+
+  /// `audio.getById` key of the official release of this recording. Copies
+  /// in a library are separate files, and a copy's file can be broken on
+  /// VK's audio server while the release plays.
+  final String? releaseKey;
+}
+
 /// Calls one VK web API method and returns its `response` value.
 typedef VkApiCall = Future<Object?> Function(
   String method,
@@ -128,13 +154,29 @@ class VkClient {
     return reply['response'];
   }
 
-  /// Fresh stream URL for one song, or null if VK has none (blocked).
-  Future<String?> resolveStreamUrl(String sourceKey, String? accessKey) async {
+  /// What VK offers for one song right now, with a fresh link.
+  Future<VkStream> resolveStream(String sourceKey, String? accessKey) async {
     final id = accessKey == null ? sourceKey : '${sourceKey}_$accessKey';
     final reply = await call('audio.getById', {'audios': id}) as List;
-    if (reply.isEmpty) return null;
-    final url = (reply.first as Map<String, dynamic>)['url'] as String?;
-    return (url == null || url.isEmpty) ? null : url;
+    if (reply.isEmpty) return const VkStream();
+    final audio = reply.first as Map<String, dynamic>;
+    final url = audio['url'] as String?;
+    return VkStream(
+      link: (url == null || url.isEmpty) ? null : Uri.parse(url),
+      restricted: audio['content_restricted'] == 1,
+      trackId: audio['track_id'] as int?,
+      releaseKey: audio['release_audio_id'] as String?,
+    );
+  }
+
+  /// A link to the official release of [stream]'s recording, or null when it
+  /// has none. Another recording is never accepted: a wrong song is worse
+  /// than a message saying this one cannot play.
+  Future<Uri?> releaseLink(VkStream stream) async {
+    final (releaseKey, trackId) = (stream.releaseKey, stream.trackId);
+    if (releaseKey == null || trackId == null) return null;
+    final release = await resolveStream(releaseKey, null);
+    return release.trackId == trackId ? release.link : null;
   }
 
   /// POSTs a form with the session cookies and decodes the JSON reply.

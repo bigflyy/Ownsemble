@@ -132,6 +132,77 @@ void main() {
     expect(await stream.upstreamFailure, HttpStatus.gatewayTimeout);
   });
 
+  group('a file the audio server cannot deliver', () {
+    Uri broken() => Uri.parse('http://127.0.0.1:${upstream.port}/broken');
+    Uri good() => Uri.parse('http://127.0.0.1:${upstream.port}/a');
+
+    test('plays from the alternative link instead', () async {
+      final logged = proxy.requests.first;
+      final stream = proxy.add(broken(), alternative: () async => good());
+      final (response, body) = await get(stream.localUri);
+      expect(response.statusCode, HttpStatus.ok);
+      expect(body, audio);
+      final log = await logged;
+      expect(log.status, HttpStatus.ok);
+      expect(log.tries, contains('status 504, trying the other link'));
+      await expectLater(
+        stream.upstreamFailure.timeout(const Duration(milliseconds: 50)),
+        throwsA(isA<TimeoutException>()),
+      );
+    });
+
+    test('seeks use the alternative link too, without asking again', () async {
+      var asked = 0;
+      final stream = proxy.add(
+        broken(),
+        alternative: () async {
+          asked++;
+          return good();
+        },
+      );
+      await get(stream.localUri);
+      final (response, body) = await get(
+        stream.localUri,
+        range: 'bytes=99000-',
+      );
+      expect(response.statusCode, HttpStatus.partialContent);
+      expect(body, audio.sublist(99000));
+      expect(asked, 1);
+    });
+
+    test('is saved from the alternative link', () async {
+      final dir = Directory.systemTemp.createTempSync('ownsemble_alt');
+      addTearDown(() => dir.deleteSync(recursive: true));
+      final target = File('${dir.path}/vk_1_2.mp3');
+      final stream = proxy.add(
+        broken(),
+        cacheTo: target,
+        alternative: () async => good(),
+      );
+      await get(stream.localUri);
+      expect(await stream.stored, audio.length);
+      expect(target.readAsBytesSync(), audio);
+    });
+
+    test('is reported when there is no alternative after all', () async {
+      final stream = proxy.add(broken(), alternative: () async => null);
+      final (response, body) = await get(stream.localUri);
+      expect(response.statusCode, HttpStatus.badGateway);
+      expect(body, isEmpty);
+      expect(await stream.upstreamFailure, HttpStatus.gatewayTimeout);
+    });
+
+    test('is reported when asking for the alternative fails', () async {
+      final stream = proxy.add(
+        broken(),
+        alternative: () async => throw StateError('VK is down'),
+      );
+      final (response, _) = await get(stream.localUri);
+      expect(response.statusCode, HttpStatus.badGateway);
+      expect(await stream.upstreamFailure, HttpStatus.gatewayTimeout);
+    });
+  });
+
   test('a dropped connection is tried again before any audio', () async {
     flakyDrops = 2;
     final stream = proxy.add(
