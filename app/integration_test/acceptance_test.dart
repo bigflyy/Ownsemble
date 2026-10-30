@@ -239,7 +239,9 @@ void main() {
     );
     // VK's generic placeholder is never used as a cover.
     for (final track in library.all) {
-      if (track.album == null) expect(track.coverUrl, isNull);
+      if (track.album?.trim().isEmpty ?? true) {
+        expect(track.coverUrl, isNull);
+      }
     }
 
     // The rows at the top really show bitmaps, and a restart still knows the
