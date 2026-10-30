@@ -35,6 +35,10 @@ dart run tool/speed_gate.dart --data-dir ../.local/v2-test/gate \
     --vk-session ../.local/v2-test/session.json
 ```
 
+The Windows icon (`windows/runner/resources/app_icon.ico`) is drawn by
+`dart run tool/make_icon.dart` from the "Overlap" design (add `--png-dir DIR`
+to also get each size as a PNG file).
+
 Screenshots of the main window with made-up songs (real fonts, dark, light,
 bottom bar, narrow), to check the look without opening the app:
 `flutter test tool/screenshots_test.dart --dart-define=OWNSEMBLE_SHOTS=<folder>`.
