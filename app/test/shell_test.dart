@@ -13,6 +13,29 @@ import 'package:ownsemble/ui/sidebar.dart';
 import 'package:ownsemble/ui/shell_settings.dart';
 import 'package:ownsemble/ui/theme.dart';
 
+/// A player that accepts songs without opening any audio, so the panel shows
+/// a song as it does in the app.
+class _StartedPlayer extends PlayerService {
+  _StartedPlayer() : super(vk: null, muted: true, dataDir: '.');
+
+  Track? _track;
+  final played = <int>[];
+
+  @override
+  bool get isReady => true;
+  @override
+  Track? get current => _track;
+  @override
+  bool get currentLoaded => true;
+
+  @override
+  Future<PlayTiming> play(Track track) async {
+    _track = track;
+    played.add(track.id);
+    return const PlayTiming(ok: true, cached: true, resolveMs: 0, toSoundMs: 1);
+  }
+}
+
 void main() {
   late LibraryStore store;
   late CollectionsController collections;
@@ -49,7 +72,12 @@ void main() {
   Future<void> pumpShell(
     WidgetTester tester, {
     Size size = const Size(1400, 900),
+    PlayerService? player,
   }) async {
+    final playback = PlaybackController(
+      player: player ?? PlayerService(vk: null, muted: true, dataDir: '.'),
+      recordPlay: collections.recordPlay,
+    );
     tester.view.physicalSize = size;
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
@@ -60,10 +88,7 @@ void main() {
           theme: buildTheme(settings.dark ? OwnColors.dark : OwnColors.light),
           home: LibraryScreen(
             library: library,
-            playback: PlaybackController(
-              player: PlayerService(vk: null, muted: true, dataDir: '.'),
-              recordPlay: collections.recordPlay,
-            ),
+            playback: playback,
             collections: collections,
             settings: settings,
           ),
@@ -230,6 +255,84 @@ void main() {
     await pumpShell(tester, size: const Size(700, 600));
     expect(find.text('Ownsemble'), findsNothing, reason: 'rail');
     expect(find.byKey(const ValueKey('toggle-rail')), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('right click queues a song; Play next goes first', (
+    tester,
+  ) async {
+    await pumpShell(tester);
+    final playback = tester
+        .widget<LibraryScreen>(find.byType(LibraryScreen))
+        .playback;
+    Future<void> queueSong(int id, String menuKey) async {
+      await tester.tap(
+        find.byKey(ValueKey('song-$id')),
+        buttons: kSecondaryMouseButton,
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(ValueKey(menuKey)));
+      await tester.pumpAndSettle();
+    }
+
+    await queueSong(ids[3], 'menu-add-to-queue');
+    await queueSong(ids[4], 'menu-play-next');
+    expect(
+      [for (final t in playback.queue.queued) t.title],
+      ['Песня 4', 'Песня 3'],
+    );
+  });
+
+  testWidgets('Up next opens from a button, shows queued songs before the '
+      'list and removes them', (tester) async {
+    final songs = library.visible;
+    final playback = PlaybackController(
+      player: _StartedPlayer(),
+      recordPlay: collections.recordPlay,
+    );
+    await playback.playFrom(songs, 0);
+    await playback.addToQueue(songs[3]);
+    await playback.addToQueue(songs[4]);
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: buildTheme(OwnColors.dark),
+        home: Scaffold(
+          body: ListenableBuilder(
+            listenable: playback,
+            builder: (context, _) =>
+                UpNextButton(playback: playback, thumbnails: false),
+          ),
+        ),
+      ),
+    );
+    expect(find.text('2'), findsOneWidget, reason: 'the queued count');
+
+    String titleOf(String key) => tester
+        .widget<Text>(
+          find
+              .descendant(
+                of: find.byKey(ValueKey(key)),
+                matching: find.byType(Text),
+              )
+              .first,
+        )
+        .data!;
+
+    await tester.tap(find.byKey(const ValueKey('up-next-open')));
+    await tester.pumpAndSettle();
+    expect(titleOf('queued-0'), 'Песня 3');
+    expect(titleOf('queued-1'), 'Песня 4');
+    expect(titleOf('up-next-0'), 'Песня 1', reason: 'the list follows');
+
+    await tester.tap(find.byKey(const ValueKey('queued-remove-0')));
+    await tester.pumpAndSettle();
+    expect(titleOf('queued-0'), 'Песня 4', reason: 'the open list updates');
+    expect(find.byKey(const ValueKey('queued-1')), findsNothing);
+
+    await tester.tap(find.byKey(const ValueKey('queued-0')));
+    await tester.pumpAndSettle();
+    expect(playback.queue.current?.title, 'Песня 4', reason: 'plays now');
+    expect(playback.queue.queued, isEmpty);
     expect(tester.takeException(), isNull);
   });
 

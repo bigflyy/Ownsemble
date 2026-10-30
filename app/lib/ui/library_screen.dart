@@ -142,8 +142,9 @@ class _LibraryScreenState extends State<LibraryScreen> {
   /// pauses or resumes it instead of restarting it.
   void _play(int index) => widget.playback.playFrom(library.visible, index);
 
-  /// A song's right-click menu: Download or Remove download, put on top of
-  /// a Stack, and in a Stack, remove this entry.
+  /// A song's right-click menu: Play next and Add to queue, Download or
+  /// Remove download, put on top of a Stack, and in a Stack, remove this
+  /// entry.
   Future<void> _showSongMenu(int index, Offset position) async {
     final track = library.visible[index];
     final entryId = library.entryIdAt(index);
@@ -160,6 +161,17 @@ class _LibraryScreenState extends State<LibraryScreen> {
         position.dy,
       ),
       items: [
+        const PopupMenuItem(
+          key: ValueKey('menu-play-next'),
+          value: 'play-next',
+          child: Text('Play next'),
+        ),
+        const PopupMenuItem(
+          key: ValueKey('menu-add-to-queue'),
+          value: 'add-to-queue',
+          child: Text('Add to queue'),
+        ),
+        if (storage != null || inStack) const PopupMenuDivider(),
         if (storage != null && !downloaded)
           const PopupMenuItem(
             key: ValueKey('menu-download'),
@@ -186,6 +198,10 @@ class _LibraryScreenState extends State<LibraryScreen> {
     );
     if (!mounted || choice == null) return;
     switch (choice) {
+      case 'play-next':
+        await widget.playback.playNext(track);
+      case 'add-to-queue':
+        await widget.playback.addToQueue(track);
       case 'download':
         final messenger = ScaffoldMessenger.of(context);
         final error = await widget.playback.download(track);

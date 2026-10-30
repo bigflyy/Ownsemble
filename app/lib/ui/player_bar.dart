@@ -169,6 +169,10 @@ class DockBar extends StatelessWidget {
                               const SizedBox(width: 12),
                             ],
                             Expanded(child: SongTitle(track: track)),
+                            UpNextButton(
+                              playback: playback,
+                              thumbnails: thumbnails,
+                            ),
                           ],
                         ),
                 ),
@@ -805,7 +809,52 @@ class DownloadButton extends StatelessWidget {
   }
 }
 
-/// The next songs of the list the current one was started from.
+/// Opens Up next from the bottom bar, which has no room for the list; the
+/// count says how many songs are queued.
+class UpNextButton extends StatelessWidget {
+  const UpNextButton({
+    super.key,
+    required this.playback,
+    required this.thumbnails,
+  });
+
+  final PlaybackController playback;
+  final bool thumbnails;
+
+  @override
+  Widget build(BuildContext context) {
+    final count = playback.queue.queued.length;
+    return IconButton(
+      key: const ValueKey('up-next-open'),
+      tooltip: 'Up next',
+      onPressed: () => showDialog<void>(
+        context: context,
+        builder: (context) => Dialog(
+          alignment: Alignment.bottomCenter,
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 380, maxHeight: 460),
+            child: ListenableBuilder(
+              listenable: playback,
+              builder: (context, _) => ListView(
+                shrinkWrap: true,
+                padding: const EdgeInsets.all(16),
+                children: [_UpNext(playback: playback, thumbnails: thumbnails)],
+              ),
+            ),
+          ),
+        ),
+      ),
+      icon: Badge(
+        isLabelVisible: count > 0,
+        label: Text('$count'),
+        child: const Icon(Icons.queue_music),
+      ),
+    );
+  }
+}
+
+/// The songs that play next: first the queued ones, each removable, then
+/// the list the current song was started from.
 class _UpNext extends StatelessWidget {
   const _UpNext({required this.playback, required this.thumbnails});
 
@@ -816,6 +865,7 @@ class _UpNext extends StatelessWidget {
   Widget build(BuildContext context) {
     final colors = OwnColors.of(context);
     final queue = playback.queue;
+    final queued = queue.queued;
     final upcoming = queue.upcoming(5);
     final note = TextStyle(fontSize: 14, color: colors.dim);
     return Column(
@@ -825,19 +875,36 @@ class _UpNext extends StatelessWidget {
           padding: EdgeInsets.fromLTRB(8, 0, 8, 6),
           child: SectionLabel('Up next'),
         ),
+        for (final (i, track) in queued.indexed)
+          _UpNextRow(
+            key: ValueKey('queued-$i'),
+            track: track,
+            thumbnails: thumbnails,
+            onTap: () => playback.playQueued(i),
+            onRemove: () => playback.removeQueued(i),
+            removeKey: ValueKey('queued-remove-$i'),
+          ),
+        if (queued.isNotEmpty) const SizedBox(height: 8),
         if (queue.shuffle)
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 8),
             child: Text(
-              'Shuffle is on: the next song is picked at random from the '
-              'list you started.',
+              queued.isEmpty
+                  ? 'Shuffle is on: the next song is picked at random from '
+                        'the list you started.'
+                  : 'Then shuffle picks at random from the list you started.',
               style: note,
             ),
           )
-        else if (upcoming.isEmpty)
+        else if (upcoming.isEmpty && queued.isEmpty)
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 8),
-            child: Text('Nothing after this song.', style: note),
+            child: Text(
+              queue.repeat == Repeat.one
+                  ? 'This song plays again.'
+                  : 'Nothing after this song.',
+              style: note,
+            ),
           )
         else
           for (final (i, index) in upcoming.indexed)
@@ -858,11 +925,17 @@ class _UpNextRow extends StatelessWidget {
     required this.track,
     required this.thumbnails,
     required this.onTap,
+    this.onRemove,
+    this.removeKey,
   });
 
   final Track track;
   final bool thumbnails;
   final VoidCallback onTap;
+
+  /// Takes a queued song out of the queue; null for songs of the list.
+  final VoidCallback? onRemove;
+  final Key? removeKey;
 
   @override
   Widget build(BuildContext context) {
@@ -904,6 +977,15 @@ class _UpNextRow extends StatelessWidget {
               formatDuration(Duration(seconds: track.durationSec)),
               style: TextStyle(fontSize: 13, color: colors.dim2),
             ),
+            if (onRemove != null)
+              IconButton(
+                key: removeKey,
+                tooltip: 'Remove from queue',
+                visualDensity: VisualDensity.compact,
+                iconSize: 18,
+                onPressed: onRemove,
+                icon: const Icon(Icons.close),
+              ),
           ],
         ),
       ),

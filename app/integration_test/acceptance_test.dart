@@ -533,6 +533,92 @@ void main() {
     await tester.pump();
     expect(playback.shuffle, isFalse);
 
+    // Play next and Add to queue, by right click on real rows: Up next shows
+    // the queued songs, one can be removed, the others play in order before
+    // the list goes on. Neighbours of the stream song are known to play.
+    await playByTap(tester, list[i - 1], label: 'before the queue');
+    Future<void> queueByMenu(Track track, String menuKey) async {
+      library.scroll.jumpTo(
+        (list.indexOf(track) * rowHeight).clamp(
+          0,
+          library.scroll.position.maxScrollExtent,
+        ),
+      );
+      await tester.pump();
+      await tester.tap(
+        find.byKey(ValueKey('song-${track.id}')),
+        buttons: kSecondaryMouseButton,
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(ValueKey(menuKey)));
+      await tester.pumpAndSettle();
+    }
+
+    final queuedSong = list.firstWhere(
+      (t) => playedOk.contains(t.id) && !{list[i - 1], list[i]}.contains(t),
+    );
+    final removedSong = list.lastWhere((t) => playedOk.contains(t.id));
+    await queueByMenu(queuedSong, 'menu-add-to-queue');
+    await queueByMenu(removedSong, 'menu-play-next');
+    expect(player.current?.id, list[i - 1].id, reason: 'playing song goes on');
+    expect(
+      [for (final t in playback.queue.queued) t.id],
+      [removedSong.id, queuedSong.id],
+    );
+    // Up next in the bottom bar (the layout saved in `feel`): a button with
+    // the count opens the list, and a song can be removed from it.
+    expect(playback.queue.queued, hasLength(2));
+    expect(
+      find.descendant(
+        of: find.byKey(const ValueKey('up-next-open')),
+        matching: find.text('2'),
+      ),
+      findsOneWidget,
+    );
+    await tester.tap(find.byKey(const ValueKey('up-next-open')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('queued-1')), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('queued-remove-0')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('queued-1')), findsNothing);
+    expect(find.byKey(const ValueKey('queued-0')), findsOneWidget);
+    await tester.tapAt(const Offset(10, 10));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('queued-0')), findsNothing);
+
+    // The side panel shows the same queue with a real song on screen.
+    await tester.tap(find.byKey(const ValueKey('dock-side')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('queued-0')), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('dock-bottom')));
+    await tester.pumpAndSettle();
+
+    ended = player.timings.first;
+    await playback.seek(player.duration - const Duration(seconds: 2));
+    expect(
+      (await waitForTiming(
+        ended,
+        'queued song after the current one ends',
+        timeout: const Duration(seconds: 90),
+      )).ok,
+      isTrue,
+    );
+    expect(player.current?.id, queuedSong.id, reason: 'queued song plays');
+    expect(playback.queue.queued, isEmpty);
+    ended = player.timings.first;
+    await playback.seek(player.duration - const Duration(seconds: 2));
+    expect(
+      (await waitForTiming(
+        ended,
+        'the list after the queue',
+        timeout: const Duration(seconds: 90),
+      )).ok,
+      isTrue,
+    );
+    expect(player.current?.id, list[i].id, reason: 'the list goes on');
+    // ignore: avoid_print
+    print('Queue: Play next, Add to queue, remove, order all ok');
+
     // The time label switches between total and remaining time. (The song
     // shuffle picked may be one VK blocks; then a known good one is used.)
     if (!player.currentLoaded) {
