@@ -806,6 +806,14 @@ void main() {
     await waitUntil(tester, () => !player.playing.value, what: 'Space pause');
     await tester.sendKeyEvent(LogicalKeyboardKey.space);
     await waitUntil(tester, () => player.playing.value, what: 'Space resume');
+    // In the search box Space is a character and never pauses the song.
+    await tester.tap(find.byType(TextField));
+    await tester.pump();
+    await tester.sendKeyEvent(LogicalKeyboardKey.space);
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(player.playing.value, isTrue, reason: 'Space in the search box');
+    FocusManager.instance.primaryFocus?.unfocus();
+    await tester.pump();
 
     // Stored audio: a streamed song is saved while it plays and then plays
     // from disk; Download keeps a song; the cache limit removes cached

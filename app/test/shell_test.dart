@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ownsemble/library/library_store.dart';
 import 'package:ownsemble/library/track.dart';
@@ -23,6 +24,7 @@ class _StartedPlayer extends PlayerService {
 
   Track? _track;
   final played = <int>[];
+  var pauseToggles = 0;
 
   @override
   bool get isReady => true;
@@ -43,6 +45,9 @@ class _StartedPlayer extends PlayerService {
     played.add(track.id);
     return const PlayTiming(ok: true, cached: true, resolveMs: 0, toSoundMs: 1);
   }
+
+  @override
+  Future<void> playOrPause() async => pauseToggles++;
 }
 
 void main() {
@@ -445,6 +450,35 @@ void main() {
       await tester.pump();
       expect(find.byKey(ValueKey('filling-${song.id}')), findsNothing);
     });
+  });
+
+  testWidgets('Space types in text fields and plays or pauses elsewhere', (
+    tester,
+  ) async {
+    final player = _StartedPlayer();
+    await pumpShell(tester, player: player);
+
+    // The search box has the focus when the app opens.
+    await tester.sendKeyEvent(LogicalKeyboardKey.space);
+    expect(player.pauseToggles, 0, reason: 'typing in the search box');
+
+    await tester.tap(find.byKey(ValueKey('song-${ids[1]}')));
+    await tester.pump();
+    FocusManager.instance.primaryFocus?.unfocus();
+    await tester.pump();
+    await tester.sendKeyEvent(LogicalKeyboardKey.space);
+    expect(player.pauseToggles, 1, reason: 'no text field has the focus');
+
+    // Any other text field counts too: the New Stack dialog.
+    await tester.tap(
+      find.byKey(ValueKey('song-${ids[1]}')),
+      buttons: kSecondaryMouseButton,
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('new-stack')));
+    await tester.pumpAndSettle();
+    await tester.sendKeyEvent(LogicalKeyboardKey.space);
+    expect(player.pauseToggles, 1, reason: 'typing a Stack name');
   });
 
   testWidgets('messages never cover the player or the sidebar', (tester) async {

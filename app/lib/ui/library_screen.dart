@@ -125,9 +125,12 @@ class _LibraryScreenState extends State<LibraryScreen> {
     return false;
   }
 
-  /// Whether the keyboard focus is in a text field.
+  /// Whether the keyboard focus is in a text field. The focus belongs to a
+  /// Focus widget inside the EditableText, so the field is an ancestor.
   bool get _typing =>
-      FocusManager.instance.primaryFocus?.context?.widget is EditableText;
+      FocusManager.instance.primaryFocus?.context
+          ?.findAncestorWidgetOfExactType<EditableText>() !=
+      null;
 
   @override
   void dispose() {
