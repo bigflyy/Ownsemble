@@ -72,8 +72,43 @@ class StreamProxy {
   final _streams = <String, ProxiedStream>{};
   final _random = Random.secure();
   final HttpClient _http = HttpClient()
-    ..connectionTimeout = const Duration(seconds: 10)
+    ..connectionTimeout = const Duration(seconds: 6)
     ..idleTimeout = const Duration(seconds: 30);
+
+  /// Longest wait for the audio server's answer (headers), over all tries.
+  /// The player gives a song 20 s to make a sound, so this leaves it a
+  /// little time to start playing.
+  static const _upstreamBudget = Duration(seconds: 17);
+
+  /// Requests [uri] (with [range], if any) and returns the answer, or null
+  /// when no answer came. On a lossy line a connection may drop or stall
+  /// before the server answers, and a fresh one often goes through at once,
+  /// so a failed try is repeated (up to 4 tries) while [_upstreamBudget]
+  /// lasts. Nothing has reached mpv before the answer, so a new try is safe.
+  Future<HttpClientResponse?> _connectUpstream(Uri uri, String? range) async {
+    final clock = Stopwatch()..start();
+    for (var attempt = 1; attempt <= 4; attempt++) {
+      final left = _upstreamBudget - clock.elapsed;
+      if (left <= Duration.zero) break;
+      HttpClientRequest? outgoing;
+      try {
+        outgoing = await _http.getUrl(uri).timeout(left);
+        if (range != null) outgoing.headers.set(HttpHeaders.rangeHeader, range);
+        // One try waits at most 8 s for the answer, so a stalled one still
+        // leaves time for another.
+        final limit = _upstreamBudget - clock.elapsed;
+        return await outgoing.close().timeout(
+          limit < const Duration(seconds: 8)
+              ? limit
+              : const Duration(seconds: 8),
+        );
+      } catch (_) {
+        outgoing?.abort();
+        await Future<void>.delayed(const Duration(milliseconds: 200));
+      }
+    }
+    return null;
+  }
 
   /// Saves still running, including those of streams no longer registered.
   final _caching = <ProxiedStream>{};
@@ -131,12 +166,8 @@ class StreamProxy {
       saving.complete(false);
     }
     final clock = Stopwatch()..start();
-    HttpClientResponse upstream;
-    try {
-      final outgoing = await _http.getUrl(stream._upstream);
-      if (range != null) outgoing.headers.set(HttpHeaders.rangeHeader, range);
-      upstream = await outgoing.close().timeout(const Duration(seconds: 15));
-    } catch (_) {
+    final upstream = await _connectUpstream(stream._upstream, range);
+    if (upstream == null) {
       stream._fail(0);
       response.statusCode = HttpStatus.badGateway;
       await response.close();

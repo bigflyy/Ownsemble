@@ -9,6 +9,8 @@ void main() {
   late StreamProxy proxy;
   final audio = List<int>.generate(100000, (i) => i % 251);
   final client = HttpClient();
+  // How many more requests to /flaky drop their connection.
+  var flakyDrops = 0;
 
   setUp(() async {
     // Stand-in for the CDN: serves [audio] with Range support.
@@ -38,6 +40,13 @@ void main() {
         );
         socket.add(audio.sublist(0, 50000));
         await socket.flush();
+        socket.destroy();
+        return;
+      }
+      if (request.uri.path == '/flaky' && flakyDrops > 0) {
+        // A lossy line: the connection drops before any answer arrives.
+        flakyDrops--;
+        final socket = await request.response.detachSocket(writeHeaders: false);
         socket.destroy();
         return;
       }
@@ -121,6 +130,17 @@ void main() {
     expect(response.statusCode, HttpStatus.badGateway);
     expect(body, isEmpty);
     expect(await stream.upstreamFailure, HttpStatus.gatewayTimeout);
+  });
+
+  test('a dropped connection is tried again before any audio', () async {
+    flakyDrops = 2;
+    final stream = proxy.add(
+      Uri.parse('http://127.0.0.1:${upstream.port}/flaky'),
+    );
+    final (response, body) = await get(stream.localUri);
+    expect(response.statusCode, HttpStatus.ok);
+    expect(body, audio);
+    expect(flakyDrops, 0);
   });
 
   test('upstream failure becomes a bad gateway', () async {
