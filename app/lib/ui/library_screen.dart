@@ -8,6 +8,7 @@ import '../playback/playback_controller.dart';
 import '../playback/player_service.dart';
 import '../storage/audio_storage.dart';
 import 'collections_controller.dart';
+import 'cover_tile.dart';
 import 'filling_icon.dart';
 import 'library_controller.dart';
 import 'player_bar.dart';

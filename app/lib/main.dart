@@ -10,14 +10,22 @@ import 'library/library_store.dart';
 import 'playback/playback_controller.dart';
 import 'playback/player_service.dart';
 import 'storage/audio_storage.dart';
+import 'storage/cover_store.dart';
 import 'sync/background_sync.dart';
 import 'ui/collections_controller.dart';
+import 'ui/cover_tile.dart';
 import 'ui/library_controller.dart';
 import 'ui/library_screen.dart';
 import 'ui/shell_settings.dart';
 import 'ui/sync_controller.dart';
 import 'ui/theme.dart';
 import 'vk/vk_client.dart';
+
+/// How many decoded covers stay in memory.
+const maxDecodedCovers = 600;
+
+/// How many bytes of decoded covers stay in memory.
+const maxDecodedCoverBytes = 24 * 1024 * 1024;
 
 /// Command-line options of the app.
 class AppOptions {
@@ -110,6 +118,8 @@ Future<void> main(List<String> args) async {
   // The store stays open while the app runs, for History, Stacks, stored
   // audio and settings; the sync uses its own connection.
   final storage = AudioStorage(dataDir: options.dataDir, store: store);
+  final covers = CoverStore(dataDir: options.dataDir);
+  unawaited(covers.load());
   final collections = CollectionsController(store);
   final settings = ShellSettings(
     read: store.readSetting,
@@ -156,6 +166,11 @@ Future<void> main(List<String> args) async {
   );
 
   WidgetsFlutterBinding.ensureInitialized();
+  // Far below Flutter's 100 MB default: decoded covers are the app's largest
+  // memory use, and a screen of rows needs about 20 of them.
+  PaintingBinding.instance.imageCache
+    ..maximumSize = maxDecodedCovers
+    ..maximumSizeBytes = maxDecodedCoverBytes;
   WidgetsBinding.instance.addPostFrameCallback((_) {
     unawaited(
       _afterFirstFrame(
@@ -167,11 +182,13 @@ Future<void> main(List<String> args) async {
         playback: playback,
         vk: vk,
         sync: sync,
+        covers: covers,
       ),
     );
   });
   runApp(
     OwnsembleApp(
+      covers: covers,
       library: library,
       playback: playback,
       sync: sync,
@@ -192,6 +209,7 @@ Future<void> _afterFirstFrame({
   required PlaybackController playback,
   required VkClient? vk,
   required SyncController sync,
+  required CoverStore covers,
 }) async {
   final firstFrameAt = DateTime.now();
   if (options.metricsFile != null) {
@@ -224,6 +242,7 @@ Future<void> _afterFirstFrame({
       player: player,
       playback: playback,
       vk: vk,
+      covers: covers,
     ).run(parts: options.benchParts);
     File(options.benchFile!)
         .writeAsStringSync(const JsonEncoder.withIndent('  ').convert(result));
@@ -260,9 +279,11 @@ class OwnsembleApp extends StatelessWidget {
     required this.playback,
     required this.collections,
     required this.settings,
+    required this.covers,
     this.sync,
   });
 
+  final CoverStore covers;
   final LibraryController library;
   final PlaybackController playback;
   final CollectionsController collections;
@@ -271,18 +292,21 @@ class OwnsembleApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return ListenableBuilder(
-      listenable: settings,
-      builder: (context, _) => MaterialApp(
-        title: 'Ownsemble v2',
-        debugShowCheckedModeBanner: false,
-        theme: buildTheme(settings.dark ? OwnColors.dark : OwnColors.light),
-        home: LibraryScreen(
-          library: library,
-          playback: playback,
-          sync: sync,
-          collections: collections,
-          settings: settings,
+    return CoverScope(
+      store: covers,
+      child: ListenableBuilder(
+        listenable: settings,
+        builder: (context, _) => MaterialApp(
+          title: 'Ownsemble v2',
+          debugShowCheckedModeBanner: false,
+          theme: buildTheme(settings.dark ? OwnColors.dark : OwnColors.light),
+          home: LibraryScreen(
+            library: library,
+            playback: playback,
+            sync: sync,
+            collections: collections,
+            settings: settings,
+          ),
         ),
       ),
     );

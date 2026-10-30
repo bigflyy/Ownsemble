@@ -5,6 +5,7 @@ import '../playback/play_queue.dart';
 import '../playback/playback_controller.dart';
 import '../storage/audio_storage.dart';
 import 'collections_controller.dart';
+import 'cover_tile.dart';
 import 'filling_icon.dart';
 import 'theme.dart';
 
@@ -331,47 +332,6 @@ class SongTitle extends StatelessWidget {
 /// The color of [track]'s source (source 1 is VK).
 Color sourceColor(OwnColors colors, Track track) =>
     track.source == TrackSource.vk ? colors.source1 : colors.source3;
-
-/// A song's tile: its cover later (item 6); for now the design's stand-in
-/// tile from the album name, else the artist.
-class TrackTile extends StatelessWidget {
-  const TrackTile({
-    super.key,
-    required this.track,
-    required this.size,
-    required this.radius,
-  });
-
-  final Track track;
-  final double size;
-  final double radius;
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = OwnColors.of(context);
-    final name = (track.album?.trim().isNotEmpty ?? false)
-        ? track.album!
-        : track.artist;
-    final tile = standInTile(name, dark: colors.isDark);
-    return Container(
-      width: size,
-      height: size,
-      alignment: Alignment.center,
-      decoration: BoxDecoration(
-        color: tile.bg,
-        borderRadius: BorderRadius.circular(radius),
-      ),
-      child: Text(
-        tile.initials,
-        style: TextStyle(
-          color: tile.fg,
-          fontSize: size * 0.3,
-          fontWeight: FontWeight.w600,
-        ),
-      ),
-    );
-  }
-}
 
 /// Shuffle, previous, play or pause, next, repeat.
 class TransportRow extends StatelessWidget {

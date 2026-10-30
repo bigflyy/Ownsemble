@@ -12,6 +12,8 @@ import '../library/track.dart';
 import '../playback/playback_controller.dart';
 import '../playback/player_service.dart';
 import '../playback/stream_proxy.dart' show ProxyRequestLog;
+import '../storage/cover_store.dart';
+import '../ui/cover_tile.dart';
 import '../ui/library_controller.dart';
 import '../vk/vk_client.dart';
 
@@ -26,6 +28,7 @@ class SpeedBench {
     required this.player,
     required this.playback,
     required this.vk,
+    required this.covers,
   });
 
   /// Volume the speed gate saves in one run and expects back in the next.
@@ -35,6 +38,7 @@ class SpeedBench {
   final PlayerService player;
   final PlaybackController playback;
   final VkClient? vk;
+  final CoverStore covers;
 
   final _frames = <FrameTiming>[];
 
@@ -50,6 +54,7 @@ class SpeedBench {
     final benches = <String, Future<Map<String, Object?>> Function()>{
       'search': _searchBench,
       'scroll': _scrollBench,
+      'scrollCovers': _scrollCoversBench,
       'playCached': _cachedPlayBench,
       'playStream': _streamPlayBench,
       'seekStream': _streamSeekBench,
@@ -182,56 +187,106 @@ class SpeedBench {
     library.searchText.clear();
     final results = <String, Object?>{};
     for (final pixelsPerSecond in [1500, 6000, 20000]) {
-      library.scroll.jumpTo(0);
-      await _settle();
-      _frames.clear();
-      final startUs = Timeline.now;
-      final done = Completer<void>();
-      const seconds = 4;
-      void onFrame(Duration _) {
-        final elapsed = (Timeline.now - startUs) / 1e6;
-        final position = library.scroll.position;
-        final target = min(elapsed * pixelsPerSecond, position.maxScrollExtent);
-        position.jumpTo(target);
-        if (elapsed >= seconds || target >= position.maxScrollExtent) {
-          done.complete();
-        } else {
-          SchedulerBinding.instance.scheduleFrameCallback(onFrame);
-        }
-      }
-
-      SchedulerBinding.instance.scheduleFrameCallback(onFrame);
-      SchedulerBinding.instance.scheduleFrame();
-      await done.future;
-      final endUs = Timeline.now;
-      await _settle();
-      final frames = [
-        for (final frame in _frames)
-          if (frame.timestampInMicroseconds(FramePhase.buildStart) >= startUs &&
-              frame.timestampInMicroseconds(FramePhase.buildStart) <= endUs)
-            frame,
-      ];
-      const budgetMs = 1000 / 60;
-      final buildMs = [
-        for (final f in frames) f.buildDuration.inMicroseconds / 1000,
-      ];
-      final rasterMs = [
-        for (final f in frames) f.rasterDuration.inMicroseconds / 1000,
-      ];
-      results['${pixelsPerSecond}pxPerSec'] = {
-        'seconds': (endUs - startUs) / 1e6,
-        'frames': frames.length,
-        'fps': frames.length / ((endUs - startUs) / 1e6),
-        'buildMs': _stats(buildMs),
-        'rasterMs': _stats(rasterMs),
-        'framesOver60fpsBudget': [
-          for (var i = 0; i < frames.length; i++)
-            if (buildMs[i] > budgetMs || rasterMs[i] > budgetMs) i,
-        ].length,
-      };
+      results['${pixelsPerSecond}pxPerSec'] = await _scrollRun(
+        pixelsPerSecond,
+        seconds: 4,
+      );
     }
     library.scroll.jumpTo(0);
     return results;
+  }
+
+  /// The hard case for covers: a speed at which every row stays long enough
+  /// to be decoded, for long enough to turn over the whole image cache. At
+  /// 20000 px/s rows leave before their covers load, so that speed says
+  /// nothing about decoding.
+  Future<Map<String, Object?>> _scrollCoversBench() async {
+    library.searchText.clear();
+    final imageCache = PaintingBinding.instance.imageCache;
+    final run = await _scrollRun(4000, seconds: 20);
+    library.scroll.jumpTo(library.scroll.position.maxScrollExtent / 2);
+    await Future<void>.delayed(const Duration(seconds: 1));
+    await _settle();
+    final shown = _coversOnScreen();
+    library.scroll.jumpTo(0);
+    return {
+      'at4000pxPerSec': run,
+      'coversOnDisk': covers.storedCount,
+      'coversShownAtRest': shown,
+      'imageCacheCount': imageCache.currentSize,
+      'imageCacheMB': imageCache.currentSizeBytes / (1024 * 1024),
+      'peakWorkingSetMB': ProcessInfo.maxRss / (1024 * 1024),
+    };
+  }
+
+  /// How many images are on screen and decoded.
+  int _coversOnScreen() {
+    var count = 0;
+    void visit(Element element) {
+      final widget = element.widget;
+      if (widget is RawImage && widget.image != null) count++;
+      element.visitChildren(visit);
+    }
+
+    WidgetsBinding.instance.rootElement?.visitChildren(visit);
+    return count;
+  }
+
+  /// Scrolls at [pixelsPerSecond] for [seconds] and reports the frames and
+  /// how many covers were decoded meanwhile.
+  Future<Map<String, Object?>> _scrollRun(
+    int pixelsPerSecond, {
+    required int seconds,
+  }) async {
+    library.scroll.jumpTo(0);
+    await _settle();
+    _frames.clear();
+    final decodesBefore = CoverFileImage.decodeCount;
+    final startUs = Timeline.now;
+    final done = Completer<void>();
+    void onFrame(Duration _) {
+      final elapsed = (Timeline.now - startUs) / 1e6;
+      final position = library.scroll.position;
+      final target = min(elapsed * pixelsPerSecond, position.maxScrollExtent);
+      position.jumpTo(target);
+      if (elapsed >= seconds || target >= position.maxScrollExtent) {
+        done.complete();
+      } else {
+        SchedulerBinding.instance.scheduleFrameCallback(onFrame);
+      }
+    }
+
+    SchedulerBinding.instance.scheduleFrameCallback(onFrame);
+    SchedulerBinding.instance.scheduleFrame();
+    await done.future;
+    final endUs = Timeline.now;
+    final decoded = CoverFileImage.decodeCount - decodesBefore;
+    await _settle();
+    final frames = [
+      for (final frame in _frames)
+        if (frame.timestampInMicroseconds(FramePhase.buildStart) >= startUs &&
+            frame.timestampInMicroseconds(FramePhase.buildStart) <= endUs)
+          frame,
+    ];
+    const budgetMs = 1000 / 60;
+    final buildMs = [
+      for (final f in frames) f.buildDuration.inMicroseconds / 1000,
+    ];
+    final rasterMs = [
+      for (final f in frames) f.rasterDuration.inMicroseconds / 1000,
+    ];
+    return {
+      'seconds': (endUs - startUs) / 1e6,
+      'frames': frames.length,
+      'fps': frames.length / ((endUs - startUs) / 1e6),
+      'coversDecoded': decoded,
+      'buildMs': _stats(buildMs),
+      'rasterMs': _stats(rasterMs),
+      'framesOver60fpsBudget': [
+        for (var i = 0; i < frames.length; i++)
+          if (buildMs[i] > budgetMs || rasterMs[i] > budgetMs) i,
+      ].length,
+    };
   }
 
   /// Plays cached songs and confirms each one keeps decoding audio.
