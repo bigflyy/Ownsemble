@@ -653,6 +653,13 @@ void main() {
     // Play next and Add to queue, by right click on real rows: Up next shows
     // the queued songs, one can be removed, the others play in order before
     // the list goes on. Neighbours of the stream song are known to play.
+    // Shuffle may have landed on that song, and a click on the playing song
+    // pauses it instead of giving a play result.
+    if (player.current?.id == list[i - 1].id) {
+      // ignore: avoid_print
+      print('shuffle landed on the song before the queue, moving off it');
+      await playByTap(tester, list[i], label: 'away from that song');
+    }
     await playByTap(tester, list[i - 1], label: 'before the queue');
     Future<void> queueByMenu(Track track, String menuKey) async {
       library.scroll.jumpTo(
@@ -707,23 +714,6 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('dock-side')));
     await tester.pumpAndSettle();
     expect(find.byKey(const ValueKey('queued-0')), findsOneWidget);
-    // The panel downloads and shows the large cover of the song playing.
-    final panelSong = player.current!;
-    if (panelSong.coverLargeUrl != null &&
-        !missingCovers.any((t) => t.id == panelSong.id)) {
-      await waitUntil(
-        tester,
-        () => shownCovers(220) > 0,
-        timeout: const Duration(seconds: 20),
-        what: 'the large cover in the side panel',
-      );
-      expect(covers.storedPath(panelSong.coverLargeUrl!), isNotNull);
-      // ignore: avoid_print
-      print('side panel: large cover shown');
-    } else {
-      // ignore: avoid_print
-      print('side panel: song has no large cover, not checked');
-    }
     await tester.tap(find.byKey(const ValueKey('dock-bottom')));
     await tester.pumpAndSettle();
 
@@ -1036,6 +1026,40 @@ void main() {
     }
 
     // Every song that started playing is in the History, newest first.
+    // The side panel downloads and shows the large cover of the song playing.
+    final withLargeCover = library.all.firstWhere(
+      (t) =>
+          t.coverLargeUrl != null &&
+          t.id != player.current?.id &&
+          playedOk.contains(t.id) &&
+          !missingCovers.any((missing) => missing.id == t.id),
+    );
+    await playByTap(tester, withLargeCover, label: 'song with a large cover');
+    await tester.tap(find.byKey(const ValueKey('dock-side')));
+    await tester.pumpAndSettle();
+    // The small cover stands in until the large one is there, so only a
+    // bitmap wider than the small cover proves the large one shows.
+    await waitUntil(
+      tester,
+      () =>
+          covers.storedPath(withLargeCover.coverLargeUrl!) != null &&
+          find
+              .byWidgetPredicate(
+                (widget) =>
+                    widget is RawImage &&
+                    widget.width == 220 &&
+                    (widget.image?.width ?? 0) > TrackTile.smallCoverPixels,
+              )
+              .evaluate()
+              .isNotEmpty,
+      timeout: const Duration(seconds: 20),
+      what: 'the large cover in the side panel',
+    );
+    // ignore: avoid_print
+    print('side panel: large cover downloaded and shown');
+    await tester.tap(find.byKey(const ValueKey('dock-bottom')));
+    await tester.pumpAndSettle();
+
     final historyStore = LibraryStore.open(p.join(copyDir, 'library.db'));
     await seekListening.cancel();
     expect(
