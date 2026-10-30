@@ -48,8 +48,9 @@ only 15 songs (for iterating, never for a handover), `OWNSEMBLE_MPV_LOG=true`
 writes mpv.log into the copied data folder.
 
 App options: `--data-dir DIR`, `--vk-session FILE`, `--muted`,
-`--metrics FILE` (startup timings), `--bench FILE [--bench-parts a,b]`
-(parts: search, scroll, playCached, playStream, seekStream),
+`--metrics FILE` (startup timings), `--bench FILE [--bench-parts a,b]
+[--bench-volume N]` (parts: search, scroll, scrollCovers, playCached,
+playStream, seekStream; volume under mute, default 100, never saved),
 `--mpv name=value` (mpv option override), `--mpv-log` (mpv log without links),
 `--no-stream-cache` (do not save streamed songs; the speed gate uses it).
 Bench parts `saveVolume` and `savedVolume` run only when named: the speed gate
