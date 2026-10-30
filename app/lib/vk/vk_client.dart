@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -37,8 +38,12 @@ class SessionCookie {
 
 /// Raised when VK answers with an error. Never contains tokens or URLs.
 class VkException implements Exception {
-  VkException(this.message);
+  VkException(this.message, {this.transient = false});
   final String message;
+
+  /// Whether the same request may work when sent again: a stalled
+  /// connection or an overloaded VK server, not a refusal.
+  final bool transient;
   @override
   String toString() => 'VkException: $message';
 }
@@ -54,14 +59,24 @@ typedef VkApiCall = Future<Object?> Function(
 /// Gets a short-lived web token from the session cookies and refreshes it
 /// shortly before it expires.
 class VkClient {
-  VkClient(this._cookies)
-    : _http = HttpClient()
-        ..userAgent = _userAgent
-        ..connectionTimeout = const Duration(seconds: 10);
+  /// [requestTimeout] is the longest wait for one whole request and
+  /// [silenceTimeout] the longest wait with no bytes from VK. A click needs
+  /// the short defaults; the background sync passes longer limits so a slow
+  /// but working line can still deliver a big page.
+  VkClient(
+    this._cookies, {
+    this.requestTimeout = const Duration(seconds: 15),
+    this.silenceTimeout = const Duration(seconds: 15),
+  }) : _http = HttpClient()
+         ..userAgent = _userAgent
+         ..connectionTimeout = const Duration(seconds: 10);
 
   /// Longest wait for one VK request; without it a stalled request would
   /// leave a click hanging forever.
-  static const requestTimeout = Duration(seconds: 15);
+  final Duration requestTimeout;
+
+  /// Longest wait for the next bytes of a reply.
+  final Duration silenceTimeout;
 
   final List<SessionCookie> _cookies;
   final HttpClient _http;
@@ -103,8 +118,11 @@ class VkClient {
     );
     final error = reply['error'];
     if (error is Map<String, dynamic>) {
+      final code = error['error_code'];
       throw VkException(
-        '$method error ${error['error_code']}: ${error['error_msg']}',
+        '$method error $code: ${error['error_msg']}',
+        // 6: too many requests per second, 10: VK internal server error.
+        transient: code == 6 || code == 10,
       );
     }
     return reply['response'];
@@ -120,30 +138,108 @@ class VkClient {
   }
 
   /// POSTs a form with the session cookies and decodes the JSON reply.
-  Future<Map<String, dynamic>> _postForm(Uri uri, Map<String, String> form) =>
-      _send(uri, form).timeout(
-        requestTimeout,
-        onTimeout: () => throw VkException(
-          'VK did not answer within ${requestTimeout.inSeconds} s',
-        ),
-      );
-
-  Future<Map<String, dynamic>> _send(Uri uri, Map<String, String> form) async {
+  Future<Map<String, dynamic>> _postForm(Uri uri, Map<String, String> form) {
     final cookieHeader = _cookies
         .where((cookie) => cookie.appliesTo(uri.host))
         .map((cookie) => '${cookie.name}=${cookie.value}')
         .join('; ');
-    final request = await _http.postUrl(uri);
-    request.headers
-      ..set(HttpHeaders.contentTypeHeader, 'application/x-www-form-urlencoded')
-      ..set('Origin', 'https://vk.ru')
-      ..set(HttpHeaders.refererHeader, 'https://vk.ru/')
-      ..set(HttpHeaders.cookieHeader, cookieHeader);
-    request.write(Uri(queryParameters: form).query);
-    final response = await request.close();
-    final text = await response.transform(utf8.decoder).join();
-    return jsonDecode(text) as Map<String, dynamic>;
+    return postVkForm(
+      _http,
+      uri,
+      form: form,
+      cookieHeader: cookieHeader,
+      silence: silenceTimeout,
+      total: requestTimeout,
+    );
   }
 
   void close() => _http.close(force: true);
 }
+
+/// POSTs [form] to [uri] the way vk.ru does and decodes the JSON reply.
+///
+/// Fails with a transient [VkException] when VK sends nothing for [silence]
+/// or the whole reply takes longer than [total], and when VK answers with a
+/// server error page (5xx) instead of JSON. A stalled request is aborted, so
+/// its connection does not linger.
+Future<Map<String, dynamic>> postVkForm(
+  HttpClient http,
+  Uri uri, {
+  required Map<String, String> form,
+  required String cookieHeader,
+  required Duration silence,
+  required Duration total,
+}) async {
+  HttpClientRequest? request;
+  Future<Map<String, dynamic>> send() async {
+    request = await http.postUrl(uri);
+    request!.headers
+      ..set(HttpHeaders.contentTypeHeader, 'application/x-www-form-urlencoded')
+      ..set('Origin', 'https://vk.ru')
+      ..set(HttpHeaders.refererHeader, 'https://vk.ru/')
+      ..set(HttpHeaders.cookieHeader, cookieHeader);
+    request!.write(Uri(queryParameters: form).query);
+    final response = await request!.close().timeout(silence);
+    if (response.statusCode >= 500) {
+      throw VkException(
+        'VK server error ${response.statusCode}',
+        transient: true,
+      );
+    }
+    final bytes = <int>[];
+    await for (final chunk in response.timeout(silence)) {
+      bytes.addAll(chunk);
+    }
+    return jsonDecode(utf8.decode(bytes)) as Map<String, dynamic>;
+  }
+
+  try {
+    return await send().timeout(total);
+  } on TimeoutException {
+    request?.abort();
+    throw VkException(
+      'VK did not answer in time (no reply within ${total.inSeconds} s '
+      'or silent for ${silence.inSeconds} s)',
+      transient: true,
+    );
+  } on VkException {
+    request?.abort();
+    rethrow;
+  }
+}
+
+/// Whether [error] is a network failure or VK overload that may pass when
+/// the same request is sent again.
+bool isTransientVkError(Object error) => switch (error) {
+  VkException(:final transient) => transient,
+  SocketException() ||
+  HandshakeException() ||
+  HttpException() ||
+  TimeoutException() => true,
+  _ => false,
+};
+
+/// Runs [action] again after a transient failure ([isTransientVkError]), up
+/// to [attempts] times in all, waiting [firstDelay] and then twice as long
+/// before each new try. Other failures and the last one are rethrown.
+Future<T> retryTransient<T>(
+  Future<T> Function() action, {
+  int attempts = 4,
+  Duration firstDelay = const Duration(seconds: 1),
+}) async {
+  var delay = firstDelay;
+  for (var attempt = 1; ; attempt++) {
+    try {
+      return await action();
+    } catch (error) {
+      if (attempt >= attempts || !isTransientVkError(error)) rethrow;
+      await Future<void>.delayed(delay);
+      delay *= 2;
+    }
+  }
+}
+
+/// [call] with every request sent again after a transient failure (see
+/// [retryTransient]). Only for calls that read: sending one twice is safe.
+VkApiCall retryingVkCall(VkApiCall call) =>
+    (method, params) => retryTransient(() => call(method, params));

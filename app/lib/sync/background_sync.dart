@@ -82,11 +82,18 @@ Future<SyncOutcome> _syncVk(
     var reachedSource = false;
     try {
       progress.send(const SyncProgress(SyncStage.connecting));
-      vk = VkClient(SessionCookie.loadAll(File(sessionPath)));
-      await vk.ensureToken();
+      // A sync runs in the background, so it may wait out a slow line: a
+      // page of 200 songs can take well over 15 s at a few KB/s. Dropped
+      // or stalled requests are sent again instead of failing the sync.
+      final client = vk = VkClient(
+        SessionCookie.loadAll(File(sessionPath)),
+        requestTimeout: const Duration(minutes: 3),
+        silenceTimeout: const Duration(seconds: 30),
+      );
+      await retryTransient(client.ensureToken);
       reachedSource = true;
       result = await syncVkSource(
-        call: vk.call,
+        call: retryingVkCall(client.call),
         userId: vk.userId,
         store: store,
         onProgress: progress.send,
