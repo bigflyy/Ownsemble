@@ -252,7 +252,7 @@ class PlayerService {
         }
         final storage = this.storage;
         final cachePath = storage != null && cacheWhileStreaming
-            ? storage.relativePathFor(track)
+            ? storage.streamSavePath(track)
             : null;
         proxied = _proxy.add(
           link,

@@ -121,6 +121,17 @@ void main() {
     expect(storage.stateOf(songs[2]), (path: path, pinned: true));
   });
 
+  test('a song being downloaded is not saved again while it streams: both '
+      'would write the same .part file', () async {
+    expect(storage.streamSavePath(songs[3]), storage.relativePathFor(songs[3]));
+    final release = Completer<Uri?>();
+    final download = storage.download(songs[3], () => release.future);
+    expect(storage.streamSavePath(songs[3]), isNull);
+    release.complete(null);
+    await expectLater(download, throwsA(isA<StateError>()));
+    expect(storage.streamSavePath(songs[3]), storage.relativePathFor(songs[3]));
+  });
+
   test('a canceled streaming save makes the download fetch the song', () async {
     final save = Completer<int?>();
     storage.noteSaving(songs[2], save.future);
