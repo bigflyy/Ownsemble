@@ -23,8 +23,12 @@ class SessionCookie {
   }
 
   /// Reads the session saved by the login helper (a JSON list of cookies).
-  static List<SessionCookie> loadAll(File file) {
-    final entries = jsonDecode(file.readAsStringSync(encoding: utf8)) as List;
+  static List<SessionCookie> loadAll(File file) =>
+      listFromJson(file.readAsStringSync(encoding: utf8));
+
+  /// Reads a JSON list of cookies.
+  static List<SessionCookie> listFromJson(String text) {
+    final entries = jsonDecode(text) as List;
     return [
       for (final entry in entries.cast<Map<String, dynamic>>())
         SessionCookie(
@@ -34,6 +38,12 @@ class SessionCookie {
         ),
     ];
   }
+
+  /// Writes [cookies] as [listFromJson] reads them.
+  static String listToJson(List<SessionCookie> cookies) => jsonEncode([
+    for (final cookie in cookies)
+      {'name': cookie.name, 'value': cookie.value, 'domain': cookie.domain},
+  ]);
 }
 
 /// Raised when VK answers with an error. Never contains tokens or URLs.

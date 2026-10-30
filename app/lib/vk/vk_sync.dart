@@ -264,15 +264,17 @@ bool _sameImage(String? a, String? b) {
   return x != null && y != null && x.path == y.path && x.query == y.query;
 }
 
+/// What the status bar says when VK no longer accepts the saved session.
+const vkLoginExpired = 'VK login expired, log in again';
+
 /// A short reason for a failed sync, fit for the status bar. Never contains
 /// links or tokens.
 String describeSyncError(Object error) {
   final text = switch (error) {
     VkException(:final message) when message.startsWith('web_token') =>
-      'VK login expired, log in again',
+      vkLoginExpired,
     VkException(:final message) => message,
     SocketException() || HandshakeException() => 'no connection to VK',
-    FileSystemException() => 'not logged in to VK',
     TimeoutException() => 'VK did not answer in time',
     _ => error.toString(),
   };

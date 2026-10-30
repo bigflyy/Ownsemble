@@ -1,24 +1,33 @@
 import 'package:flutter/material.dart';
 
 import '../library/library_store.dart';
+import '../vk/vk_login_window.dart';
 import '../vk/vk_sync.dart';
 import 'sync_controller.dart';
 import 'theme.dart';
+import 'vk_account.dart';
 
 /// The bottom status bar: each synced source with its state, a thin progress
-/// line while a sync runs, and the Sync now button.
+/// line while a sync runs, and the Sync now button. Logged out, or with a
+/// session VK no longer takes, the button logs in instead.
 class SyncStatusBar extends StatelessWidget {
-  const SyncStatusBar({super.key, required this.sync});
+  const SyncStatusBar({super.key, required this.sync, this.account});
 
   final SyncController sync;
+
+  /// The VK account; without one there is nothing to log in to.
+  final VkAccount? account;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final style = theme.textTheme.bodySmall;
+    final account = this.account;
     return ListenableBuilder(
-      listenable: sync,
+      listenable: Listenable.merge([sync, ?account]),
       builder: (context, _) {
+        final loginNeeded =
+            account != null && (!account.loggedIn || sync.loginExpired);
         final progress = sync.progress;
         final sources = sync.syncedSources;
         final percent = progress == null
@@ -69,23 +78,42 @@ class SyncStatusBar extends StatelessWidget {
                     ),
                   ),
                   const SizedBox(width: 12),
-                  OutlinedButton.icon(
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: own.text,
-                      side: BorderSide(color: own.line),
-                      minimumSize: const Size(0, 30),
-                      padding: const EdgeInsets.symmetric(horizontal: 12),
-                      textStyle: const TextStyle(fontSize: 13),
+                  if (loginNeeded)
+                    LogInButton(account: account)
+                  else
+                    OutlinedButton.icon(
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: own.text,
+                        side: BorderSide(color: own.line),
+                        minimumSize: const Size(0, 30),
+                        padding: const EdgeInsets.symmetric(horizontal: 12),
+                        textStyle: const TextStyle(fontSize: 13),
+                      ),
+                      key: const ValueKey('sync-now'),
+                      onPressed: sync.canSync && !sync.running
+                          ? sync.syncNow
+                          : null,
+                      icon: const Icon(Icons.sync, size: 16),
+                      label: Text(
+                        sync.running ? 'Syncing $percent%' : 'Sync now',
+                      ),
                     ),
-                    key: const ValueKey('sync-now'),
-                    onPressed: sync.canSync && !sync.running
-                        ? sync.syncNow
-                        : null,
-                    icon: const Icon(Icons.sync, size: 16),
-                    label: Text(
-                      sync.running ? 'Syncing $percent%' : 'Sync now',
+                  if (account != null && account.loggedIn)
+                    PopupMenuButton<String>(
+                      key: const ValueKey('vk-account-menu'),
+                      tooltip: 'VK account',
+                      padding: EdgeInsets.zero,
+                      iconSize: 18,
+                      icon: Icon(Icons.more_vert, color: own.dim),
+                      onSelected: (_) => account.logOut(),
+                      itemBuilder: (context) => const [
+                        PopupMenuItem(
+                          key: ValueKey('vk-log-out'),
+                          value: 'log-out',
+                          child: Text('Log out of VK'),
+                        ),
+                      ],
                     ),
-                  ),
                 ],
               ),
             ),
@@ -103,6 +131,41 @@ class SyncStatusBar extends StatelessWidget {
           ],
         );
       },
+    );
+  }
+}
+
+/// Opens the VK login window. While it is open the button says so; a click
+/// then brings the window back to the front. A window that cannot open says
+/// why in a message.
+class LogInButton extends StatelessWidget {
+  const LogInButton({super.key, required this.account});
+
+  final VkAccount account;
+
+  Future<void> _logIn(BuildContext context) async {
+    final messenger = ScaffoldMessenger.maybeOf(context);
+    try {
+      await account.logIn();
+    } on LoginWindowException catch (error) {
+      messenger?.showSnackBar(
+        SnackBar(content: Text('Cannot log in: ${error.reason}')),
+      );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return FilledButton.icon(
+      key: const ValueKey('vk-log-in'),
+      style: FilledButton.styleFrom(
+        minimumSize: const Size(0, 30),
+        padding: const EdgeInsets.symmetric(horizontal: 12),
+        textStyle: const TextStyle(fontSize: 13),
+      ),
+      onPressed: () => _logIn(context),
+      icon: const Icon(Icons.login, size: 16),
+      label: Text(account.loggingIn ? 'Logging in...' : 'Log in to VK'),
     );
   }
 }

@@ -4,8 +4,8 @@ Flutter app (Windows first). Run commands from this folder.
 
 Test data folders (both use the separate test VK account):
 
-- `../.local/v2-test/feel`: only the test account's songs. The installed
-  shortcut and the acceptance test use it.
+- `../.local/v2-test/feel`: only the test account's songs. The acceptance test
+  copies it.
 - `../.local/v2-test/gate`: the same plus 10,000 generated filler songs (made-up
   names, borrowed audio), for speed measurements only.
 
@@ -21,9 +21,18 @@ dart run tool/prepare_gate_data.dart --data-dir ../.local/v2-test/feel \
 # Acceptance test before every handover: the real app on a fresh copy of the
 # test library (feel-acceptance, with one made-up song the sync must mark
 # gone), muted, in an off-screen window that never takes focus (about 3 min).
-OWNSEMBLE_BACKGROUND_WINDOW=1 flutter test integration_test -d windows \
-    --dart-define=OWNSEMBLE_DATA=<absolute path>/.local/v2-test/feel \
+OWNSEMBLE_BACKGROUND_WINDOW=1 flutter test integration_test/acceptance_test.dart \
+    -d windows --dart-define=OWNSEMBLE_DATA=<absolute path>/.local/v2-test/feel \
     --dart-define=OWNSEMBLE_SESSION=<absolute path>/.local/v2-test/session.json
+
+# Login check: the real app logged out on an empty folder (feel-login, replaced
+# on every run), the real login window off-screen, real VK. The agent never types into a login page, so
+# the test account's cookies are put into the window (--vk-login-seed);
+# everything after that is the real path. Writes a picture of the page.
+OWNSEMBLE_BACKGROUND_WINDOW=1 flutter test integration_test/login_test.dart \
+    -d windows --dart-define=OWNSEMBLE_DATA=<absolute path>/.local/v2-test/feel \
+    --dart-define=OWNSEMBLE_SESSION=<absolute path>/.local/v2-test/session.json \
+    --dart-define=OWNSEMBLE_SHOT=<absolute path>/login-page.png
 
 # Check the "gone from VK" rule against real VK on a copy of a library (the
 # folder itself is not written).
@@ -47,7 +56,13 @@ Acceptance test switches (add as `--dart-define`): `OWNSEMBLE_QUICK=true` plays
 only 15 songs (for iterating, never for a handover), `OWNSEMBLE_MPV_LOG=true`
 writes mpv.log into the copied data folder.
 
-App options: `--data-dir DIR`, `--vk-session FILE`, `--muted`,
+Without options the app keeps everything in `%APPDATA%\Ownsemble\v2` and logs
+in through its own window; the session is `session.dpapi`, encrypted by Windows
+for this Windows user. Agent checks always pass `--data-dir` and `--vk-session`.
+
+App options: `--data-dir DIR`, `--vk-session FILE` (the test account's session
+file, instead of the login window), `--vk-login-seed FILE` (login check only),
+`--muted`,
 `--metrics FILE` (startup timings), `--bench FILE [--bench-parts a,b]
 [--bench-volume N]` (parts: search, scroll, scrollCovers, playCached,
 playStream, seekStream; volume under mute, default 100, never saved),

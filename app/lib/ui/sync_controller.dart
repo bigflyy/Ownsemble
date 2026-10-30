@@ -10,12 +10,18 @@ import '../vk/vk_sync.dart';
 class SyncController extends ChangeNotifier {
   SyncController({
     required this._sources,
-    required this.runner,
+    required this._runner,
     required this.onLibraryChanged,
   });
 
   /// Starts one sync; null when the app has no VK session to sync with.
-  final SyncRunner? runner;
+  SyncRunner? get runner => _runner;
+  set runner(SyncRunner? runner) {
+    _runner = runner;
+    notifyListeners();
+  }
+
+  SyncRunner? _runner;
 
   /// Receives the new library after a sync changed it.
   final void Function(LoadedLibrary library) onLibraryChanged;
@@ -38,6 +44,9 @@ class SyncController extends ChangeNotifier {
 
   /// How the last sync of this session ended; null before the first one.
   SyncOutcome? get lastOutcome => _lastOutcome;
+
+  /// Whether the last sync failed because VK no longer takes the session.
+  bool get loginExpired => _lastOutcome?.error == vkLoginExpired;
 
   /// Completes when no sync runs, with the last sync's outcome.
   Future<SyncOutcome?> get idle =>

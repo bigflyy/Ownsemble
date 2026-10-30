@@ -17,6 +17,7 @@ import 'sidebar.dart';
 import 'sync_controller.dart';
 import 'sync_status_bar.dart';
 import 'theme.dart';
+import 'vk_account.dart';
 
 /// Height of one song row; fixed so the list can skip layout of hidden rows.
 const rowHeight = 58.0;
@@ -35,6 +36,7 @@ class LibraryScreen extends StatefulWidget {
     required this.library,
     required this.playback,
     this.sync,
+    this.account,
     this.collections,
     this._settings,
   });
@@ -46,6 +48,9 @@ class LibraryScreen extends StatefulWidget {
 
   /// Sync state for the status bar; no status bar when null.
   final SyncController? sync;
+
+  /// The VK account, for logging in and out.
+  final VkAccount? account;
 
   /// History and Stacks; without them those views stay empty.
   final CollectionsController? collections;
@@ -265,7 +270,8 @@ class _LibraryScreenState extends State<LibraryScreen> {
                       onDockSide: () => _settings.dockTo(PlayerDock.side),
                       compact: !roomForSidebar,
                     ),
-                  if (widget.sync case final sync?) SyncStatusBar(sync: sync),
+                  if (widget.sync case final sync?)
+                    SyncStatusBar(sync: sync, account: widget.account),
                 ],
               ),
               body: Column(
@@ -442,13 +448,37 @@ class _LibraryScreenState extends State<LibraryScreen> {
                     'right-click menu.',
               _ => 'No songs yet.',
             };
+      final message = Text(
+        empty,
+        textAlign: TextAlign.center,
+        style: TextStyle(fontSize: 15, color: colors.dim),
+      );
+      // A first start: the library fills from the VK account.
+      final account = widget.account;
+      final firstStart =
+          account != null &&
+          library.view.kind == ViewKind.songs &&
+          library.searchText.text.isEmpty;
       return Padding(
         padding: const EdgeInsets.all(48),
-        child: Text(
-          empty,
-          textAlign: TextAlign.center,
-          style: TextStyle(fontSize: 15, color: colors.dim),
-        ),
+        child: !firstStart
+            ? message
+            : ListenableBuilder(
+                listenable: account,
+                builder: (context, _) => account.loggedIn
+                    ? message
+                    : Column(
+                        children: [
+                          Text(
+                            'Log in to VK and your songs come here.',
+                            textAlign: TextAlign.center,
+                            style: TextStyle(fontSize: 15, color: colors.dim),
+                          ),
+                          const SizedBox(height: 16),
+                          LogInButton(account: account),
+                        ],
+                      ),
+              ),
       );
     }
     return StreamBuilder<Track?>(

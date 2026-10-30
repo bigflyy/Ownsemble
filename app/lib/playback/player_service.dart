@@ -103,7 +103,7 @@ class PlayerService {
   final bool cacheWhileStreaming;
 
   /// Resolves stream URLs for VK songs; null when no session is configured.
-  final VkClient? vk;
+  VkClient? vk;
   final bool muted;
 
   /// Extra mpv options (name to value), applied on top of [defaultMpvOptions].

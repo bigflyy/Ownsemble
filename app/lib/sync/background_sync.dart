@@ -1,4 +1,3 @@
-import 'dart:io';
 import 'dart:isolate';
 
 import '../library/library_store.dart';
@@ -43,18 +42,18 @@ typedef SyncRunner = Future<SyncOutcome> Function(
   void Function(SyncProgress) onProgress,
 );
 
-/// Syncs the VK account of the session in [sessionPath] into the library at
+/// Syncs the VK account of the session [cookies] into the library at
 /// [dbPath], in a background isolate with its own database connection, so
 /// network waits, writes and reloading the library never block the UI.
 Future<SyncOutcome> syncVkInBackground({
   required String dbPath,
-  required String sessionPath,
+  required List<SessionCookie> cookies,
   required void Function(SyncProgress) onProgress,
 }) async {
   final progress = ReceivePort();
   progress.listen((message) => onProgress(message as SyncProgress));
   try {
-    return await _runInIsolate(dbPath, sessionPath, progress.sendPort);
+    return await _runInIsolate(dbPath, cookies, progress.sendPort);
   } finally {
     progress.close();
   }
@@ -64,14 +63,14 @@ Future<SyncOutcome> syncVkInBackground({
 // values (a closure sent to an isolate carries everything its scope captures).
 Future<SyncOutcome> _runInIsolate(
   String dbPath,
-  String sessionPath,
+  List<SessionCookie> cookies,
   SendPort progress,
-) => Isolate.run(() => _syncVk(dbPath, sessionPath, progress));
+) => Isolate.run(() => _syncVk(dbPath, cookies, progress));
 
 /// The isolate's work: sync, then reload the library if it changed.
 Future<SyncOutcome> _syncVk(
   String dbPath,
-  String sessionPath,
+  List<SessionCookie> cookies,
   SendPort progress,
 ) async {
   final store = LibraryStore.open(dbPath);
@@ -86,7 +85,7 @@ Future<SyncOutcome> _syncVk(
       // page of 200 songs can take well over 15 s at a few KB/s. Dropped
       // or stalled requests are sent again instead of failing the sync.
       final client = vk = VkClient(
-        SessionCookie.loadAll(File(sessionPath)),
+        cookies,
         requestTimeout: const Duration(minutes: 3),
         silenceTimeout: const Duration(seconds: 30),
       );

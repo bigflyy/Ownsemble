@@ -19,7 +19,9 @@ import 'ui/library_screen.dart';
 import 'ui/shell_settings.dart';
 import 'ui/sync_controller.dart';
 import 'ui/theme.dart';
-import 'vk/vk_client.dart';
+import 'ui/vk_account.dart';
+import 'vk/vk_login_window.dart';
+import 'vk/vk_session.dart';
 
 /// How many decoded covers stay in memory.
 const maxDecodedCovers = 600;
@@ -32,6 +34,7 @@ class AppOptions {
   AppOptions({
     required this.dataDir,
     this.vkSession,
+    this.vkLoginSeed,
     this.muted = false,
     this.metricsFile,
     this.benchFile,
@@ -42,7 +45,8 @@ class AppOptions {
     this.cacheWhileStreaming = true,
   });
 
-  /// Parses `--data-dir DIR --vk-session FILE --muted --metrics FILE
+  /// Parses `--data-dir DIR --vk-session FILE --vk-login-seed FILE --muted
+  /// --metrics FILE
   /// --bench FILE --bench-parts a,b --bench-volume N --mpv name=value ...
   /// --mpv-log`.
   factory AppOptions.parse(List<String> args) {
@@ -54,12 +58,9 @@ class AppOptions {
     return AppOptions(
       dataDir:
           valueOf('--data-dir') ??
-          p.join(
-            Platform.environment['LOCALAPPDATA'] ?? '.',
-            'Ownsemble',
-            'v2',
-          ),
+          p.join(Platform.environment['APPDATA'] ?? '.', 'Ownsemble', 'v2'),
       vkSession: valueOf('--vk-session'),
+      vkLoginSeed: valueOf('--vk-login-seed'),
       muted: args.contains('--muted'),
       metricsFile: valueOf('--metrics'),
       benchFile: valueOf('--bench'),
@@ -79,8 +80,13 @@ class AppOptions {
   /// Folder with library.db, cached audio and perf.log.
   final String dataDir;
 
-  /// Saved VK session (cookies JSON); VK songs stream only when set.
+  /// The test account's session file (cookies JSON). Without it the session
+  /// comes from the login window and is kept encrypted in the data folder.
   final String? vkSession;
+
+  /// Test account cookies for the login window: the agent's login check puts
+  /// them there because it never types into a login page.
+  final String? vkLoginSeed;
   final bool muted;
 
   /// Where to write startup timings (JSON), for the speed gate.
@@ -132,14 +138,18 @@ Future<void> main(List<String> args) async {
     write: store.writeSetting,
   );
 
-  final sessionFile = options.vkSession == null
-      ? null
-      : File(options.vkSession!);
-  final vk = sessionFile != null && sessionFile.existsSync()
-      ? VkClient(SessionCookie.loadAll(sessionFile))
-      : null;
+  final sessionFile = options.vkSession;
+  final account = VkAccount(
+    sessions: sessionFile != null
+        ? PlainSessionFile(File(sessionFile))
+        : ProtectedSessionFile(File(p.join(options.dataDir, 'session.dpapi'))),
+    window: NativeLoginWindow(
+      userDataDir: p.join(options.dataDir, 'webview'),
+      seedFile: options.vkLoginSeed == null ? null : File(options.vkLoginSeed!),
+    ),
+  );
   final player = PlayerService(
-    vk: vk,
+    vk: account.client,
     muted: options.muted,
     dataDir: options.dataDir,
     mpvOptions: options.mpvOptions,
@@ -158,18 +168,31 @@ Future<void> main(List<String> args) async {
     readSetting: store.readSetting,
     writeSetting: store.writeSetting,
   );
+  // The sync reads the session each time: logging in or out changes it.
+  SyncRunner? syncRunner() {
+    final cookies = account.cookies;
+    if (cookies == null) return null;
+    return (onProgress) => syncVkInBackground(
+      dbPath: dbPath,
+      cookies: cookies,
+      onProgress: onProgress,
+    );
+  }
+
   final sync = SyncController(
     sources: sources,
-    runner: vk == null
-        ? null
-        : (onProgress) => syncVkInBackground(
-            dbPath: dbPath,
-            sessionPath: sessionFile!.path,
-            onProgress: onProgress,
-          ),
+    runner: syncRunner(),
     onLibraryChanged: (loaded) =>
         library.replaceTracks(loaded.tracks, loaded.index),
   );
+  // A new login is synced at once, so the library fills without another step.
+  var loggedIn = account.loggedIn;
+  account.addListener(() {
+    player.vk = account.client;
+    sync.runner = syncRunner();
+    if (account.loggedIn && !loggedIn) unawaited(sync.syncNow());
+    loggedIn = account.loggedIn;
+  });
 
   WidgetsFlutterBinding.ensureInitialized();
   // Far below Flutter's 100 MB default: decoded covers are the app's largest
@@ -186,7 +209,7 @@ Future<void> main(List<String> args) async {
         library: library,
         player: player,
         playback: playback,
-        vk: vk,
+        account: account,
         sync: sync,
         covers: covers,
       ),
@@ -198,6 +221,7 @@ Future<void> main(List<String> args) async {
       library: library,
       playback: playback,
       sync: sync,
+      account: account,
       collections: collections,
       settings: settings,
     ),
@@ -213,7 +237,7 @@ Future<void> _afterFirstFrame({
   required LibraryController library,
   required PlayerService player,
   required PlaybackController playback,
-  required VkClient? vk,
+  required VkAccount account,
   required SyncController sync,
   required CoverStore covers,
 }) async {
@@ -234,7 +258,7 @@ Future<void> _afterFirstFrame({
   final startSync = sync.syncNow();
   _logPlayTimings(player, File(p.join(options.dataDir, 'perf.log')));
   try {
-    await vk?.ensureToken();
+    await account.client?.ensureToken();
   } catch (_) {
     // Offline or session expired: VK songs fail at play time with a message.
   }
@@ -247,7 +271,7 @@ Future<void> _afterFirstFrame({
       library: library,
       player: player,
       playback: playback,
-      vk: vk,
+      vk: account.client,
       covers: covers,
       volume: options.benchVolume,
     ).run(parts: options.benchParts);
@@ -288,6 +312,7 @@ class OwnsembleApp extends StatelessWidget {
     required this.settings,
     required this.covers,
     this.sync,
+    this.account,
   });
 
   final CoverStore covers;
@@ -296,6 +321,7 @@ class OwnsembleApp extends StatelessWidget {
   final CollectionsController collections;
   final ShellSettings settings;
   final SyncController? sync;
+  final VkAccount? account;
 
   @override
   Widget build(BuildContext context) {
@@ -311,6 +337,7 @@ class OwnsembleApp extends StatelessWidget {
             library: library,
             playback: playback,
             sync: sync,
+            account: account,
             collections: collections,
             settings: settings,
           ),
