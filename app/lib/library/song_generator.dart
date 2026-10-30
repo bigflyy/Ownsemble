@@ -50,9 +50,16 @@ List<NewTrack> generateSongs(int count, {int seed = 2026}) {
       album: random.nextInt(3) == 0 ? null : capitalize(pick(words)),
       durationSec: 120 + random.nextInt(300),
       addedAt: now - random.nextInt(fiveYears),
+      coverUrl: generatedCoverUrl(seed, index),
+      tint: 0xFF000000 | random.nextInt(0x1000000),
     );
   });
 }
+
+/// The made-up cover link of a generated song. The speed gate's tool stores an
+/// image under this link's key, so the link itself is never fetched.
+String generatedCoverUrl(int seed, int index) =>
+    'https://covers.invalid/gen-$seed/$index.jpg?size=135';
 
 final _ruSyllables =
     'ки но лё ша ма ри зе мфи ра ду ле то сё ва ль ми ро ня жу ко ёж ст ан ви'
