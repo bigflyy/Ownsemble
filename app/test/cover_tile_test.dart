@@ -11,21 +11,30 @@ import 'package:path/path.dart' as p;
 
 const smallUrl = 'https://img.example/a.jpg?size=135';
 const largeUrl = 'https://img.example/a.jpg?size=600';
+const midUrl = 'https://img.example/a.jpg?size=300';
+const fullUrl = 'https://img.example/a.jpg?size=1200';
 const tint = 0xFF123456;
 
-Track song({String? cover = smallUrl, String? large, int? color = tint}) =>
-    Track(
-      id: 1,
-      sourceId: 1,
-      source: TrackSource.vk,
-      artist: 'Сплин',
-      title: 'Выхода нет',
-      album: 'Гранатовый альбом',
-      durationSec: 200,
-      coverUrl: cover,
-      coverLargeUrl: large,
-      tint: color,
-    );
+Track song({
+  String? cover = smallUrl,
+  String? large,
+  String? mid,
+  String? full,
+  int? color = tint,
+}) => Track(
+  id: 1,
+  sourceId: 1,
+  source: TrackSource.vk,
+  artist: 'Сплин',
+  title: 'Выхода нет',
+  album: 'Гранатовый альбом',
+  durationSec: 200,
+  coverUrl: cover,
+  coverLargeUrl: large,
+  coverMidUrl: mid,
+  coverFullUrl: full,
+  tint: color,
+);
 
 /// A store that answers from a map and records what it was asked for.
 class FakeCovers extends CoverStore {
@@ -153,6 +162,80 @@ void main() {
     await tester.pump();
 
     expect(find.text('ГА'), findsOneWidget);
+  });
+
+  coverTest('a size VK does not serve: the next size is fetched and shown', (
+    tester,
+  ) async {
+    await tester.pumpWidget(tile(song(mid: midUrl)));
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(covers.fetched, [smallUrl]);
+
+    covers.answers[smallUrl]!(null);
+    await tester.pump();
+    expect(covers.fetched, [smallUrl, midUrl]);
+    expect(find.text('ГА'), findsNothing, reason: 'still trying');
+
+    covers.answers[midUrl]!(imagePath);
+    await loadImage(tester);
+    expect(shownImage(), findsOneWidget);
+  });
+
+  coverTest('every size failed: the stand-in shows', (tester) async {
+    await tester.pumpWidget(tile(song(mid: midUrl, full: fullUrl)));
+    await tester.pump(const Duration(milliseconds: 100));
+    covers.answers[smallUrl]!(null);
+    await tester.pump();
+    covers.answers[midUrl]!(null);
+    await tester.pump();
+    covers.answers[fullUrl]!(null);
+    await tester.pump();
+
+    expect(find.text('ГА'), findsOneWidget);
+  });
+
+  coverTest('a stored other size shows without asking the network', (
+    tester,
+  ) async {
+    covers.stored[midUrl] = imagePath;
+    await tester.pumpWidget(tile(song(mid: midUrl)));
+    await loadImage(tester);
+
+    expect(covers.fetched, isEmpty);
+    expect(shownImage(), findsOneWidget);
+  });
+
+  coverTest('a size known to be unavailable is skipped', (tester) async {
+    covers.unavailable.add(smallUrl);
+    await tester.pumpWidget(tile(song(mid: midUrl)));
+    await tester.pump(const Duration(milliseconds: 100));
+
+    expect(covers.fetched, [midUrl]);
+  });
+
+  coverTest('the panel tile tries the other large sizes before giving up', (
+    tester,
+  ) async {
+    covers.stored[smallUrl] = imagePath;
+    await tester.pumpWidget(
+      tile(song(large: largeUrl, full: fullUrl, mid: midUrl), size: 220),
+    );
+    await loadImage(tester);
+    expect(covers.fetched, [largeUrl]);
+
+    covers.answers[largeUrl]!(null);
+    await tester.pump();
+    expect(covers.fetched, [largeUrl, fullUrl]);
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  test('cover links run from the wanted size to the others', () {
+    final track = song(large: largeUrl, mid: midUrl, full: fullUrl);
+    expect(track.smallCovers, [smallUrl, midUrl, largeUrl, fullUrl]);
+    expect(track.largeCovers, [largeUrl, fullUrl, midUrl]);
+    expect(track.fullCovers, [fullUrl, largeUrl, midUrl, smallUrl]);
+    expect(song(cover: null).smallCovers, isEmpty);
+    expect(song(cover: null, mid: midUrl).smallCovers, [midUrl]);
   });
 
   coverTest('a cover known to be unavailable is not asked for', (tester) async {

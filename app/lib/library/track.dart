@@ -21,6 +21,8 @@ class Track {
     this.accessKey,
     this.coverUrl,
     this.coverLargeUrl,
+    this.coverMidUrl,
+    this.coverFullUrl,
     this.tint,
     this.goneAtMs,
     this.localPath,
@@ -50,8 +52,35 @@ class Track {
   /// Large cover image (about 600 px) for the player panel.
   final String? coverLargeUrl;
 
+  /// Middle cover image (about 300 px), for when VK does not serve the size
+  /// that was asked for: it often lacks one size of an image and has the rest.
+  final String? coverMidUrl;
+
+  /// Biggest cover image (about 1200 px).
+  final String? coverFullUrl;
+
   /// Main color of the cover as 0xAARRGGBB, for stand-in tiles.
   final int? tint;
+
+  /// Links to try for a list row's tile, best first.
+  List<String> get smallCovers => [
+    ?coverUrl,
+    ?coverMidUrl,
+    ?coverLargeUrl,
+    ?coverFullUrl,
+  ];
+
+  /// Links to try for a panel-sized tile, best first. The small size is left
+  /// out: the row's own small cover is what shows under it anyway.
+  List<String> get largeCovers => [?coverLargeUrl, ?coverFullUrl, ?coverMidUrl];
+
+  /// Links to try for the biggest view, best first.
+  List<String> get fullCovers => [
+    ?coverFullUrl,
+    ?coverLargeUrl,
+    ?coverMidUrl,
+    ?coverUrl,
+  ];
 
   /// When a sync found the song gone from its source, Unix milliseconds.
   final int? goneAtMs;

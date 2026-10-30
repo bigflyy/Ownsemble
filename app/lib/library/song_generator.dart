@@ -51,6 +51,10 @@ List<NewTrack> generateSongs(int count, {int seed = 2026}) {
       durationSec: 120 + random.nextInt(300),
       addedAt: now - random.nextInt(fiveYears),
       coverUrl: generatedCoverUrl(seed, index),
+      // Never fetched; they make a generated song as big as a real one.
+      coverMidUrl: generatedCoverUrl(seed, index, size: 300),
+      coverLargeUrl: generatedCoverUrl(seed, index, size: 600),
+      coverFullUrl: generatedCoverUrl(seed, index, size: 1200),
       tint: 0xFF000000 | random.nextInt(0x1000000),
     );
   });
@@ -58,8 +62,8 @@ List<NewTrack> generateSongs(int count, {int seed = 2026}) {
 
 /// The made-up cover link of a generated song. The speed gate's tool stores an
 /// image under this link's key, so the link itself is never fetched.
-String generatedCoverUrl(int seed, int index) =>
-    'https://covers.invalid/gen-$seed/$index.jpg?size=135';
+String generatedCoverUrl(int seed, int index, {int size = 135}) =>
+    'https://covers.invalid/gen-$seed/$index.jpg?size=$size';
 
 final _ruSyllables =
     'ки но лё ша ма ри зе мфи ра ду ле то сё ва ль ми ро ня жу ко ёж ст ан ви'

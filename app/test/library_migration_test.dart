@@ -129,6 +129,37 @@ void main() {
     expect(store.sources(), hasLength(2));
   });
 
+  test('version 1 gains the cover sizes and keeps its songs', () {
+    // A current library taken back to version 1.
+    final store = LibraryStore.open(dbPath);
+    final vk = store.ensureSource(TrackSource.vk, account: '1', name: 'VK');
+    store.upsertAll(vk, [
+      const NewTrack(
+        sourceKey: '1_1',
+        artist: 'Сплин',
+        title: 'Выхода нет',
+        durationSec: 236,
+        addedAt: 5,
+        coverUrl: 'https://example.invalid/135.jpg',
+      ),
+    ]);
+    store.close();
+    final db = sqlite3.open(dbPath);
+    db.execute('ALTER TABLE tracks DROP COLUMN cover_mid_url');
+    db.execute('ALTER TABLE tracks DROP COLUMN cover_full_url');
+    db.execute('PRAGMA user_version = 1');
+    db.close();
+
+    final migrated = LibraryStore.open(dbPath);
+    addTearDown(migrated.close);
+    expect(versionOf(dbPath), librarySchemaVersion);
+    final track = migrated.loadAll().single;
+    expect(track.title, 'Выхода нет');
+    expect(track.coverUrl, 'https://example.invalid/135.jpg');
+    expect(track.coverMidUrl, isNull);
+    expect(track.coverFullUrl, isNull);
+  });
+
   test('a library from a newer build is refused and left alone', () {
     final db = sqlite3.open(dbPath);
     db.execute('PRAGMA user_version = ${librarySchemaVersion + 1}');

@@ -212,8 +212,8 @@ void main() {
         tester,
         () => onScreen.every(
           (t) =>
-              covers.storedPath(t.coverUrl!) != null ||
-              covers.isUnavailable(t.coverUrl!),
+              t.smallCovers.any((url) => covers.storedPath(url) != null) ||
+              t.smallCovers.every(covers.isUnavailable),
         ),
         timeout: const Duration(seconds: 30),
         what: 'covers of the rows on screen',
@@ -222,15 +222,21 @@ void main() {
     }
     final seconds = (clock.elapsedMilliseconds / 1000).toStringAsFixed(1);
     final missing = withCover
-        .where((t) => covers.storedPath(t.coverUrl!) == null)
+        .where((t) => !t.smallCovers.any((u) => covers.storedPath(u) != null))
+        .toList();
+    final otherSize = withCover
+        .where(
+          (t) => covers.storedPath(t.coverUrl!) == null && !missing.contains(t),
+        )
         .toList();
     final stored = withCover.length - missing.length;
     // ignore: avoid_print
     print(
       'covers: $stored of ${withCover.length} stored in $seconds s, '
       '${library.all.length - withCover.length} songs without a cover show '
-      'stand-ins; VK did not serve ${missing.length}: '
-      '${missing.map(songName).join('; ')}',
+      'stand-ins; ${otherSize.length} came from another size because VK '
+      'lacks the small one: ${otherSize.map(songName).join('; ')}; VK did not '
+      'serve ${missing.length}: ${missing.map(songName).join('; ')}',
     );
     expect(
       missing.length,

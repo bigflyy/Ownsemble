@@ -86,6 +86,8 @@ typedef KnownTrack = ({
   String? accessKey,
   String? coverUrl,
   String? coverLargeUrl,
+  String? coverMidUrl,
+  String? coverFullUrl,
   int? goneAtMs,
 });
 

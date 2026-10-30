@@ -241,14 +241,14 @@ Future<VkSyncResult> syncVkSource({
 /// (same path and query); without this every sync would rewrite most songs.
 NewTrack _keepSameCovers(NewTrack fresh, KnownTrack? known) {
   if (known == null) return fresh;
-  final cover = _sameImage(known.coverUrl, fresh.coverUrl)
-      ? known.coverUrl
-      : fresh.coverUrl;
-  final large = _sameImage(known.coverLargeUrl, fresh.coverLargeUrl)
-      ? known.coverLargeUrl
-      : fresh.coverLargeUrl;
-  if (cover == fresh.coverUrl && large == fresh.coverLargeUrl) return fresh;
-  return fresh.withCovers(cover, large);
+  String? keep(String? stored, String? link) =>
+      _sameImage(stored, link) ? stored : link;
+  return fresh.withCovers(
+    coverUrl: keep(known.coverUrl, fresh.coverUrl),
+    coverLargeUrl: keep(known.coverLargeUrl, fresh.coverLargeUrl),
+    coverMidUrl: keep(known.coverMidUrl, fresh.coverMidUrl),
+    coverFullUrl: keep(known.coverFullUrl, fresh.coverFullUrl),
+  );
 }
 
 /// Whether two image links differ at most in their host.
@@ -303,6 +303,8 @@ NewTrack vkItemToTrack(Map<String, dynamic> item) {
     addedAt: item['date'] as int? ?? 0,
     coverUrl: thumb?['photo_135'] as String?,
     coverLargeUrl: thumb?['photo_600'] as String?,
+    coverMidUrl: thumb?['photo_300'] as String?,
+    coverFullUrl: thumb?['photo_1200'] as String?,
     tint: parseVkColor(item['main_color']),
   );
 }

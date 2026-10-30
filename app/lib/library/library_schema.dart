@@ -6,7 +6,7 @@ import 'package:sqlite3/sqlite3.dart';
 /// Schema version this build reads and writes (`PRAGMA user_version`).
 ///
 /// 0 is the speed-gate build's single `tracks` table (or an empty file).
-const librarySchemaVersion = 1;
+const librarySchemaVersion = 2;
 
 /// Thrown when the library was written by a newer build of the app.
 class NewerLibraryException implements Exception {
@@ -37,25 +37,37 @@ void migrateLibrary(Database db, {String? dataDir}) {
 
   db.execute('BEGIN');
   try {
-    final hasGateTracks = db
-        .select(
-          "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'tracks'",
-        )
-        .isNotEmpty;
-    if (hasGateTracks) {
-      // The index moves with the renamed table but keeps its name, which the
-      // new tracks table needs.
-      db.execute('ALTER TABLE tracks RENAME TO tracks_v0');
-      db.execute('DROP INDEX IF EXISTS tracks_by_added');
-    }
-    _createVersion1(db);
-    if (hasGateTracks) _copyFromVersion0(db, dataDir);
+    if (version < 1) _upgradeToVersion1(db, dataDir);
+    if (version < 2) _addCoverSizes(db);
     db.execute('PRAGMA user_version = $librarySchemaVersion');
     db.execute('COMMIT');
   } catch (_) {
     db.execute('ROLLBACK');
     rethrow;
   }
+}
+
+/// Creates the version 1 tables, taking over a speed-gate `tracks` table.
+void _upgradeToVersion1(Database db, String? dataDir) {
+  final hasGateTracks = db
+      .select(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'tracks'",
+      )
+      .isNotEmpty;
+  if (hasGateTracks) {
+    // The index moves with the renamed table but keeps its name, which the
+    // new tracks table needs.
+    db.execute('ALTER TABLE tracks RENAME TO tracks_v0');
+    db.execute('DROP INDEX IF EXISTS tracks_by_added');
+  }
+  _createVersion1(db);
+  if (hasGateTracks) _copyFromVersion0(db, dataDir);
+}
+
+/// Version 2: two more sizes of each cover. The next sync fills them in.
+void _addCoverSizes(Database db) {
+  db.execute('ALTER TABLE tracks ADD COLUMN cover_mid_url TEXT');
+  db.execute('ALTER TABLE tracks ADD COLUMN cover_full_url TEXT');
 }
 
 void _createVersion1(Database db) {

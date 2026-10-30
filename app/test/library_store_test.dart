@@ -92,6 +92,8 @@ void main() {
           addedAt: 0,
           coverUrl: 'https://example.invalid/135.jpg',
           coverLargeUrl: 'https://example.invalid/600.jpg',
+          coverMidUrl: 'https://example.invalid/300.jpg',
+          coverFullUrl: 'https://example.invalid/1200.jpg',
           tint: 0xFF8A2BE2,
         ),
       ]);
@@ -99,6 +101,8 @@ void main() {
       expect(track.album, 'Альбом');
       expect(track.coverUrl, 'https://example.invalid/135.jpg');
       expect(track.coverLargeUrl, 'https://example.invalid/600.jpg');
+      expect(track.coverMidUrl, 'https://example.invalid/300.jpg');
+      expect(track.coverFullUrl, 'https://example.invalid/1200.jpg');
       expect(track.tint, 0xFF8A2BE2);
       expect(track.source, TrackSource.vk);
     });

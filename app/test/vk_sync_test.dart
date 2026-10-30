@@ -168,6 +168,7 @@ void main() {
     Map<String, String> thumb(String name) => {
       'photo_34': '$name-34',
       'photo_135': '$name-135',
+      'photo_300': '$name-300',
       'photo_600': '$name-600',
       'photo_1200': '$name-1200',
     };
@@ -180,6 +181,8 @@ void main() {
     });
     expect(own.coverUrl, 'song-135');
     expect(own.coverLargeUrl, 'song-600');
+    expect(own.coverMidUrl, 'song-300');
+    expect(own.coverFullUrl, 'song-1200');
     expect(own.tint, 0xFF1A2B3C);
 
     final albumOnly = vkItemToTrack({
@@ -266,7 +269,9 @@ void main() {
             ..['album'] = {'title': 'Альбом'}
             ..['thumb'] = {
               'photo_135': 'https://$host/c/1.jpg?size=135&sign=$sign',
+              'photo_300': 'https://$host/c/1.jpg?size=300&sign=$sign',
               'photo_600': 'https://$host/c/1.jpg?size=600&sign=$sign',
+              'photo_1200': 'https://$host/c/1.jpg?size=1200&sign=$sign',
             };
       final first = vk.song(1);
       vk.itemOverride = (song) => withCover(song, 'img1.example', 'a');
@@ -279,6 +284,7 @@ void main() {
       vk.itemOverride = (song) => withCover(song, 'img7.example', 'b');
       expect((await sync()).updated, 1, reason: 'a new image is a change');
       expect(byKey('${FakeVk.userId}_1').coverUrl, contains('sign=b'));
+      expect(byKey('${FakeVk.userId}_1').coverFullUrl, contains('sign=b'));
     });
 
     test('a renamed song counts as updated, not added', () async {

@@ -100,8 +100,8 @@ class TrackTile extends StatelessWidget {
   Widget build(BuildContext context) {
     final standIn = _StandIn(track: track, size: size, radius: radius);
     final covers = CoverScope.maybeOf(context);
-    final smallUrl = track.coverUrl;
-    if (covers == null || smallUrl == null) return standIn;
+    final smallLinks = track.smallCovers;
+    if (covers == null || smallLinks.isEmpty) return standIn;
 
     final pixels = (size * MediaQuery.devicePixelRatioOf(context)).round();
     final tint = track.tint;
@@ -118,18 +118,18 @@ class TrackTile extends StatelessWidget {
           );
     Widget tile = _Cover(
       covers: covers,
-      url: smallUrl,
+      urls: smallLinks,
       pixels: pixels,
       size: size,
       radius: radius,
       loading: loading,
       failed: standIn,
     );
-    final largeUrl = track.coverLargeUrl;
-    if (largeUrl != null && pixels > smallCoverPixels) {
+    final largeLinks = track.largeCovers;
+    if (largeLinks.isNotEmpty && pixels > smallCoverPixels) {
       tile = _Cover(
         covers: covers,
-        url: largeUrl,
+        urls: largeLinks,
         pixels: pixels,
         size: size,
         radius: radius,
@@ -180,7 +180,8 @@ class _StandIn extends StatelessWidget {
   }
 }
 
-/// One cover image that loads itself from disk or the network.
+/// One cover image that loads itself from disk or the network, from the
+/// first of [urls] that is stored, else the first that VK serves.
 ///
 /// It waits [settleDelay] before doing any work, so a row that scrolls past
 /// costs nothing: no download, no file read, no decode. A bitmap already in
@@ -188,7 +189,7 @@ class _StandIn extends StatelessWidget {
 class _Cover extends StatefulWidget {
   const _Cover({
     required this.covers,
-    required this.url,
+    required this.urls,
     required this.pixels,
     required this.size,
     required this.radius,
@@ -200,7 +201,9 @@ class _Cover extends StatefulWidget {
   static const settleDelay = Duration(milliseconds: 80);
 
   final CoverStore covers;
-  final String url;
+
+  /// Links of the same image, best first; not empty.
+  final List<String> urls;
   final int pixels;
   final double size;
   final double radius;
@@ -217,6 +220,9 @@ class _CoverState extends State<_Cover> {
   Timer? _settle;
   CoverRequest? _request;
 
+  /// Index in the links of the next one to ask for.
+  int _nextLink = 0;
+
   @override
   void initState() {
     super.initState();
@@ -227,7 +233,8 @@ class _CoverState extends State<_Cover> {
   void didUpdateWidget(_Cover oldWidget) {
     super.didUpdateWidget(oldWidget);
     // A list reuses its rows for other songs when the search text changes.
-    if (oldWidget.url != widget.url || oldWidget.pixels != widget.pixels) {
+    if (!listEquals(oldWidget.urls, widget.urls) ||
+        oldWidget.pixels != widget.pixels) {
       _stop();
       _image = null;
       _failed = false;
@@ -248,8 +255,17 @@ class _CoverState extends State<_Cover> {
     _request = null;
   }
 
+  /// The file of the first link that is on disk.
+  String? _storedPath() {
+    for (final url in widget.urls) {
+      final path = widget.covers.storedPath(url);
+      if (path != null) return path;
+    }
+    return null;
+  }
+
   void _begin() {
-    final path = widget.covers.storedPath(widget.url);
+    final path = _storedPath();
     if (path != null) {
       final image = CoverFileImage(path, widget.pixels);
       if (PaintingBinding.instance.imageCache.containsKey(image)) {
@@ -261,27 +277,35 @@ class _CoverState extends State<_Cover> {
   }
 
   void _load() {
-    final covers = widget.covers;
-    final path = covers.storedPath(widget.url);
+    final path = _storedPath();
     if (path != null) {
       setState(() => _image = CoverFileImage(path, widget.pixels));
-    } else if (covers.isUnavailable(widget.url)) {
-      setState(() => _failed = true);
     } else {
-      _request = covers.fetch(widget.url, _onFetched);
+      _nextLink = 0;
+      _fetchNext();
     }
+  }
+
+  /// Asks for the next link that may work; with none left, gives up.
+  void _fetchNext() {
+    while (_nextLink < widget.urls.length) {
+      final url = widget.urls[_nextLink++];
+      if (!widget.covers.isUnavailable(url)) {
+        _request = widget.covers.fetch(url, _onFetched);
+        return;
+      }
+    }
+    setState(() => _failed = true);
   }
 
   void _onFetched(String? path) {
     _request = null;
     if (!mounted) return;
-    setState(() {
-      if (path == null) {
-        _failed = true;
-      } else {
-        _image = CoverFileImage(path, widget.pixels);
-      }
-    });
+    if (path == null) {
+      _fetchNext();
+    } else {
+      setState(() => _image = CoverFileImage(path, widget.pixels));
+    }
   }
 
   @override

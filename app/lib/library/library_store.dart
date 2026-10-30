@@ -20,6 +20,8 @@ class NewTrack {
     this.accessKey,
     this.coverUrl,
     this.coverLargeUrl,
+    this.coverMidUrl,
+    this.coverFullUrl,
     this.tint,
   });
 
@@ -36,10 +38,17 @@ class NewTrack {
   final String? accessKey;
   final String? coverUrl;
   final String? coverLargeUrl;
+  final String? coverMidUrl;
+  final String? coverFullUrl;
   final int? tint;
 
   /// This song with other cover links.
-  NewTrack withCovers(String? coverUrl, String? coverLargeUrl) => NewTrack(
+  NewTrack withCovers({
+    required String? coverUrl,
+    required String? coverLargeUrl,
+    required String? coverMidUrl,
+    required String? coverFullUrl,
+  }) => NewTrack(
     artist: artist,
     title: title,
     album: album,
@@ -49,6 +58,8 @@ class NewTrack {
     accessKey: accessKey,
     coverUrl: coverUrl,
     coverLargeUrl: coverLargeUrl,
+    coverMidUrl: coverMidUrl,
+    coverFullUrl: coverFullUrl,
     tint: tint,
   );
 }
@@ -187,8 +198,8 @@ class LibraryStore {
     final upsert = _db.prepare('''
       INSERT INTO tracks (source_id, source_key, access_key, artist, title,
                           album, duration_sec, added_at, cover_url,
-                          cover_large_url, tint)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                          cover_large_url, cover_mid_url, cover_full_url, tint)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT (source_id, source_key) DO UPDATE SET
         access_key = excluded.access_key,
         artist = excluded.artist,
@@ -198,6 +209,8 @@ class LibraryStore {
         added_at = excluded.added_at,
         cover_url = excluded.cover_url,
         cover_large_url = excluded.cover_large_url,
+        cover_mid_url = excluded.cover_mid_url,
+        cover_full_url = excluded.cover_full_url,
         tint = excluded.tint,
         gone_at_ms = NULL
       WHERE tracks.access_key IS NOT excluded.access_key
@@ -208,6 +221,8 @@ class LibraryStore {
          OR tracks.added_at IS NOT excluded.added_at
          OR tracks.cover_url IS NOT excluded.cover_url
          OR tracks.cover_large_url IS NOT excluded.cover_large_url
+         OR tracks.cover_mid_url IS NOT excluded.cover_mid_url
+         OR tracks.cover_full_url IS NOT excluded.cover_full_url
          OR tracks.tint IS NOT excluded.tint
          OR tracks.gone_at_ms IS NOT NULL
       RETURNING id
@@ -231,6 +246,8 @@ class LibraryStore {
             track.addedAt,
             track.coverUrl,
             track.coverLargeUrl,
+            track.coverMidUrl,
+            track.coverFullUrl,
             track.tint,
           ]);
           if (written.isNotEmpty) {
@@ -255,7 +272,8 @@ class LibraryStore {
   /// cover links, for comparing the library with what the source lists now.
   Map<String, KnownTrack> trackKeys(int sourceId) => {
     for (final row in _db.select(
-      'SELECT source_key, access_key, cover_url, cover_large_url, gone_at_ms '
+      'SELECT source_key, access_key, cover_url, cover_large_url, '
+      'cover_mid_url, cover_full_url, gone_at_ms '
       'FROM tracks WHERE source_id = ?',
       [sourceId],
     ))
@@ -263,6 +281,8 @@ class LibraryStore {
         accessKey: row['access_key'] as String?,
         coverUrl: row['cover_url'] as String?,
         coverLargeUrl: row['cover_large_url'] as String?,
+        coverMidUrl: row['cover_mid_url'] as String?,
+        coverFullUrl: row['cover_full_url'] as String?,
         goneAtMs: row['gone_at_ms'] as int?,
       ),
   };
@@ -296,7 +316,8 @@ class LibraryStore {
     final rows = _db.select('''
       SELECT t.id, t.source_id, s.kind, t.source_key, t.access_key, t.artist,
              t.title, t.album, t.duration_sec, t.cover_url, t.cover_large_url,
-             t.tint, t.gone_at_ms, a.path, a.pinned
+             t.cover_mid_url, t.cover_full_url, t.tint, t.gone_at_ms, a.path,
+             a.pinned
       FROM tracks t
       JOIN sources s ON s.id = t.source_id
       LEFT JOIN audio_files a ON a.track_id = t.id
@@ -316,6 +337,8 @@ class LibraryStore {
           durationSec: row['duration_sec'] as int,
           coverUrl: row['cover_url'] as String?,
           coverLargeUrl: row['cover_large_url'] as String?,
+          coverMidUrl: row['cover_mid_url'] as String?,
+          coverFullUrl: row['cover_full_url'] as String?,
           tint: row['tint'] as int?,
           goneAtMs: row['gone_at_ms'] as int?,
           localPath: row['path'] as String?,
