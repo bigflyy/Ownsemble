@@ -11,7 +11,8 @@
 // mark exactly that song gone; the data folder itself is never written.
 //
 // The background window opens off-screen without focus, so the user's screen,
-// mouse and keyboard stay untouched. Prints counts only: no titles or links.
+// mouse and keyboard stay untouched. Prints counts and the titles of songs that
+// failed, never links.
 
 import 'dart:async';
 import 'dart:io';
@@ -31,6 +32,8 @@ import 'package:ownsemble/playback/playback_controller.dart';
 import 'package:ownsemble/playback/player_service.dart';
 import 'package:ownsemble/playback/stream_proxy.dart' show ProxyRequestLog;
 import 'package:ownsemble/storage/audio_storage.dart';
+import 'package:ownsemble/storage/cover_store.dart';
+import 'package:ownsemble/ui/cover_tile.dart';
 import 'package:ownsemble/ui/library_controller.dart';
 import 'package:ownsemble/ui/library_screen.dart';
 import 'package:ownsemble/ui/shell_settings.dart';
@@ -95,6 +98,18 @@ String prepareCopy(String from, String to) {
     store.close();
   }
 }
+
+/// How a song is named in this test's output.
+String songName(Track track) => '${track.artist} - ${track.title}';
+
+/// How many decoded images of [size] logical pixels are on screen.
+int shownCovers(double size) => find
+    .byWidgetPredicate(
+      (widget) =>
+          widget is RawImage && widget.image != null && widget.width == size,
+    )
+    .evaluate()
+    .length;
 
 /// Number of History entries in the library of [dataDir].
 int _historyLength(String dataDir) {
@@ -172,6 +187,85 @@ void main() {
     return null;
   }
 
+  /// Moves through the whole list so every song's cover is asked for, the way
+  /// scrolling by hand does, then checks they were stored and are shown. The
+  /// copied data folder starts without covers, so these are real downloads.
+  Future<List<Track>> checkCovers(
+    WidgetTester tester,
+    CoverStore covers,
+  ) async {
+    final clock = Stopwatch()..start();
+    final withCover = library.all.where((t) => t.coverUrl != null).toList();
+    final position = library.scroll.position;
+    final screen = position.viewportDimension;
+    final songs = library.visible;
+    for (var offset = 0.0; ; offset += screen) {
+      final target = min(offset, position.maxScrollExtent);
+      library.scroll.jumpTo(target);
+      await tester.pump();
+      final first = (target / rowHeight).floor();
+      final last = min(((target + screen) / rowHeight).ceil(), songs.length);
+      final onScreen = songs
+          .sublist(first, last)
+          .where((t) => t.coverUrl != null);
+      await waitUntil(
+        tester,
+        () => onScreen.every(
+          (t) =>
+              covers.storedPath(t.coverUrl!) != null ||
+              covers.isUnavailable(t.coverUrl!),
+        ),
+        timeout: const Duration(seconds: 30),
+        what: 'covers of the rows on screen',
+      );
+      if (target >= position.maxScrollExtent) break;
+    }
+    final seconds = (clock.elapsedMilliseconds / 1000).toStringAsFixed(1);
+    final missing = withCover
+        .where((t) => covers.storedPath(t.coverUrl!) == null)
+        .toList();
+    final stored = withCover.length - missing.length;
+    // ignore: avoid_print
+    print(
+      'covers: $stored of ${withCover.length} stored in $seconds s, '
+      '${library.all.length - withCover.length} songs without a cover show '
+      'stand-ins; VK did not serve ${missing.length}: '
+      '${missing.map(songName).join('; ')}',
+    );
+    expect(
+      missing.length,
+      lessThanOrEqualTo(withCover.length ~/ 10),
+      reason: 'a few covers may be missing on VK, not many',
+    );
+    // VK's generic placeholder is never used as a cover.
+    for (final track in library.all) {
+      if (track.album == null) expect(track.coverUrl, isNull);
+    }
+
+    // The rows at the top really show bitmaps, and a restart still knows the
+    // covers without the network.
+    library.scroll.jumpTo(0);
+    await tester.pump();
+    final shownOnTop = songs
+        .take((screen / rowHeight).floor())
+        .where(
+          (t) => t.coverUrl != null && covers.storedPath(t.coverUrl!) != null,
+        )
+        .length;
+    await waitUntil(
+      tester,
+      () => shownCovers(44) >= shownOnTop,
+      timeout: const Duration(seconds: 5),
+      what: 'stored covers shown in the rows',
+    );
+    expect(shownOnTop, greaterThan(0));
+    final restarted = CoverStore(dataDir: '$dataDir-acceptance');
+    await restarted.load();
+    expect(restarted.storedCount, covers.storedCount);
+    restarted.close();
+    return missing;
+  }
+
   testWidgets('the app works the way the user uses it', (tester) async {
     expect(dataDir, isNotEmpty, reason: 'pass --dart-define=OWNSEMBLE_DATA');
     final copyDir = '$dataDir-acceptance';
@@ -245,6 +339,11 @@ void main() {
     expect(find.textContaining('1 gone from VK'), findsOneWidget);
     final fakeSong = gone.single;
 
+    final covers = CoverScope.maybeOf(
+      tester.element(find.byType(LibraryScreen)),
+    )!;
+    final missingCovers = await checkCovers(tester, covers);
+
     // Every song: a click starts sound and the loaded audio has the song's
     // listed length (so it is this song, not another one). Songs VK blocks
     // must fail quickly with a message.
@@ -254,6 +353,8 @@ void main() {
     var goneNotStored = 0;
     final playedOk = <int>{};
     final problems = <String>[];
+    // Songs that did not play, named so a failure is never just a number.
+    final notPlayed = <String>[];
     var slowRetries = 0;
     for (final (index, track)
         in library.all.take(quick ? 15 : 1 << 30).indexed) {
@@ -279,6 +380,7 @@ void main() {
             timing.error!.contains('gone from VK') &&
             timing.toSoundMs < 5000) {
           goneNotStored++;
+          notPlayed.add('gone, not stored: ${songName(track)}');
         } else if (timing.error!.contains('unavailable on VK') &&
             timing.toSoundMs < 5000) {
           await waitUntil(
@@ -290,19 +392,21 @@ void main() {
             what: 'the message for a withdrawn song',
           );
           blocked++;
+          notPlayed.add('withdrawn on VK: ${songName(track)}');
         } else if (timing.error!.contains("VK's server is not delivering") &&
             timing.toSoundMs < 5000) {
           // VK's own server failed; the app must say so quickly.
           serverErrors++;
+          notPlayed.add('VK server error: ${songName(track)}');
         } else {
-          problems.add('song #$index: ${timing.error}');
+          problems.add('${songName(track)}: ${timing.error}');
         }
         continue;
       }
       // Checked first: if the test stalls, the song ends and auto-advance
       // moves on, and the length below would be another song's.
       if (player.current?.id != track.id || !player.playing.value) {
-        problems.add('song #$index: not the current, playing song');
+        problems.add('${songName(track)}: not the current, playing song');
         continue;
       }
       // mpv estimates a stream's length from its bitrate, so allow 3% (at
@@ -311,7 +415,7 @@ void main() {
       final tolerance = max(3.0, track.durationSec * 0.03);
       if (length == null || (length - track.durationSec).abs() > tolerance) {
         problems.add(
-          'song #$index: loaded audio is ${length?.round()} s, '
+          '${songName(track)}: loaded audio is ${length?.round()} s, '
           'list says ${track.durationSec} s',
         );
         continue;
@@ -339,6 +443,8 @@ void main() {
       'retried after no sound in 20 s (slow line): $slowRetries, '
       'problems: ${problems.length}',
     );
+    // ignore: avoid_print
+    print('not played: ${notPlayed.isEmpty ? 'none' : notPlayed.join('; ')}');
     expect(problems, isEmpty);
     if (!quick) expect(goneNotStored, 1);
     // This copy's file is broken on VK's audio server (always 504): it plays
@@ -599,6 +705,23 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('dock-side')));
     await tester.pumpAndSettle();
     expect(find.byKey(const ValueKey('queued-0')), findsOneWidget);
+    // The panel downloads and shows the large cover of the song playing.
+    final panelSong = player.current!;
+    if (panelSong.coverLargeUrl != null &&
+        !missingCovers.any((t) => t.id == panelSong.id)) {
+      await waitUntil(
+        tester,
+        () => shownCovers(220) > 0,
+        timeout: const Duration(seconds: 20),
+        what: 'the large cover in the side panel',
+      );
+      expect(covers.storedPath(panelSong.coverLargeUrl!), isNotNull);
+      // ignore: avoid_print
+      print('side panel: large cover shown');
+    } else {
+      // ignore: avoid_print
+      print('side panel: song has no large cover, not checked');
+    }
     await tester.tap(find.byKey(const ValueKey('dock-bottom')));
     await tester.pumpAndSettle();
 
