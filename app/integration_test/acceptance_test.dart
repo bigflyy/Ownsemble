@@ -190,11 +190,13 @@ void main() {
     expect(library.all, isNotEmpty);
 
     // The app syncs itself on start, in the background, with progress. The
-    // made-up song is marked gone and kept; every real song stays.
+    // made-up song is marked gone and kept; every real song stays. On a slow
+    // line one VK page can take 30 s and a dropped request is sent again,
+    // so the wait is long.
     await waitUntil(
       tester,
       () => sync.lastOutcome != null,
-      timeout: const Duration(seconds: 60),
+      timeout: const Duration(minutes: 4),
       what: 'start sync',
     );
     await tester.pump();
