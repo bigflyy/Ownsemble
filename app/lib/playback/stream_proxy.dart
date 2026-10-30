@@ -230,6 +230,41 @@ class StreamProxy {
     return null;
   }
 
+  /// How many times a song without another link is asked for again.
+  static const _sameLinkRetries = 2;
+
+  /// The wait before that; a server error rarely lasts longer.
+  static const _sameLinkPause = Duration(milliseconds: 300);
+
+  /// A whole song is never this short: at 128 kbit/s this is 2 seconds.
+  static const _stubBytes = 32 * 1024;
+
+  /// Whether [reply] is something other than the song: an error page or, for
+  /// a whole-file request, a stub. VK has answered with a 206 of 1.7 KB and
+  /// closed (twice in about 300 plays); the song played on the next try.
+  static bool _isNotAudio(HttpClientResponse reply, bool wholeFile) {
+    if (reply.statusCode >= 400) return true;
+    final length = reply.contentLength;
+    return wholeFile && length >= 0 && length < _stubBytes;
+  }
+
+  /// A line for the log about a reply that was not the song, which also
+  /// reads the reply to its end. Headers and first bytes only, never links.
+  Future<String> _describe(HttpClientResponse reply) async {
+    final head = <int>[];
+    await for (final chunk in reply) {
+      if (head.length < 8) head.addAll(chunk);
+    }
+    final start = head
+        .take(8)
+        .map((byte) => byte.toRadixString(16).padLeft(2, '0'))
+        .join();
+    return 'status ${reply.statusCode}: ${reply.contentLength} bytes, '
+        '${reply.headers.value(HttpHeaders.contentTypeHeader)}, '
+        'range ${reply.headers.value(HttpHeaders.contentRangeHeader)}, '
+        'starts $start';
+  }
+
   /// Saves still running, including those of streams no longer registered.
   final _caching = <ProxiedStream>{};
 
@@ -304,14 +339,25 @@ class StreamProxy {
     }
     final clock = Stopwatch()..start();
     var upstream = await _connectUpstream(stream._upstream, range, trace.tries);
-    // The audio server cannot deliver this file. Nothing has reached mpv, so
-    // the other link can take over without mpv noticing.
-    if (upstream != null && upstream.statusCode >= 400) {
+    // Not the song. Nothing has reached mpv, so the other link can take over
+    // without mpv noticing; a song without one is asked again, because most
+    // of these go away by themselves (a broken file answers 504 every time).
+    if (upstream != null && _isNotAudio(upstream, wholeFile)) {
       final other = await stream._switchLink();
       if (other != null) {
-        trace.tries.add('status ${upstream.statusCode}, trying the other link');
-        await upstream.drain<void>();
+        trace.tries.add('${await _describe(upstream)}, trying the other link');
         upstream = await _connectUpstream(other, range, trace.tries);
+      } else {
+        for (var again = 0; again < _sameLinkRetries; again++) {
+          trace.tries.add('${await _describe(upstream!)}, asking again');
+          await Future<void>.delayed(_sameLinkPause);
+          upstream = await _connectUpstream(
+            stream._upstream,
+            range,
+            trace.tries,
+          );
+          if (upstream == null || !_isNotAudio(upstream, wholeFile)) break;
+        }
       }
     }
     if (upstream == null) {
@@ -329,10 +375,15 @@ class StreamProxy {
           (upstream.headers.value(HttpHeaders.contentRangeHeader) == null
               ? null
               : 'content-range');
-    // An error page is not audio: mpv may misread it as a song, so report
-    // the failure and give mpv nothing.
-    if (upstream.statusCode >= 400) {
-      stream._fail(upstream.statusCode);
+    // An error page or a stub is not audio: mpv may misread it as a song or
+    // fail with a message that says nothing, so report the failure and give
+    // mpv nothing.
+    if (_isNotAudio(upstream, wholeFile)) {
+      stream._fail(
+        upstream.statusCode >= 400
+            ? upstream.statusCode
+            : HttpStatus.badGateway,
+      );
       await upstream.drain<void>();
       response.statusCode = HttpStatus.badGateway;
       await response.close();

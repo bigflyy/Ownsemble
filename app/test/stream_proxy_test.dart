@@ -11,6 +11,10 @@ void main() {
   final client = HttpClient();
   // How many more requests to /flaky drop their connection.
   var flakyDrops = 0;
+  // How many more whole-file requests to /blip get an error page, and to
+  // /stub a reply of a kilobyte or two.
+  var blips = 0;
+  var stubs = 0;
 
   setUp(() async {
     // Stand-in for the CDN: serves [audio] with Range support.
@@ -48,6 +52,28 @@ void main() {
         flakyDrops--;
         final socket = await request.response.detachSocket(writeHeaders: false);
         socket.destroy();
+        return;
+      }
+      if (request.uri.path == '/blip' && blips > 0) {
+        // Seen on VK: one 504 on a song whose next request is fine.
+        blips--;
+        request.response
+          ..statusCode = HttpStatus.gatewayTimeout
+          ..headers.contentType = ContentType.html
+          ..write('<html>504</html>');
+        await request.response.close();
+        return;
+      }
+      if (request.uri.path == '/stub' && stubs > 0) {
+        // Seen on VK: a 206 of 1.7 KB for the whole file, then the end.
+        stubs--;
+        request.response
+          ..statusCode = HttpStatus.partialContent
+          ..headers.contentType = ContentType('audio', 'mpeg')
+          ..headers.set(HttpHeaders.contentRangeHeader, 'bytes 0-1725/1726')
+          ..contentLength = 1726
+          ..add(List.filled(1726, 7));
+        await request.response.close();
         return;
       }
       if (request.uri.path == '/broken') {
@@ -144,7 +170,10 @@ void main() {
       expect(body, audio);
       final log = await logged;
       expect(log.status, HttpStatus.ok);
-      expect(log.tries, contains('status 504, trying the other link'));
+      expect(
+        log.tries.join(' '),
+        allOf(contains('status 504'), contains('trying the other link')),
+      );
       await expectLater(
         stream.upstreamFailure.timeout(const Duration(milliseconds: 50)),
         throwsA(isA<TimeoutException>()),
@@ -212,6 +241,58 @@ void main() {
     expect(response.statusCode, HttpStatus.ok);
     expect(body, audio);
     expect(flakyDrops, 0);
+  });
+
+  group('a reply that is not the song', () {
+    setUp(() {
+      blips = 0;
+      stubs = 0;
+    });
+
+    Uri upstreamUri(String path) =>
+        Uri.parse('http://127.0.0.1:${upstream.port}$path');
+
+    Future<List<int>> wholeFile(Uri uri, {String? range}) async {
+      final (response, body) = await get(uri, range: range);
+      expect(response.statusCode, lessThan(300));
+      return body;
+    }
+
+    test('a passing server error is asked again on the same link', () async {
+      blips = 1;
+      final stream = proxy.add(upstreamUri('/blip'));
+      expect(await wholeFile(stream.localUri), audio);
+    });
+
+    test('a tiny whole-file reply is asked again on the same link', () async {
+      stubs = 2;
+      final stream = proxy.add(upstreamUri('/stub'));
+      expect(await wholeFile(stream.localUri, range: 'bytes=0-'), audio);
+    });
+
+    test('the log says what the tiny reply looked like', () async {
+      stubs = 1;
+      final logged = proxy.requests.first;
+      await wholeFile(proxy.add(upstreamUri('/stub')).localUri);
+      final tries = (await logged).tries.join(' ');
+      expect(tries, contains('1726 bytes'));
+      expect(tries, contains('bytes 0-1725/1726'));
+      expect(tries, contains('0707070707070707'));
+    });
+
+    test('one that never goes away fails instead of reaching mpv', () async {
+      stubs = 99;
+      final stream = proxy.add(upstreamUri('/stub'));
+      final (response, _) = await get(stream.localUri);
+      expect(response.statusCode, HttpStatus.badGateway);
+      expect(await stream.upstreamFailure, HttpStatus.badGateway);
+    });
+
+    test('a short range near the end of a song is not a stub', () async {
+      final stream = proxy.add(upstreamUri('/song'));
+      final tail = await wholeFile(stream.localUri, range: 'bytes=99000-');
+      expect(tail, audio.sublist(99000));
+    });
   });
 
   test('upstream failure becomes a bad gateway', () async {
