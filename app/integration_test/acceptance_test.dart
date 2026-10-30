@@ -33,6 +33,7 @@ import 'package:ownsemble/playback/stream_proxy.dart' show ProxyRequestLog;
 import 'package:ownsemble/storage/audio_storage.dart';
 import 'package:ownsemble/ui/library_controller.dart';
 import 'package:ownsemble/ui/library_screen.dart';
+import 'package:ownsemble/ui/shell_settings.dart';
 import 'package:ownsemble/ui/sync_controller.dart';
 import 'package:ownsemble/vk/vk_sync.dart';
 import 'package:path/path.dart' as p;
@@ -178,6 +179,13 @@ void main() {
     // The copied library keeps the History of whoever used it before (the
     // user plays the same library), so only entries added now are counted.
     final historyBefore = _historyLength(copyDir);
+    // The test's own layout, whatever the user last chose in that library.
+    final copied = LibraryStore.open(p.join(copyDir, 'library.db'));
+    ShellSettings(
+      read: copied.readSetting,
+      write: copied.writeSetting,
+    ).dockTo(PlayerDock.bottom);
+    copied.close();
     await app.main([
       '--data-dir',
       copyDir,
