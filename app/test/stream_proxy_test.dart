@@ -152,6 +152,56 @@ void main() {
     expect(response.statusCode, HttpStatus.badGateway);
   });
 
+  test('each request is logged with its range, tries and timing', () async {
+    flakyDrops = 1;
+    final logs = <ProxyRequestLog>[];
+    final subscription = proxy.requests.listen(logs.add);
+    final stream = proxy.add(
+      Uri.parse('http://127.0.0.1:${upstream.port}/flaky'),
+    );
+    await get(stream.localUri);
+    await get(stream.localUri, range: 'bytes=99000-');
+    await Future<void>.delayed(const Duration(milliseconds: 50));
+    await subscription.cancel();
+
+    expect(logs, hasLength(2));
+    final (whole, seek) = (logs[0], logs[1]);
+    expect(whole.fromByte, isNull);
+    expect(whole.tries, hasLength(2));
+    expect(whole.tries.last, endsWith('ms ok'));
+    expect(whole.status, HttpStatus.ok);
+    expect(whole.bytes, audio.length);
+    expect(whole.end, 'done');
+    expect(whole.asked, isNull);
+    expect(seek.asked, 'bytes=99000-');
+    expect(seek.ranges, 'content-range');
+    expect(seek.fromByte, 99000);
+    expect(seek.tries, hasLength(1));
+    expect(seek.status, HttpStatus.partialContent);
+    expect(seek.bytes, 1000);
+    expect(seek.headersMs, lessThanOrEqualTo(seek.firstByteMs!));
+    expect(
+      seek.toString(),
+      startsWith('proxy range from 99000: asked bytes=99000-, tries ['),
+    );
+    expect(seek.toString(), endsWith('1000 bytes in ${seek.totalMs} ms, done'));
+  });
+
+  test('a request with no answer is logged as such', () async {
+    final closed = await ServerSocket.bind(InternetAddress.loopbackIPv4, 0);
+    final port = closed.port;
+    await closed.close();
+    final logged = proxy.requests.first;
+    final stream = proxy.add(Uri.parse('http://127.0.0.1:$port/a'));
+    await get(stream.localUri, range: 'bytes=10-');
+    final log = await logged;
+    expect(log.end, 'no answer');
+    expect(log.status, 0);
+    expect(log.headersMs, isNull);
+    expect(log.tries, hasLength(4));
+    expect(log.toString(), isNot(contains('127.0.0.1')));
+  });
+
   group('saving while streaming', () {
     late Directory dir;
     setUp(() => dir = Directory.systemTemp.createTempSync('ownsemble_tee'));

@@ -128,6 +128,9 @@ class PlayerService {
   /// Every finished play request's timing, for the status line and logs.
   Stream<PlayTiming> get timings => _timingController.stream;
 
+  /// Every finished request mpv made for a stream, with its timing.
+  Stream<ProxyRequestLog> get proxyRequests => _proxy.requests;
+
   /// Fires when the current song plays to its end.
   Stream<void> get ended => _endedController.stream;
 

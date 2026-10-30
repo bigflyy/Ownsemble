@@ -50,6 +50,83 @@ class ProxiedStream {
   }
 }
 
+/// What happened to one request mpv made through [StreamProxy]: for
+/// perf.log and the seek benchmark, so a slow seek can be split into the
+/// audio server's share and the proxy's. Holds no links.
+class ProxyRequestLog {
+  const ProxyRequestLog({
+    required this.startedAt,
+    required this.asked,
+    required this.fromByte,
+    required this.tries,
+    required this.headersMs,
+    required this.status,
+    required this.firstByteMs,
+    required this.bytes,
+    required this.totalMs,
+    required this.end,
+    this.ranges,
+  });
+
+  /// When mpv's request arrived.
+  final DateTime startedAt;
+
+  /// The Range header mpv sent, such as "bytes=0-"; null when it sent none.
+  final String? asked;
+
+  /// Where the requested range starts; null for the whole file.
+  final int? fromByte;
+
+  /// One note per try at the audio server, such as "8001 ms timeout".
+  final List<String> tries;
+
+  /// From mpv's request to the audio server's answer (headers); null when
+  /// no answer came.
+  final int? headersMs;
+
+  /// The audio server's HTTP status; 0 when it never answered.
+  final int status;
+
+  /// From mpv's request to the first audio bytes; null when none came.
+  final int? firstByteMs;
+
+  /// Audio bytes passed on to mpv.
+  final int bytes;
+
+  /// From mpv's request until the proxy finished with it.
+  final int totalMs;
+
+  /// How it ended: done, mpv hung up (", saved on" when the save went on
+  /// to the end), save canceled, upstream error, no answer, stalled.
+  final String end;
+
+  /// What the audio server says about ranges: its Accept-Ranges header,
+  /// or "content-range" when it sent only that; null when it said nothing.
+  final String? ranges;
+
+  /// One perf.log line.
+  @override
+  String toString() =>
+      'proxy ${fromByte == null ? 'whole' : 'range from $fromByte'}: '
+      'asked ${asked ?? 'no range'}, '
+      'tries [${tries.join(', ')}], status $status, ranges ${ranges ?? '-'}, '
+      'headers ${headersMs ?? '-'} ms, first byte ${firstByteMs ?? '-'} ms, '
+      '$bytes bytes in $totalMs ms, $end';
+
+  Map<String, Object?> toJson() => {
+    'asked': asked,
+    'fromByte': fromByte,
+    'ranges': ranges,
+    'tries': tries,
+    'status': status,
+    'headersMs': headersMs,
+    'firstByteMs': firstByteMs,
+    'bytes': bytes,
+    'totalMs': totalMs,
+    'end': end,
+  };
+}
+
 /// Local HTTP proxy between mpv and the VK CDN.
 ///
 /// The app does all network I/O itself, so it can time the network exactly,
@@ -71,6 +148,10 @@ class StreamProxy {
   final HttpServer _server;
   final _streams = <String, ProxiedStream>{};
   final _random = Random.secure();
+  final _requests = StreamController<ProxyRequestLog>.broadcast();
+
+  /// Every finished request from mpv, with its timing.
+  Stream<ProxyRequestLog> get requests => _requests.stream;
   final HttpClient _http = HttpClient()
     ..connectionTimeout = const Duration(seconds: 6)
     ..idleTimeout = const Duration(seconds: 30);
@@ -85,11 +166,17 @@ class StreamProxy {
   /// before the server answers, and a fresh one often goes through at once,
   /// so a failed try is repeated (up to 4 tries) while [_upstreamBudget]
   /// lasts. Nothing has reached mpv before the answer, so a new try is safe.
-  Future<HttpClientResponse?> _connectUpstream(Uri uri, String? range) async {
+  /// Each try's time and outcome is added to [tries].
+  Future<HttpClientResponse?> _connectUpstream(
+    Uri uri,
+    String? range,
+    List<String> tries,
+  ) async {
     final clock = Stopwatch()..start();
     for (var attempt = 1; attempt <= 4; attempt++) {
       final left = _upstreamBudget - clock.elapsed;
       if (left <= Duration.zero) break;
+      final tryStartedMs = clock.elapsedMilliseconds;
       HttpClientRequest? outgoing;
       try {
         outgoing = await _http.getUrl(uri).timeout(left);
@@ -97,12 +184,19 @@ class StreamProxy {
         // One try waits at most 8 s for the answer, so a stalled one still
         // leaves time for another.
         final limit = _upstreamBudget - clock.elapsed;
-        return await outgoing.close().timeout(
+        final answer = await outgoing.close().timeout(
           limit < const Duration(seconds: 8)
               ? limit
               : const Duration(seconds: 8),
         );
-      } catch (_) {
+        tries.add('${clock.elapsedMilliseconds - tryStartedMs} ms ok');
+        return answer;
+      } catch (error) {
+        // The error's type only: messages may carry the server's address.
+        final kind = error is TimeoutException
+            ? 'timeout'
+            : error.runtimeType.toString();
+        tries.add('${clock.elapsedMilliseconds - tryStartedMs} ms $kind');
         outgoing?.abort();
         await Future<void>.delayed(const Duration(milliseconds: 200));
       }
@@ -157,6 +251,14 @@ class StreamProxy {
     }
     final range = request.headers.value(HttpHeaders.rangeHeader);
     final wholeFile = range == null || range.trim() == 'bytes=0-';
+    final trace = _Trace(
+      range,
+      wholeFile
+          ? null
+          : int.tryParse(
+              RegExp(r'bytes=(\d+)-').firstMatch(range)?.group(1) ?? '',
+            ),
+    );
     // A seek: the save still fetching from the start would share the line
     // with it and make it slow, so saving stops; the song is saved the next
     // time it plays through.
@@ -166,13 +268,26 @@ class StreamProxy {
       saving.complete(false);
     }
     final clock = Stopwatch()..start();
-    final upstream = await _connectUpstream(stream._upstream, range);
+    final upstream = await _connectUpstream(
+      stream._upstream,
+      range,
+      trace.tries,
+    );
     if (upstream == null) {
       stream._fail(0);
       response.statusCode = HttpStatus.badGateway;
       await response.close();
+      _report(trace, 'no answer');
       return;
     }
+    trace
+      ..headersMs = trace.clock.elapsedMilliseconds
+      ..status = upstream.statusCode
+      ..ranges =
+          upstream.headers.value(HttpHeaders.acceptRangesHeader) ??
+          (upstream.headers.value(HttpHeaders.contentRangeHeader) == null
+              ? null
+              : 'content-range');
     // An error page is not audio: mpv may misread it as a song, so report
     // the failure and give mpv nothing.
     if (upstream.statusCode >= 400) {
@@ -180,6 +295,7 @@ class StreamProxy {
       await upstream.drain<void>();
       response.statusCode = HttpStatus.badGateway;
       await response.close();
+      _report(trace, 'upstream error');
       return;
     }
 
@@ -205,7 +321,7 @@ class StreamProxy {
         !stream._cachingCanceled &&
         upstream.statusCode < 300) {
       stream._teeStarted = true;
-      await _serveAndSave(stream, upstream, response, cacheTo, clock);
+      await _serveAndSave(stream, upstream, response, cacheTo, clock, trace);
       return;
     }
 
@@ -215,6 +331,8 @@ class StreamProxy {
           if (!stream._firstChunk.isCompleted) {
             stream._firstChunk.complete(clock.elapsedMilliseconds);
           }
+          trace.firstByteMs ??= trace.clock.elapsedMilliseconds;
+          trace.bytes += chunk.length;
           sink.add(chunk);
         },
       ),
@@ -222,9 +340,18 @@ class StreamProxy {
     try {
       await response.addStream(body);
       await response.close();
+      // mpv may hang up without an error reaching the proxy.
+      final short =
+          upstream.contentLength >= 0 && trace.bytes < upstream.contentLength;
+      _report(trace, short ? 'mpv hung up' : 'done');
     } catch (_) {
       // mpv closed the connection (new song, seek or stop).
+      _report(trace, 'mpv hung up');
     }
+  }
+
+  void _report(_Trace trace, String end) {
+    if (!_requests.isClosed) _requests.add(trace.finish(end));
   }
 
   /// Sends [upstream] to mpv and writes it to [cacheTo] at the same time;
@@ -236,6 +363,7 @@ class StreamProxy {
     HttpResponse response,
     File cacheTo,
     Stopwatch clock,
+    _Trace trace,
   ) async {
     // The total size: from Content-Range for "bytes=0-", else the length.
     final contentRange = upstream.headers.value(HttpHeaders.contentRangeHeader);
@@ -265,11 +393,13 @@ class StreamProxy {
         if (!stream._firstChunk.isCompleted) {
           stream._firstChunk.complete(clock.elapsedMilliseconds);
         }
+        trace.firstByteMs ??= trace.clock.elapsedMilliseconds;
         file?.add(chunk);
         written += chunk.length;
         if (!mpvGone) {
           try {
             response.add(chunk);
+            trace.bytes += chunk.length;
           } catch (_) {
             mpvGone = true;
           }
@@ -295,6 +425,7 @@ class StreamProxy {
     });
     final complete = await done.future;
     watchdog.cancel();
+    final stalled = !complete && written == lastWritten;
     if (!complete) await subscription.cancel();
     _caching.remove(stream);
     if (!mpvGone) {
@@ -328,11 +459,52 @@ class StreamProxy {
       }
     }
     stream._finishStored(saved ? written : null);
+    _report(
+      trace,
+      stalled
+          ? 'stalled'
+          : complete
+          ? (mpvGone ? 'mpv hung up, saved on' : 'done')
+          : stream._cachingCanceled
+          ? (mpvGone ? 'mpv hung up, save canceled' : 'save canceled')
+          : 'upstream error',
+    );
   }
 
   Future<void> close() async {
     cancelCachingExcept(null);
+    await _requests.close();
     _http.close(force: true);
     await _server.close(force: true);
   }
+}
+
+/// Timing of one request while the proxy serves it; see [ProxyRequestLog].
+class _Trace {
+  _Trace(this.asked, this.fromByte);
+
+  final String? asked;
+  final int? fromByte;
+  final startedAt = DateTime.now();
+  String? ranges;
+  final clock = Stopwatch()..start();
+  final tries = <String>[];
+  int? headersMs;
+  int status = 0;
+  int? firstByteMs;
+  int bytes = 0;
+
+  ProxyRequestLog finish(String end) => ProxyRequestLog(
+    startedAt: startedAt,
+    asked: asked,
+    fromByte: fromByte,
+    ranges: ranges,
+    tries: List.unmodifiable(tries),
+    headersMs: headersMs,
+    status: status,
+    firstByteMs: firstByteMs,
+    bytes: bytes,
+    totalMs: clock.elapsedMilliseconds,
+    end: end,
+  );
 }

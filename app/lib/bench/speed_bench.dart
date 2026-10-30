@@ -9,6 +9,7 @@ import 'package:flutter/widgets.dart';
 
 import '../library/track.dart';
 import '../playback/player_service.dart';
+import '../playback/stream_proxy.dart' show ProxyRequestLog;
 import '../ui/library_controller.dart';
 import '../vk/vk_client.dart';
 
@@ -276,8 +277,10 @@ class SpeedBench {
     };
   }
 
-  /// Seeks to the middle of streamed songs, 2 s after their sound started,
+  /// Seeks streamed songs to three quarters as soon as their sound starts,
   /// and times the seek until the position moves on from the new place.
+  /// Each sample lists the proxy's requests, so a slow seek shows whether
+  /// the audio server or the app took the time.
   Future<Map<String, Object?>> _streamSeekBench() async {
     if (vk == null) return {'skipped': 'no VK session'};
     final candidates =
@@ -297,9 +300,16 @@ class SpeedBench {
         samples.add({'ok': false, 'error': timing.error});
         continue;
       }
-      await Future<void>.delayed(const Duration(seconds: 2));
-      final target = Duration(seconds: track.durationSec ~/ 2);
+      // Seek at once, to three quarters of the song: on a fast line mpv has
+      // the whole song buffered after a few seconds and would seek in
+      // memory, so this makes it ask the audio server for a range.
+      final target = Duration(seconds: track.durationSec * 3 ~/ 4);
       final before = player.position;
+      // The proxy's requests from the seek on (the hung-up whole-file
+      // request and the ranged one), to tell the audio server's time from
+      // the app's.
+      final requests = <ProxyRequestLog>[];
+      final listening = player.proxyRequests.listen(requests.add);
       final clock = Stopwatch()..start();
       await player.seek(target);
       // Done when playback runs again away from where it was: the first
@@ -333,6 +343,9 @@ class SpeedBench {
       });
       await player.stop();
       await Future<void>.delayed(const Duration(milliseconds: 300));
+      await listening.cancel();
+      samples.last['ranged'] = requests.any((r) => r.fromByte != null);
+      samples.last['proxyRequests'] = [for (final r in requests) r.toJson()];
     }
     return {
       'samples': samples,
@@ -340,6 +353,7 @@ class SpeedBench {
         for (final s in samples)
           if (s['ok'] == true) (s['seekToSoundMs'] as int).toDouble(),
       ]),
+      'rangedSeeks': samples.where((s) => s['ranged'] == true).length,
     };
   }
 
