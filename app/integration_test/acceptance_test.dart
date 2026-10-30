@@ -93,6 +93,16 @@ String prepareCopy(String from, String to) {
   }
 }
 
+/// Number of History entries in the library of [dataDir].
+int _historyLength(String dataDir) {
+  final store = LibraryStore.open(p.join(dataDir, 'library.db'));
+  try {
+    return store.history(limit: 1 << 30).length;
+  } finally {
+    store.close();
+  }
+}
+
 void main() {
   IntegrationTestWidgetsFlutterBinding.ensureInitialized();
 
@@ -163,6 +173,9 @@ void main() {
     expect(dataDir, isNotEmpty, reason: 'pass --dart-define=OWNSEMBLE_DATA');
     final copyDir = '$dataDir-acceptance';
     final fakeKey = prepareCopy(dataDir, copyDir);
+    // The copied library keeps the History of whoever used it before (the
+    // user plays the same library), so only entries added now are counted.
+    final historyBefore = _historyLength(copyDir);
     await app.main([
       '--data-dir',
       copyDir,
@@ -666,14 +679,15 @@ void main() {
     final historyStore = LibraryStore.open(p.join(copyDir, 'library.db'));
     final history = historyStore.history(limit: 1 << 30);
     historyStore.close();
+    final historyAdded = history.length - historyBefore;
     // ignore: avoid_print
     print(
       'controls: seek, previous (restart and back), next, auto-advance, '
       'repeat one, shuffle, time label, volume, mute, Space checked; '
       'stream seek: click to playing on ${seekResumeMs - 300} ms or less; '
-      'History entries ${history.length} for $soundStarts sound starts',
+      'History entries added $historyAdded for $soundStarts sound starts',
     );
-    expect(history.length, soundStarts);
+    expect(historyAdded, soundStarts);
     expect(history.first.trackId, player.current?.id);
 
     // Sync now right after the start sync finds nothing new and leaves the
