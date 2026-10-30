@@ -211,10 +211,14 @@ Future<VkSyncResult> syncVkSource({
     );
 
     onProgress?.call(const SyncProgress(SyncStage.saving));
+    final fresh = library.items.map(vkItemToTrack).toList();
     final written = store.upsertTracks(sourceId, [
-      for (final item in library.items)
-        _keepSameCovers(vkItemToTrack(item), known[vkSourceKey(item)]),
+      for (final track in fresh) _keepSameCovers(track, known[track.sourceKey]),
     ]);
+    // Only some of VK's image hosts hold a given image, and which one a link
+    // names changes with every request. So the newest link replaces the old
+    // one, and a cover that failed gets another chance after the next start.
+    store.updateCoverLinks(sourceId, fresh);
     final added = listed.where((key) => !known.containsKey(key)).length;
     final back = listed.where((key) => known[key]?.goneAtMs != null).length;
     final newlyGone = store.markGone(sourceId, gone);
@@ -238,7 +242,8 @@ Future<VkSyncResult> syncVkSource({
 /// same image to another host.
 ///
 /// VK serves a cover from a different image server on almost every request
-/// (same path and query); without this every sync would rewrite most songs.
+/// (same path and query); without this every sync would count most songs as
+/// changed and reload the library.
 NewTrack _keepSameCovers(NewTrack fresh, KnownTrack? known) {
   if (known == null) return fresh;
   String? keep(String? stored, String? link) =>

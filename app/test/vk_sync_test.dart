@@ -279,7 +279,13 @@ void main() {
       await sync();
       vk.itemOverride = (song) => withCover(song, 'img7.example', 'a');
       expect((await sync()).changedLibrary, isFalse);
-      expect(byKey('${FakeVk.userId}_1').coverUrl, contains('img1.example'));
+      // Not every host has every image, so the newest host is kept: a cover
+      // that could not be had gets another chance with the next start.
+      final moved = byKey('${FakeVk.userId}_1');
+      expect(moved.coverUrl, contains('img7.example'));
+      expect(moved.coverMidUrl, contains('img7.example'));
+      expect(moved.coverLargeUrl, contains('img7.example'));
+      expect(moved.coverFullUrl, contains('img7.example'));
 
       vk.itemOverride = (song) => withCover(song, 'img7.example', 'b');
       expect((await sync()).updated, 1, reason: 'a new image is a change');

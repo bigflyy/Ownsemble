@@ -268,6 +268,33 @@ class LibraryStore {
     }
   }
 
+  /// Stores the cover links of [tracks], for songs that exist already. No
+  /// change the UI has to know about: a new host of the same image only
+  /// matters the next time the library loads.
+  void updateCoverLinks(int sourceId, Iterable<NewTrack> tracks) {
+    final update = _db.prepare('''
+      UPDATE tracks SET cover_url = ?, cover_large_url = ?, cover_mid_url = ?,
+                        cover_full_url = ?
+      WHERE source_id = ? AND source_key = ?
+    ''');
+    try {
+      _transaction(() {
+        for (final track in tracks) {
+          update.execute([
+            track.coverUrl,
+            track.coverLargeUrl,
+            track.coverMidUrl,
+            track.coverFullUrl,
+            sourceId,
+            track.sourceKey,
+          ]);
+        }
+      });
+    } finally {
+      update.close();
+    }
+  }
+
   /// Every song key of [sourceId] with its gone mark, VK access key and
   /// cover links, for comparing the library with what the source lists now.
   Map<String, KnownTrack> trackKeys(int sourceId) => {

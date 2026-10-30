@@ -197,6 +197,13 @@ void main() {
     final clock = Stopwatch()..start();
     final withCover = library.all.where((t) => t.coverUrl != null).toList();
     final position = library.scroll.position;
+    // Right after a sync the list may not be laid out yet, and this scan
+    // would end after one screen.
+    await waitUntil(
+      tester,
+      () => position.maxScrollExtent > 0,
+      what: 'the song list laid out',
+    );
     final screen = position.viewportDimension;
     final songs = library.visible;
     for (var offset = 0.0; ; offset += screen) {
