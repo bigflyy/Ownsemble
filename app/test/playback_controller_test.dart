@@ -12,6 +12,9 @@ class FakePlayer implements PlayerService {
   final played = <int>[];
   final seeks = <Duration>[];
   final failing = <int>{};
+
+  /// When set, a song keeps starting until this completes.
+  Completer<void>? holdPlay;
   final endedController = StreamController<void>.broadcast(sync: true);
   int pauseToggles = 0;
   double? lastVolume;
@@ -36,6 +39,7 @@ class FakePlayer implements PlayerService {
   @override
   Future<PlayTiming> play(Track track) async {
     played.add(track.id);
+    await holdPlay?.future;
     _current = track;
     final ok = !failing.contains(track.id);
     _loaded = ok;
@@ -219,5 +223,139 @@ void main() {
     expect(playback.shuffle, isTrue);
     expect(playback.repeat, Repeat.list);
     expect(playback.showRemaining, isTrue);
+  });
+
+  group('the queue', () {
+    final queued = Track(
+      id: 50,
+      sourceId: 1,
+      source: TrackSource.vk,
+      artist: 'Исполнитель',
+      title: 'В очереди',
+      durationSec: 200,
+    );
+
+    test('with a song playing it waits for that song to end', () async {
+      await playback.playFrom(songs(3), 0);
+      await playback.addToQueue(queued);
+      expect(player.played, [0]);
+      player.endedController.add(null);
+      await settle();
+      expect(player.played, [0, 50]);
+      expect(history, [0, 50]);
+    });
+
+    test('with a song paused it still waits', () async {
+      await playback.playFrom(songs(3), 0);
+      await playback.playOrPause();
+      await playback.playNext(queued);
+      expect(player.played, [0]);
+    });
+
+    test('with nothing started it plays at once', () async {
+      await playback.addToQueue(queued);
+      expect(player.played, [50]);
+      expect(playback.queue.queued, isEmpty);
+    });
+
+    test('after the list ended it plays at once', () async {
+      await playback.playFrom(songs(2), 1);
+      player.endedController.add(null);
+      await settle();
+      await playback.addToQueue(queued);
+      expect(player.played, [1, 50]);
+    });
+
+    // Found while writing the tests: after the list ended, resuming its last
+    // song left the app "idle", so queueing a song cut the playing one off.
+    test('a last song resumed after the list ended is not cut off', () async {
+      await playback.playFrom(songs(2), 1);
+      player.playing.value = false;
+      player.endedController.add(null);
+      await settle();
+      player.playing.value = true;
+      await playback.addToQueue(queued);
+      expect(player.played, [1]);
+      expect(playback.queue.queued, hasLength(1));
+    });
+
+    test(
+      'a last song moved back after the list ended is not cut off',
+      () async {
+        await playback.playFrom(songs(2), 1);
+        player.playing.value = false;
+        player.endedController.add(null);
+        await settle();
+        await playback.seek(Duration.zero);
+        await playback.addToQueue(queued);
+        expect(player.played, [1]);
+      },
+    );
+
+    test('after a song failed to start it plays at once', () async {
+      player.failing.add(0);
+      await playback.playFrom(songs(2), 0);
+      await playback.playNext(queued);
+      expect(player.played, [0, 50]);
+    });
+
+    test('while a song is starting it waits', () async {
+      final slow = Completer<void>();
+      player.holdPlay = slow;
+      final starting = playback.playFrom(songs(3), 0);
+      await playback.addToQueue(queued);
+      slow.complete();
+      await starting;
+      expect(player.played, [0]);
+      expect(playback.queue.queued, hasLength(1));
+    });
+
+    test(
+      'a queued song that cannot play is skipped, also on repeat one',
+      () async {
+        final second = Track(
+          id: 51,
+          sourceId: 1,
+          source: TrackSource.vk,
+          artist: 'Исполнитель',
+          title: 'Вторая',
+          durationSec: 200,
+        );
+        player.failing.add(50);
+        await playback.playFrom(songs(3), 0);
+        await playback.addToQueue(queued);
+        await playback.addToQueue(second);
+        playback
+          ..cycleRepeat()
+          ..cycleRepeat();
+        expect(playback.repeat, Repeat.one);
+        player.endedController.add(null);
+        await settle();
+        await settle();
+        expect(player.played, [0, 50, 51]);
+      },
+    );
+
+    test('Next plays the queued song; removing one notifies the UI', () async {
+      await playback.playFrom(songs(3), 0);
+      await playback.addToQueue(queued);
+      await playback.next();
+      expect(player.played, [0, 50]);
+      await playback.addToQueue(queued);
+      var notified = 0;
+      playback.addListener(() => notified++);
+      playback.removeQueued(0);
+      expect(notified, 1);
+      expect(playback.queue.queued, isEmpty);
+    });
+
+    test('picking a queued song plays it now', () async {
+      await playback.playFrom(songs(3), 0);
+      await playback.addToQueue(queued);
+      await playback.playQueued(0);
+      expect(player.played, [0, 50]);
+      expect(playback.queue.queued, isEmpty);
+      expect(playback.queue.upcoming(5), [1, 2]);
+    });
   });
 }

@@ -17,6 +17,7 @@ class PlaybackController extends ChangeNotifier {
     PlayQueue? queue,
   }) : queue = queue ?? PlayQueue() {
     _ended = player.ended.listen((_) => unawaited(_onEnded()));
+    player.playing.addListener(_onPlayingChanged);
   }
 
   final PlayerService player;
@@ -30,6 +31,10 @@ class PlaybackController extends ChangeNotifier {
   /// Counts play requests, so an automatic skip stops when the user picks
   /// another song meanwhile.
   int _request = 0;
+
+  /// Whether nothing plays or is about to: nothing started yet, the list
+  /// ended, or the last song failed. A paused song does not count.
+  bool _idle = true;
 
   double _volume = 100;
   bool _mutedByUser = false;
@@ -80,7 +85,51 @@ class PlaybackController extends ChangeNotifier {
     return _play(track);
   }
 
-  Future<void> seek(Duration to) => player.seek(to);
+  /// Moving back in a song that ended leaves it paused there, which is not
+  /// idle: the song can go on from that place.
+  Future<void> seek(Duration to) {
+    _idle = false;
+    return player.seek(to);
+  }
+
+  /// Sound from any cause means something plays, for example the last song
+  /// of a list resumed after it ended.
+  void _onPlayingChanged() {
+    if (player.playing.value) _idle = false;
+  }
+
+  /// "Play next": [track] plays right after the current song.
+  Future<void> playNext(Track track) {
+    queue.playNext(track);
+    return _queueGrew();
+  }
+
+  /// "Add to queue": [track] plays after the songs already queued.
+  Future<void> addToQueue(Track track) {
+    queue.addToQueue(track);
+    return _queueGrew();
+  }
+
+  /// Takes the song at [index] of the queue out of it.
+  void removeQueued(int index) {
+    queue.removeQueued(index);
+    notifyListeners();
+  }
+
+  /// A click on a queued song in Up next: it plays now.
+  Future<PlayTiming?> playQueued(int index) async {
+    if (!player.isReady) return null;
+    return _play(queue.takeQueued(index));
+  }
+
+  /// With nothing playing a song just queued starts at once, since no song
+  /// will end to make room for it.
+  Future<void> _queueGrew() async {
+    notifyListeners();
+    if (!_idle || !player.isReady) return;
+    final track = queue.next(auto: false);
+    if (track != null) await _play(track);
+  }
 
   /// Downloads [track] (keeps its audio for good). Returns why it failed,
   /// or null on success.
@@ -152,8 +201,15 @@ class PlaybackController extends ChangeNotifier {
   /// Plays [track] and records it in the History once sound starts.
   Future<PlayTiming> _play(Track track) async {
     final request = ++_request;
+    _idle = false;
     final timing = await player.play(track);
-    if (timing.ok && request == _request) recordPlay(track);
+    if (request == _request) {
+      if (timing.ok) {
+        recordPlay(track);
+      } else {
+        _idle = true;
+      }
+    }
     notifyListeners();
     return timing;
   }
@@ -163,18 +219,22 @@ class PlaybackController extends ChangeNotifier {
   Future<void> _onEnded() async {
     for (var skips = 0; skips < maxSkips; skips++) {
       final track = queue.next(auto: true);
-      if (track == null) return;
+      if (track == null) {
+        _idle = true;
+        return;
+      }
       final request = _request + 1;
       final timing = await _play(track);
       // Stop once a song plays, when the user picked another song meanwhile,
       // or when repeat one would retry the same failing song.
       if (timing.ok || request != _request) return;
-      if (queue.repeat == Repeat.one) return;
+      if (queue.repeat == Repeat.one && queue.queued.isEmpty) return;
     }
   }
 
   @override
   void dispose() {
+    player.playing.removeListener(_onPlayingChanged);
     _ended.cancel();
     super.dispose();
   }

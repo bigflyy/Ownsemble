@@ -130,4 +130,177 @@ void main() {
     expect(queue.next(auto: false), isNull);
     expect(queue.previous(Duration.zero), isNull);
   });
+
+  group('queued songs', () {
+    final extra = Track(
+      id: 100,
+      sourceId: 1,
+      source: TrackSource.vk,
+      artist: 'Исполнитель',
+      title: 'В очереди',
+      durationSec: 200,
+    );
+    final other = Track(
+      id: 101,
+      sourceId: 1,
+      source: TrackSource.vk,
+      artist: 'Исполнитель',
+      title: 'Ещё одна',
+      durationSec: 200,
+    );
+
+    test('they play before the rest of the list, then the list goes on', () {
+      queue.start(songs(4), 1);
+      queue
+        ..addToQueue(extra)
+        ..addToQueue(other);
+      expect(ids([queue.next(auto: true), queue.next(auto: false)]), [
+        100,
+        101,
+      ]);
+      expect(queue.queued, isEmpty);
+      expect(queue.next(auto: true)?.id, 2);
+    });
+
+    test('Play next goes before songs already queued', () {
+      queue.start(songs(4), 0);
+      queue
+        ..addToQueue(extra)
+        ..playNext(other);
+      expect(ids(queue.queued), [101, 100]);
+    });
+
+    test('the same song can be queued twice and removed once', () {
+      queue.start(songs(4), 0);
+      queue
+        ..addToQueue(extra)
+        ..addToQueue(other)
+        ..addToQueue(extra)
+        ..removeQueued(0);
+      expect(ids(queue.queued), [101, 100]);
+    });
+
+    test('a removed song does not play', () {
+      queue.start(songs(3), 0);
+      queue
+        ..addToQueue(extra)
+        ..removeQueued(0);
+      expect(queue.next(auto: true)?.id, 1);
+    });
+
+    test('starting another song keeps the queue', () {
+      queue.start(songs(4), 0);
+      queue
+        ..addToQueue(extra)
+        ..start(songs(4), 2);
+      expect(queue.next(auto: true)?.id, 100);
+      expect(queue.next(auto: true)?.id, 3);
+    });
+
+    test('a queued song after the last song of the list still plays', () {
+      queue.start(songs(2), 1);
+      queue.addToQueue(extra);
+      expect(queue.next(auto: true)?.id, 100);
+      expect(queue.current?.id, 100);
+      expect(queue.next(auto: true), isNull, reason: 'repeat off stops');
+      expect(queue.current?.id, 100, reason: 'still the loaded song');
+    });
+
+    test('Previous steps back through queued songs to the list', () {
+      queue.start(songs(4), 1);
+      queue
+        ..addToQueue(extra)
+        ..addToQueue(other)
+        ..next(auto: true)
+        ..next(auto: true)
+        ..next(auto: true);
+      expect(queue.current?.id, 2);
+      expect(queue.previous(Duration.zero)?.id, 101);
+      expect(queue.previous(Duration.zero)?.id, 100);
+      expect(queue.previous(Duration.zero)?.id, 1);
+    });
+
+    test('a queued song plays once: going back past it drops it', () {
+      queue.start(songs(4), 1);
+      queue
+        ..addToQueue(extra)
+        ..next(auto: true);
+      expect(queue.previous(Duration.zero)?.id, 1);
+      expect(queue.upcoming(5), [2, 3]);
+      expect(queue.next(auto: true)?.id, 2);
+    });
+
+    test('repeat list does not bring a played queued song back', () {
+      queue
+        ..repeat = Repeat.list
+        ..start(songs(2), 0)
+        ..addToQueue(extra)
+        ..next(auto: true);
+      expect(queue.upcoming(5), [1, 0]);
+      expect(ids([queue.next(auto: true), queue.next(auto: true)]), [1, 0]);
+      expect(queue.next(auto: true)?.id, 1, reason: 'no 100 in round two');
+    });
+
+    test('a queued song wins over repeat one, which then repeats it', () {
+      queue
+        ..start(songs(3), 0)
+        ..repeat = Repeat.one
+        ..addToQueue(extra);
+      expect(queue.upcoming(5), isEmpty, reason: 'the queue is shown instead');
+      expect(queue.next(auto: true)?.id, 100);
+      expect(queue.upcoming(5), isEmpty, reason: 'not a song of the list');
+      expect(queue.next(auto: true)?.id, 100);
+    });
+
+    test('shuffle keeps the queue first and plays each list song once', () {
+      queue
+        ..shuffle = true
+        ..start(songs(5), 0)
+        ..addToQueue(extra);
+      expect(queue.next(auto: true)?.id, 100);
+      final rest = [for (var i = 0; i < 4; i++) queue.next(auto: true)?.id];
+      expect(rest.toSet(), {1, 2, 3, 4});
+      expect(queue.next(auto: true), isNull);
+    });
+
+    test('a new shuffle round works from a one-song list', () {
+      queue
+        ..shuffle = true
+        ..repeat = Repeat.list
+        ..start(songs(1), 0)
+        ..addToQueue(extra);
+      expect(queue.next(auto: true)?.id, 100);
+      expect(queue.next(auto: true)?.id, 0);
+      expect(queue.next(auto: true)?.id, 0);
+    });
+
+    test('shuffle off during a queued song goes on from the list song', () {
+      queue
+        ..shuffle = true
+        ..start(songs(5), 2)
+        ..addToQueue(extra)
+        ..next(auto: true)
+        ..shuffle = false;
+      expect(queue.current?.id, 100);
+      expect(queue.upcoming(5), [3, 4]);
+      expect(queue.previous(Duration.zero)?.id, 2);
+    });
+
+    test('with nothing started a queued song starts its own list', () {
+      queue.addToQueue(extra);
+      expect(queue.next(auto: false)?.id, 100);
+      expect(queue.current?.id, 100);
+      expect(queue.next(auto: true), isNull);
+    });
+
+    test('a queued song can be picked out of the queue', () {
+      queue
+        ..start(songs(3), 0)
+        ..addToQueue(extra)
+        ..addToQueue(other);
+      expect(queue.takeQueued(1).id, 101);
+      expect(ids(queue.queued), [100]);
+      expect(queue.current?.id, 101);
+    });
+  });
 }
