@@ -121,6 +121,19 @@ int _historyLength(String dataDir) {
   }
 }
 
+/// The VK access key of every song in the library at [dir].
+Map<String, String?> accessKeys(String dir) {
+  final db = sqlite3.open(p.join(dir, 'library.db'), mode: OpenMode.readOnly);
+  try {
+    return {
+      for (final row in db.select('SELECT source_key, access_key FROM tracks'))
+        row['source_key'] as String: row['access_key'] as String?,
+    };
+  } finally {
+    db.close();
+  }
+}
+
 void main() {
   IntegrationTestWidgetsFlutterBinding.ensureInitialized();
 
@@ -1105,6 +1118,7 @@ void main() {
     // Sync now right after the start sync finds nothing new and leaves the
     // library as it is.
     final before = library.all;
+    final keysBefore = accessKeys(copyDir);
     await tester.tap(find.byKey(const ValueKey('sync-now')));
     await tester.pump();
     expect(sync.running, isTrue, reason: 'Sync now starts a sync');
@@ -1122,9 +1136,22 @@ void main() {
       'Sync now: added ${again.result!.added}, updated '
       '${again.result!.updated}, newly gone ${again.result!.newlyGone}',
     );
-    expect(again.result!.changedLibrary, isFalse);
-    expect(identical(library.all, before), isTrue, reason: 'not reloaded');
-    expect(find.textContaining('no changes'), findsOneWidget);
+    expect(again.result!.added, 0);
+    expect(again.result!.newlyGone, 0);
+    // VK now and then gives every song a new access key, which can happen
+    // during this test. Only that may count as a change here.
+    final keysAfter = accessKeys(copyDir);
+    final newKeys = keysAfter.keys
+        .where((key) => keysAfter[key] != keysBefore[key])
+        .length;
+    expect(again.result!.updated, newKeys, reason: 'only new access keys');
+    if (newKeys == 0) {
+      expect(identical(library.all, before), isTrue, reason: 'not reloaded');
+      expect(find.textContaining('no changes'), findsOneWidget);
+    } else {
+      // ignore: avoid_print
+      print('Sync now: VK changed $newKeys access keys, nothing else');
+    }
 
     await player.stop();
   });
