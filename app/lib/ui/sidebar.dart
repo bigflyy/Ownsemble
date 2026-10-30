@@ -4,6 +4,10 @@ import 'collections_controller.dart';
 import 'library_controller.dart';
 import 'theme.dart';
 
+/// Width of the full sidebar and of the icon rail.
+const sidebarWidth = 236.0;
+const railWidth = 68.0;
+
 /// The grouped sidebar (B2): Library, Collections and Listening, with the
 /// views planned after the MVP marked "later". Collapses to an icon rail.
 class Sidebar extends StatelessWidget {
@@ -56,7 +60,7 @@ class Sidebar extends StatelessWidget {
       onTap: () => library.showView(target),
     );
     return Container(
-      width: rail ? 68 : 236,
+      width: rail ? railWidth : sidebarWidth,
       decoration: BoxDecoration(
         color: colors.surface,
         border: Border(right: BorderSide(color: colors.line)),

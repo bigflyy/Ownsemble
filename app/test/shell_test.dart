@@ -8,6 +8,8 @@ import 'package:ownsemble/playback/player_service.dart';
 import 'package:ownsemble/ui/collections_controller.dart';
 import 'package:ownsemble/ui/library_controller.dart';
 import 'package:ownsemble/ui/library_screen.dart';
+import 'package:ownsemble/ui/player_bar.dart';
+import 'package:ownsemble/ui/sidebar.dart';
 import 'package:ownsemble/ui/shell_settings.dart';
 import 'package:ownsemble/ui/theme.dart';
 
@@ -229,5 +231,41 @@ void main() {
     expect(find.text('Ownsemble'), findsNothing, reason: 'rail');
     expect(find.byKey(const ValueKey('toggle-rail')), findsNothing);
     expect(tester.takeException(), isNull);
+  });
+
+  // Bug of 2026-10-30: "Cannot play: ..." covered the whole window bottom
+  // for 4 s, so a click on the seek bar under it did nothing.
+  testWidgets('messages never cover the player or the sidebar', (tester) async {
+    for (final size in const [Size(1400, 900), Size(900, 700)]) {
+      await pumpShell(tester, size: size);
+      ScaffoldMessenger.of(tester.element(find.byType(LibraryScreen)))
+          .showSnackBar(const SnackBar(content: Text('Cannot play: test')));
+      await tester.pumpAndSettle();
+      // The visible card; the SnackBar's own box includes its margins.
+      final message = tester.getRect(
+        find
+            .descendant(
+              of: find.byType(SnackBar),
+              matching: find.byType(Material),
+            )
+            .first,
+      );
+      for (final part in [
+        find.byType(Sidebar),
+        find.byType(NowPlayingPanel),
+        find.byType(DockBar),
+      ]) {
+        if (part.evaluate().isEmpty) continue;
+        expect(
+          message.overlaps(tester.getRect(part)),
+          isFalse,
+          reason:
+              '$size: the message covers ${part.describeMatch(Plurality.one)}',
+        );
+      }
+      ScaffoldMessenger.of(tester.element(find.byType(LibraryScreen)))
+          .removeCurrentSnackBar();
+      await tester.pumpAndSettle();
+    }
   });
 }

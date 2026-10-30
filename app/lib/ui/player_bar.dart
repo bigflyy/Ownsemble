@@ -7,6 +7,9 @@ import '../storage/audio_storage.dart';
 import 'collections_controller.dart';
 import 'theme.dart';
 
+/// Width of the side panel.
+const sidePanelWidth = 380.0;
+
 /// The player in the side panel (B2 "Now playing"): tile, song, source and
 /// storage, Stack menu and Download, seek bar, transport, volume, Up next.
 class NowPlayingPanel extends StatelessWidget {
@@ -28,7 +31,7 @@ class NowPlayingPanel extends StatelessWidget {
     final colors = OwnColors.of(context);
     final player = playback.player;
     return Container(
-      width: 380,
+      width: sidePanelWidth,
       decoration: BoxDecoration(
         color: colors.surface,
         border: Border(left: BorderSide(color: colors.line)),

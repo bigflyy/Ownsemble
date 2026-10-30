@@ -214,52 +214,74 @@ class _LibraryScreenState extends State<LibraryScreen> {
           final roomForSidebar = width >= fullSidebarMinWidth;
           final sidePanel = roomForPanel && _settings.dock == PlayerDock.side;
           final colors = OwnColors.of(context);
-          return Scaffold(
-            backgroundColor: colors.bg,
-            body: Column(
-              children: [
-                Expanded(
-                  child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      ListenableBuilder(
-                        listenable: Listenable.merge([
-                          library,
-                          ?widget.collections,
-                          ?_storage,
-                        ]),
-                        builder: (context, _) => Sidebar(
-                          library: library,
-                          collections: widget.collections,
-                          downloads: _downloadCount(),
-                          rail: _settings.rail || !roomForSidebar,
-                          canExpand: roomForSidebar,
-                          onToggleRail: _settings.toggleRail,
+          final rail = _settings.rail || !roomForSidebar;
+          // Messages ("Cannot play: ...") float over the song list only:
+          // the insets keep them off the sidebar and the side panel, and
+          // the bottom bar below is the Scaffold's, so they sit above it.
+          // Covering the player for 4 s ate clicks on the seek bar.
+          final theme = Theme.of(context);
+          final messages = theme.snackBarTheme.copyWith(
+            insetPadding: EdgeInsets.fromLTRB(
+              (rail ? railWidth : sidebarWidth) + 16,
+              0,
+              (sidePanel ? sidePanelWidth : 0) + 16,
+              16,
+            ),
+          );
+          return Theme(
+            data: theme.copyWith(snackBarTheme: messages),
+            child: Scaffold(
+              backgroundColor: colors.bg,
+              bottomNavigationBar: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if (!sidePanel)
+                    DockBar(
+                      playback: widget.playback,
+                      collections: widget.collections,
+                      thumbnails: _settings.thumbnails,
+                      canDockSide: roomForPanel,
+                      onDockSide: () => _settings.dockTo(PlayerDock.side),
+                      compact: !roomForSidebar,
+                    ),
+                  if (widget.sync case final sync?) SyncStatusBar(sync: sync),
+                ],
+              ),
+              body: Column(
+                children: [
+                  Expanded(
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        ListenableBuilder(
+                          listenable: Listenable.merge([
+                            library,
+                            ?widget.collections,
+                            ?_storage,
+                          ]),
+                          builder: (context, _) => Sidebar(
+                            library: library,
+                            collections: widget.collections,
+                            downloads: _downloadCount(),
+                            rail: rail,
+                            canExpand: roomForSidebar,
+                            onToggleRail: _settings.toggleRail,
+                          ),
                         ),
-                      ),
-                      Expanded(child: _main(colors)),
-                      if (sidePanel)
-                        NowPlayingPanel(
-                          playback: widget.playback,
-                          collections: widget.collections,
-                          thumbnails: _settings.thumbnails,
-                          onDockBottom: () =>
-                              _settings.dockTo(PlayerDock.bottom),
-                        ),
-                    ],
+                        Expanded(child: _main(colors)),
+                        if (sidePanel)
+                          NowPlayingPanel(
+                            playback: widget.playback,
+                            collections: widget.collections,
+                            thumbnails: _settings.thumbnails,
+                            onDockBottom: () =>
+                                _settings.dockTo(PlayerDock.bottom),
+                          ),
+                      ],
+                    ),
                   ),
-                ),
-                if (!sidePanel)
-                  DockBar(
-                    playback: widget.playback,
-                    collections: widget.collections,
-                    thumbnails: _settings.thumbnails,
-                    canDockSide: roomForPanel,
-                    onDockSide: () => _settings.dockTo(PlayerDock.side),
-                    compact: !roomForSidebar,
-                  ),
-                if (widget.sync case final sync?) SyncStatusBar(sync: sync),
-              ],
+                ],
+              ),
             ),
           );
         },
