@@ -47,6 +47,28 @@ VK moved to `vk.ru`; `vk.com` redirects there and the session cookies live on
 - Stream URLs expire; resolve a fresh one with `audio.getById` at play time
   instead of re-syncing.
 
+## Songs that do not play (test account, 2026-10-30)
+
+123 of 126 songs have a link. All but one of those answer with audio.
+
+- **No link, withdrawn (3 songs).** `content_restricted: 1`, `is_licensed:
+  false`, empty `url`, no `release_audio_id`. `audio.getRestrictionPopup`
+  (`audio_id` = `owner_id`_`id`) gives VK's reason: "Аудиозапись недоступна. Так
+  решил музыкант или его представитель." Nothing to fix; the app says so.
+- **Link, but the file is broken (1 song).** The copy's audio server answers
+  504 with an HTML page in about 0.4 s, not a real gateway timeout: every try
+  since at least 2026-10-29, with fresh links, with or without Range, a browser
+  User-Agent, Referer and Origin. Other copies of the same recording play.
+- **`track_id` names the recording and `release_audio_id` its official
+  release.** Each copy in a library is its own file (`file_id` differs), and
+  the release can be requested with `audio.getById` with no access key. The
+  app uses it only after the copy's audio server fails, and only if the
+  release has the same `track_id`.
+- The catalog has licensed songs with the same artist and title as all 3
+  withdrawn ones, but with a different `track_id`, and for 2 of them a
+  different length (223 s vs 194 s, 212 s vs 199 s), so they are not known
+  to be the same recording. The app does not substitute them.
+
 ## Not yet verified
 
 - Libraries larger than one page of 200, and the maximum page size.
