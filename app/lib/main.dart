@@ -9,6 +9,7 @@ import 'package:path/path.dart' as p;
 import 'bench/speed_bench.dart';
 import 'library/library_store.dart';
 import 'playback/playback_controller.dart';
+import 'platform/end_process.dart';
 import 'playback/player_service.dart';
 import 'storage/audio_storage.dart';
 import 'storage/cover_store.dart';
@@ -175,10 +176,13 @@ Future<void> main(List<String> args) async {
   );
   // Before the first frame, which then already shows the song.
   playback.restoreSession(library.byId);
-  // The periodic save is up to 5 s old: a normal close saves the exact place.
+  // The periodic save is up to 5 s old: a normal close saves the exact place,
+  // then ends the process, because the engine's own shutdown crashes or hangs
+  // with mpv running (see endProcessNow).
   AppLifecycleListener(
     onExitRequested: () async {
       playback.saveSession();
+      endProcessNow();
       return AppExitResponse.exit;
     },
   );
