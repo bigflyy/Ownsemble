@@ -131,6 +131,37 @@ void main() {
     await tester.pump();
   }
 
+  group('the view is kept between runs', () {
+    LibraryController restart() => LibraryController(
+      store.loadAll(),
+      collections: collections,
+      readSetting: (key) => saved[key],
+      writeSetting: (key, value) => saved[key] = value,
+    );
+
+    test('History comes back with its songs listed', () {
+      collections.recordPlay(store.loadAll().first);
+      restart().showView(const LibraryView(ViewKind.history));
+      final second = restart();
+      expect(second.view, const LibraryView(ViewKind.history));
+      expect(second.visible, hasLength(1));
+    });
+
+    test('a Stack comes back; a deleted one falls back to all songs', () {
+      final stackId = collections.createStack('Вечер');
+      restart().showView(LibraryView(ViewKind.stack, stackId: stackId));
+      expect(restart().view.stackId, stackId);
+      saved[LibraryController.viewSetting] = 'stack:999999';
+      expect(restart().view, LibraryView.songs);
+    });
+
+    test('nothing or nonsense saved means all songs', () {
+      expect(restart().view, LibraryView.songs);
+      saved[LibraryController.viewSetting] = 'sideways';
+      expect(restart().view, LibraryView.songs);
+    });
+  });
+
   String heading(WidgetTester tester) => tester
       .widget<Text>(
         find.descendant(

@@ -425,4 +425,46 @@ void main() {
       expect(playback.queue.upcoming(5), [1, 2]);
     });
   });
+
+  group('choices kept between runs', () {
+    late Map<String, String?> saved;
+
+    /// A controller reading and writing [saved], as the app's settings do.
+    PlaybackController restart() {
+      final controller = PlaybackController(
+        player: FakePlayer(),
+        recordPlay: (_) {},
+        readSetting: (key) => saved[key],
+        writeSetting: (key, value) => saved[key] = value,
+      );
+      addTearDown(controller.dispose);
+      return controller;
+    }
+
+    setUp(() => saved = {});
+
+    test('shuffle, repeat and the time display survive a restart', () {
+      restart()
+        ..toggleShuffle()
+        ..cycleRepeat()
+        ..cycleRepeat()
+        ..toggleRemaining();
+      final second = restart();
+      expect(second.shuffle, isTrue);
+      expect(second.repeat, Repeat.one);
+      expect(second.showRemaining, isTrue);
+    });
+
+    test('nothing saved means shuffle off, repeat off, total time', () {
+      final fresh = restart();
+      expect(fresh.shuffle, isFalse);
+      expect(fresh.repeat, Repeat.off);
+      expect(fresh.showRemaining, isFalse);
+    });
+
+    test('an unknown saved repeat mode falls back to off', () {
+      saved[PlaybackController.repeatSetting] = 'sideways';
+      expect(restart().repeat, Repeat.off);
+    });
+  });
 }

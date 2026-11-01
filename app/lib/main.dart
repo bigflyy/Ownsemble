@@ -163,6 +163,8 @@ Future<void> main(List<String> args) async {
     tracks,
     collections: collections,
     storage: storage,
+    readSetting: store.readSetting,
+    writeSetting: store.writeSetting,
   );
   final playback = PlaybackController(
     player: player,

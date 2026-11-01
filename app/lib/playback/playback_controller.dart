@@ -21,6 +21,11 @@ class PlaybackController extends ChangeNotifier {
     final saved = double.tryParse(readSetting?.call(volumeSetting) ?? '');
     if (saved != null) _volume = saved.clamp(0, 100);
     _mutedByUser = readSetting?.call(muteSetting) == 'on';
+    _showRemaining = readSetting?.call(remainingSetting) == 'on';
+    this.queue.shuffle = readSetting?.call(shuffleSetting) == 'on';
+    this.queue.repeat =
+        Repeat.values.asNameMap()[readSetting?.call(repeatSetting)] ??
+        Repeat.off;
     _ended = player.ended.listen((_) => unawaited(_onEnded()));
     player.playing.addListener(_onPlayingChanged);
   }
@@ -28,6 +33,12 @@ class PlaybackController extends ChangeNotifier {
   /// Settings with the chosen volume and whether the user muted.
   static const volumeSetting = 'player.volume';
   static const muteSetting = 'player.mute';
+
+  /// Settings with the shuffle and repeat buttons' state and whether the time
+  /// label shows the remaining time.
+  static const shuffleSetting = 'player.shuffle';
+  static const repeatSetting = 'player.repeat';
+  static const remainingSetting = 'player.remaining';
 
   final PlayerService player;
   final PlayQueue queue;
@@ -178,16 +189,19 @@ class PlaybackController extends ChangeNotifier {
 
   void toggleShuffle() {
     queue.shuffle = !queue.shuffle;
+    _writeSetting?.call(shuffleSetting, queue.shuffle ? 'on' : 'off');
     notifyListeners();
   }
 
   void cycleRepeat() {
     queue.cycleRepeat();
+    _writeSetting?.call(repeatSetting, queue.repeat.name);
     notifyListeners();
   }
 
   void toggleRemaining() {
     _showRemaining = !_showRemaining;
+    _writeSetting?.call(remainingSetting, _showRemaining ? 'on' : 'off');
     notifyListeners();
   }
 

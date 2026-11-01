@@ -44,13 +44,47 @@ class LibraryView {
 /// keeps those that match, in the view's order; History and Stacks may list
 /// a song more than once.
 class LibraryController extends ChangeNotifier {
-  LibraryController(this._all, {this.collections, this.storage})
-    : _index = SearchIndex(_all),
-      _visible = _all {
+  LibraryController(
+    this._all, {
+    this.collections,
+    this.storage,
+    String? Function(String key)? readSetting,
+    this._writeSetting,
+  }) : _index = SearchIndex(_all),
+       _visible = _all {
     _byId = {for (final track in _all) track.id: track};
     searchText.addListener(_onSearchChanged);
     collections?.addListener(_onSourceChanged);
     storage?.addListener(_onStorageChanged);
+    final saved = _decodeView(readSetting?.call(viewSetting));
+    if (saved != null) {
+      _view = saved;
+      _rebuildBase();
+      _applySearch();
+    }
+  }
+
+  /// Setting with the view shown when the app closed.
+  static const viewSetting = 'ui.view';
+
+  final void Function(String key, String? value)? _writeSetting;
+
+  /// A view as stored in [viewSetting]: its kind, plus the id for a Stack.
+  static String _encodeView(LibraryView view) => view.stackId == null
+      ? view.kind.name
+      : '${view.kind.name}:${view.stackId}';
+
+  /// The view stored as [text], or null when there is none to go back to,
+  /// for example a Stack that no longer exists.
+  LibraryView? _decodeView(String? text) {
+    if (text == null) return null;
+    final parts = text.split(':');
+    final kind = ViewKind.values.asNameMap()[parts.first];
+    if (kind == null) return null;
+    if (kind != ViewKind.stack || parts.length < 2) return LibraryView(kind);
+    final stackId = int.tryParse(parts[1]);
+    final exists = collections?.stacks.any((s) => s.id == stackId) ?? false;
+    return exists ? LibraryView(kind, stackId: stackId) : null;
   }
 
   /// History and Stacks; without it those views are empty.
@@ -98,6 +132,7 @@ class LibraryController extends ChangeNotifier {
   /// Switches the list to [view] and scrolls to its top.
   void showView(LibraryView view) {
     _view = view;
+    _writeSetting?.call(viewSetting, _encodeView(view));
     _rebuildBase();
     _applySearch();
     if (scroll.hasClients) scroll.jumpTo(0);
