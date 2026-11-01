@@ -94,6 +94,7 @@ void main() {
     PlayerDock dock = PlayerDock.side,
     bool saving = false,
     double pixelRatio = 1,
+    bool shortcutsList = false,
   }) async {
     final store = LibraryStore.open(':memory:');
     addTearDown(store.close);
@@ -174,6 +175,10 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
+    if (shortcutsList) {
+      await tester.tap(find.byKey(const ValueKey('keyboard-help')));
+      await tester.pumpAndSettle();
+    }
     await tester.runAsync(() async {
       final render =
           boundary.currentContext!.findRenderObject()! as RenderRepaintBoundary;
@@ -211,6 +216,10 @@ void main() {
       dock: PlayerDock.bottom,
       pixelRatio: 2,
     ),
+  );
+  testWidgets(
+    'dark, shortcuts list',
+    (t) => shoot(t, 'dark-shortcuts', dark: true, shortcutsList: true),
   );
   testWidgets(
     'light, narrow',
