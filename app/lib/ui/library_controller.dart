@@ -4,6 +4,10 @@ import '../library/search_index.dart';
 import '../library/track.dart';
 import '../storage/audio_storage.dart';
 import 'collections_controller.dart';
+import 'type_jump.dart';
+
+/// Height of one song row; fixed so the list can skip layout of hidden rows.
+const rowHeight = 58.0;
 
 /// The views of the sidebar. Artists, Playlists and Charts are planned
 /// after the MVP and show a "later" page.
@@ -113,6 +117,10 @@ class LibraryController extends ChangeNotifier {
   final searchText = TextEditingController();
   final scroll = ScrollController();
 
+  /// Typing on the list jumps to a song. Any change of the rows ends a jump,
+  /// since it holds a row number.
+  late final jump = TypeJump(rows: () => _visible, reveal: _revealRow);
+
   List<Track> get all => _all;
   LibraryView get view => _view;
 
@@ -135,8 +143,27 @@ class LibraryController extends ChangeNotifier {
     _writeSetting?.call(viewSetting, _encodeView(view));
     _rebuildBase();
     _applySearch();
+    jump.clear();
     if (scroll.hasClients) scroll.jumpTo(0);
     notifyListeners();
+  }
+
+  /// Scrolls row [index] into view: not at all if it is fully visible, else
+  /// to a third of the way down, with the rows above it for orientation.
+  void _revealRow(int index) {
+    if (!scroll.hasClients) return;
+    final position = scroll.position;
+    final top = index * rowHeight;
+    final height = position.viewportDimension;
+    final visible =
+        top >= position.pixels && top + rowHeight <= position.pixels + height;
+    if (visible) return;
+    scroll.jumpTo(
+      (top - height / 3).clamp(
+        position.minScrollExtent,
+        position.maxScrollExtent,
+      ),
+    );
   }
 
   void _onSearchChanged() {
@@ -146,6 +173,7 @@ class LibraryController extends ChangeNotifier {
     final clock = Stopwatch()..start();
     _applySearch();
     lastQueryTime = clock.elapsed;
+    jump.clear();
     if (scroll.hasClients) scroll.jumpTo(0);
     notifyListeners();
   }
@@ -155,6 +183,7 @@ class LibraryController extends ChangeNotifier {
     if (!_view.hasEntries) return;
     _rebuildBase();
     _applySearch();
+    jump.clear();
     notifyListeners();
   }
 
@@ -163,6 +192,7 @@ class LibraryController extends ChangeNotifier {
     if (_view.kind != ViewKind.downloads) return;
     _rebuildBase();
     _applySearch();
+    jump.clear();
     notifyListeners();
   }
 
@@ -244,6 +274,7 @@ class LibraryController extends ChangeNotifier {
     _byId = {for (final track in _all) track.id: track};
     _rebuildBase();
     _applySearch();
+    jump.clear();
     notifyListeners();
   }
 
@@ -251,6 +282,7 @@ class LibraryController extends ChangeNotifier {
   void dispose() {
     collections?.removeListener(_onSourceChanged);
     storage?.removeListener(_onStorageChanged);
+    jump.dispose();
     searchText.dispose();
     scroll.dispose();
     super.dispose();

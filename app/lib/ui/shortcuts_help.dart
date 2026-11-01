@@ -12,7 +12,10 @@ const shortcuts = <(String keys, String action)>[
   ('Ctrl + S', 'Shuffle on or off'),
   ('Ctrl + R', 'Repeat: off, list, this song'),
   ('Ctrl + F', 'Search'),
-  ('Esc', 'Clear the search, then leave the search box'),
+  ('Letters', 'Jump to a matching song'),
+  ('Up, Down after letters', 'Next or previous match'),
+  ('Enter after letters', 'Play the song jumped to'),
+  ('Esc', 'End the jump, clear the search, leave the search box'),
   ('F1', 'This list'),
 ];
 
@@ -24,6 +27,8 @@ Future<void> showShortcutsHelp(BuildContext context) => showDialog<void>(
     return AlertDialog(
       key: const ValueKey('shortcuts-help'),
       title: const Text('Keyboard shortcuts'),
+      // The list is longer than a small window.
+      scrollable: true,
       content: SizedBox(
         width: 440,
         child: Column(

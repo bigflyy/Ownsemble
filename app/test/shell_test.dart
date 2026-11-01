@@ -18,6 +18,7 @@ import 'package:ownsemble/ui/player_bar.dart';
 import 'package:ownsemble/ui/sidebar.dart';
 import 'package:ownsemble/ui/shell_settings.dart';
 import 'package:ownsemble/ui/theme.dart';
+import 'package:ownsemble/ui/type_jump.dart';
 
 /// A player that accepts songs without opening any audio, so the panel shows
 /// a song as it does in the app.
@@ -317,6 +318,285 @@ void main() {
       expect(focused?.findAncestorWidgetOfExactType<Slider>(), isNotNull);
       await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
       expect(player.seekOffsets, isEmpty);
+    });
+
+    group('type to jump', () {
+      /// Types [text] on the list, the way Windows delivers a letter: a key
+      /// with its text. Cyrillic has no logical key of its own, so one key
+      /// stands for all of them; only the text counts.
+      Future<void> typeOnList(WidgetTester tester, String text) async {
+        for (final character in text.split('')) {
+          await tester.sendKeyEvent(
+            character == ' '
+                ? LogicalKeyboardKey.space
+                : LogicalKeyboardKey.keyA,
+            character: character,
+          );
+        }
+        await tester.pump();
+      }
+
+      Finder jumpPill() => find.byKey(const ValueKey('jump-pill'));
+
+      String pillText(WidgetTester tester) => tester
+          .widget<Text>(
+            find.descendant(of: jumpPill(), matching: find.byType(Text)),
+          )
+          .textSpan!
+          .toPlainText();
+
+      /// Whether the song row of song [index] has the jump's outline.
+      bool outlined(WidgetTester tester, int index) {
+        final row = find.byKey(ValueKey('song-${ids[index]}'));
+        final material = tester.widget<Material>(
+          find.descendant(of: row, matching: find.byType(Material)).first,
+        );
+        final shape = material.shape! as RoundedRectangleBorder;
+        return shape.side != BorderSide.none;
+      }
+
+      testWidgets('letters jump without filtering, also in Cyrillic', (
+        tester,
+      ) async {
+        await pumpPlaying(tester);
+        await typeOnList(tester, 'песня 3');
+        expect(library.visible, hasLength(6));
+        expect(library.searchText.text, isEmpty);
+        expect(library.jump.row, 3);
+        expect(outlined(tester, 3), isTrue);
+        expect(outlined(tester, 1), isFalse);
+        expect(pillText(tester), 'песня 3  1 of 1');
+        await tester.pump(TypeJump.resetAfter);
+      });
+
+      testWidgets('the row outlives the text and its pill', (tester) async {
+        await pumpPlaying(tester);
+        await typeOnList(tester, 'п');
+        expect(jumpPill(), findsOneWidget);
+        await tester.pump(TypeJump.resetAfter);
+        await tester.pump();
+        expect(jumpPill(), findsNothing);
+        expect(outlined(tester, 0), isTrue);
+      });
+
+      testWidgets('no match says so and outlines nothing', (tester) async {
+        await pumpPlaying(tester);
+        await typeOnList(tester, 'пя');
+        expect(library.jump.row, isNull);
+        expect(outlined(tester, 0), isFalse);
+        expect(pillText(tester), 'пя  no match');
+        await tester.sendKeyEvent(LogicalKeyboardKey.backspace);
+        await tester.pump();
+        expect(library.jump.row, 0);
+        await tester.pump(TypeJump.resetAfter);
+      });
+
+      testWidgets('during a jump Down and Up move, held too, and not the '
+          'volume', (tester) async {
+        await pumpPlaying(tester);
+        await playback.setVolume(50);
+        await typeOnList(tester, 'п');
+        await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+        expect(library.jump.row, 1);
+        await tester.sendKeyDownEvent(LogicalKeyboardKey.arrowDown);
+        await tester.sendKeyRepeatEvent(LogicalKeyboardKey.arrowDown);
+        await tester.sendKeyUpEvent(LogicalKeyboardKey.arrowDown);
+        expect(library.jump.row, 3);
+        await tester.sendKeyEvent(LogicalKeyboardKey.arrowUp);
+        expect(library.jump.row, 2);
+        expect(playback.volume, 50);
+        await tester.pump(TypeJump.resetAfter);
+      });
+
+      testWidgets('once the text is gone Up is the volume again', (
+        tester,
+      ) async {
+        await pumpPlaying(tester);
+        await playback.setVolume(50);
+        await typeOnList(tester, 'п');
+        await tester.pump(TypeJump.resetAfter);
+        await tester.sendKeyEvent(LogicalKeyboardKey.arrowUp);
+        expect(playback.volume, 55);
+        expect(library.jump.row, 0);
+      });
+
+      testWidgets('Space joins letters, alone it stays play and pause', (
+        tester,
+      ) async {
+        await pumpPlaying(tester);
+        await tester.sendKeyEvent(LogicalKeyboardKey.space, character: ' ');
+        expect(player.pauseToggles, 1);
+        expect(library.jump.isTyping, isFalse);
+        await typeOnList(tester, 'песня 4');
+        expect(player.pauseToggles, 1);
+        expect(library.jump.row, 4);
+        await tester.pump(TypeJump.resetAfter);
+        await tester.sendKeyEvent(LogicalKeyboardKey.space, character: ' ');
+        expect(player.pauseToggles, 2, reason: 'the text is gone');
+      });
+
+      testWidgets('Enter plays the row and ends the jump', (tester) async {
+        await pumpPlaying(tester);
+        await typeOnList(tester, 'песня 4');
+        await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+        await tester.pump();
+        expect(player.played, [ids[1], ids[4]]);
+        expect(library.jump.row, isNull);
+        expect(library.jump.isTyping, isFalse);
+      });
+
+      testWidgets('Enter with no match plays nothing', (tester) async {
+        await pumpPlaying(tester);
+        await typeOnList(tester, 'я');
+        await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+        await tester.pump();
+        expect(player.played, [ids[1]]);
+        await tester.pump(TypeJump.resetAfter);
+      });
+
+      testWidgets('Esc ends the jump first, then clears the search', (
+        tester,
+      ) async {
+        await pumpPlaying(tester);
+        library.searchText.text = 'песня';
+        await tester.pump();
+        await typeOnList(tester, 'п');
+        await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+        await tester.pump();
+        expect(library.jump.row, isNull);
+        expect(library.searchText.text, 'песня');
+        await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+        await tester.pump();
+        expect(library.searchText.text, isEmpty);
+      });
+
+      testWidgets('a click on a row ends the jump', (tester) async {
+        await pumpPlaying(tester);
+        await typeOnList(tester, 'п');
+        await tester.tap(find.byKey(ValueKey('song-${ids[3]}')));
+        await tester.pump();
+        expect(library.jump.row, isNull);
+        expect(player.played, [ids[1], ids[3]]);
+      });
+
+      testWidgets('going to the search box ends the jump, letters stay '
+          'out of it', (tester) async {
+        await pumpPlaying(tester);
+        await typeOnList(tester, 'п');
+        await tester.tap(find.byType(TextField));
+        await tester.pump();
+        expect(library.jump.row, isNull);
+        expect(library.jump.isTyping, isFalse);
+        await typeOnList(tester, 'п');
+        expect(library.jump.isTyping, isFalse);
+      });
+
+      testWidgets('a change of the list ends the jump', (tester) async {
+        await pumpPlaying(tester);
+        await typeOnList(tester, 'п');
+        library.showView(const LibraryView(ViewKind.history));
+        await tester.pump();
+        expect(library.jump.row, isNull);
+        library.showView(LibraryView.songs);
+        await tester.pump();
+        await typeOnList(tester, 'п');
+        library.searchText.text = 'песня 1';
+        await tester.pump();
+        expect(library.jump.row, isNull);
+      });
+
+      testWidgets('with Ctrl or Alt held letters are not typed', (
+        tester,
+      ) async {
+        await pumpPlaying(tester);
+        await withControl(tester, () async {
+          await tester.sendKeyEvent(LogicalKeyboardKey.keyQ, character: 'q');
+        });
+        await tester.sendKeyDownEvent(LogicalKeyboardKey.altLeft);
+        await tester.sendKeyEvent(LogicalKeyboardKey.keyQ, character: 'q');
+        await tester.sendKeyUpEvent(LogicalKeyboardKey.altLeft);
+        await tester.pump();
+        expect(library.jump.isTyping, isFalse);
+      });
+
+      testWidgets('Shift letters are typed', (tester) async {
+        await pumpPlaying(tester);
+        await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
+        await tester.sendKeyEvent(LogicalKeyboardKey.keyA, character: 'П');
+        await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
+        await tester.pump();
+        expect(library.jump.row, 0);
+        await tester.pump(TypeJump.resetAfter);
+      });
+
+      testWidgets('not under a dialog, not on a later page', (tester) async {
+        await pumpPlaying(tester);
+        await tester.sendKeyEvent(LogicalKeyboardKey.f1);
+        await tester.pumpAndSettle();
+        await typeOnList(tester, 'п');
+        expect(library.jump.isTyping, isFalse);
+        await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+        await tester.pumpAndSettle();
+        library.showView(const LibraryView(ViewKind.artists));
+        await tester.pump();
+        await typeOnList(tester, 'п');
+        expect(library.jump.isTyping, isFalse);
+      });
+
+      testWidgets('a row out of sight scrolls to a third down; a row in '
+          'sight does not scroll', (tester) async {
+        final many = store.ensureSource(
+          TrackSource.vk,
+          account: '2',
+          name: 'VK',
+        );
+        store.upsertAll(many, [
+          for (var i = 0; i < 300; i++)
+            NewTrack(
+              sourceKey: '2_$i',
+              artist: 'Filler',
+              title: 'Filler $i',
+              durationSec: 200,
+              addedAt: -i - 1,
+            ),
+          const NewTrack(
+            sourceKey: '2_last',
+            artist: 'Finish',
+            title: 'Zebra',
+            durationSec: 200,
+            addedAt: -1000,
+          ),
+        ]);
+        library = LibraryController(store.loadAll(), collections: collections);
+        await pumpPlaying(tester);
+        final inSight = library.visible.indexWhere((t) => t.title == 'Песня 4');
+        await typeOnList(tester, 'песня 4');
+        expect(library.jump.row, inSight);
+        expect(library.scroll.offset, 0);
+        await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+
+        final middle = library.visible.indexWhere(
+          (t) => t.title == 'Filler 150',
+        );
+        await typeOnList(tester, 'filler 150');
+        await tester.pump();
+        final height = library.scroll.position.viewportDimension;
+        expect(library.scroll.offset, middle * rowHeight - height / 3);
+        expect(
+          find.byKey(ValueKey('song-${library.visible[middle].id}')),
+          findsOneWidget,
+        );
+        await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+
+        await typeOnList(tester, 'zebra');
+        await tester.pump();
+        expect(
+          library.scroll.offset,
+          library.scroll.position.maxScrollExtent,
+          reason: 'the last row cannot be a third down',
+        );
+        await tester.pump(TypeJump.resetAfter);
+      });
     });
 
     testWidgets('F1 and the toolbar button list the shortcuts', (tester) async {

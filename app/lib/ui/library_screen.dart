@@ -19,10 +19,8 @@ import 'sidebar.dart';
 import 'sync_controller.dart';
 import 'sync_status_bar.dart';
 import 'theme.dart';
+import 'type_jump.dart';
 import 'vk_account.dart';
-
-/// Height of one song row; fixed so the list can skip layout of hidden rows.
-const rowHeight = 58.0;
 
 /// Narrower than this, the side panel gives way to the bottom bar.
 const sidePanelMinWidth = 980.0;
@@ -94,6 +92,12 @@ class _LibraryScreenState extends State<LibraryScreen> {
       }),
     );
     FocusManager.instance.addEarlyKeyEventHandler(_onEarlyKey);
+    _searchFocus.addListener(_endJumpInSearch);
+  }
+
+  /// Going to the search box ends a jump: typing now filters instead.
+  void _endJumpInSearch() {
+    if (_searchFocus.hasFocus) library.jump.clear();
   }
 
   /// App-wide keys. They run before the focus tree, so they work wherever the
@@ -105,6 +109,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
 
   /// Acts on [event]; true when the key was used.
   bool _onKey(KeyEvent event) {
+    if (_onJumpKey(event)) return true;
     // A held key repeats only for the volume, see _onPlayerKey.
     if (event is KeyRepeatEvent) return _onPlayerKey(event);
     if (event is! KeyDownEvent) return false;
@@ -155,6 +160,65 @@ class _LibraryScreenState extends State<LibraryScreen> {
       return true;
     }
     return _onPlayerKey(event);
+  }
+
+  /// Keys of the jump to a song by typing. They come before the app's other
+  /// keys, since Up, Down, Space and Esc mean something else during a jump.
+  /// Letters come from Windows' text, so any layout works: Cyrillic has no
+  /// physical key of its own. Ctrl and Alt keep their shortcuts, and AltGr
+  /// reads as both, so its letters do not jump.
+  bool _onJumpKey(KeyEvent event) {
+    if (event is KeyUpEvent) return false;
+    if (_typing || _covered) return false;
+    if (library.view.isLater || library.visible.isEmpty) return false;
+    final keyboard = HardwareKeyboard.instance;
+    if (keyboard.isControlPressed ||
+        keyboard.isAltPressed ||
+        keyboard.isMetaPressed) {
+      return false;
+    }
+    final jump = library.jump;
+    final key = event.logicalKey;
+    if (jump.isTyping) {
+      if (key == LogicalKeyboardKey.arrowDown) {
+        jump.next();
+        return true;
+      }
+      if (key == LogicalKeyboardKey.arrowUp) {
+        jump.previous();
+        return true;
+      }
+      if (key == LogicalKeyboardKey.backspace) {
+        jump.backspace();
+        return true;
+      }
+    }
+    // A held key is not many letters, and it stays with the player below.
+    if (event is! KeyDownEvent) return false;
+    if (key == LogicalKeyboardKey.escape &&
+        (jump.isTyping || jump.row != null)) {
+      jump.clear();
+      return true;
+    }
+    final row = jump.row;
+    if (key == LogicalKeyboardKey.enter && row != null) {
+      jump.clear();
+      _play(row);
+      return true;
+    }
+    final character = event.character;
+    if (character == null || !_isPrintable(character)) return false;
+    // Space only joins letters: on its own it stays play and pause.
+    if (key == LogicalKeyboardKey.space && !jump.isTyping) return false;
+    jump.type(character);
+    return true;
+  }
+
+  /// Whether [character] is text, not a control character such as the ones
+  /// Enter, Esc, Tab and Backspace come with.
+  bool _isPrintable(String character) {
+    final code = character.runes.first;
+    return code >= 0x20 && code != 0x7F;
   }
 
   /// The player's keys, listed in [shortcuts]. Not while typing, where they
@@ -236,6 +300,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
   @override
   void dispose() {
     FocusManager.instance.removeEarlyKeyEventHandler(_onEarlyKey);
+    _searchFocus.removeListener(_endJumpInSearch);
     for (final subscription in _subscriptions) {
       subscription.cancel();
     }
@@ -499,6 +564,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
           child: ListenableBuilder(
             listenable: Listenable.merge([
               library,
+              library.jump,
               ?_storage,
               ?widget.collections,
             ]),
@@ -515,6 +581,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
                         ? '${library.viewCount} songs'
                         : '${library.visible.length} of '
                               '${library.viewCount} songs',
+                    jump: library.jump,
                   ),
                   Expanded(
                     child: view.isLater
@@ -621,8 +688,12 @@ class _LibraryScreenState extends State<LibraryScreen> {
                 storage: _storage,
                 thumbnails: _settings.thumbnails,
                 isCurrent: track.id == current.data?.id,
+                isJump: index == library.jump.row,
                 playing: playing,
-                onTap: () => _play(index),
+                onTap: () {
+                  library.jump.clear();
+                  _play(index);
+                },
                 onMenu: (position) => _showSongMenu(index, position),
               );
             },
@@ -703,10 +774,15 @@ class _SearchField extends StatelessWidget {
 }
 
 class _ViewHeading extends StatelessWidget {
-  const _ViewHeading({required this.title, required this.count});
+  const _ViewHeading({
+    required this.title,
+    required this.count,
+    required this.jump,
+  });
 
   final String title;
   final String? count;
+  final TypeJump jump;
 
   @override
   Widget build(BuildContext context) {
@@ -714,22 +790,83 @@ class _ViewHeading extends StatelessWidget {
     return Padding(
       padding: const EdgeInsets.fromLTRB(24, 0, 24, 10),
       child: Row(
-        crossAxisAlignment: CrossAxisAlignment.baseline,
-        textBaseline: TextBaseline.alphabetic,
         children: [
-          Flexible(
-            child: Text(
-              title,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(fontSize: 26, fontWeight: FontWeight.w700),
+          Expanded(
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.baseline,
+              textBaseline: TextBaseline.alphabetic,
+              children: [
+                Flexible(
+                  child: Text(
+                    title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      fontSize: 26,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+                if (count != null) ...[
+                  const SizedBox(width: 10),
+                  Text(
+                    count!,
+                    style: TextStyle(fontSize: 13, color: colors.dim),
+                  ),
+                ],
+              ],
             ),
           ),
-          if (count != null) ...[
-            const SizedBox(width: 10),
-            Text(count!, style: TextStyle(fontSize: 13, color: colors.dim)),
+          if (jump.isTyping) ...[
+            const SizedBox(width: 16),
+            ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 260),
+              child: _JumpPill(jump: jump),
+            ),
           ],
         ],
+      ),
+    );
+  }
+}
+
+/// What was typed for a jump and how it went: "mad  2 of 3" or "mad  no
+/// match". It sits in the heading so that it never covers a row.
+class _JumpPill extends StatelessWidget {
+  const _JumpPill({required this.jump});
+
+  final TypeJump jump;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = OwnColors.of(context);
+    final found = jump.matchCount > 0;
+    return Container(
+      key: const ValueKey('jump-pill'),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
+      decoration: BoxDecoration(
+        color: found ? colors.accentBg : colors.surface,
+        border: Border.all(color: found ? colors.accent : colors.line),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Text.rich(
+        TextSpan(
+          children: [
+            TextSpan(
+              text: jump.text.trimRight(),
+              style: const TextStyle(fontWeight: FontWeight.w600),
+            ),
+            TextSpan(
+              text: found
+                  ? '  ${jump.matchNumber} of ${jump.matchCount}'
+                  : '  no match',
+              style: TextStyle(color: colors.dim),
+            ),
+          ],
+        ),
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: const TextStyle(fontSize: 13),
       ),
     );
   }
@@ -780,6 +917,7 @@ class _SongRow extends StatelessWidget {
     required this.storage,
     required this.thumbnails,
     required this.isCurrent,
+    required this.isJump,
     required this.playing,
     required this.onTap,
     required this.onMenu,
@@ -798,6 +936,10 @@ class _SongRow extends StatelessWidget {
   final AudioStorage? storage;
   final bool thumbnails;
   final bool isCurrent;
+
+  /// The row reached by typing: outlined, so that it reads apart from the
+  /// current song's fill and can be the same row.
+  final bool isJump;
 
   /// Whether the player is playing (not paused), for the current row.
   final bool playing;
@@ -833,7 +975,15 @@ class _SongRow extends StatelessWidget {
       padding: const EdgeInsets.symmetric(vertical: 1),
       child: Material(
         color: isCurrent ? colors.accentBg : Colors.transparent,
-        borderRadius: BorderRadius.circular(10),
+        // Material fades a new shape in over 200 ms: too slow for an outline
+        // that moves with every key.
+        animationDuration: Duration.zero,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(10),
+          side: isJump
+              ? BorderSide(color: colors.accent, width: 1.5)
+              : BorderSide.none,
+        ),
         child: InkWell(
           borderRadius: BorderRadius.circular(10),
           hoverColor: colors.hover,
