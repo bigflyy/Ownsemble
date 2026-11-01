@@ -912,6 +912,65 @@ void main() {
       );
     }
 
+    // Type to jump on real rows: Cyrillic letters reach a song far down
+    // without filtering, its row comes into view, Down walks the matches,
+    // Enter plays it for real, a text with no match says so, Esc ends it.
+    FocusManager.instance.primaryFocus?.unfocus();
+    library.scroll.jumpTo(0);
+    await tester.pump();
+    Future<void> typeOnList(String text) async {
+      for (final character in text.split('')) {
+        await tester.sendKeyEvent(
+          LogicalKeyboardKey.keyA,
+          character: character,
+        );
+      }
+      await tester.pump();
+    }
+
+    final cyrillicTitle = RegExp('^[а-яА-Я]{3}');
+    final jumpTarget = library.visible.lastWhere(
+      (t) =>
+          playedOk.contains(t.id) &&
+          t.id != player.current?.id &&
+          cyrillicTitle.hasMatch(t.title),
+    );
+    final jumpText = jumpTarget.title.substring(0, 3);
+    final rowsBefore = library.visible.length;
+    await typeOnList(jumpText);
+    expect(library.visible, hasLength(rowsBefore), reason: 'jump filters none');
+    expect(library.jump.row, isNotNull, reason: 'letters found a row');
+    final jumpMatches = library.jump.matchCount;
+    for (var step = 1; step < jumpMatches; step++) {
+      if (library.visible[library.jump.row!].id == jumpTarget.id) break;
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+    }
+    await tester.pump();
+    expect(library.visible[library.jump.row!].id, jumpTarget.id);
+    expect(
+      find.byKey(ValueKey('song-${jumpTarget.id}')),
+      findsOneWidget,
+      reason: 'the row is on screen',
+    );
+    final jumpResult = player.timings.first;
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    final jumpPlay = await waitForTiming(jumpResult, 'Enter on the jumped row');
+    expect(jumpPlay.ok, isTrue);
+    expect(player.current?.id, jumpTarget.id, reason: 'Enter plays the row');
+    expect(library.jump.row, isNull, reason: 'Enter ends the jump');
+    await typeOnList('ъъъ');
+    expect(library.jump.matchCount, 0);
+    expect(find.textContaining('no match'), findsOneWidget);
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await tester.pump();
+    expect(library.jump.isTyping, isFalse, reason: 'Esc ends the jump');
+    // ignore: avoid_print
+    print(
+      'Type to jump: "$jumpText" reached row '
+      '${library.visible.indexOf(jumpTarget)} of $rowsBefore, '
+      '$jumpMatches matches, played in ${jumpPlay.toSoundMs} ms',
+    );
+
     // Stored audio: a streamed song is saved while it plays and then plays
     // from disk; Download keeps a song; the cache limit removes cached
     // songs but never downloaded ones.

@@ -95,6 +95,7 @@ void main() {
     bool saving = false,
     double pixelRatio = 1,
     bool shortcutsList = false,
+    String jump = '',
   }) async {
     final store = LibraryStore.open(':memory:');
     addTearDown(store.close);
@@ -175,6 +176,8 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
+    jump.split('').forEach(library.jump.type);
+    await tester.pump();
     if (shortcutsList) {
       await tester.tap(find.byKey(const ValueKey('keyboard-help')));
       await tester.pumpAndSettle();
@@ -188,6 +191,7 @@ void main() {
       File(p.join(shotsDir, '$name.png'))
           .writeAsBytesSync(png!.buffer.asUint8List());
     });
+    library.jump.clear();
   }
 
   testWidgets('dark, side panel', (t) => shoot(t, 'dark-side', dark: true));
@@ -220,6 +224,25 @@ void main() {
   testWidgets(
     'dark, shortcuts list',
     (t) => shoot(t, 'dark-shortcuts', dark: true, shortcutsList: true),
+  );
+  testWidgets(
+    'dark, jump to a row',
+    (t) => shoot(t, 'dark-jump', dark: true, jump: 'mas', pixelRatio: 2),
+  );
+  testWidgets(
+    'light, jump to the playing row',
+    (t) => shoot(
+      t,
+      'light-jump-current',
+      dark: false,
+      saving: true,
+      jump: 'ки',
+      pixelRatio: 2,
+    ),
+  );
+  testWidgets(
+    'dark, jump without a match',
+    (t) => shoot(t, 'dark-jump-none', dark: true, jump: 'ъъ', pixelRatio: 2),
   );
   testWidgets(
     'light, narrow',

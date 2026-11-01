@@ -9,6 +9,7 @@ import 'package:flutter/scheduler.dart';
 import 'package:flutter/widgets.dart';
 import 'package:media_kit/media_kit.dart' show NativePlayer;
 
+import '../library/search_text.dart';
 import '../library/track.dart';
 import '../playback/playback_controller.dart';
 import '../playback/player_service.dart';
@@ -73,6 +74,7 @@ class SpeedBench {
     final display = WidgetsBinding.instance.platformDispatcher.displays.first;
     final benches = <String, Future<Map<String, Object?>> Function()>{
       'search': _searchBench,
+      'typeJump': _typeJumpBench,
       'scroll': _scrollBench,
       'scrollCovers': _scrollCoversBench,
       'playCached': _cachedPlayBench,
@@ -155,7 +157,9 @@ class SpeedBench {
   /// Pauses a cached song at [savedSongProbe] and says so in the result file;
   /// the speed gate then posts real Windows key messages to this window, and
   /// this reports what they did: Right moves the song, Up the volume, Space
-  /// resumes it.
+  /// resumes it, and letters jump to a song. The letters are Cyrillic, taken
+  /// from the library: the jump reads them from Windows' text, and only real
+  /// messages have that. The result file's ".ready" holds them.
   Future<Map<String, Object?>> _keysProbe() async {
     final list = library.visible;
     final index = list.indexWhere(
@@ -173,17 +177,34 @@ class SpeedBench {
     await Future<void>.delayed(const Duration(milliseconds: 300));
     final position = player.position;
     final volumeBefore = playback.volume;
-    File('${resultFile!}.ready').writeAsStringSync('ready');
+    final cyrillic = RegExp('^[а-яА-Я]{3}');
+    final jumpTrack = list.firstWhere((t) => cyrillic.hasMatch(t.title));
+    final jumpText = jumpTrack.title.substring(0, 3);
+    File('${resultFile!}.ready').writeAsStringSync(jumpText);
     final clock = Stopwatch()..start();
+    // The text is forgotten after 2 s, sooner than the song gets 4 s on.
+    Track? jumpedTo;
     bool done() =>
         player.playing.value &&
         player.position >= position + const Duration(seconds: 4) &&
-        playback.volume != volumeBefore;
+        playback.volume != volumeBefore &&
+        jumpedTo != null;
     while (!done() && clock.elapsed < const Duration(seconds: 15)) {
       await Future<void>.delayed(const Duration(milliseconds: 50));
+      final row = library.jump.row;
+      if (library.jump.text == jumpText && row != null) {
+        jumpedTo = list[row];
+      }
     }
+    final wanted = normalizeForSearch(jumpText);
     return {
-      'ok': done(),
+      'ok':
+          done() &&
+          (normalizeForSearch(jumpedTo!.title).startsWith(wanted) ||
+              normalizeForSearch(jumpedTo.artist).startsWith(wanted)),
+      'jumpText': jumpText,
+      'jumpedToTitle': jumpedTo?.title,
+      'jumpedToArtist': jumpedTo?.artist,
       'positionBeforeMs': position.inMilliseconds,
       'positionAfterMs': player.position.inMilliseconds,
       'volumeBefore': volumeBefore,
@@ -316,6 +337,48 @@ class SpeedBench {
     final count = library.visible.length;
     library.searchText.clear();
     return count;
+  }
+
+  /// Types on the list one character at a time, as a user would, and
+  /// measures each key until the frame showing the jump is rasterized. Each
+  /// key scans every row, and a far row also scrolls the list. The last text
+  /// finds nothing, which is the full scan through all three checks.
+  Future<Map<String, Object?>> _typeJumpBench() async {
+    const texts = ['кино', 'ёлка', 'metallica', 'night city', 'the', 'ъъъъ'];
+    final jump = library.jump;
+    final keystrokes = <({int startUs, int scanUs, int uiDoneUs})>[];
+    for (final text in texts) {
+      for (final character in text.split('')) {
+        await Future<void>.delayed(const Duration(milliseconds: 40));
+        final startUs = Timeline.now;
+        jump.type(character);
+        final scanUs = Timeline.now - startUs;
+        await WidgetsBinding.instance.endOfFrame;
+        keystrokes.add((
+          startUs: startUs,
+          scanUs: scanUs,
+          uiDoneUs: Timeline.now,
+        ));
+      }
+      await Future<void>.delayed(const Duration(milliseconds: 40));
+      jump.clear();
+      await WidgetsBinding.instance.endOfFrame;
+    }
+    library.scroll.jumpTo(0);
+    await _settle();
+    final toRasterMs = <double>[];
+    for (final keystroke in keystrokes) {
+      final frame = _firstFrameStartingAfter(keystroke.startUs);
+      if (frame == null) continue;
+      final rasterDone = frame.timestampInMicroseconds(FramePhase.rasterFinish);
+      toRasterMs.add((rasterDone - keystroke.startUs) / 1000);
+    }
+    return {
+      'keystrokes': keystrokes.length,
+      'matchedFrames': toRasterMs.length,
+      'keystrokeToRasterMs': _stats(toRasterMs),
+      'scanMs': _stats([for (final k in keystrokes) k.scanUs / 1000]),
+    };
   }
 
   /// Scrolls the full list at constant speeds, one jump per frame, and

@@ -65,6 +65,7 @@ const _perMonitorAware = -4;
 const _wmClose = 0x0010;
 const _wmKeyDown = 0x0100;
 const _wmKeyUp = 0x0101;
+const _wmChar = 0x0102;
 
 /// Whether process [pid] has a visible Flutter runner window.
 bool _hasVisibleWindow(int pid) => _visibleWindow(pid) != 0;
@@ -323,8 +324,21 @@ void _pressKey(
   _postMessage(window, _wmKeyUp, virtualKey, bits | (3 << 30));
 }
 
+/// Posts a letter to [window], with the text Windows would send after its
+/// key. The key itself does not matter: one stands for all of them, and with
+/// any text, so this needs no keyboard layout installed.
+void _typeLetter(int window, int codeUnit) {
+  const virtualKey = 0x41;
+  const scanCode = 0x1E;
+  final bits = 1 | (scanCode << 16);
+  _postMessage(window, _wmKeyDown, virtualKey, bits);
+  _postMessage(window, _wmChar, codeUnit, bits);
+  _postMessage(window, _wmKeyUp, virtualKey, bits | (3 << 30));
+}
+
 /// The real keyboard path of the release, which simulated keys in the tests
-/// skip: Right, Up and Space sent to the engine's own window as messages.
+/// skip: Right, Up, Space and Cyrillic letters sent to the engine's own window
+/// as messages.
 Future<Map<String, Object?>> _checkRealKeys(String benchFile) async {
   final file = File(benchFile);
   final ready = File('$benchFile.ready');
@@ -360,6 +374,11 @@ Future<Map<String, Object?>> _checkRealKeys(String benchFile) async {
   _pressKey(view, 0x26, 0x48, extended: true); // Up
   await Future<void>.delayed(const Duration(milliseconds: 150));
   _pressKey(view, 0x20, 0x39); // Space
+  await Future<void>.delayed(const Duration(milliseconds: 150));
+  for (final codeUnit in ready.readAsStringSync().codeUnits) {
+    _typeLetter(view, codeUnit);
+    await Future<void>.delayed(const Duration(milliseconds: 60));
+  }
   await process.exitCode.timeout(
     const Duration(seconds: 30),
     onTimeout: () {
