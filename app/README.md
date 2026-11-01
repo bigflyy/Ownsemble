@@ -39,9 +39,18 @@ OWNSEMBLE_BACKGROUND_WINDOW=1 flutter test integration_test/login_test.dart \
 dart run tool/check_gone_marks.dart --data-dir ../.local/v2-test/feel \
     --vk-session ../.local/v2-test/session.json
 
-# Speed gate against the release build (playback muted).
+# Speed gate against the release build (playback muted). Run it with
+# OWNSEMBLE_BACKGROUND_WINDOW=1 unless a window on screen is wanted. It also
+# restarts the real app: saved volume, window size and place, real Windows key
+# messages (Right, Up, Space), and the last song across a real window close.
+# --only-restart runs just those checks, about 1 min.
 dart run tool/speed_gate.dart --data-dir ../.local/v2-test/gate \
     --vk-session ../.local/v2-test/session.json
+
+# Closes the release through its window many times while a song plays and
+# counts the exit codes: only 0 is a clean close. Works on any test folder.
+dart run tool/close_check.dart --exe build/windows/x64/runner/Release/ownsemble.exe \
+    --data-dir ../.local/v2-test/close-check-old --runs 20
 ```
 
 The Windows icon (`windows/runner/resources/app_icon.ico`) is drawn by
@@ -68,5 +77,14 @@ file, instead of the login window), `--vk-login-seed FILE` (login check only),
 playStream, seekStream; volume under mute, default 100, never saved),
 `--mpv name=value` (mpv option override), `--mpv-log` (mpv log without links),
 `--no-stream-cache` (do not save streamed songs; the speed gate uses it).
-Bench parts `saveVolume` and `savedVolume` run only when named: the speed gate
-uses them to prove a saved volume reaches mpv after a real restart.
+Bench parts `saveVolume`, `savedVolume`, `playToCloseCached`, `playToCloseStream`,
+`savedSong` and `keysProbe` run only when named: the speed gate uses them for its
+checks across a real restart.
+
+Between runs the app keeps its settings in the library's `settings` table
+(`ui.*`, `player.*`: theme, layout, view, volume, shuffle, repeat, the last song
+with its position, list and queue) and the window's size and place in
+`window-placement.txt` in the data folder. A restored song is not loaded until
+Play, so a start costs no network. A close saves, then ends the process at once
+(`lib/platform/end_process.dart`): the engine's own shutdown crashes or hangs
+while mpv runs.

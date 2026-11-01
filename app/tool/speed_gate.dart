@@ -54,6 +54,14 @@ final _setWindowPos = _user32
       int Function(int, int, int, int, int, int, int)
     >('SetWindowPos');
 
+final _setDpiAwareness = _user32
+    .lookupFunction<IntPtr Function(IntPtr), int Function(int)>(
+      'SetThreadDpiAwarenessContext',
+    );
+
+/// DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2.
+const _perMonitorAware = -4;
+
 const _wmClose = 0x0010;
 const _wmKeyDown = 0x0100;
 const _wmKeyUp = 0x0101;
@@ -83,6 +91,9 @@ late final String exe;
 late final List<String> appArgs;
 
 Future<void> main(List<String> args) async {
+  // Real pixels: at a display scale above 100% Windows would otherwise report
+  // this process every window size divided by the scale.
+  _setDpiAwareness(_perMonitorAware);
   String? valueOf(String name) {
     final index = args.indexOf(name);
     return index >= 0 && index + 1 < args.length ? args[index + 1] : null;
