@@ -1,6 +1,7 @@
 import 'dart:async';
+import 'dart:convert' show jsonEncode;
 import 'dart:developer' show Timeline;
-import 'dart:io' show ProcessInfo;
+import 'dart:io' show File, ProcessInfo;
 import 'dart:math';
 import 'dart:ui' show FramePhase, FrameTiming;
 
@@ -13,6 +14,7 @@ import '../playback/playback_controller.dart';
 import '../playback/player_service.dart';
 import '../playback/stream_proxy.dart' show ProxyRequestLog;
 import '../storage/cover_store.dart';
+import '../ui/collections_controller.dart';
 import '../ui/cover_tile.dart';
 import '../ui/library_controller.dart';
 import '../vk/vk_client.dart';
@@ -29,8 +31,13 @@ class SpeedBench {
     required this.playback,
     required this.vk,
     required this.covers,
+    this.collections,
+    this.resultFile,
     this.volume = 100,
   });
+
+  /// Where the speed gate seeks to before it closes the window.
+  static const savedSongProbe = Duration(seconds: 40);
 
   /// Volume the speed gate saves in one run and expects back in the next.
   static const savedVolumeProbe = 37.0;
@@ -40,6 +47,12 @@ class SpeedBench {
   final PlaybackController playback;
   final VkClient? vk;
   final CoverStore covers;
+
+  /// History, for the restart check; null when not needed.
+  final CollectionsController? collections;
+
+  /// The result file; the restart check writes it while the app stays open.
+  final String? resultFile;
 
   /// mpv volume while measuring, always under mute. Set for each run and not
   /// saved, so results do not depend on what the data folder last saved.
@@ -51,6 +64,7 @@ class SpeedBench {
   /// Two parts run only when named, since they are not speed measurements:
   /// saveVolume saves [savedVolumeProbe] the way the volume slider does, and
   /// savedVolume reports what mpv holds before any sound in a later run.
+  /// The same goes for playToClose and savedSong, see [_playToClose].
   Future<Map<String, Object?>> run({List<String>? parts}) async {
     SchedulerBinding.instance.addTimingsCallback(_frames.addAll);
     FocusManager.instance.primaryFocus?.unfocus();
@@ -80,6 +94,15 @@ class SpeedBench {
         'mutedByUser': playback.mutedByUser,
       };
     }
+    if (parts?.contains('playToCloseCached') ?? false) {
+      await _playToClose(cached: true);
+    }
+    if (parts?.contains('playToCloseStream') ?? false) {
+      await _playToClose(cached: false);
+    }
+    if (parts?.contains('savedSong') ?? false) {
+      result['savedSong'] = await _goOnFromSavedSong();
+    }
     await player.setVolume(volume);
     result['volume'] = volume;
     for (final bench in benches.entries) {
@@ -93,6 +116,68 @@ class SpeedBench {
       'peak': ProcessInfo.maxRss ~/ (1024 * 1024),
     };
     return result;
+  }
+
+  /// Plays a cached or a streamed VK song the way a click does, moves to
+  /// [savedSongProbe], writes where it is and keeps playing: the speed gate
+  /// then closes the window, as the user does. Only the close can save this
+  /// place, since the periodic save has not come round yet. Never returns.
+  Future<void> _playToClose({required bool cached}) async {
+    final list = library.visible;
+    final index = list.indexWhere(
+      (t) =>
+          t.source == TrackSource.vk &&
+          t.isCached == cached &&
+          t.durationSec >= savedSongProbe.inSeconds + 30,
+    );
+    await playback.playFrom(list, index);
+    await playback.seek(savedSongProbe);
+    await player.positions
+        .firstWhere((at) => at > savedSongProbe)
+        .timeout(const Duration(seconds: 30));
+    File(resultFile!).writeAsStringSync(
+      jsonEncode({
+        'ok': player.currentLoaded,
+        'trackId': list[index].id,
+        'lengthS': list[index].durationSec,
+        'listSongs': list.length,
+        'librarySongs': library.all.length,
+        'positionMs': player.position.inMilliseconds,
+      }),
+    );
+    await Completer<void>().future;
+  }
+
+  /// What a new run shows for the saved song before Play (nothing may be
+  /// loaded in mpv), then Play and the sound that follows.
+  Future<Map<String, Object?>> _goOnFromSavedSong() async {
+    final mpv = player.player.platform as NativePlayer;
+    final historyBefore = collections?.history().length;
+    final before = <String, Object?>{
+      'trackId': player.current?.id,
+      'positionMs': player.position.inMilliseconds,
+      'playing': player.playing.value,
+      'mpvPath': await mpv.getProperty('path'),
+      'listSongs': playback.queue.context.length,
+      'librarySongs': library.all.length,
+    };
+    final clock = Stopwatch()..start();
+    await playback.playOrPause();
+    final toSoundMs = clock.elapsedMilliseconds;
+    final soundAt = player.position;
+    await Future<void>.delayed(const Duration(seconds: 2));
+    return {
+      'before': before,
+      'toSoundMs': toSoundMs,
+      'loaded': player.currentLoaded,
+      'soundAtMs': soundAt.inMilliseconds,
+      'twoSecondsLaterMs': player.position.inMilliseconds,
+      'playing': player.playing.value,
+      'sampleRate': player.player.state.audioParams.sampleRate,
+      'historyAdded': collections == null
+          ? null
+          : collections!.history().length - historyBefore!,
+    };
   }
 
   /// Waits for pending frames and for the engine to report their timings

@@ -122,6 +122,15 @@ class PlayerService {
   Track? _current;
   bool _loaded = false;
 
+  /// Where the current song goes on from when it was restored from the last
+  /// run, until its sound starts. The song is not in mpv until then, so a
+  /// start costs no network and no failed link.
+  Duration? _resumeAt;
+
+  /// Whether [_current] is a restored song no play request has touched yet:
+  /// mpv's own state says nothing about it.
+  bool _restored = false;
+
   /// What the current play request loads, and whether mpv has switched to it
   /// (see the 'path' observer in [init]).
   String? _loadingUri;
@@ -142,6 +151,18 @@ class PlayerService {
   /// so pausing and resuming applies to it.
   bool get currentLoaded => _loaded;
   Stream<Track?> get currentStream => _currentController.stream;
+
+  /// Where a restored song goes on from; null once it sounds, and for every
+  /// other song.
+  Duration? get resumeAt => _resumeAt;
+
+  /// Shows [track] as the current song, paused at [position], without loading
+  /// it. May run before [init], so the first frame already shows it.
+  void restore(Track track, Duration position) {
+    _current = track;
+    _resumeAt = position;
+    _restored = true;
+  }
 
   /// Every finished play request's timing, for the status line and logs.
   Stream<PlayTiming> get timings => _timingController.stream;
@@ -188,7 +209,7 @@ class PlayerService {
     // Play state comes straight from mpv because songs are loaded with mpv's
     // own loadfile command (see play), which media_kit's state does not track.
     await _mpv.observeProperty('pause', (value) async {
-      playing.value = value == 'no' && _current != null;
+      playing.value = value == 'no' && _current != null && !_restored;
     });
     // mpv reports properties in order and media_kit reads the value when it
     // handles the event: once 'path' shows the file being loaded, every later
@@ -205,12 +226,16 @@ class PlayerService {
     _ready = true;
   }
 
-  /// Starts [track] and completes once sound is playing (or it failed).
-  Future<PlayTiming> play(Track track) async {
+  /// Starts [track] and completes once sound is playing (or it failed). With
+  /// [from] it starts at that position instead of the beginning; a failed
+  /// start keeps it as [resumeAt], so the next try goes on from there too.
+  Future<PlayTiming> play(Track track, {Duration? from}) async {
     final generation = ++_generation;
     final clock = Stopwatch()..start();
     _current = track;
     _loaded = false;
+    _resumeAt = from;
+    _restored = false;
     _currentController.add(track);
     var resolveMs = 0;
     PlayTiming finish(PlayTiming timing) {
@@ -297,10 +322,13 @@ class PlayerService {
       // previous song keeps reporting positions until it is unloaded.
       _loadingUri = uri;
       _loadingUriActive = false;
+      final startsAt = from ?? Duration.zero;
       final positions = _player.stream.position.listen((position) {
+        // Starting at a position, nothing older can be reported: the song
+        // follows no other one in mpv. It may land a little past the target.
         if (_loadingUriActive &&
-            position > Duration.zero &&
-            position <= clock.elapsed &&
+            position > startsAt &&
+            (from != null || position <= clock.elapsed) &&
             !sound.isCompleted) {
           sound.complete();
         }
@@ -328,6 +356,13 @@ class PlayerService {
         // paused load and unpausing later is slower), and again after it:
         // mpv runs with keep-open, so right after a song ended the first
         // unpause hits the old song's end again and mpv pauses once more.
+        // mpv keeps 'start' for every later file, so each play sets it.
+        await _mpv.setProperty(
+          'start',
+          from == null
+              ? 'none'
+              : (from.inMilliseconds / 1000).toStringAsFixed(3),
+        );
         await _mpv.setProperty('pause', 'no');
         await _mpv.command(['loadfile', uri, 'replace']);
         await _mpv.setProperty('pause', 'no');
@@ -337,7 +372,10 @@ class PlayerService {
         await positions.cancel();
         await errors.cancel();
       }
-      if (generation == _generation) _loaded = true;
+      if (generation == _generation) {
+        _loaded = true;
+        _resumeAt = null;
+      }
       return finish(
         PlayTiming(
           ok: true,
@@ -377,21 +415,49 @@ class PlayerService {
   /// Every position mpv reports while a song plays.
   Stream<Duration> get positions => _player.stream.position;
 
-  /// Position in the loaded song (zero when nothing is loaded).
-  Duration get position => _loaded ? _player.state.position : Duration.zero;
+  /// Position in the loaded song, or where a restored song goes on from
+  /// (zero when nothing is loaded).
+  Duration get position =>
+      _resumeAt ?? (_loaded ? _player.state.position : Duration.zero);
 
   /// Length of the loaded song as mpv knows it, else the listed length.
   Duration get duration {
-    final known = _player.state.duration;
-    if (_loaded && known > Duration.zero) return known;
+    if (_loaded) {
+      final known = _player.state.duration;
+      if (known > Duration.zero) return known;
+    }
     return Duration(seconds: _current?.durationSec ?? 0);
   }
 
-  /// Moves within the loaded song; does nothing while none is loaded.
+  /// Moves within the loaded song, or moves where a restored song goes on
+  /// from; does nothing while no song is loaded.
   Future<void> seek(Duration to) async {
+    if (_resumeAt != null) {
+      _resumeAt = to;
+      return;
+    }
     if (!_loaded) return;
     final seconds = to.inMilliseconds / 1000;
     await _mpv.command(['seek', seconds.toStringAsFixed(3), 'absolute']);
+  }
+
+  /// Moves by [offset] from where the song is. mpv adds up seeks it has not
+  /// finished yet, so quick presses on a stream all count.
+  Future<void> seekBy(Duration offset) async {
+    final resumeAt = _resumeAt;
+    if (resumeAt != null) {
+      final length = duration - const Duration(seconds: 1);
+      final to = resumeAt + offset;
+      _resumeAt = to.isNegative
+          ? Duration.zero
+          : length > Duration.zero && to > length
+          ? length
+          : to;
+      return;
+    }
+    if (!_loaded) return;
+    final seconds = offset.inMilliseconds / 1000;
+    await _mpv.command(['seek', seconds.toStringAsFixed(3), 'relative']);
   }
 
   /// Sets the volume, 0 to 100.

@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:ui' show AppExitResponse;
 
 import 'package:flutter/material.dart';
 import 'package:path/path.dart' as p;
@@ -172,6 +173,15 @@ Future<void> main(List<String> args) async {
     readSetting: store.readSetting,
     writeSetting: store.writeSetting,
   );
+  // Before the first frame, which then already shows the song.
+  playback.restoreSession(library.byId);
+  // The periodic save is up to 5 s old: a normal close saves the exact place.
+  AppLifecycleListener(
+    onExitRequested: () async {
+      playback.saveSession();
+      return AppExitResponse.exit;
+    },
+  );
   // The sync reads the session each time: logging in or out changes it.
   SyncRunner? syncRunner() {
     final cookies = account.cookies;
@@ -215,6 +225,7 @@ Future<void> main(List<String> args) async {
         account: account,
         sync: sync,
         covers: covers,
+        collections: collections,
       ),
     );
   });
@@ -243,6 +254,7 @@ Future<void> _afterFirstFrame({
   required VkAccount account,
   required SyncController sync,
   required CoverStore covers,
+  required CollectionsController collections,
 }) async {
   final firstFrameAt = DateTime.now();
   if (options.metricsFile != null) {
@@ -276,6 +288,8 @@ Future<void> _afterFirstFrame({
       playback: playback,
       vk: account.client,
       covers: covers,
+      collections: collections,
+      resultFile: options.benchFile,
       volume: options.benchVolume,
     ).run(parts: options.benchParts);
     File(options.benchFile!)

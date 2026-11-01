@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
 
@@ -17,7 +18,8 @@ class PlaybackController extends ChangeNotifier {
     PlayQueue? queue,
     String? Function(String key)? readSetting,
     this._writeSetting,
-  }) : queue = queue ?? PlayQueue() {
+  }) : queue = queue ?? PlayQueue(),
+       _readSetting = readSetting {
     final saved = double.tryParse(readSetting?.call(volumeSetting) ?? '');
     if (saved != null) _volume = saved.clamp(0, 100);
     _mutedByUser = readSetting?.call(muteSetting) == 'on';
@@ -40,8 +42,25 @@ class PlaybackController extends ChangeNotifier {
   static const repeatSetting = 'player.repeat';
   static const remainingSetting = 'player.remaining';
 
+  /// Settings with the song to restore: `{"id", "ms", "index"}` (library id,
+  /// position, index in the list), written often and so kept small; the
+  /// list's song ids, written when the list changes (up to 60 KB at 10,000
+  /// songs); and the queued songs' ids.
+  static const songSetting = 'player.song';
+  static const listSetting = 'player.list';
+  static const queuedSetting = 'player.queued';
+
+  /// While a song plays its position is saved this often, so a crash or a
+  /// forced end loses at most this much. A normal close saves the exact place.
+  static const saveEvery = Duration(seconds: 5);
+
+  /// A song closer to its end than this comes back from its start: going on
+  /// from there would end it at once and move to the next song.
+  static const nearEnd = Duration(seconds: 3);
+
   final PlayerService player;
   final PlayQueue queue;
+  final String? Function(String key)? _readSetting;
   final void Function(String key, String? value)? _writeSetting;
 
   /// Writes a History entry for a song that started playing.
@@ -52,6 +71,17 @@ class PlaybackController extends ChangeNotifier {
   /// Counts play requests, so an automatic skip stops when the user picks
   /// another song meanwhile.
   int _request = 0;
+
+  /// Saves the position while a song plays; null while none does.
+  Timer? _saveTimer;
+
+  /// The list and queue as last saved, to write them only when they change.
+  List<Track>? _savedList;
+  String? _savedQueued;
+
+  /// True while a restored song is starting, so a second press of Play does
+  /// not start it again.
+  bool _resuming = false;
 
   /// Whether nothing plays or is about to: nothing started yet, the list
   /// ended, or the last song failed. A paused song does not count.
@@ -79,17 +109,33 @@ class PlaybackController extends ChangeNotifier {
   Future<PlayTiming?> playFrom(List<Track> list, int index) async {
     if (!player.isReady) return null;
     final track = list[index];
-    if (track.id == player.current?.id && player.currentLoaded) {
-      await player.playOrPause();
+    if (track.id == player.current?.id &&
+        (player.currentLoaded || player.resumeAt != null)) {
+      await playOrPause();
       return null;
     }
     return _play(queue.start(list, index));
   }
 
-  Future<void> playOrPause() => player.playOrPause();
+  /// Pauses or resumes. A song restored from the last run starts here, at
+  /// its saved position; that is not a new play, so History does not change.
+  Future<void> playOrPause() async {
+    if (!player.isReady) return;
+    final track = player.current;
+    final resumeAt = player.resumeAt;
+    if (track == null || resumeAt == null) return player.playOrPause();
+    if (_resuming) return;
+    _resuming = true;
+    try {
+      await _play(track, from: resumeAt, record: false);
+    } finally {
+      _resuming = false;
+    }
+  }
 
   /// The Next button: the next song of the list (wraps at the end).
   Future<PlayTiming?> next() async {
+    if (!player.isReady) return null;
     final track = queue.next(auto: false);
     return track == null ? null : _play(track);
   }
@@ -97,7 +143,7 @@ class PlaybackController extends ChangeNotifier {
   /// The Previous button: back to the start of the song after 3 s of it,
   /// else the previous song of the list.
   Future<PlayTiming?> previous() async {
-    if (queue.current == null) return null;
+    if (!player.isReady || queue.current == null) return null;
     final track = queue.previous(player.position);
     if (track == null) {
       await player.seek(Duration.zero);
@@ -108,15 +154,30 @@ class PlaybackController extends ChangeNotifier {
 
   /// Moving back in a song that ended leaves it paused there, which is not
   /// idle: the song can go on from that place.
-  Future<void> seek(Duration to) {
+  Future<void> seek(Duration to) async {
     _idle = false;
-    return player.seek(to);
+    await player.seek(to);
+    // A restored song reports no positions, so the seek bar waits for this.
+    if (player.resumeAt != null) notifyListeners();
+  }
+
+  /// Moves by [offset] within the song, for the arrow keys.
+  Future<void> seekBy(Duration offset) async {
+    await player.seekBy(offset);
+    if (player.resumeAt != null) notifyListeners();
   }
 
   /// Sound from any cause means something plays, for example the last song
   /// of a list resumed after it ended.
   void _onPlayingChanged() {
-    if (player.playing.value) _idle = false;
+    if (player.playing.value) {
+      _idle = false;
+      _saveTimer ??= Timer.periodic(saveEvery, (_) => saveSession());
+    } else {
+      _saveTimer?.cancel();
+      _saveTimer = null;
+      saveSession();
+    }
   }
 
   /// "Play next": [track] plays right after the current song.
@@ -134,6 +195,7 @@ class PlaybackController extends ChangeNotifier {
   /// Takes the song at [index] of the queue out of it.
   void removeQueued(int index) {
     queue.removeQueued(index);
+    saveSession();
     notifyListeners();
   }
 
@@ -147,6 +209,7 @@ class PlaybackController extends ChangeNotifier {
   /// will end to make room for it.
   Future<void> _queueGrew() async {
     notifyListeners();
+    saveSession();
     if (!_idle || !player.isReady) return;
     final track = queue.next(auto: false);
     if (track != null) await _play(track);
@@ -233,14 +296,105 @@ class PlaybackController extends ChangeNotifier {
     await player.setMuted(_mutedByUser);
   }
 
-  /// Plays [track] and records it in the History once sound starts.
-  Future<PlayTiming> _play(Track track) async {
+  /// Saves the current song and its place, so the next run can go on from
+  /// there. A song that failed is left out: the last one that played stays.
+  void saveSession() {
+    final write = _writeSetting;
+    final track = queue.current;
+    if (write == null || track == null || track.id != player.current?.id) {
+      return;
+    }
+    if (!player.currentLoaded && player.resumeAt == null) return;
+    final position = player.position;
+    final length = player.duration;
+    final atEnd = length > Duration.zero && position >= length - nearEnd;
+    write(
+      songSetting,
+      jsonEncode({
+        'id': track.id,
+        'ms': atEnd ? 0 : position.inMilliseconds,
+        'index': queue.contextIndex,
+      }),
+    );
+    if (!identical(queue.context, _savedList)) {
+      _savedList = queue.context;
+      write(listSetting, jsonEncode([for (final t in queue.context) t.id]));
+    }
+    final queued = jsonEncode([for (final t in queue.queued) t.id]);
+    if (queued != _savedQueued) {
+      _savedQueued = queued;
+      write(queuedSetting, queued);
+    }
+  }
+
+  /// Brings back the song, list and queue of the last run, paused at the
+  /// saved position; [find] gives the library's song for an id. Songs no
+  /// longer in the library are left out, and without the song nothing comes
+  /// back. Runs before the first frame, and nothing loads until Play.
+  void restoreSession(Track? Function(int id) find) {
+    final read = _readSetting;
+    final song = _decode(read?.call(songSetting));
+    if (read == null || song is! Map<String, Object?>) return;
+    final id = song['id'];
+    final track = id is int ? find(id) : null;
+    if (track == null) return;
+    final savedIndex = song['index'];
+    final ms = song['ms'];
+
+    final ids = _decode(read(listSetting));
+    final list = <Track>[];
+    var index = 0;
+    if (ids is List<Object?>) {
+      for (final (i, listId) in ids.indexed) {
+        // Songs before the saved one may have left the library.
+        if (i == savedIndex) index = list.length;
+        final listed = listId is int ? find(listId) : null;
+        if (listed != null) list.add(listed);
+      }
+    }
+    if (list.isEmpty) list.add(track);
+    queue.start(list, index.clamp(0, list.length - 1));
+    if (queue.current?.id != track.id) {
+      // A queued song was playing, or its place in the list is gone.
+      queue.playNext(track);
+      queue.next(auto: false);
+    }
+    final queued = _decode(read(queuedSetting));
+    if (queued is List<Object?>) {
+      for (final queuedId in queued) {
+        final waiting = queuedId is int ? find(queuedId) : null;
+        if (waiting != null) queue.addToQueue(waiting);
+      }
+    }
+    // Not idle: a song queued now waits for this one, as for any paused song.
+    _idle = false;
+    player.restore(track, Duration(milliseconds: ms is int ? ms : 0));
+  }
+
+  /// [text] parsed as JSON, or null when it is missing or broken.
+  static Object? _decode(String? text) {
+    if (text == null) return null;
+    try {
+      return jsonDecode(text);
+    } on FormatException {
+      return null;
+    }
+  }
+
+  /// Plays [track] from [from] (the start when null). Once sound starts it
+  /// is saved for the next run and, when [record], added to the History.
+  Future<PlayTiming> _play(
+    Track track, {
+    Duration? from,
+    bool record = true,
+  }) async {
     final request = ++_request;
     _idle = false;
-    final timing = await player.play(track);
+    final timing = await player.play(track, from: from);
     if (request == _request) {
       if (timing.ok) {
-        recordPlay(track);
+        if (record) recordPlay(track);
+        saveSession();
       } else {
         _idle = true;
       }
@@ -256,6 +410,7 @@ class PlaybackController extends ChangeNotifier {
       final track = queue.next(auto: true);
       if (track == null) {
         _idle = true;
+        saveSession();
         return;
       }
       final request = _request + 1;
@@ -270,6 +425,7 @@ class PlaybackController extends ChangeNotifier {
   @override
   void dispose() {
     player.playing.removeListener(_onPlayingChanged);
+    _saveTimer?.cancel();
     _ended.cancel();
     super.dispose();
   }

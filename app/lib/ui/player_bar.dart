@@ -45,7 +45,7 @@ class NowPlayingPanel extends StatelessWidget {
           stream: player.currentStream,
           initialData: player.current,
           builder: (context, snapshot) {
-            final track = player.isReady ? snapshot.data : null;
+            final track = snapshot.data;
             return ListView(
               padding: const EdgeInsets.fromLTRB(24, 10, 24, 18),
               children: [
@@ -158,7 +158,7 @@ class DockBar extends StatelessWidget {
           stream: player.currentStream,
           initialData: player.current,
           builder: (context, snapshot) {
-            final track = player.isReady ? snapshot.data : null;
+            final track = snapshot.data;
             return Row(
               children: [
                 Expanded(
@@ -357,7 +357,7 @@ class TransportRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final colors = OwnColors.of(context);
     final player = playback.player;
-    final hasSong = player.isReady && player.current != null;
+    final hasSong = player.current != null;
     final repeatLabel = switch (playback.repeat) {
       Repeat.off => 'Repeat: off',
       Repeat.list => 'Repeat: list',
@@ -485,7 +485,7 @@ class _SeekRowState extends State<SeekRow> {
       builder: (context, _) => StreamBuilder<Duration>(
         stream: player.isReady ? player.positions : null,
         builder: (context, _) {
-          final hasSong = player.isReady && player.current != null;
+          final hasSong = player.current != null;
           final total = hasSong ? player.duration : Duration.zero;
           final totalSeconds = total.inMilliseconds / 1000;
           final playingSeconds = hasSong

@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:fake_async/fake_async.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ownsemble/library/track.dart';
@@ -11,7 +12,11 @@ import 'package:ownsemble/playback/player_service.dart';
 class FakePlayer implements PlayerService {
   final played = <int>[];
   final seeks = <Duration>[];
+  final seekOffsets = <Duration>[];
   final failing = <int>{};
+
+  /// The position each play request asked to start from.
+  final startedFrom = <Duration?>[];
 
   /// When set, a song keeps starting until this completes.
   Completer<void>? holdPlay;
@@ -24,6 +29,10 @@ class FakePlayer implements PlayerService {
 
   @override
   Duration position = Duration.zero;
+  @override
+  Duration duration = const Duration(seconds: 200);
+  @override
+  Duration? resumeAt;
 
   @override
   bool get isReady => true;
@@ -37,14 +46,16 @@ class FakePlayer implements PlayerService {
   final ValueNotifier<bool> playing = ValueNotifier(false);
 
   @override
-  Future<PlayTiming> play(Track track) async {
+  Future<PlayTiming> play(Track track, {Duration? from}) async {
     played.add(track.id);
+    startedFrom.add(from);
     await holdPlay?.future;
     _current = track;
     final ok = !failing.contains(track.id);
     _loaded = ok;
     playing.value = ok;
-    position = Duration.zero;
+    if (ok) resumeAt = null;
+    position = from ?? Duration.zero;
     return PlayTiming(
       ok: ok,
       cached: true,
@@ -57,7 +68,23 @@ class FakePlayer implements PlayerService {
   @override
   Future<void> playOrPause() async => pauseToggles++;
   @override
-  Future<void> seek(Duration to) async => seeks.add(to);
+  void restore(Track track, Duration position) {
+    _current = track;
+    resumeAt = position;
+    this.position = position;
+  }
+
+  @override
+  Future<void> seek(Duration to) async {
+    seeks.add(to);
+    if (resumeAt != null) {
+      resumeAt = to;
+      position = to;
+    }
+  }
+
+  @override
+  Future<void> seekBy(Duration offset) async => seekOffsets.add(offset);
   @override
   Future<void> setVolume(double volume) async => lastVolume = volume;
   @override
@@ -465,6 +492,253 @@ void main() {
     test('an unknown saved repeat mode falls back to off', () {
       saved[PlaybackController.repeatSetting] = 'sideways';
       expect(restart().repeat, Repeat.off);
+    });
+  });
+
+  group('last song', () {
+    late Map<String, String?> saved;
+    late List<Track> list;
+    late FakePlayer firstPlayer;
+    late FakePlayer restarted;
+    late List<int> recorded;
+
+    Track? find(int id) => id < list.length ? list[id] : null;
+
+    /// A controller over the first run's [saved] settings.
+    PlaybackController run(FakePlayer onPlayer) {
+      final controller = PlaybackController(
+        player: onPlayer,
+        recordPlay: (track) => recorded.add(track.id),
+        readSetting: (key) => saved[key],
+        writeSetting: (key, value) => saved[key] = value,
+      );
+      addTearDown(controller.dispose);
+      return controller;
+    }
+
+    /// The next run: a new player and everything restored.
+    PlaybackController restart() {
+      restarted = FakePlayer();
+      return run(restarted)..restoreSession(find);
+    }
+
+    setUp(() {
+      saved = {};
+      recorded = [];
+      list = songs(5);
+    });
+
+    /// The first run plays song [index] and is [at] into it.
+    Future<PlaybackController> played(int index, Duration at) async {
+      final first = run(firstPlayer = FakePlayer());
+      await first.playFrom(list, index);
+      firstPlayer.position = at;
+      return first..saveSession();
+    }
+
+    test('comes back paused at its position, nothing loaded', () async {
+      await played(2, const Duration(seconds: 42));
+      final second = restart();
+      expect(restarted.current?.id, 2);
+      expect(restarted.resumeAt, const Duration(seconds: 42));
+      expect(restarted.playing.value, isFalse);
+      expect(restarted.played, isEmpty);
+      expect(second.queue.current?.id, 2);
+    });
+
+    test('Play goes on from there; History gets no second entry', () async {
+      await played(2, const Duration(seconds: 42));
+      recorded.clear();
+      final second = restart();
+      await second.playOrPause();
+      expect(restarted.played, [2]);
+      expect(restarted.startedFrom, [const Duration(seconds: 42)]);
+      expect(recorded, isEmpty);
+      expect(restarted.pauseToggles, 0);
+    });
+
+    test('a second press while it starts does not start it again', () async {
+      await played(2, const Duration(seconds: 42));
+      final second = restart();
+      restarted.holdPlay = Completer();
+      final first = second.playOrPause();
+      await second.playOrPause();
+      restarted.holdPlay!.complete();
+      await first;
+      expect(restarted.played, [2]);
+    });
+
+    test('a click on the restored song goes on from there too', () async {
+      await played(2, const Duration(seconds: 42));
+      final second = restart();
+      await second.playFrom(list, 2);
+      expect(restarted.startedFrom, [const Duration(seconds: 42)]);
+    });
+
+    test('a failed start keeps the position for the next try', () async {
+      await played(2, const Duration(seconds: 42));
+      final second = restart();
+      restarted.failing.add(2);
+      await second.playOrPause();
+      expect(restarted.resumeAt, const Duration(seconds: 42));
+      restarted.failing.clear();
+      await second.playOrPause();
+      expect(restarted.startedFrom.last, const Duration(seconds: 42));
+    });
+
+    test('another song starts from its beginning', () async {
+      await played(2, const Duration(seconds: 42));
+      final second = restart();
+      await second.playFrom(list, 4);
+      expect(restarted.startedFrom, [null]);
+    });
+
+    test('Next and Previous move in the saved list', () async {
+      await played(2, Duration.zero);
+      final second = restart();
+      await second.next();
+      expect(restarted.played, [3]);
+      await second.previous();
+      expect(restarted.played, [3, 2]);
+    });
+
+    test('a seek before Play moves where it goes on from', () async {
+      await played(2, const Duration(seconds: 42));
+      final second = restart();
+      var notified = 0;
+      second.addListener(() => notified++);
+      await second.seek(const Duration(seconds: 10));
+      expect(notified, 1);
+      await second.playOrPause();
+      expect(restarted.startedFrom, [const Duration(seconds: 10)]);
+    });
+
+    test('a song near its end comes back from its start', () async {
+      await played(2, const Duration(seconds: 198));
+      restart();
+      expect(restarted.resumeAt, Duration.zero);
+    });
+
+    test('the same song listed twice keeps its own place', () async {
+      list = [...songs(3), ...songs(3)];
+      final first = run(FakePlayer());
+      await first.playFrom(list, 4);
+      first.saveSession();
+      final second = restart();
+      expect(second.queue.contextIndex, 4);
+      expect(second.queue.upcoming(1), [5]);
+    });
+
+    test('the queue comes back, in order, and does not start', () async {
+      final first = await played(2, const Duration(seconds: 42));
+      await first.addToQueue(list[4]);
+      await first.addToQueue(list[0]);
+      final second = restart();
+      expect([for (final t in second.queue.queued) t.id], [4, 0]);
+      expect(restarted.played, isEmpty);
+    });
+
+    test('a queued song goes on, then the list after it', () async {
+      final first = await played(1, Duration.zero);
+      await first.addToQueue(list[4]);
+      await first.next();
+      first.saveSession();
+      final second = restart();
+      expect(restarted.current?.id, 4);
+      await second.next();
+      expect(restarted.played, [2]);
+    });
+
+    test('a song queued after the restart waits for Play', () async {
+      await played(2, const Duration(seconds: 42));
+      final second = restart();
+      await second.addToQueue(list[4]);
+      expect(restarted.played, isEmpty);
+      expect(restarted.current?.id, 2);
+    });
+
+    test('a saved song no longer in the library restores nothing', () async {
+      await played(4, const Duration(seconds: 42));
+      list = songs(3);
+      final second = restart();
+      expect(restarted.current, isNull);
+      expect(second.queue.current, isNull);
+    });
+
+    test('songs gone from the list leave the saved one in place', () async {
+      await played(3, Duration.zero);
+      list = List.of(list);
+      final gone = <int>{0, 1};
+      restarted = FakePlayer();
+      final second = run(restarted)
+        ..restoreSession((id) => gone.contains(id) ? null : find(id));
+      expect(second.queue.current?.id, 3);
+      expect(second.queue.contextIndex, 1);
+    });
+
+    test('broken saved settings restore nothing', () {
+      saved[PlaybackController.songSetting] = '{not json';
+      final second = restart();
+      expect(restarted.current, isNull);
+      expect(second.queue.current, isNull);
+    });
+
+    test('a song that failed does not replace the saved one', () async {
+      final first = await played(2, const Duration(seconds: 42));
+      firstPlayer.failing.add(3);
+      await first.playFrom(list, 3);
+      first.saveSession();
+      restart();
+      expect(restarted.current?.id, 2);
+      expect(restarted.resumeAt, const Duration(seconds: 42));
+    });
+
+    test('pausing saves the place at once', () async {
+      await played(2, Duration.zero);
+      firstPlayer.position = const Duration(seconds: 77);
+      firstPlayer.playing.value = false;
+      restart();
+      expect(restarted.resumeAt, const Duration(seconds: 77));
+    });
+
+    test('while playing the place is saved every few seconds', () {
+      fakeAsync((time) {
+        run(firstPlayer = FakePlayer()).playFrom(list, 2);
+        time.flushMicrotasks();
+        firstPlayer.position = const Duration(seconds: 33);
+        time.elapse(PlaybackController.saveEvery);
+        restart();
+        expect(restarted.resumeAt, const Duration(seconds: 33));
+      });
+    });
+
+    test('a long list is written once, not at each save', () async {
+      final writes = <String>[];
+      final controller = PlaybackController(
+        player: FakePlayer(),
+        recordPlay: (_) {},
+        writeSetting: (key, value) => writes.add(key),
+      );
+      addTearDown(controller.dispose);
+      await controller.playFrom(list, 0);
+      controller
+        ..saveSession()
+        ..saveSession();
+      expect(
+        writes.where((key) => key == PlaybackController.listSetting),
+        hasLength(1),
+      );
+      await controller.next();
+      controller.saveSession();
+      expect(
+        writes.where((key) => key == PlaybackController.listSetting),
+        hasLength(1),
+      );
+      await controller.playFrom(songs(2), 0);
+      expect(
+        writes.where((key) => key == PlaybackController.listSetting),
+        hasLength(2),
+      );
     });
   });
 }

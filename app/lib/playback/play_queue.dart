@@ -60,6 +60,13 @@ class PlayQueue {
   /// The current song, or null before anything was started.
   Track? get current => _position < 0 ? null : _songAt(_order[_position]);
 
+  /// Index in [context] of the current song; during a queued song, of the
+  /// list song before it, where the list goes on from. -1 before anything
+  /// was started.
+  int get contextIndex => _position < 0
+      ? -1
+      : _order.take(_position + 1).lastWhere(_isListEntry, orElse: () => -1);
+
   /// Makes [context] the play list and [index] in it the current song. The
   /// songs waiting in the queue stay there.
   Track start(List<Track> context, int index) {
@@ -93,9 +100,7 @@ class PlayQueue {
     } else {
       // During a queued song the list goes on from the song before it.
       final entry = _order[_position];
-      final listEntry = _order
-          .take(_position + 1)
-          .lastWhere(_isListEntry, orElse: () => -1);
+      final listEntry = contextIndex;
       _order = List.generate(_context.length, (i) => i);
       _position = listEntry;
       if (entry != listEntry) _order.insert(++_position, entry);

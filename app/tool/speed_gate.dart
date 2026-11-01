@@ -30,23 +30,33 @@ final _isWindowVisible = _user32
     .lookupFunction<Int32 Function(IntPtr), int Function(int)>(
       'IsWindowVisible',
     );
+final _postMessage = _user32
+    .lookupFunction<
+      Int32 Function(IntPtr, Uint32, IntPtr, IntPtr),
+      int Function(int, int, int, int)
+    >('PostMessageW');
 final _getWindowThreadProcessId = _user32
     .lookupFunction<
       Uint32 Function(IntPtr, Pointer<Uint32>),
       int Function(int, Pointer<Uint32>)
     >('GetWindowThreadProcessId');
 
+const _wmClose = 0x0010;
+
 /// Whether process [pid] has a visible Flutter runner window.
-bool _hasVisibleWindow(int pid) {
+bool _hasVisibleWindow(int pid) => _visibleWindow(pid) != 0;
+
+/// The visible Flutter runner window of process [pid], or 0.
+int _visibleWindow(int pid) {
   final className = 'FLUTTER_RUNNER_WIN32_WINDOW'.toNativeUtf16();
   final owner = calloc<Uint32>();
   try {
     var window = 0;
     while (true) {
       window = _findWindowEx(0, window, className, nullptr);
-      if (window == 0) return false;
+      if (window == 0) return 0;
       _getWindowThreadProcessId(window, owner);
-      if (owner.value == pid && _isWindowVisible(window) != 0) return true;
+      if (owner.value == pid && _isWindowVisible(window) != 0) return window;
     }
   } finally {
     calloc.free(className);
@@ -80,6 +90,16 @@ Future<void> main(List<String> args) async {
   ];
   final starts = int.parse(valueOf('--starts') ?? '6');
 
+  // Only the restart check: quick to repeat while working on it.
+  if (args.contains('--only-restart')) {
+    final bench = p.join(dataDir, 'bench.json');
+    print(jsonEncode(await _checkSavedSong('playToCloseCached', bench)));
+    if (session != null) {
+      print(jsonEncode(await _checkSavedSong('playToCloseStream', bench)));
+    }
+    return;
+  }
+
   print('Start time ($starts launches)...');
   final startRuns = <Map<String, Object?>>[];
   for (var i = 0; i < starts; i++) {
@@ -111,12 +131,22 @@ Future<void> main(List<String> args) async {
   final savedVolume = await _checkSavedVolume(benchFile);
   print('  ${jsonEncode(savedVolume)}');
 
+  print('Last song across a real window close...');
+  final savedSongs = {
+    'cached': await _checkSavedSong('playToCloseCached', benchFile),
+    'stream': session == null
+        ? {'skipped': 'no VK session'}
+        : await _checkSavedSong('playToCloseStream', benchFile),
+  };
+  print('  ${jsonEncode(savedSongs)}');
+
   final report = {
     'measuredAt': DateTime.now().toIso8601String(),
     'starts': startRuns,
     'idleMemory': memory,
     'bench': benchResult,
     'savedVolume': savedVolume,
+    'savedSongs': savedSongs,
   };
   File(outFile)
       .writeAsStringSync(const JsonEncoder.withIndent('  ').convert(report));
@@ -161,6 +191,94 @@ Future<Map<String, Object?>> _checkSavedVolume(String benchFile) async {
         actual != null &&
         (actual - expected).abs() < 0.6 &&
         restored?['mutedByUser'] == false,
+  };
+}
+
+/// One release run plays a song to a known place and is closed through its
+/// window, as the user closes it; the next run must show that song paused
+/// there with nothing loaded, and Play must go on from there with sound and
+/// no new History entry. Not a speed target, see [_checkSavedVolume].
+Future<Map<String, Object?>> _checkSavedSong(
+  String playPart,
+  String benchFile,
+) async {
+  final file = File(benchFile);
+  if (file.existsSync()) file.deleteSync();
+  final first = await Process.start(exe, [
+    ...appArgs,
+    '--bench',
+    benchFile,
+    '--bench-parts',
+    playPart,
+  ]);
+  final clock = Stopwatch()..start();
+  while (!file.existsSync() && clock.elapsed < const Duration(minutes: 1)) {
+    await Future<void>.delayed(const Duration(milliseconds: 50));
+  }
+  if (!file.existsSync()) {
+    first.kill();
+    return {'ok': false, 'error': 'no play result'};
+  }
+  await Future<void>.delayed(const Duration(milliseconds: 100));
+  final played = (jsonDecode(file.readAsStringSync()) as Map)
+      .cast<String, Object?>();
+  _postMessage(_visibleWindow(first.pid), _wmClose, 0, 0);
+  final closeClock = Stopwatch()..start();
+  final exit = await first.exitCode.timeout(
+    const Duration(seconds: 15),
+    onTimeout: () {
+      first.kill();
+      return -1;
+    },
+  );
+  final closeMs = closeClock.elapsedMilliseconds;
+  file.deleteSync();
+  final second = await Process.start(exe, [
+    ...appArgs,
+    '--bench',
+    benchFile,
+    '--bench-parts',
+    'savedSong',
+  ]);
+  await second.exitCode.timeout(
+    const Duration(minutes: 1),
+    onTimeout: () {
+      second.kill();
+      return -1;
+    },
+  );
+  if (!file.existsSync()) {
+    return {'ok': false, 'played': played, 'error': 'no restart result'};
+  }
+  final bench = jsonDecode(file.readAsStringSync()) as Map;
+  final restored = (bench['savedSong'] as Map).cast<String, Object?>();
+  final before = (restored['before'] as Map).cast<String, Object?>();
+  final playedMs = played['positionMs'] as int;
+  final shownMs = before['positionMs'] as int;
+  final soundAt = restored['soundAtMs'] as int;
+  final later = restored['twoSecondsLaterMs'] as int;
+  return {
+    'played': played,
+    'exitCode': exit,
+    'closeMs': closeMs,
+    'restored': restored,
+    // The close saves the place within a second or so of the last report.
+    'ok':
+        exit == 0 &&
+        played['ok'] == true &&
+        before['trackId'] == played['trackId'] &&
+        before['listSongs'] == played['listSongs'] &&
+        before['playing'] == false &&
+        ((before['mpvPath'] as String?) ?? '').isEmpty &&
+        shownMs >= playedMs &&
+        shownMs < playedMs + 3000 &&
+        restored['loaded'] == true &&
+        restored['playing'] == true &&
+        soundAt >= shownMs &&
+        soundAt < shownMs + 3000 &&
+        later > soundAt + 1000 &&
+        (restored['sampleRate'] as int? ?? 0) > 0 &&
+        restored['historyAdded'] == 0,
   };
 }
 

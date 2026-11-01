@@ -51,7 +51,7 @@ class _ShownPlayer extends PlayerService {
   Duration get duration => const Duration(minutes: 3);
 
   @override
-  Future<PlayTiming> play(Track track) async {
+  Future<PlayTiming> play(Track track, {Duration? from}) async {
     _track = track;
     return const PlayTiming(ok: true, cached: true, resolveMs: 0, toSoundMs: 1);
   }

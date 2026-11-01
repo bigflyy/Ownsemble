@@ -42,7 +42,7 @@ class _StartedPlayer extends PlayerService {
   Duration get duration => const Duration(seconds: 200);
 
   @override
-  Future<PlayTiming> play(Track track) async {
+  Future<PlayTiming> play(Track track, {Duration? from}) async {
     _track = track;
     played.add(track.id);
     return const PlayTiming(ok: true, cached: true, resolveMs: 0, toSoundMs: 1);
@@ -130,6 +130,29 @@ void main() {
     );
     await tester.pump();
   }
+
+  testWidgets('the first frame shows the restored song, paused at its place, '
+      'before the player is ready', (tester) async {
+    final player = PlayerService(vk: null, muted: true, dataDir: '.');
+    final track = store.loadAll()[1];
+    player.restore(track, const Duration(seconds: 42));
+    await pumpShell(tester, player: player);
+    expect(player.isReady, isFalse);
+    final panel = find.byType(NowPlayingPanel);
+    expect(
+      find.descendant(of: panel, matching: find.text(track.title)),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(of: panel, matching: find.text('0:42')),
+      findsOneWidget,
+    );
+    final play = tester.widget<IconButton>(
+      find.byKey(const ValueKey('play-pause')),
+    );
+    expect(play.onPressed, isNotNull);
+    expect(play.tooltip, 'Play (Space)');
+  });
 
   group('the view is kept between runs', () {
     LibraryController restart() => LibraryController(
