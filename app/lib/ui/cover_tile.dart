@@ -81,20 +81,29 @@ class CoverFileImage extends ImageProvider<CoverFileImage> {
 ///
 /// The large cover is used only where a tile is bigger than the small one
 /// (the Now playing panel); until it comes, the small cover stands in for it.
+/// The cover viewer ([biggest]) adds VK's biggest size on top the same way.
 class TrackTile extends StatelessWidget {
   const TrackTile({
     super.key,
     required this.track,
     required this.size,
     required this.radius,
+    this.biggest = false,
   });
 
   /// Side of VK's small cover, in pixels.
   static const smallCoverPixels = 135;
 
+  /// Side of VK's biggest cover, in pixels.
+  static const fullCoverPixels = 1200;
+
   final Track track;
   final double size;
   final double radius;
+
+  /// For the cover viewer: asks for VK's biggest size without waiting, and
+  /// decodes it whole, so resizing the window does not decode it again.
+  final bool biggest;
 
   @override
   Widget build(BuildContext context) {
@@ -103,7 +112,11 @@ class TrackTile extends StatelessWidget {
     final smallLinks = track.smallCovers;
     if (covers == null || smallLinks.isEmpty) return standIn;
 
-    final pixels = (size * MediaQuery.devicePixelRatioOf(context)).round();
+    final pixels = biggest
+        ? fullCoverPixels
+        : (size * MediaQuery.devicePixelRatioOf(context)).round();
+    final settle = biggest ? Duration.zero : _Cover.settleDelay;
+    final filter = biggest ? FilterQuality.medium : FilterQuality.low;
     final tint = track.tint;
     // While a cover loads its main color shows, not initials that flash by.
     final Widget loading = tint == null
@@ -120,6 +133,8 @@ class TrackTile extends StatelessWidget {
       covers: covers,
       urls: smallLinks,
       pixels: pixels,
+      settle: settle,
+      filter: filter,
       size: size,
       radius: radius,
       loading: loading,
@@ -131,6 +146,23 @@ class TrackTile extends StatelessWidget {
         covers: covers,
         urls: largeLinks,
         pixels: pixels,
+        settle: settle,
+        filter: filter,
+        size: size,
+        radius: radius,
+        loading: tile,
+        failed: tile,
+      );
+    }
+    final fullLink = track.coverFullUrl;
+    if (biggest && fullLink != null) {
+      // This link alone: a list would stop at a smaller size already stored.
+      tile = _Cover(
+        covers: covers,
+        urls: [fullLink],
+        pixels: pixels,
+        settle: settle,
+        filter: filter,
         size: size,
         radius: radius,
         loading: tile,
@@ -191,6 +223,8 @@ class _Cover extends StatefulWidget {
     required this.covers,
     required this.urls,
     required this.pixels,
+    required this.settle,
+    required this.filter,
     required this.size,
     required this.radius,
     required this.loading,
@@ -205,6 +239,10 @@ class _Cover extends StatefulWidget {
   /// Links of the same image, best first; not empty.
   final List<String> urls;
   final int pixels;
+
+  /// How long to wait before any work; see [settleDelay].
+  final Duration settle;
+  final FilterQuality filter;
   final double size;
   final double radius;
   final Widget loading;
@@ -273,7 +311,7 @@ class _CoverState extends State<_Cover> {
         return;
       }
     }
-    _settle = Timer(_Cover.settleDelay, _load);
+    _settle = Timer(widget.settle, _load);
   }
 
   void _load() {
@@ -320,7 +358,7 @@ class _CoverState extends State<_Cover> {
         width: widget.size,
         height: widget.size,
         fit: BoxFit.cover,
-        filterQuality: FilterQuality.low,
+        filterQuality: widget.filter,
         excludeFromSemantics: true,
         frameBuilder: (_, child, frame, _) =>
             frame == null ? widget.loading : child,

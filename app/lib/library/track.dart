@@ -74,13 +74,8 @@ class Track {
   /// out: the row's own small cover is what shows under it anyway.
   List<String> get largeCovers => [?coverLargeUrl, ?coverFullUrl, ?coverMidUrl];
 
-  /// Links to try for the biggest view, best first.
-  List<String> get fullCovers => [
-    ?coverFullUrl,
-    ?coverLargeUrl,
-    ?coverMidUrl,
-    ?coverUrl,
-  ];
+  /// Whether VK gave the song a real cover, in any size.
+  bool get hasCover => smallCovers.isNotEmpty;
 
   /// When a sync found the song gone from its source, Unix milliseconds.
   final int? goneAtMs;

@@ -86,11 +86,16 @@ void main() {
 
   tearDown(() => dir.deleteSync(recursive: true));
 
-  Widget tile(Track track, {double size = 44, bool scoped = true}) {
+  Widget tile(
+    Track track, {
+    double size = 44,
+    bool scoped = true,
+    bool biggest = false,
+  }) {
     final app = MaterialApp(
       theme: buildTheme(OwnColors.dark),
       home: Center(
-        child: TrackTile(track: track, size: size, radius: 8),
+        child: TrackTile(track: track, size: size, radius: 8, biggest: biggest),
       ),
     );
     return scoped ? CoverScope(store: covers, child: app) : app;
@@ -229,11 +234,46 @@ void main() {
     await tester.pumpWidget(const SizedBox());
   });
 
+  coverTest('the biggest view asks for the 1200 px cover at once, though a '
+      'smaller one is stored, and keeps the smaller one if VK has no 1200', (
+    tester,
+  ) async {
+    final track = song(large: largeUrl, full: fullUrl);
+    covers.stored[largeUrl] = imagePath;
+    await tester.pumpWidget(tile(track, size: 600, biggest: true));
+    await tester.pump(const Duration(milliseconds: 1));
+    expect(covers.fetched, [fullUrl]);
+
+    await loadImage(tester);
+    expect(shownImage(), findsOneWidget, reason: 'the stored size meanwhile');
+    covers.answers[fullUrl]!(null);
+    await loadImage(tester);
+    expect(shownImage(), findsOneWidget);
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  coverTest('the biggest view shows the 1200 px cover once it is stored', (
+    tester,
+  ) async {
+    final bigPath = p.join(dir.path, 'big.png');
+    File(bigPath)
+        .writeAsBytesSync(img.encodePng(img.Image(width: 1200, height: 1200)));
+    covers.stored[largeUrl] = imagePath;
+    await tester.pumpWidget(
+      tile(song(large: largeUrl, full: fullUrl), size: 600, biggest: true),
+    );
+    await tester.pump(const Duration(milliseconds: 1));
+    covers.answers[fullUrl]!(bigPath);
+    await loadImage(tester);
+    final shown = tester.widget<RawImage>(find.byType(RawImage).first);
+    expect(shown.image?.width, 1200);
+    await tester.pumpWidget(const SizedBox());
+  });
+
   test('cover links run from the wanted size to the others', () {
     final track = song(large: largeUrl, mid: midUrl, full: fullUrl);
     expect(track.smallCovers, [smallUrl, midUrl, largeUrl, fullUrl]);
     expect(track.largeCovers, [largeUrl, fullUrl, midUrl]);
-    expect(track.fullCovers, [fullUrl, largeUrl, midUrl, smallUrl]);
     expect(song(cover: null).smallCovers, isEmpty);
     expect(song(cover: null, mid: midUrl).smallCovers, [midUrl]);
   });
