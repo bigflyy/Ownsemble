@@ -120,6 +120,12 @@ Win32Window::~Win32Window() {
   Destroy();
 }
 
+void Win32Window::SetStartPlacement(const RECT& frame, bool maximized) {
+  has_start_frame_ = true;
+  start_frame_ = frame;
+  start_maximized_ = maximized;
+}
+
 bool Win32Window::Create(const std::wstring& title,
                          const Point& origin,
                          const Size& size) {
@@ -134,11 +140,26 @@ bool Win32Window::Create(const std::wstring& title,
   UINT dpi = FlutterDesktopGetDpiForMonitor(monitor);
   double scale_factor = dpi / 96.0;
 
-  HWND window = CreateWindow(
-      window_class, title.c_str(), WS_OVERLAPPEDWINDOW,
-      Scale(origin.x, scale_factor), Scale(origin.y, scale_factor),
-      Scale(size.width, scale_factor), Scale(size.height, scale_factor),
-      nullptr, nullptr, GetModuleHandle(nullptr), this);
+  int left = Scale(origin.x, scale_factor);
+  int top = Scale(origin.y, scale_factor);
+  int width = Scale(size.width, scale_factor);
+  int height = Scale(size.height, scale_factor);
+  DWORD style = WS_OVERLAPPEDWINDOW;
+  if (has_start_frame_) {
+    left = start_frame_.left;
+    top = start_frame_.top;
+    width = start_frame_.right - start_frame_.left;
+    height = start_frame_.bottom - start_frame_.top;
+    // Maximized from the start, still hidden: the engine then starts at the
+    // final size, and no second frame has to be drawn when the window shows.
+    if (start_maximized_) {
+      style |= WS_MAXIMIZE;
+    }
+  }
+
+  HWND window = CreateWindow(window_class, title.c_str(), style, left, top,
+                             width, height, nullptr, nullptr,
+                             GetModuleHandle(nullptr), this);
 
   if (!window) {
     return false;
@@ -156,9 +177,10 @@ bool Win32Window::Show() {
   if (GetEnvironmentVariableW(L"OWNSEMBLE_BACKGROUND_WINDOW", nullptr, 0) > 0) {
     SetWindowPos(window_handle_, HWND_BOTTOM, -20000, -20000, 0, 0,
                  SWP_NOSIZE | SWP_NOACTIVATE);
-    return ShowWindow(window_handle_, SW_SHOWNOACTIVATE);
+    return ShowWindow(window_handle_, SW_SHOWNA);
   }
-  return ShowWindow(window_handle_, SW_SHOWNORMAL);
+  return ShowWindow(window_handle_,
+                    start_maximized_ ? SW_SHOWMAXIMIZED : SW_SHOWNORMAL);
 }
 
 // static

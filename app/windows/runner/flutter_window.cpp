@@ -3,9 +3,11 @@
 #include <optional>
 
 #include "flutter/generated_plugin_registrant.h"
+#include "window_placement.h"
 
-FlutterWindow::FlutterWindow(const flutter::DartProject& project)
-    : project_(project) {}
+FlutterWindow::FlutterWindow(const flutter::DartProject& project,
+                             const std::wstring& placement_path)
+    : project_(project), placement_path_(placement_path) {}
 
 FlutterWindow::~FlutterWindow() {}
 
@@ -54,6 +56,12 @@ LRESULT
 FlutterWindow::MessageHandler(HWND hwnd, UINT const message,
                               WPARAM const wparam,
                               LPARAM const lparam) noexcept {
+  // Here and not at WM_DESTROY: Flutter handles the close, and the app ends
+  // the process from there without destroying this window.
+  if (message == WM_CLOSE) {
+    SaveWindowPlacement(hwnd, placement_path_);
+  }
+
   // Give Flutter, including plugins, an opportunity to handle window messages.
   if (flutter_controller_) {
     std::optional<LRESULT> result =

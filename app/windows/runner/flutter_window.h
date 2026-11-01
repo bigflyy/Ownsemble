@@ -5,6 +5,7 @@
 #include <flutter/flutter_view_controller.h>
 
 #include <memory>
+#include <string>
 
 #include "vk_login_window.h"
 #include "win32_window.h"
@@ -12,8 +13,10 @@
 // A window that does nothing but host a Flutter view.
 class FlutterWindow : public Win32Window {
  public:
-  // Creates a new FlutterWindow hosting a Flutter view running |project|.
-  explicit FlutterWindow(const flutter::DartProject& project);
+  // Creates a new FlutterWindow hosting a Flutter view running |project|. Its
+  // placement is saved to the file at |placement_path| when it closes.
+  FlutterWindow(const flutter::DartProject& project,
+                const std::wstring& placement_path);
   virtual ~FlutterWindow();
 
  protected:
@@ -26,6 +29,9 @@ class FlutterWindow : public Win32Window {
  private:
   // The project to run.
   flutter::DartProject project_;
+
+  // Where the placement is saved when the window closes.
+  std::wstring placement_path_;
 
   // The Flutter instance hosted by this window.
   std::unique_ptr<flutter::FlutterViewController> flutter_controller_;

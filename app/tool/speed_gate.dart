@@ -41,6 +41,19 @@ final _getWindowThreadProcessId = _user32
       int Function(int, Pointer<Uint32>)
     >('GetWindowThreadProcessId');
 
+final _getWindowRect = _user32
+    .lookupFunction<
+      Int32 Function(IntPtr, Pointer<Int32>),
+      int Function(int, Pointer<Int32>)
+    >('GetWindowRect');
+final _isZoomed = _user32
+    .lookupFunction<Int32 Function(IntPtr), int Function(int)>('IsZoomed');
+final _setWindowPos = _user32
+    .lookupFunction<
+      Int32 Function(IntPtr, IntPtr, Int32, Int32, Int32, Int32, Uint32),
+      int Function(int, int, int, int, int, int, int)
+    >('SetWindowPos');
+
 const _wmClose = 0x0010;
 const _wmKeyDown = 0x0100;
 const _wmKeyUp = 0x0101;
@@ -95,6 +108,7 @@ Future<void> main(List<String> args) async {
   // Only the restart check: quick to repeat while working on it.
   if (args.contains('--only-restart')) {
     final bench = p.join(dataDir, 'bench.json');
+    print(jsonEncode(await _checkWindowPlacement(dataDir)));
     print(jsonEncode(await _checkRealKeys(bench)));
     print(jsonEncode(await _checkSavedSong('playToCloseCached', bench)));
     if (session != null) {
@@ -134,6 +148,10 @@ Future<void> main(List<String> args) async {
   final savedVolume = await _checkSavedVolume(benchFile);
   print('  ${jsonEncode(savedVolume)}');
 
+  print('Window size and place across a real close...');
+  final windowPlacement = await _checkWindowPlacement(dataDir);
+  print('  ${jsonEncode(windowPlacement)}');
+
   print('Real Windows key messages...');
   final realKeys = await _checkRealKeys(benchFile);
   print('  ${jsonEncode(realKeys)}');
@@ -153,6 +171,7 @@ Future<void> main(List<String> args) async {
     'idleMemory': memory,
     'bench': benchResult,
     'savedVolume': savedVolume,
+    'windowPlacement': windowPlacement,
     'realKeys': realKeys,
     'savedSongs': savedSongs,
   };
@@ -199,6 +218,83 @@ Future<Map<String, Object?>> _checkSavedVolume(String benchFile) async {
         actual != null &&
         (actual - expected).abs() < 0.6 &&
         restored?['mutedByUser'] == false,
+  };
+}
+
+/// The frame's width and height of [window].
+(int, int) _windowSize(int window) {
+  final rect = calloc<Int32>(4);
+  _getWindowRect(window, rect);
+  final size = (rect[2] - rect[0], rect[3] - rect[1]);
+  calloc.free(rect);
+  return size;
+}
+
+/// The window comes back at a saved size, maximized when saved so, and a real
+/// close saves a new size. Run with OWNSEMBLE_BACKGROUND_WINDOW the window
+/// stays off-screen, so its place is not checked here, only its size. Removes
+/// the placement file afterwards, so other checks start from the default.
+Future<Map<String, Object?>> _checkWindowPlacement(String dataDir) async {
+  final file = File(p.join(dataDir, 'window-placement.txt'));
+
+  /// Starts the app on [placement] and hands the window to [check].
+  Future<T> withWindow<T>(
+    String placement,
+    Future<T> Function(int window, Process app) check,
+  ) async {
+    file.writeAsStringSync(placement);
+    final app = await Process.start(exe, appArgs);
+    final clock = Stopwatch()..start();
+    while (_visibleWindow(app.pid) == 0 &&
+        clock.elapsed < const Duration(seconds: 10)) {
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+    }
+    final result = await check(_visibleWindow(app.pid), app);
+    app.kill();
+    await app.exitCode;
+    return result;
+  }
+
+  final normal = await withWindow(
+    '100 100 900 700 0\n',
+    (window, _) async => (_windowSize(window), _isZoomed(window) != 0),
+  );
+  final maximized = await withWindow(
+    '100 100 900 700 1\n',
+    (window, _) async => _isZoomed(window) != 0,
+  );
+  final offScreen = await withWindow(
+    '50000 50000 900 700 0\n',
+    (window, _) async => _windowSize(window),
+  );
+  final exit = await withWindow('100 100 900 700 0\n', (window, app) async {
+    await Future<void>.delayed(const Duration(seconds: 2));
+    const noMoveNoZorderNoActivate = 0x0002 | 0x0004 | 0x0010;
+    _setWindowPos(window, 0, 0, 0, 1000, 720, noMoveNoZorderNoActivate);
+    await Future<void>.delayed(const Duration(milliseconds: 300));
+    _postMessage(window, _wmClose, 0, 0);
+    return app.exitCode.timeout(
+      const Duration(seconds: 15),
+      onTimeout: () => -1,
+    );
+  });
+  final saved = file.readAsStringSync().trim().split(' ');
+  file.deleteSync();
+  return {
+    'normal': '${normal.$1}',
+    'maximized': maximized,
+    'offScreenFallsBackTo': '$offScreen',
+    'closeExit': exit,
+    'saved': saved.join(' '),
+    'ok':
+        normal.$1 == (900, 700) &&
+        !normal.$2 &&
+        maximized &&
+        offScreen != (900, 700) &&
+        exit == 0 &&
+        saved[2] == '1000' &&
+        saved[3] == '720' &&
+        saved[4] == '0',
   };
 }
 

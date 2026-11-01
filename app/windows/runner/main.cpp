@@ -4,6 +4,7 @@
 
 #include "flutter_window.h"
 #include "utils.h"
+#include "window_placement.h"
 
 int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
                       _In_ wchar_t *command_line, _In_ int show_command) {
@@ -26,11 +27,15 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
   std::vector<std::string> command_line_arguments =
       GetCommandLineArguments();
 
+  const std::wstring placement_path = WindowPlacementPath(command_line_arguments);
   project.set_dart_entrypoint_arguments(std::move(command_line_arguments));
 
-  FlutterWindow window(project);
+  FlutterWindow window(project, placement_path);
   Win32Window::Point origin(10, 10);
   Win32Window::Size size(1100, 760);
+  if (const auto placement = LoadWindowPlacement(placement_path)) {
+    window.SetStartPlacement(placement->frame, placement->maximized);
+  }
   if (!window.Create(L"Ownsemble v2", origin, size)) {
     return EXIT_FAILURE;
   }
