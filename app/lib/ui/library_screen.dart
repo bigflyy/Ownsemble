@@ -9,6 +9,7 @@ import '../playback/player_service.dart';
 import '../storage/audio_storage.dart';
 import 'collections_controller.dart';
 import 'cover_tile.dart';
+import 'cover_viewer.dart';
 import 'filling_icon.dart';
 import 'library_controller.dart';
 import 'player_bar.dart';
@@ -96,7 +97,8 @@ class _LibraryScreenState extends State<LibraryScreen> {
     // The physical key, so Ctrl+F also works with the Russian layout, where
     // the same key types "а".
     if (event.physicalKey == PhysicalKeyboardKey.keyF &&
-        HardwareKeyboard.instance.isControlPressed) {
+        HardwareKeyboard.instance.isControlPressed &&
+        !_covered) {
       _searchFocus.requestFocus();
       library.searchText.selection = TextSelection(
         baseOffset: 0,
@@ -105,7 +107,8 @@ class _LibraryScreenState extends State<LibraryScreen> {
       return true;
     }
     if (key == LogicalKeyboardKey.escape &&
-        library.searchText.text.isNotEmpty) {
+        library.searchText.text.isNotEmpty &&
+        !_covered) {
       library.searchText.clear();
       return true;
     }
@@ -130,6 +133,10 @@ class _LibraryScreenState extends State<LibraryScreen> {
     return false;
   }
 
+  /// Whether a dialog, a menu or the cover viewer is open over this screen:
+  /// Esc is theirs then, and the search box is out of reach.
+  bool get _covered => Navigator.of(context).canPop();
+
   /// Whether the keyboard focus is in a text field. The focus belongs to a
   /// Focus widget inside the EditableText, so the field is an ancestor.
   bool get _typing =>
@@ -152,9 +159,9 @@ class _LibraryScreenState extends State<LibraryScreen> {
   /// pauses or resumes it instead of restarting it.
   void _play(int index) => widget.playback.playFrom(library.visible, index);
 
-  /// A song's right-click menu: Play next and Add to queue, Download or
-  /// Remove download, put on top of a Stack, and in a Stack, remove this
-  /// entry.
+  /// A song's right-click menu: Play next and Add to queue, View cover,
+  /// Download or Remove download, put on top of a Stack, and in a Stack,
+  /// remove this entry.
   Future<void> _showSongMenu(int index, Offset position) async {
     final track = library.visible[index];
     final entryId = library.entryIdAt(index);
@@ -181,7 +188,14 @@ class _LibraryScreenState extends State<LibraryScreen> {
           value: 'add-to-queue',
           child: Text('Add to queue'),
         ),
-        if (storage != null || inStack) const PopupMenuDivider(),
+        if (track.hasCover || storage != null || inStack)
+          const PopupMenuDivider(),
+        if (track.hasCover)
+          const PopupMenuItem(
+            key: ValueKey('menu-view-cover'),
+            value: 'view-cover',
+            child: Text('View cover'),
+          ),
         if (storage != null && !downloaded)
           const PopupMenuItem(
             key: ValueKey('menu-download'),
@@ -212,6 +226,8 @@ class _LibraryScreenState extends State<LibraryScreen> {
         await widget.playback.playNext(track);
       case 'add-to-queue':
         await widget.playback.addToQueue(track);
+      case 'view-cover':
+        await showCoverViewer(context, track);
       case 'download':
         final messenger = ScaffoldMessenger.of(context);
         final error = await widget.playback.download(track);

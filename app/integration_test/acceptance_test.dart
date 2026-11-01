@@ -22,6 +22,7 @@ import 'package:flutter/gestures.dart' show kSecondaryMouseButton;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:image/image.dart' as img;
 import 'package:integration_test/integration_test.dart';
 import 'package:media_kit/media_kit.dart' show NativePlayer;
 import 'package:ownsemble/library/library_store.dart';
@@ -1064,6 +1065,7 @@ void main() {
     final withLargeCover = library.all.firstWhere(
       (t) =>
           t.coverLargeUrl != null &&
+          t.coverFullUrl != null &&
           t.id != player.current?.id &&
           playedOk.contains(t.id) &&
           !missingCovers.any((missing) => missing.id == t.id),
@@ -1091,8 +1093,101 @@ void main() {
     );
     // ignore: avoid_print
     print('side panel: large cover downloaded and shown');
+
+    // A click on a player's cover opens the biggest size; Esc or a click
+    // closes it, and a row opens one from its menu without playing it.
+    final viewer = find.byKey(const ValueKey('cover-viewer'));
+    int viewerPixels() {
+      final images = find.descendant(
+        of: viewer,
+        matching: find.byType(RawImage),
+      );
+      return [
+        0,
+        for (final element in images.evaluate())
+          (element.widget as RawImage).image?.width ?? 0,
+      ].reduce((a, b) => a > b ? a : b);
+    }
+
+    Future<void> closeViewerByEsc() async {
+      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+      await tester.pumpAndSettle();
+      expect(viewer, findsNothing, reason: 'Esc closes the cover');
+    }
+
+    final viewerClock = Stopwatch()..start();
+    await tester.tap(find.byKey(const ValueKey('open-cover')));
+    await waitUntil(
+      tester,
+      () => covers.storedPath(withLargeCover.coverFullUrl!) != null,
+      timeout: const Duration(seconds: 20),
+      what: 'the biggest cover stored',
+    );
+    // A smaller size shows first, so only the saved file's own width proves
+    // that the biggest one is on screen.
+    final fullFile = img.decodeImage(
+      await File(covers.storedPath(withLargeCover.coverFullUrl!)!)
+          .readAsBytes(),
+    )!;
+    await waitUntil(
+      tester,
+      () => viewerPixels() == fullFile.width,
+      timeout: const Duration(seconds: 20),
+      what: 'the biggest cover in the viewer',
+    );
+    final fullPixels = viewerPixels();
+    final fullShownMs = viewerClock.elapsedMilliseconds;
+    final largeFile = img.decodeImage(
+      await File(covers.storedPath(withLargeCover.coverLargeUrl!)!)
+          .readAsBytes(),
+    )!;
+    await closeViewerByEsc();
+
+    await tester.tap(find.byKey(const ValueKey('open-cover')));
+    await tester.pumpAndSettle();
+    expect(viewer, findsOneWidget);
+    await tester.tapAt(const Offset(5, 5));
+    await tester.pumpAndSettle();
+    expect(viewer, findsNothing, reason: 'a click closes the cover');
+
     await tester.tap(find.byKey(const ValueKey('dock-bottom')));
     await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('open-cover')));
+    await tester.pumpAndSettle();
+    expect(viewer, findsOneWidget, reason: 'the bottom bar cover opens too');
+    await closeViewerByEsc();
+
+    final rowCover = library.visible.firstWhere(
+      (t) =>
+          t.hasCover &&
+          t.id != player.current?.id &&
+          !missingCovers.any((missing) => missing.id == t.id),
+    );
+    library.scroll.jumpTo(
+      (library.visible.indexOf(rowCover) * rowHeight).clamp(
+        0,
+        library.scroll.position.maxScrollExtent,
+      ),
+    );
+    await tester.pump();
+    await tester.tap(
+      find.byKey(ValueKey('song-${rowCover.id}')),
+      buttons: kSecondaryMouseButton,
+    );
+    await tester.pumpAndSettle();
+    final playingBefore = player.current?.id;
+    await tester.tap(find.byKey(const ValueKey('menu-view-cover')));
+    await tester.pumpAndSettle();
+    expect(viewer, findsOneWidget, reason: 'View cover in a row menu');
+    expect(player.current?.id, playingBefore, reason: 'looking plays nothing');
+    await closeViewerByEsc();
+    // ignore: avoid_print
+    print(
+      'cover viewer: ${withLargeCover.artist} - ${withLargeCover.title}: '
+      'saved files ${largeFile.width} and ${fullFile.width} px, '
+      '$fullPixels px bitmap shown in $fullShownMs ms; side panel, bottom '
+      'bar and row menu open it; Esc and a click close it',
+    );
 
     final historyStore = LibraryStore.open(p.join(copyDir, 'library.db'));
     await seekListening.cancel();

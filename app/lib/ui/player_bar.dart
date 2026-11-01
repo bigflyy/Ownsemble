@@ -6,6 +6,7 @@ import '../playback/playback_controller.dart';
 import '../storage/audio_storage.dart';
 import 'collections_controller.dart';
 import 'cover_tile.dart';
+import 'cover_viewer.dart';
 import 'filling_icon.dart';
 import 'theme.dart';
 
@@ -72,7 +73,10 @@ class NowPlayingPanel extends StatelessWidget {
                 else ...[
                   if (thumbnails)
                     Center(
-                      child: TrackTile(track: track, size: 220, radius: 16),
+                      child: OpensCover(
+                        track: track,
+                        child: TrackTile(track: track, size: 220, radius: 16),
+                      ),
                     ),
                   const SizedBox(height: 18),
                   Row(
@@ -167,7 +171,14 @@ class DockBar extends StatelessWidget {
                       : Row(
                           children: [
                             if (thumbnails) ...[
-                              TrackTile(track: track, size: 52, radius: 8),
+                              OpensCover(
+                                track: track,
+                                child: TrackTile(
+                                  track: track,
+                                  size: 52,
+                                  radius: 8,
+                                ),
+                              ),
                               const SizedBox(width: 12),
                             ],
                             Expanded(child: SongTitle(track: track)),

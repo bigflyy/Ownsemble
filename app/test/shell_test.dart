@@ -9,7 +9,9 @@ import 'package:ownsemble/library/track.dart';
 import 'package:ownsemble/playback/playback_controller.dart';
 import 'package:ownsemble/playback/player_service.dart';
 import 'package:ownsemble/storage/audio_storage.dart';
+import 'package:ownsemble/storage/cover_store.dart';
 import 'package:ownsemble/ui/collections_controller.dart';
+import 'package:ownsemble/ui/cover_tile.dart';
 import 'package:ownsemble/ui/library_controller.dart';
 import 'package:ownsemble/ui/library_screen.dart';
 import 'package:ownsemble/ui/player_bar.dart';
@@ -50,6 +52,18 @@ class _StartedPlayer extends PlayerService {
   Future<void> playOrPause() async => pauseToggles++;
 }
 
+/// A cover store with nothing stored that never answers, so tiles stay at
+/// their loading color and no test reaches the network.
+class _SilentCovers extends CoverStore {
+  _SilentCovers() : super(dataDir: '.');
+
+  @override
+  String? storedPath(String url) => null;
+
+  @override
+  CoverRequest? fetch(String url, void Function(String? path) onDone) => null;
+}
+
 void main() {
   late LibraryStore store;
   late CollectionsController collections;
@@ -70,6 +84,8 @@ void main() {
           album: i.isEven ? 'Альбом' : null,
           durationSec: 200,
           addedAt: 100 - i,
+          // Песня 5 has no cover, like a song without an album on VK.
+          coverUrl: i == 5 ? null : 'https://img.example/$i.jpg?size=135',
         ),
     ]);
     store.saveAudioFile(ids[2], 'cache/a.mp3', 10, pinned: true);
@@ -96,15 +112,18 @@ void main() {
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
     await tester.pumpWidget(
-      ListenableBuilder(
-        listenable: settings,
-        builder: (context, _) => MaterialApp(
-          theme: buildTheme(settings.dark ? OwnColors.dark : OwnColors.light),
-          home: LibraryScreen(
-            library: library,
-            playback: playback,
-            collections: collections,
-            settings: settings,
+      CoverScope(
+        store: _SilentCovers(),
+        child: ListenableBuilder(
+          listenable: settings,
+          builder: (context, _) => MaterialApp(
+            theme: buildTheme(settings.dark ? OwnColors.dark : OwnColors.light),
+            home: LibraryScreen(
+              library: library,
+              playback: playback,
+              collections: collections,
+              settings: settings,
+            ),
           ),
         ),
       ),
@@ -295,6 +314,119 @@ void main() {
       [for (final t in playback.queue.queued) t.title],
       ['Песня 4', 'Песня 3'],
     );
+  });
+
+  group('maximized cover', () {
+    const openCover = ValueKey('open-cover');
+    const viewer = ValueKey('cover-viewer');
+
+    /// The screen with a song playing. The fake player reports its song
+    /// only when the screen is built, so it starts before that.
+    Future<_StartedPlayer> shellPlaying(WidgetTester tester, int id) async {
+      final player = _StartedPlayer();
+      await player.play(library.all.firstWhere((track) => track.id == id));
+      await pumpShell(tester, player: player);
+      return player;
+    }
+
+    TrackTile shownTile(WidgetTester tester) => tester.widget<TrackTile>(
+      find.descendant(of: find.byKey(viewer), matching: find.byType(TrackTile)),
+    );
+
+    testWidgets('a click on the side panel cover opens it; Esc closes it', (
+      tester,
+    ) async {
+      await shellPlaying(tester, ids[1]);
+      await tester.tap(find.byKey(openCover));
+      await tester.pumpAndSettle();
+      expect(shownTile(tester).biggest, isTrue);
+      expect(shownTile(tester).track.id, ids[1]);
+      expect(shownTile(tester).size, 900 - 2 * 32, reason: 'fills the window');
+
+      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+      await tester.pumpAndSettle();
+      expect(find.byKey(viewer), findsNothing);
+    });
+
+    testWidgets('a click anywhere closes it, on the cover too', (tester) async {
+      await shellPlaying(tester, ids[1]);
+      await tester.tap(find.byKey(openCover));
+      await tester.pumpAndSettle();
+      await tester.tapAt(const Offset(5, 5));
+      await tester.pumpAndSettle();
+      expect(find.byKey(viewer), findsNothing);
+
+      await tester.tap(find.byKey(openCover));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byType(TrackTile).last);
+      await tester.pumpAndSettle();
+      expect(find.byKey(viewer), findsNothing);
+    });
+
+    testWidgets('the bottom bar cover opens it too', (tester) async {
+      await shellPlaying(tester, ids[1]);
+      await tester.tap(find.byKey(const ValueKey('dock-bottom')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(openCover));
+      await tester.pumpAndSettle();
+      expect(shownTile(tester).track.id, ids[1]);
+    });
+
+    testWidgets('Esc closes the cover and leaves the search text', (
+      tester,
+    ) async {
+      await shellPlaying(tester, ids[1]);
+      library.searchText.text = 'Песня';
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(openCover));
+      await tester.pumpAndSettle();
+
+      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+      await tester.pumpAndSettle();
+      expect(find.byKey(viewer), findsNothing);
+      expect(library.searchText.text, 'Песня');
+
+      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+      await tester.pumpAndSettle();
+      expect(library.searchText.text, isEmpty);
+    });
+
+    testWidgets('Space still pauses behind the cover', (tester) async {
+      final player = await shellPlaying(tester, ids[1]);
+      await tester.tap(find.byKey(openCover));
+      await tester.pumpAndSettle();
+      await tester.sendKeyEvent(LogicalKeyboardKey.space);
+      await tester.pumpAndSettle();
+      expect(player.pauseToggles, 1);
+      expect(find.byKey(viewer), findsOneWidget);
+    });
+
+    testWidgets('a row opens it from the right-click menu; its click plays', (
+      tester,
+    ) async {
+      final player = _StartedPlayer();
+      await pumpShell(tester, player: player);
+      await tester.tap(
+        find.byKey(ValueKey('song-${ids[3]}')),
+        buttons: kSecondaryMouseButton,
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('menu-view-cover')));
+      await tester.pumpAndSettle();
+      expect(shownTile(tester).track.id, ids[3]);
+      expect(player.played, isEmpty, reason: 'looking at it plays nothing');
+    });
+
+    testWidgets('a song without a cover has nothing to open', (tester) async {
+      await shellPlaying(tester, ids[5]);
+      await tester.tap(
+        find.byKey(ValueKey('song-${ids[5]}')),
+        buttons: kSecondaryMouseButton,
+      );
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('menu-view-cover')), findsNothing);
+      expect(find.byKey(openCover), findsNothing);
+    });
   });
 
   testWidgets('Up next opens from a button, shows queued songs before the '
