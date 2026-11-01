@@ -95,24 +95,12 @@ void main() {
     await tester.pump();
     // With the Russian layout the F key types "а": the logical key is the
     // Cyrillic letter, only the physical key is still F.
-    // The test key simulator cannot produce Cyrillic keys, so the event
-    // Windows delivers is handed to the keyboard directly.
-    const cyrillicA = LogicalKeyboardKey(0x0430);
+    // The test key simulator cannot produce Cyrillic keys, so another Latin
+    // letter stands in: only the physical key says F.
     await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
-    HardwareKeyboard.instance.handleKeyEvent(
-      const KeyDownEvent(
-        physicalKey: PhysicalKeyboardKey.keyF,
-        logicalKey: cyrillicA,
-        character: 'а',
-        timeStamp: Duration.zero,
-      ),
-    );
-    HardwareKeyboard.instance.handleKeyEvent(
-      const KeyUpEvent(
-        physicalKey: PhysicalKeyboardKey.keyF,
-        logicalKey: cyrillicA,
-        timeStamp: Duration.zero,
-      ),
+    await tester.sendKeyEvent(
+      LogicalKeyboardKey.keyV,
+      physicalKey: PhysicalKeyboardKey.keyF,
     );
     await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
     await tester.pump();

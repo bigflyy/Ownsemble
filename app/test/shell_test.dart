@@ -26,6 +26,9 @@ class _StartedPlayer extends PlayerService {
 
   Track? _track;
   final played = <int>[];
+  final seekOffsets = <Duration>[];
+  double? lastVolume;
+  bool? lastMuted;
   var pauseToggles = 0;
 
   @override
@@ -50,6 +53,14 @@ class _StartedPlayer extends PlayerService {
 
   @override
   Future<void> playOrPause() async => pauseToggles++;
+  @override
+  Future<void> seekBy(Duration offset) async => seekOffsets.add(offset);
+  @override
+  Future<void> seek(Duration to) async {}
+  @override
+  Future<void> setVolume(double volume) async => lastVolume = volume;
+  @override
+  Future<void> setMuted(bool mute) async => lastMuted = mute;
 }
 
 /// A cover store with nothing stored that never answers, so tiles stay at
@@ -152,6 +163,174 @@ void main() {
     );
     expect(play.onPressed, isNotNull);
     expect(play.tooltip, 'Play (Space)');
+  });
+
+  group('keyboard', () {
+    late _StartedPlayer player;
+    late PlaybackController playback;
+
+    Future<void> withControl(
+      WidgetTester tester,
+      Future<void> Function() keys,
+    ) async {
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+      await keys();
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+      await tester.pump();
+    }
+
+    Future<void> pumpPlaying(WidgetTester tester) async {
+      player = _StartedPlayer();
+      await pumpShell(tester, player: player);
+      playback = tester
+          .widget<LibraryScreen>(find.byType(LibraryScreen))
+          .playback;
+      await playback.playFrom(library.visible, 1);
+      await tester.pump();
+    }
+
+    testWidgets('Space works right after the start, nothing typed', (
+      tester,
+    ) async {
+      await pumpPlaying(tester);
+      await tester.sendKeyEvent(LogicalKeyboardKey.space);
+      expect(player.pauseToggles, 1);
+      expect(library.searchText.text, isEmpty);
+    });
+
+    testWidgets('Left and Right seek by 5 s', (tester) async {
+      await pumpPlaying(tester);
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowLeft);
+      expect(player.seekOffsets, [seekKeyStep, -seekKeyStep]);
+    });
+
+    testWidgets('a used key stops: arrows leave the focus where it is', (
+      tester,
+    ) async {
+      await pumpPlaying(tester);
+      final before = FocusManager.instance.primaryFocus;
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+      await tester.pump();
+      expect(FocusManager.instance.primaryFocus, before);
+    });
+
+    testWidgets('a held arrow steps the volume but seeks only once', (
+      tester,
+    ) async {
+      await pumpPlaying(tester);
+      await playback.setVolume(50);
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.arrowUp);
+      await tester.sendKeyRepeatEvent(LogicalKeyboardKey.arrowUp);
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.arrowUp);
+      expect(playback.volume, 60);
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+      expect(playback.volume, 55);
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.arrowRight);
+      await tester.sendKeyRepeatEvent(LogicalKeyboardKey.arrowRight);
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.arrowRight);
+      expect(player.seekOffsets, hasLength(1));
+    });
+
+    testWidgets('Ctrl+Right and Ctrl+Left change the song', (tester) async {
+      await pumpPlaying(tester);
+      await withControl(tester, () async {
+        await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+      });
+      expect(player.played, [ids[1], ids[2]]);
+      expect(player.seekOffsets, isEmpty);
+      await withControl(tester, () async {
+        await tester.sendKeyEvent(LogicalKeyboardKey.arrowLeft);
+      });
+      // 20 s in, Previous restarts the song.
+      expect(player.played, [ids[1], ids[2]]);
+    });
+
+    testWidgets('Ctrl+M, Ctrl+S and Ctrl+R go by the key, not the layout', (
+      tester,
+    ) async {
+      await pumpPlaying(tester);
+      await withControl(tester, () async {
+        await tester.sendKeyEvent(
+          LogicalKeyboardKey.keyV,
+          physicalKey: PhysicalKeyboardKey.keyM,
+        );
+        await tester.sendKeyEvent(
+          LogicalKeyboardKey.keyK,
+          physicalKey: PhysicalKeyboardKey.keyS,
+        );
+        await tester.sendKeyEvent(
+          LogicalKeyboardKey.keyP,
+          physicalKey: PhysicalKeyboardKey.keyR,
+        );
+      });
+      expect(playback.mutedByUser, isTrue);
+      expect(player.lastMuted, isTrue);
+      expect(playback.shuffle, isTrue);
+      expect(playback.repeat.name, 'list');
+    });
+
+    testWidgets('in the search box the keys edit text; Esc leaves it', (
+      tester,
+    ) async {
+      await pumpPlaying(tester);
+      await tester.tap(find.byType(TextField));
+      await tester.pump();
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowUp);
+      await withControl(tester, () async {
+        await tester.sendKeyEvent(LogicalKeyboardKey.keyM);
+      });
+      expect(player.seekOffsets, isEmpty);
+      expect(player.lastVolume, isNull);
+      expect(playback.mutedByUser, isFalse);
+      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+      await tester.pump();
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+      expect(player.seekOffsets, [seekKeyStep]);
+    });
+
+    testWidgets('in an open menu the arrows choose', (tester) async {
+      await pumpPlaying(tester);
+      await tester.tap(find.text('Песня 0'), buttons: kSecondaryButton);
+      await tester.pumpAndSettle();
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+      expect(player.seekOffsets, isEmpty);
+      expect(player.lastVolume, isNull);
+    });
+
+    testWidgets('a slider reached with Tab keeps the arrows', (tester) async {
+      // Started before the screen is built, so the panel shows its sliders.
+      player = _StartedPlayer();
+      await player.play(store.loadAll()[1]);
+      await pumpShell(tester, player: player);
+      // The render widget inside the Slider, below the Slider's own Focus.
+      final inside = find.descendant(
+        of: find.byKey(const ValueKey('volume')),
+        matching: find.byType(Semantics),
+      );
+      Focus.of(tester.element(inside.last)).requestFocus();
+      await tester.pump();
+      final focused = FocusManager.instance.primaryFocus?.context;
+      expect(focused?.findAncestorWidgetOfExactType<Slider>(), isNotNull);
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+      expect(player.seekOffsets, isEmpty);
+    });
+
+    testWidgets('F1 and the toolbar button list the shortcuts', (tester) async {
+      await pumpPlaying(tester);
+      await tester.sendKeyEvent(LogicalKeyboardKey.f1);
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('shortcuts-help')), findsOneWidget);
+      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('shortcuts-help')), findsNothing);
+      await tester.tap(find.byKey(const ValueKey('keyboard-help')));
+      await tester.pumpAndSettle();
+      expect(find.text('Ctrl + M'), findsOneWidget);
+    });
   });
 
   group('the view is kept between runs', () {
@@ -644,7 +823,8 @@ void main() {
     final player = _StartedPlayer();
     await pumpShell(tester, player: player);
 
-    // The search box has the focus when the app opens.
+    await tester.tap(find.byType(TextField));
+    await tester.pump();
     await tester.sendKeyEvent(LogicalKeyboardKey.space);
     expect(player.pauseToggles, 0, reason: 'typing in the search box');
 

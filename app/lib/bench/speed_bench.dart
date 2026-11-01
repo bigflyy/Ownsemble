@@ -64,7 +64,8 @@ class SpeedBench {
   /// Two parts run only when named, since they are not speed measurements:
   /// saveVolume saves [savedVolumeProbe] the way the volume slider does, and
   /// savedVolume reports what mpv holds before any sound in a later run.
-  /// The same goes for playToClose and savedSong, see [_playToClose].
+  /// The same goes for playToClose and savedSong, see [_playToClose], and
+  /// for keysProbe, see [_keysProbe].
   Future<Map<String, Object?>> run({List<String>? parts}) async {
     SchedulerBinding.instance.addTimingsCallback(_frames.addAll);
     FocusManager.instance.primaryFocus?.unfocus();
@@ -102,6 +103,9 @@ class SpeedBench {
     }
     if (parts?.contains('savedSong') ?? false) {
       result['savedSong'] = await _goOnFromSavedSong();
+    }
+    if (parts?.contains('keysProbe') ?? false) {
+      result['keysProbe'] = await _keysProbe();
     }
     await player.setVolume(volume);
     result['volume'] = volume;
@@ -146,6 +150,47 @@ class SpeedBench {
       }),
     );
     await Completer<void>().future;
+  }
+
+  /// Pauses a cached song at [savedSongProbe] and says so in the result file;
+  /// the speed gate then posts real Windows key messages to this window, and
+  /// this reports what they did: Right moves the song, Up the volume, Space
+  /// resumes it.
+  Future<Map<String, Object?>> _keysProbe() async {
+    final list = library.visible;
+    final index = list.indexWhere(
+      (t) =>
+          t.source == TrackSource.vk &&
+          t.isCached &&
+          t.durationSec >= savedSongProbe.inSeconds + 30,
+    );
+    await playback.playFrom(list, index);
+    await playback.seek(savedSongProbe);
+    await player.positions
+        .firstWhere((at) => at > savedSongProbe)
+        .timeout(const Duration(seconds: 30));
+    await playback.playOrPause();
+    await Future<void>.delayed(const Duration(milliseconds: 300));
+    final position = player.position;
+    final volumeBefore = playback.volume;
+    File('${resultFile!}.ready').writeAsStringSync('ready');
+    final clock = Stopwatch()..start();
+    bool done() =>
+        player.playing.value &&
+        player.position >= position + const Duration(seconds: 4) &&
+        playback.volume != volumeBefore;
+    while (!done() && clock.elapsed < const Duration(seconds: 15)) {
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+    }
+    return {
+      'ok': done(),
+      'positionBeforeMs': position.inMilliseconds,
+      'positionAfterMs': player.position.inMilliseconds,
+      'volumeBefore': volumeBefore,
+      'volumeAfter': playback.volume,
+      'playing': player.playing.value,
+      'tookMs': clock.elapsedMilliseconds,
+    };
   }
 
   /// What a new run shows for the saved song before Play (nothing may be

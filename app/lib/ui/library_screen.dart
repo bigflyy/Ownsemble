@@ -14,6 +14,7 @@ import 'filling_icon.dart';
 import 'library_controller.dart';
 import 'player_bar.dart';
 import 'shell_settings.dart';
+import 'shortcuts_help.dart';
 import 'sidebar.dart';
 import 'sync_controller.dart';
 import 'sync_status_bar.dart';
@@ -28,6 +29,12 @@ const sidePanelMinWidth = 980.0;
 
 /// Narrower than this, the sidebar is always a rail.
 const fullSidebarMinWidth = 720.0;
+
+/// How far Left and Right move within a song.
+const seekKeyStep = Duration(seconds: 5);
+
+/// How far Up and Down move the volume.
+const volumeKeyStep = 5.0;
 
 /// The B2 window: sidebar, search and the song list, the player as a side
 /// panel or bottom bar, and the sync status bar at the bottom.
@@ -86,12 +93,20 @@ class _LibraryScreenState extends State<LibraryScreen> {
           ..showSnackBar(SnackBar(content: Text('Cannot play: $error')));
       }),
     );
-    HardwareKeyboard.instance.addHandler(_onKey);
+    FocusManager.instance.addEarlyKeyEventHandler(_onEarlyKey);
   }
 
-  /// App-wide keys. Handled before focus routing, so they work wherever the
-  /// focus is, including nowhere after clicking a song.
+  /// App-wide keys. They run before the focus tree, so they work wherever the
+  /// focus is, including nowhere after clicking a song. A key used here stops
+  /// here: Flutter's own bindings would also move the focus onto a button
+  /// with the arrows, scroll with Ctrl+arrows and press that button with Space.
+  KeyEventResult _onEarlyKey(KeyEvent event) =>
+      _onKey(event) ? KeyEventResult.handled : KeyEventResult.ignored;
+
+  /// Acts on [event]; true when the key was used.
   bool _onKey(KeyEvent event) {
+    // A held key repeats only for the volume, see _onPlayerKey.
+    if (event is KeyRepeatEvent) return _onPlayerKey(event);
     if (event is! KeyDownEvent) return false;
     final key = event.logicalKey;
     // The physical key, so Ctrl+F also works with the Russian layout, where
@@ -112,6 +127,15 @@ class _LibraryScreenState extends State<LibraryScreen> {
       library.searchText.clear();
       return true;
     }
+    // Esc in an empty search box leaves it, so the player keys work again.
+    if (key == LogicalKeyboardKey.escape && _typing && !_covered) {
+      _searchFocus.unfocus();
+      return true;
+    }
+    if (key == LogicalKeyboardKey.f1 && !_covered) {
+      unawaited(showShortcutsHelp(context));
+      return true;
+    }
     // Media keys of keyboards and headsets.
     if (key == LogicalKeyboardKey.mediaPlayPause) {
       widget.playback.playOrPause();
@@ -130,6 +154,65 @@ class _LibraryScreenState extends State<LibraryScreen> {
       widget.playback.playOrPause();
       return true;
     }
+    return _onPlayerKey(event);
+  }
+
+  /// The player's keys, listed in [shortcuts]. Not while typing, where they
+  /// edit text, nor under a dialog or menu, where the arrows choose. Letters
+  /// always need Ctrl: plain letters stay free for jumping to a song by typing.
+  bool _onPlayerKey(KeyEvent event) {
+    if (_typing || _covered || !widget.player.isReady) return false;
+    final keyboard = HardwareKeyboard.instance;
+    if (keyboard.isAltPressed || keyboard.isShiftPressed) return false;
+    final playback = widget.playback;
+    final key = event.logicalKey;
+    if (!keyboard.isControlPressed) {
+      // A slider reached with Tab keeps the arrows for itself.
+      if (_onSlider) return false;
+      if (key == LogicalKeyboardKey.arrowUp) {
+        playback.stepVolume(volumeKeyStep);
+        return true;
+      }
+      if (key == LogicalKeyboardKey.arrowDown) {
+        playback.stepVolume(-volumeKeyStep);
+        return true;
+      }
+      // A held arrow would send a seek every few milliseconds, each of them
+      // a new request to the audio server on a stream.
+      if (event is KeyRepeatEvent) return false;
+      if (key == LogicalKeyboardKey.arrowRight) {
+        playback.seekBy(seekKeyStep);
+        return true;
+      }
+      if (key == LogicalKeyboardKey.arrowLeft) {
+        playback.seekBy(-seekKeyStep);
+        return true;
+      }
+      return false;
+    }
+    if (event is KeyRepeatEvent) return false;
+    if (key == LogicalKeyboardKey.arrowRight) {
+      playback.next();
+      return true;
+    }
+    if (key == LogicalKeyboardKey.arrowLeft) {
+      playback.previous();
+      return true;
+    }
+    // Physical keys, so these also work with the Russian layout.
+    final physical = event.physicalKey;
+    if (physical == PhysicalKeyboardKey.keyM) {
+      playback.toggleMute();
+      return true;
+    }
+    if (physical == PhysicalKeyboardKey.keyS) {
+      playback.toggleShuffle();
+      return true;
+    }
+    if (physical == PhysicalKeyboardKey.keyR) {
+      playback.cycleRepeat();
+      return true;
+    }
     return false;
   }
 
@@ -144,9 +227,15 @@ class _LibraryScreenState extends State<LibraryScreen> {
           ?.findAncestorWidgetOfExactType<EditableText>() !=
       null;
 
+  /// Whether the keyboard focus is on a slider.
+  bool get _onSlider =>
+      FocusManager.instance.primaryFocus?.context
+          ?.findAncestorWidgetOfExactType<Slider>() !=
+      null;
+
   @override
   void dispose() {
-    HardwareKeyboard.instance.removeHandler(_onKey);
+    FocusManager.instance.removeEarlyKeyEventHandler(_onEarlyKey);
     for (final subscription in _subscriptions) {
       subscription.cancel();
     }
@@ -386,6 +475,12 @@ class _LibraryScreenState extends State<LibraryScreen> {
                 icon: const Icon(Icons.grid_view_rounded),
               ),
               IconButton(
+                key: const ValueKey('keyboard-help'),
+                tooltip: 'Keyboard shortcuts (F1)',
+                onPressed: () => showShortcutsHelp(context),
+                icon: const Icon(Icons.keyboard_outlined),
+              ),
+              IconButton(
                 key: const ValueKey('toggle-theme'),
                 tooltip: _settings.dark
                     ? 'Switch to light theme'
@@ -559,8 +654,8 @@ class _SearchField extends StatelessWidget {
     );
     return TextField(
       controller: controller,
+      // Not focused at the start: Space must resume the song, not type.
       focusNode: focusNode,
-      autofocus: true,
       style: const TextStyle(fontSize: 15),
       decoration: InputDecoration(
         isDense: true,

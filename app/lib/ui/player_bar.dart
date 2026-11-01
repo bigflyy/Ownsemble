@@ -359,9 +359,9 @@ class TransportRow extends StatelessWidget {
     final player = playback.player;
     final hasSong = player.current != null;
     final repeatLabel = switch (playback.repeat) {
-      Repeat.off => 'Repeat: off',
-      Repeat.list => 'Repeat: list',
-      Repeat.one => 'Repeat: this song',
+      Repeat.off => 'Repeat: off (Ctrl+R)',
+      Repeat.list => 'Repeat: list (Ctrl+R)',
+      Repeat.one => 'Repeat: this song (Ctrl+R)',
     };
     Widget toggle({
       required Key key,
@@ -387,14 +387,16 @@ class TransportRow extends StatelessWidget {
       children: [
         toggle(
           key: const ValueKey('shuffle'),
-          tooltip: playback.shuffle ? 'Shuffle: on' : 'Shuffle: off',
+          tooltip: playback.shuffle
+              ? 'Shuffle: on (Ctrl+S)'
+              : 'Shuffle: off (Ctrl+S)',
           on: playback.shuffle,
           onPressed: playback.toggleShuffle,
           icon: const Icon(Icons.shuffle, size: 20),
         ),
         IconButton(
           key: const ValueKey('prev'),
-          tooltip: 'Previous (restarts the song after 3 s)',
+          tooltip: 'Previous (Ctrl+Left). Restarts the song after 3 s',
           onPressed: hasSong ? playback.previous : null,
           style: IconButton.styleFrom(foregroundColor: colors.text),
           icon: Icon(Icons.skip_previous_rounded, size: large ? 30 : 24),
@@ -419,7 +421,7 @@ class TransportRow extends StatelessWidget {
         ),
         IconButton(
           key: const ValueKey('next'),
-          tooltip: 'Next',
+          tooltip: 'Next (Ctrl+Right)',
           onPressed: hasSong ? playback.next : null,
           style: IconButton.styleFrom(foregroundColor: colors.text),
           icon: Icon(Icons.skip_next_rounded, size: large ? 30 : 24),
@@ -577,7 +579,7 @@ class VolumeRow extends StatelessWidget {
       children: [
         IconButton(
           key: const ValueKey('mute'),
-          tooltip: playback.mutedByUser ? 'Unmute' : 'Mute',
+          tooltip: playback.mutedByUser ? 'Unmute (Ctrl+M)' : 'Mute (Ctrl+M)',
           onPressed: playback.toggleMute,
           icon: Icon(
             shown == 0

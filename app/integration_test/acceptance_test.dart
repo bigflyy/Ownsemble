@@ -842,6 +842,76 @@ void main() {
     FocusManager.instance.primaryFocus?.unfocus();
     await tester.pump();
 
+    // The player's keys on real playback: arrows seek and change the volume
+    // in mpv, Ctrl+arrow changes the song, Ctrl+M mutes.
+    await playback.seek(const Duration(seconds: 30));
+    await waitUntil(
+      tester,
+      () => player.position >= const Duration(seconds: 30),
+      what: 'seek before the keys',
+      timeout: const Duration(seconds: 60),
+    );
+    final beforeKey = player.position;
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+    await waitUntil(
+      tester,
+      () => player.position >= beforeKey + const Duration(seconds: 4),
+      what: 'Right moves 5 s on',
+      timeout: const Duration(seconds: 60),
+    );
+    final afterRight = player.position;
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowLeft);
+    await waitUntil(
+      tester,
+      () => player.position <= afterRight - const Duration(seconds: 3),
+      what: 'Left moves 5 s back',
+      timeout: const Duration(seconds: 60),
+    );
+    final volumeBefore = playback.volume;
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowUp);
+    await Future<void>.delayed(const Duration(milliseconds: 200));
+    expect(playback.volume, closeTo(volumeBefore + 5, 0.1));
+    expect(
+      double.parse(await mpv.getProperty('volume')),
+      closeTo(playback.volume, 0.6),
+      reason: 'Up reaches mpv',
+    );
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyM);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+    await tester.pump();
+    expect(playback.mutedByUser, isTrue, reason: 'Ctrl+M');
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyM);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+    await tester.pump();
+    expect(playback.mutedByUser, isFalse, reason: 'Ctrl+M again');
+    final keyedFrom = player.current!.id;
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+    await waitUntil(
+      tester,
+      () => player.current?.id != keyedFrom,
+      what: 'Ctrl+Right changes the song',
+    );
+    // ignore: avoid_print
+    print('Keys: Right, Left, Up, Down, Ctrl+M, Ctrl+Right all ok');
+    // The song after that key may be one VK blocks: back to a good one.
+    await waitUntil(
+      tester,
+      () => player.currentLoaded || !player.playing.value,
+      what: 'the song after Ctrl+Right',
+      timeout: const Duration(seconds: 60),
+    );
+    if (!player.currentLoaded) {
+      expect(
+        (await playByTap(tester, list[i], label: 'stream song')).ok,
+        isTrue,
+      );
+    }
+
     // Stored audio: a streamed song is saved while it plays and then plays
     // from disk; Download keeps a song; the cache limit removes cached
     // songs but never downloaded ones.

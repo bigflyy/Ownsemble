@@ -42,6 +42,8 @@ final _getWindowThreadProcessId = _user32
     >('GetWindowThreadProcessId');
 
 const _wmClose = 0x0010;
+const _wmKeyDown = 0x0100;
+const _wmKeyUp = 0x0101;
 
 /// Whether process [pid] has a visible Flutter runner window.
 bool _hasVisibleWindow(int pid) => _visibleWindow(pid) != 0;
@@ -93,6 +95,7 @@ Future<void> main(List<String> args) async {
   // Only the restart check: quick to repeat while working on it.
   if (args.contains('--only-restart')) {
     final bench = p.join(dataDir, 'bench.json');
+    print(jsonEncode(await _checkRealKeys(bench)));
     print(jsonEncode(await _checkSavedSong('playToCloseCached', bench)));
     if (session != null) {
       print(jsonEncode(await _checkSavedSong('playToCloseStream', bench)));
@@ -131,6 +134,10 @@ Future<void> main(List<String> args) async {
   final savedVolume = await _checkSavedVolume(benchFile);
   print('  ${jsonEncode(savedVolume)}');
 
+  print('Real Windows key messages...');
+  final realKeys = await _checkRealKeys(benchFile);
+  print('  ${jsonEncode(realKeys)}');
+
   print('Last song across a real window close...');
   final savedSongs = {
     'cached': await _checkSavedSong('playToCloseCached', benchFile),
@@ -146,6 +153,7 @@ Future<void> main(List<String> args) async {
     'idleMemory': memory,
     'bench': benchResult,
     'savedVolume': savedVolume,
+    'realKeys': realKeys,
     'savedSongs': savedSongs,
   };
   File(outFile)
@@ -192,6 +200,69 @@ Future<Map<String, Object?>> _checkSavedVolume(String benchFile) async {
         (actual - expected).abs() < 0.6 &&
         restored?['mutedByUser'] == false,
   };
+}
+
+/// Posts a key press to [window]: down and up, as Windows delivers it. Works
+/// on an off-screen window and never touches the user's own keyboard. Ctrl
+/// cannot be done this way: the engine asks Windows for the modifier state.
+void _pressKey(
+  int window,
+  int virtualKey,
+  int scanCode, {
+  bool extended = false,
+}) {
+  final bits = 1 | (scanCode << 16) | (extended ? 1 << 24 : 0);
+  _postMessage(window, _wmKeyDown, virtualKey, bits);
+  _postMessage(window, _wmKeyUp, virtualKey, bits | (3 << 30));
+}
+
+/// The real keyboard path of the release, which simulated keys in the tests
+/// skip: Right, Up and Space sent to the engine's own window as messages.
+Future<Map<String, Object?>> _checkRealKeys(String benchFile) async {
+  final file = File(benchFile);
+  final ready = File('$benchFile.ready');
+  for (final old in [file, ready]) {
+    if (old.existsSync()) old.deleteSync();
+  }
+  final process = await Process.start(exe, [
+    ...appArgs,
+    '--bench',
+    benchFile,
+    '--bench-parts',
+    'keysProbe',
+  ]);
+  final clock = Stopwatch()..start();
+  while (!ready.existsSync() && clock.elapsed < const Duration(seconds: 40)) {
+    await Future<void>.delayed(const Duration(milliseconds: 50));
+  }
+  if (!ready.existsSync()) {
+    process.kill();
+    return {'ok': false, 'error': 'not ready'};
+  }
+  // The engine's view is the only child of the runner's window.
+  final className = 'FLUTTERVIEW'.toNativeUtf16();
+  final view = _findWindowEx(
+    _visibleWindow(process.pid),
+    0,
+    className,
+    nullptr,
+  );
+  calloc.free(className);
+  _pressKey(view, 0x27, 0x4D, extended: true); // Right
+  await Future<void>.delayed(const Duration(milliseconds: 150));
+  _pressKey(view, 0x26, 0x48, extended: true); // Up
+  await Future<void>.delayed(const Duration(milliseconds: 150));
+  _pressKey(view, 0x20, 0x39); // Space
+  await process.exitCode.timeout(
+    const Duration(seconds: 30),
+    onTimeout: () {
+      process.kill();
+      return -1;
+    },
+  );
+  if (!file.existsSync()) return {'ok': false, 'error': 'no result'};
+  final bench = jsonDecode(file.readAsStringSync()) as Map;
+  return (bench['keysProbe'] as Map).cast<String, Object?>();
 }
 
 /// One release run plays a song to a known place and is closed through its

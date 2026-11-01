@@ -280,6 +280,12 @@ class PlaybackController extends ChangeNotifier {
     await player.setVolume(_volume);
   }
 
+  /// Moves the volume by [by] and keeps it, for the arrow keys.
+  Future<void> stepVolume(double by) async {
+    await setVolume(_volume + by);
+    saveVolume();
+  }
+
   /// Keeps the volume for the next run, once the slider is let go.
   void saveVolume() {
     _writeSetting?.call(volumeSetting, _volume.toStringAsFixed(1));
