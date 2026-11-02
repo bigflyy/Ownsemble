@@ -86,6 +86,16 @@ class TypeJump extends ChangeNotifier {
     _settle();
   }
 
+  /// Outlines [row] with no text typed, for going to a song. The caller
+  /// scrolls to it, since the row may belong to a list not laid out yet.
+  void mark(int row) {
+    _resetTimer?.cancel();
+    _text = '';
+    _matches = const [];
+    _anchor = row;
+    notifyListeners();
+  }
+
   /// Forgets the text and the row.
   void clear() {
     _resetTimer?.cancel();

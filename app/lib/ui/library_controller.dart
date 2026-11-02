@@ -4,6 +4,7 @@ import '../library/search_index.dart';
 import '../library/track.dart';
 import '../storage/audio_storage.dart';
 import 'collections_controller.dart';
+import 'place_history.dart';
 import 'type_jump.dart';
 
 /// Height of one song row; fixed so the list can skip layout of hidden rows.
@@ -57,6 +58,7 @@ class LibraryController extends ChangeNotifier {
   }) : _index = SearchIndex(_all),
        _visible = _all {
     _byId = {for (final track in _all) track.id: track};
+    _playedFrom = _decodePlayedFrom(readSetting?.call(playedFromSetting));
     searchText.addListener(_onSearchChanged);
     collections?.addListener(_onSourceChanged);
     storage?.addListener(_onStorageChanged);
@@ -70,6 +72,10 @@ class LibraryController extends ChangeNotifier {
 
   /// Setting with the view shown when the app closed.
   static const viewSetting = 'ui.view';
+
+  /// Setting with the list the playing song was started from: its view and,
+  /// on the next line, its search text.
+  static const playedFromSetting = 'ui.played_from';
 
   final void Function(String key, String? value)? _writeSetting;
 
@@ -91,6 +97,16 @@ class LibraryController extends ChangeNotifier {
     return exists ? LibraryView(kind, stackId: stackId) : null;
   }
 
+  /// The list stored as [text] in [playedFromSetting], if there is one.
+  Place? _decodePlayedFrom(String? text) {
+    if (text == null) return null;
+    final lineEnd = text.indexOf('\n');
+    if (lineEnd < 0) return null;
+    final view = _decodeView(text.substring(0, lineEnd));
+    if (view == null) return null;
+    return Place(view: view, search: text.substring(lineEnd + 1));
+  }
+
   /// History and Stacks; without it those views are empty.
   final CollectionsController? collections;
 
@@ -110,6 +126,12 @@ class LibraryController extends ChangeNotifier {
   List<Track> _visible;
   List<int>? _visibleEntryIds;
   String _appliedQuery = '';
+
+  /// Previous and next places, for going back and forward.
+  final _places = PlaceHistory();
+
+  /// The list the playing song was started from.
+  Place? _playedFrom;
 
   /// Time the last search itself took, for the benchmark.
   Duration lastQueryTime = Duration.zero;
@@ -139,6 +161,7 @@ class LibraryController extends ChangeNotifier {
 
   /// Switches the list to [view] and scrolls to its top.
   void showView(LibraryView view) {
+    if (view != _view) _places.leave(_here);
     _view = view;
     _writeSetting?.call(viewSetting, _encodeView(view));
     _rebuildBase();
@@ -148,27 +171,140 @@ class LibraryController extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Where the list is now.
+  Place get _here => Place(
+    view: _view,
+    search: _appliedQuery,
+    scroll: scroll.hasClients ? scroll.offset : 0,
+  );
+
+  /// Remembers the list on screen as the one the song being started comes
+  /// from, for [goToSong]. Saved, since the song comes back in the next run.
+  void notePlayedFrom() {
+    final from = _here;
+    if (_playedFrom?.view == from.view && _playedFrom?.search == from.search) {
+      return;
+    }
+    _playedFrom = Place(view: from.view, search: from.search);
+    _writeSetting?.call(
+      playedFromSetting,
+      '${_encodeView(from.view)}\n${from.search}',
+    );
+  }
+
+  /// Goes to [track]'s row in the list it was played from and outlines it;
+  /// when that list no longer has it, in All songs. With a song repeated in
+  /// the list, [listRow] (its row when it started) tells which one it is.
+  void goToSong(Track track, {int? listRow}) {
+    if (byId(track.id) == null) return;
+    final here = _here;
+    final from =
+        _playedFrom ?? const Place(view: LibraryView.songs, search: '');
+    _showList(from.view, from.search);
+    var row = _rowOf(track, listRow);
+    if (row == null) {
+      _showList(LibraryView.songs, '');
+      row = _rowOf(track, listRow);
+    }
+    if (row == null) return;
+    final sameList = _view == here.view && _appliedQuery == here.search;
+    // Only the outline changes then, which is not a place to come back from.
+    if (!sameList || !_rowInSight(row)) _places.leave(here);
+    jump.mark(row);
+    // Scroll offsets of another list only hold after its layout.
+    final target = row;
+    if (sameList) {
+      _revealRow(target);
+    } else {
+      _afterLayout(() => _revealRow(target));
+    }
+  }
+
+  /// Goes to the previous place, if there is one.
+  void goBack() => _showPlace(_places.back(_here));
+
+  /// Goes to the next place, if going back left one.
+  void goForward() => _showPlace(_places.forward(_here));
+
+  void _showPlace(Place? place) {
+    if (place == null) return;
+    _showList(place.view, place.search);
+    jump.clear();
+    _afterLayout(() {
+      if (!scroll.hasClients) return;
+      final position = scroll.position;
+      scroll.jumpTo(
+        place.scroll.clamp(position.minScrollExtent, position.maxScrollExtent),
+      );
+    });
+  }
+
+  /// Shows the list of [view] filtered by [search], unless it is on screen.
+  /// The search box follows, without counting as a new search.
+  void _showList(LibraryView view, String search) {
+    if (view == _view && search == _appliedQuery) return;
+    _view = view;
+    _writeSetting?.call(viewSetting, _encodeView(view));
+    _appliedQuery = search;
+    searchText.value = TextEditingValue(
+      text: search,
+      selection: TextSelection.collapsed(offset: search.length),
+    );
+    _rebuildBase();
+    _applySearch();
+    jump.clear();
+    notifyListeners();
+  }
+
+  /// The visible row of [track]: row [listRow] if that is the song, else its
+  /// first row, else null.
+  int? _rowOf(Track track, int? listRow) {
+    if (listRow != null &&
+        listRow >= 0 &&
+        listRow < _visible.length &&
+        _visible[listRow].id == track.id) {
+      return listRow;
+    }
+    final row = _visible.indexWhere((t) => t.id == track.id);
+    return row < 0 ? null : row;
+  }
+
+  void _afterLayout(VoidCallback action) =>
+      WidgetsBinding.instance.addPostFrameCallback((_) => action());
+
+  /// Whether row [index] is fully on screen.
+  bool _rowInSight(int index) {
+    if (!scroll.hasClients) return false;
+    final position = scroll.position;
+    final top = index * rowHeight;
+    return top >= position.pixels &&
+        top + rowHeight <= position.pixels + position.viewportDimension;
+  }
+
   /// Scrolls row [index] into view: not at all if it is fully visible, else
   /// to a third of the way down, with the rows above it for orientation.
   void _revealRow(int index) {
-    if (!scroll.hasClients) return;
+    if (!scroll.hasClients || _rowInSight(index)) return;
     final position = scroll.position;
-    final top = index * rowHeight;
-    final height = position.viewportDimension;
-    final visible =
-        top >= position.pixels && top + rowHeight <= position.pixels + height;
-    if (visible) return;
     scroll.jumpTo(
-      (top - height / 3).clamp(
+      (index * rowHeight - position.viewportDimension / 3).clamp(
         position.minScrollExtent,
         position.maxScrollExtent,
       ),
     );
   }
 
+  /// A new search, not more or fewer letters of the same one. The first and
+  /// the last letter count: those start and leave a search.
+  bool _isNewSearch(String old, String query) =>
+      old.isEmpty ||
+      query.isEmpty ||
+      !(old.startsWith(query) || query.startsWith(old));
+
   void _onSearchChanged() {
     final query = searchText.text;
     if (query == _appliedQuery) return;
+    if (_isNewSearch(_appliedQuery, query)) _places.leave(_here);
     _appliedQuery = query;
     final clock = Stopwatch()..start();
     _applySearch();

@@ -26,6 +26,7 @@ class _StartedPlayer extends PlayerService {
   _StartedPlayer({super.storage}) : super(vk: null, muted: true, dataDir: '.');
 
   Track? _track;
+  final _changes = StreamController<Track?>.broadcast();
   final played = <int>[];
   final seekOffsets = <Duration>[];
   double? lastVolume;
@@ -46,9 +47,13 @@ class _StartedPlayer extends PlayerService {
   Duration get duration => const Duration(seconds: 200);
 
   @override
+  Stream<Track?> get currentStream => _changes.stream;
+
+  @override
   Future<PlayTiming> play(Track track, {Duration? from}) async {
     _track = track;
     played.add(track.id);
+    _changes.add(track);
     return const PlayTiming(ok: true, cached: true, resolveMs: 0, toSoundMs: 1);
   }
 
@@ -596,6 +601,381 @@ void main() {
           reason: 'the last row cannot be a third down',
         );
         await tester.pump(TypeJump.resetAfter);
+      });
+    });
+
+    group('places', () {
+      /// A library long enough to scroll, songs named Filler 0 to Filler 299
+      /// after the 6 Песня songs.
+      void addManySongs() {
+        final many = store.ensureSource(
+          TrackSource.vk,
+          account: '2',
+          name: 'VK',
+        );
+        store.upsertAll(many, [
+          for (var i = 0; i < 300; i++)
+            NewTrack(
+              sourceKey: '2_$i',
+              artist: 'Filler',
+              title: 'Filler $i',
+              album: i == 150 ? 'Редкий альбом' : null,
+              durationSec: 200,
+              addedAt: -i - 1,
+            ),
+        ]);
+        library = LibraryController(
+          store.loadAll(),
+          collections: collections,
+          readSetting: (key) => saved[key],
+          writeSetting: (key, value) => saved[key] = value,
+        );
+      }
+
+      int rowOf(String title) =>
+          library.visible.indexWhere((t) => t.title == title);
+
+      /// Scrolls song [title] on screen and plays it with a click.
+      Future<void> clickSong(WidgetTester tester, String title) async {
+        final row = rowOf(title);
+        if (library.scroll.hasClients) {
+          library.scroll.jumpTo(
+            (row * rowHeight).clamp(0, library.scroll.position.maxScrollExtent),
+          );
+          await tester.pump();
+        }
+        final track = library.visible[row];
+        await tester.tap(find.byKey(ValueKey('song-${track.id}')));
+        await tester.pump();
+      }
+
+      Future<void> pressCtrlL(WidgetTester tester) async {
+        await withControl(
+          tester,
+          () => tester.sendKeyEvent(LogicalKeyboardKey.keyL),
+        );
+        await tester.pump();
+      }
+
+      Future<void> pressAlt(WidgetTester tester, LogicalKeyboardKey key) async {
+        await tester.sendKeyDownEvent(LogicalKeyboardKey.altLeft);
+        await tester.sendKeyEvent(key);
+        await tester.sendKeyUpEvent(LogicalKeyboardKey.altLeft);
+        await tester.pump();
+        await tester.pump();
+      }
+
+      Future<void> clickMouseButton(WidgetTester tester, int button) async {
+        final gesture = await tester.createGesture(
+          kind: PointerDeviceKind.mouse,
+          buttons: button,
+        );
+        await gesture.down(tester.getCenter(find.byType(ListView).at(1)));
+        await gesture.up();
+        await tester.pump();
+        await tester.pump();
+      }
+
+      testWidgets('Ctrl+L opens the list the song was played from, shows the '
+          'row and outlines it', (tester) async {
+        addManySongs();
+        await pumpPlaying(tester);
+        await clickSong(tester, 'Filler 150');
+        library.showView(const LibraryView(ViewKind.history));
+        await tester.pump();
+
+        await pressCtrlL(tester);
+        expect(library.view, LibraryView.songs);
+        final row = rowOf('Filler 150');
+        expect(library.jump.row, row);
+        final height = library.scroll.position.viewportDimension;
+        expect(library.scroll.offset, row * rowHeight - height / 3);
+        expect(find.textContaining('Filler 150'), findsWidgets);
+        expect(
+          find.byKey(ValueKey('song-${library.visible[row].id}')),
+          findsOneWidget,
+        );
+      });
+
+      testWidgets('the search it was played from comes back', (tester) async {
+        addManySongs();
+        await pumpPlaying(tester);
+        library.searchText.text = 'filler 15';
+        await tester.pump();
+        await clickSong(tester, 'Filler 150');
+        library.searchText.clear();
+        library.showView(const LibraryView(ViewKind.history));
+        await tester.pump();
+
+        await pressCtrlL(tester);
+        expect(library.view, LibraryView.songs);
+        expect(library.searchText.text, 'filler 15');
+        expect(library.visible.length, lessThan(20));
+        expect(library.jump.row, rowOf('Filler 150'));
+      });
+
+      testWidgets('a list that lost the song gives way to All songs', (
+        tester,
+      ) async {
+        await pumpPlaying(tester);
+        final song = library.visible[3];
+        final stackId = collections.createStack('Стопка');
+        collections.addToStack(stackId, song);
+        final stack = LibraryView(ViewKind.stack, stackId: stackId);
+        library.showView(stack);
+        await tester.pump();
+        final entry = library.entryIdAt(0)!;
+        await tester.tap(find.byKey(ValueKey('entry-$entry')));
+        await tester.pump();
+        collections.removeStackEntry(entry);
+        await tester.pump();
+
+        await pressCtrlL(tester);
+        expect(library.view, LibraryView.songs);
+        expect(library.jump.row, rowOf(song.title));
+      });
+
+      testWidgets('with repeats the row that played is the one found', (
+        tester,
+      ) async {
+        await pumpPlaying(tester);
+        final song = library.visible[3];
+        final other = library.visible[4];
+        final stackId = collections.createStack('Стопка');
+        collections.addToStack(stackId, song);
+        collections.addToStack(stackId, other);
+        collections.addToStack(stackId, song);
+        library.showView(LibraryView(ViewKind.stack, stackId: stackId));
+        await tester.pump();
+        expect(library.visible.map((t) => t.id), [song.id, other.id, song.id]);
+        await tester.tap(find.byKey(ValueKey('entry-${library.entryIdAt(2)}')));
+        await tester.pump();
+        library.showView(LibraryView.songs);
+        await tester.pump();
+
+        await pressCtrlL(tester);
+        expect(library.jump.row, 2);
+      });
+
+      testWidgets('a click on the title does the same, in both docks', (
+        tester,
+      ) async {
+        await pumpPlaying(tester);
+        await clickSong(tester, 'Песня 3');
+        library.showView(const LibraryView(ViewKind.history));
+        await tester.pump();
+        await tester.tap(find.byKey(const ValueKey('go-to-song')));
+        await tester.pump();
+        await tester.pump();
+        expect(library.view, LibraryView.songs);
+        expect(library.jump.row, rowOf('Песня 3'));
+
+        await tester.tap(find.byKey(const ValueKey('dock-bottom')));
+        await tester.pump();
+        library.showView(const LibraryView(ViewKind.history));
+        await tester.pump();
+        await tester.tap(find.byKey(const ValueKey('go-to-song')));
+        await tester.pump();
+        await tester.pump();
+        expect(library.view, LibraryView.songs);
+        expect(library.jump.row, rowOf('Песня 3'));
+      });
+
+      testWidgets('nothing playing: Ctrl+L does nothing', (tester) async {
+        await pumpShell(tester, player: _StartedPlayer());
+        library.showView(const LibraryView(ViewKind.history));
+        await tester.pump();
+        await pressCtrlL(tester);
+        expect(library.view, const LibraryView(ViewKind.history));
+        expect(library.jump.row, isNull);
+      });
+
+      testWidgets('a row already in sight is only outlined: no scroll, and '
+          'no place to go back to', (tester) async {
+        addManySongs();
+        await pumpPlaying(tester);
+        await clickSong(tester, 'Filler 150');
+        final before = library.scroll.offset;
+
+        await pressCtrlL(tester);
+        expect(library.jump.row, rowOf('Filler 150'));
+        expect(library.scroll.offset, before);
+        await pressAlt(tester, LogicalKeyboardKey.arrowLeft);
+        expect(
+          library.jump.row,
+          rowOf('Filler 150'),
+          reason: 'nothing to undo',
+        );
+        expect(library.scroll.offset, before);
+      });
+
+      testWidgets('Ctrl+L from the search box leaves it, so Enter plays', (
+        tester,
+      ) async {
+        await pumpPlaying(tester);
+        await clickSong(tester, 'Песня 3');
+        await tester.tap(find.byType(TextField));
+        await tester.pump();
+        expect(FocusManager.instance.primaryFocus?.hasPrimaryFocus, isTrue);
+
+        await pressCtrlL(tester);
+        expect(
+          FocusManager.instance.primaryFocus?.context
+              ?.findAncestorWidgetOfExactType<EditableText>(),
+          isNull,
+        );
+        expect(library.jump.row, rowOf('Песня 3'));
+      });
+
+      testWidgets('the list it was played from outlives a restart', (
+        tester,
+      ) async {
+        addManySongs();
+        await pumpPlaying(tester);
+        library.searchText.text = 'filler 15';
+        await tester.pump();
+        await clickSong(tester, 'Filler 150');
+
+        final tracks = store.loadAll();
+        final next = LibraryController(
+          tracks,
+          collections: collections,
+          readSetting: (key) => saved[key],
+          writeSetting: (key, value) => saved[key] = value,
+        );
+        addTearDown(next.dispose);
+        next.goToSong(tracks.firstWhere((t) => t.title == 'Filler 150'));
+        expect(next.searchText.text, 'filler 15');
+        expect(next.visible.length, lessThan(20));
+      });
+
+      testWidgets('Alt+Left and Alt+Right walk views, searches and the '
+          'scroll offset', (tester) async {
+        addManySongs();
+        await pumpPlaying(tester);
+        library.scroll.jumpTo(3000);
+        await tester.pump();
+
+        library.showView(const LibraryView(ViewKind.history));
+        await tester.pump();
+        library.showView(const LibraryView(ViewKind.downloads));
+        await tester.pump();
+
+        await pressAlt(tester, LogicalKeyboardKey.arrowLeft);
+        expect(library.view, const LibraryView(ViewKind.history));
+        await pressAlt(tester, LogicalKeyboardKey.arrowLeft);
+        expect(library.view, LibraryView.songs);
+        expect(library.scroll.offset, 3000);
+        await pressAlt(tester, LogicalKeyboardKey.arrowLeft);
+        expect(library.view, LibraryView.songs, reason: 'nothing further back');
+        expect(library.scroll.offset, 3000);
+
+        await pressAlt(tester, LogicalKeyboardKey.arrowRight);
+        expect(library.view, const LibraryView(ViewKind.history));
+        await pressAlt(tester, LogicalKeyboardKey.arrowRight);
+        expect(library.view, const LibraryView(ViewKind.downloads));
+        await pressAlt(tester, LogicalKeyboardKey.arrowRight);
+        expect(library.view, const LibraryView(ViewKind.downloads));
+      });
+
+      testWidgets('a search is a place; its letters are not', (tester) async {
+        addManySongs();
+        await pumpPlaying(tester);
+        library.scroll.jumpTo(3000);
+        await tester.pump();
+
+        for (final text in ['f', 'fi', 'fil', 'fill']) {
+          library.searchText.text = text;
+          await tester.pump();
+        }
+        library.scroll.jumpTo(500);
+        await tester.pump();
+        library.searchText.clear();
+        await tester.pump();
+        expect(library.scroll.offset, 0);
+
+        await pressAlt(tester, LogicalKeyboardKey.arrowLeft);
+        expect(library.searchText.text, 'fill');
+        expect(library.scroll.offset, 500);
+        await pressAlt(tester, LogicalKeyboardKey.arrowLeft);
+        expect(library.searchText.text, isEmpty);
+        expect(library.scroll.offset, 3000);
+        await pressAlt(tester, LogicalKeyboardKey.arrowRight);
+        expect(library.searchText.text, 'fill');
+        expect(library.searchText.selection.baseOffset, 4);
+      });
+
+      testWidgets('a new search typed over the old one is a new place', (
+        tester,
+      ) async {
+        addManySongs();
+        await pumpPlaying(tester);
+        library.searchText.text = 'filler';
+        await tester.pump();
+        library.searchText.text = 'песня';
+        await tester.pump();
+        await pressAlt(tester, LogicalKeyboardKey.arrowLeft);
+        expect(library.searchText.text, 'filler');
+      });
+
+      testWidgets('going to the song is a place to come back from', (
+        tester,
+      ) async {
+        addManySongs();
+        await pumpPlaying(tester);
+        await clickSong(tester, 'Filler 150');
+        library.scroll.jumpTo(100);
+        await tester.pump();
+
+        await pressCtrlL(tester);
+        expect(library.scroll.offset, greaterThan(100));
+        await pressAlt(tester, LogicalKeyboardKey.arrowLeft);
+        expect(library.scroll.offset, 100);
+        expect(library.jump.row, isNull, reason: 'the outline stays behind');
+      });
+
+      testWidgets('the same click on a view again is not a place', (
+        tester,
+      ) async {
+        await pumpPlaying(tester);
+        library.showView(const LibraryView(ViewKind.history));
+        await tester.pump();
+        library.showView(const LibraryView(ViewKind.history));
+        await tester.pump();
+        await pressAlt(tester, LogicalKeyboardKey.arrowLeft);
+        expect(library.view, LibraryView.songs);
+      });
+
+      testWidgets('the mouse side buttons go back and forward', (tester) async {
+        addManySongs();
+        await pumpPlaying(tester);
+        library.showView(const LibraryView(ViewKind.history));
+        await tester.pump();
+        await clickMouseButton(tester, kBackMouseButton);
+        expect(library.view, LibraryView.songs);
+        await clickMouseButton(tester, kForwardMouseButton);
+        expect(library.view, const LibraryView(ViewKind.history));
+      });
+
+      testWidgets('going back works from the search box, not under a dialog', (
+        tester,
+      ) async {
+        await pumpPlaying(tester);
+        library.showView(const LibraryView(ViewKind.history));
+        await tester.pump();
+
+        await tester.sendKeyEvent(LogicalKeyboardKey.f1);
+        await tester.pumpAndSettle();
+        await pressAlt(tester, LogicalKeyboardKey.arrowLeft);
+        await pressCtrlL(tester);
+        expect(library.view, const LibraryView(ViewKind.history));
+        await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+        await tester.pumpAndSettle();
+
+        await tester.tap(find.byType(TextField));
+        await tester.pump();
+        await pressAlt(tester, LogicalKeyboardKey.arrowLeft);
+        expect(library.view, LibraryView.songs);
       });
     });
 

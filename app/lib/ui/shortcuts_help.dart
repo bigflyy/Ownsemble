@@ -12,6 +12,11 @@ const shortcuts = <(String keys, String action)>[
   ('Ctrl + S', 'Shuffle on or off'),
   ('Ctrl + R', 'Repeat: off, list, this song'),
   ('Ctrl + F', 'Search'),
+  ('Ctrl + L', 'Go to the playing song in its list'),
+  (
+    'Alt + Left, Alt + Right',
+    'Previous or next place, as the mouse side buttons',
+  ),
   ('Letters', 'Jump to a matching song'),
   ('Up, Down after letters', 'Next or previous match'),
   ('Enter after letters', 'Play the song jumped to'),

@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -126,6 +127,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
       );
       return true;
     }
+    if (_onPlaceKey(event)) return true;
     if (key == LogicalKeyboardKey.escape &&
         library.searchText.text.isNotEmpty &&
         !_covered) {
@@ -160,6 +162,45 @@ class _LibraryScreenState extends State<LibraryScreen> {
       return true;
     }
     return _onPlayerKey(event);
+  }
+
+  /// Going to the playing song and to the previous or next place. They work
+  /// from the search box too, like a browser's. The physical key, so Ctrl+L
+  /// also works with the Russian layout.
+  bool _onPlaceKey(KeyEvent event) {
+    if (_covered) return false;
+    final keyboard = HardwareKeyboard.instance;
+    if (keyboard.isControlPressed &&
+        event.physicalKey == PhysicalKeyboardKey.keyL) {
+      _goToPlayingSong();
+      return true;
+    }
+    if (!keyboard.isAltPressed) return false;
+    if (event.logicalKey == LogicalKeyboardKey.arrowLeft) {
+      library.goBack();
+      return true;
+    }
+    if (event.logicalKey == LogicalKeyboardKey.arrowRight) {
+      library.goForward();
+      return true;
+    }
+    return false;
+  }
+
+  /// The mouse's back and forward side buttons.
+  void _onPointerDown(PointerDownEvent event) {
+    if (_covered) return;
+    if (event.buttons & kBackMouseButton != 0) library.goBack();
+    if (event.buttons & kForwardMouseButton != 0) library.goForward();
+  }
+
+  /// Shows the playing song in the list it came from. Leaves the search box,
+  /// so Enter and letters work on the row found.
+  void _goToPlayingSong() {
+    final track = widget.player.current;
+    if (track == null) return;
+    _searchFocus.unfocus();
+    library.goToSong(track, listRow: widget.playback.queue.contextIndex);
   }
 
   /// Keys of the jump to a song by typing. They come before the app's other
@@ -311,7 +352,10 @@ class _LibraryScreenState extends State<LibraryScreen> {
   /// Plays the visible song at [index], with the visible list as the list
   /// next and previous move in; clicking the song that is already loaded
   /// pauses or resumes it instead of restarting it.
-  void _play(int index) => widget.playback.playFrom(library.visible, index);
+  void _play(int index) {
+    library.notePlayedFrom();
+    widget.playback.playFrom(library.visible, index);
+  }
 
   /// A song's right-click menu: Play next and Add to queue, View cover,
   /// Download or Remove download, put on top of a Stack, and in a Stack,
@@ -426,58 +470,63 @@ class _LibraryScreenState extends State<LibraryScreen> {
           );
           return Theme(
             data: theme.copyWith(snackBarTheme: messages),
-            child: Scaffold(
-              backgroundColor: colors.bg,
-              bottomNavigationBar: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  if (!sidePanel)
-                    DockBar(
-                      playback: widget.playback,
-                      collections: widget.collections,
-                      thumbnails: _settings.thumbnails,
-                      canDockSide: roomForPanel,
-                      onDockSide: () => _settings.dockTo(PlayerDock.side),
-                      compact: !roomForSidebar,
-                    ),
-                  if (widget.sync case final sync?)
-                    SyncStatusBar(sync: sync, account: widget.account),
-                ],
-              ),
-              body: Column(
-                children: [
-                  Expanded(
-                    child: Row(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        ListenableBuilder(
-                          listenable: Listenable.merge([
-                            library,
-                            ?widget.collections,
-                            ?_storage,
-                          ]),
-                          builder: (context, _) => Sidebar(
-                            library: library,
-                            collections: widget.collections,
-                            downloads: _downloadCount(),
-                            rail: rail,
-                            canExpand: roomForSidebar,
-                            onToggleRail: _settings.toggleRail,
+            child: Listener(
+              onPointerDown: _onPointerDown,
+              child: Scaffold(
+                backgroundColor: colors.bg,
+                bottomNavigationBar: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    if (!sidePanel)
+                      DockBar(
+                        playback: widget.playback,
+                        collections: widget.collections,
+                        thumbnails: _settings.thumbnails,
+                        canDockSide: roomForPanel,
+                        onDockSide: () => _settings.dockTo(PlayerDock.side),
+                        onGoToSong: _goToPlayingSong,
+                        compact: !roomForSidebar,
+                      ),
+                    if (widget.sync case final sync?)
+                      SyncStatusBar(sync: sync, account: widget.account),
+                  ],
+                ),
+                body: Column(
+                  children: [
+                    Expanded(
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          ListenableBuilder(
+                            listenable: Listenable.merge([
+                              library,
+                              ?widget.collections,
+                              ?_storage,
+                            ]),
+                            builder: (context, _) => Sidebar(
+                              library: library,
+                              collections: widget.collections,
+                              downloads: _downloadCount(),
+                              rail: rail,
+                              canExpand: roomForSidebar,
+                              onToggleRail: _settings.toggleRail,
+                            ),
                           ),
-                        ),
-                        Expanded(child: _main(colors)),
-                        if (sidePanel)
-                          NowPlayingPanel(
-                            playback: widget.playback,
-                            collections: widget.collections,
-                            thumbnails: _settings.thumbnails,
-                            onDockBottom: () =>
-                                _settings.dockTo(PlayerDock.bottom),
-                          ),
-                      ],
+                          Expanded(child: _main(colors)),
+                          if (sidePanel)
+                            NowPlayingPanel(
+                              playback: widget.playback,
+                              collections: widget.collections,
+                              thumbnails: _settings.thumbnails,
+                              onDockBottom: () =>
+                                  _settings.dockTo(PlayerDock.bottom),
+                              onGoToSong: _goToPlayingSong,
+                            ),
+                        ],
+                      ),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
             ),
           );

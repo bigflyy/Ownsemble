@@ -22,12 +22,16 @@ class NowPlayingPanel extends StatelessWidget {
     required this.collections,
     required this.thumbnails,
     required this.onDockBottom,
+    required this.onGoToSong,
   });
 
   final PlaybackController playback;
   final CollectionsController? collections;
   final bool thumbnails;
   final VoidCallback onDockBottom;
+
+  /// A click on the title: shows the song in its list.
+  final VoidCallback onGoToSong;
 
   @override
   Widget build(BuildContext context) {
@@ -87,6 +91,7 @@ class NowPlayingPanel extends StatelessWidget {
                           track: track,
                           large: true,
                           storage: player.storage,
+                          onGoToSong: onGoToSong,
                         ),
                       ),
                       if (collections != null)
@@ -130,6 +135,7 @@ class DockBar extends StatelessWidget {
     required this.thumbnails,
     required this.canDockSide,
     required this.onDockSide,
+    required this.onGoToSong,
     required this.compact,
   });
 
@@ -138,6 +144,9 @@ class DockBar extends StatelessWidget {
   final bool thumbnails;
   final bool canDockSide;
   final VoidCallback onDockSide;
+
+  /// A click on the title: shows the song in its list.
+  final VoidCallback onGoToSong;
 
   /// Very narrow window: the right column (volume and menus) is left out.
   final bool compact;
@@ -181,7 +190,12 @@ class DockBar extends StatelessWidget {
                               ),
                               const SizedBox(width: 12),
                             ],
-                            Expanded(child: SongTitle(track: track)),
+                            Expanded(
+                              child: SongTitle(
+                                track: track,
+                                onGoToSong: onGoToSong,
+                              ),
+                            ),
                             UpNextButton(
                               playback: playback,
                               thumbnails: thumbnails,
@@ -269,15 +283,29 @@ class SongTitle extends StatelessWidget {
     required this.track,
     this.large = false,
     this.storage,
+    this.onGoToSong,
   });
 
   final Track track;
   final bool large;
   final AudioStorage? storage;
 
+  /// What a click on the title does.
+  final VoidCallback? onGoToSong;
+
   @override
   Widget build(BuildContext context) {
     final colors = OwnColors.of(context);
+    final title = Text(
+      track.title,
+      maxLines: large ? 3 : 1,
+      overflow: TextOverflow.ellipsis,
+      style: TextStyle(
+        fontSize: large ? 23 : 15,
+        fontWeight: large ? FontWeight.w700 : FontWeight.w500,
+        height: 1.2,
+      ),
+    );
     final stored =
         storage?.stateOf(track) ??
         (path: track.localPath, pinned: track.pinned);
@@ -292,16 +320,20 @@ class SongTitle extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       mainAxisSize: MainAxisSize.min,
       children: [
-        Text(
-          track.title,
-          maxLines: large ? 3 : 1,
-          overflow: TextOverflow.ellipsis,
-          style: TextStyle(
-            fontSize: large ? 23 : 15,
-            fontWeight: large ? FontWeight.w700 : FontWeight.w500,
-            height: 1.2,
+        if (onGoToSong == null)
+          title
+        else
+          MouseRegion(
+            cursor: SystemMouseCursors.click,
+            child: GestureDetector(
+              key: const ValueKey('go-to-song'),
+              onTap: onGoToSong,
+              child: Tooltip(
+                message: 'Show this song in its list (Ctrl+L)',
+                child: title,
+              ),
+            ),
           ),
-        ),
         const SizedBox(height: 4),
         Text(
           track.source == TrackSource.generated
