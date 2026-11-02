@@ -26,8 +26,20 @@ import 'vk_account.dart';
 /// Narrower than this, the side panel gives way to the bottom bar.
 const sidePanelMinWidth = 980.0;
 
+/// Shorter than this, the side panel gives way to the bottom bar too: it would
+/// scroll its own seek bar and buttons out of the window. At this height they
+/// fit under the longest title; only the volume may need the panel's scroll.
+const sidePanelMinHeight = 660.0;
+
 /// Narrower than this, the sidebar is always a rail.
 const fullSidebarMinWidth = 720.0;
+
+/// A song list narrower than this has no Album column: the title needs it.
+const albumColumnMinWidth = 440.0;
+
+/// Shorter than this, the toolbar and the view's title tighten and the column
+/// names go, so that the song list keeps its rows.
+const tightWindowHeight = 540.0;
 
 /// How far Left and Right move within a song.
 const seekKeyStep = Duration(seconds: 5);
@@ -450,11 +462,19 @@ class _LibraryScreenState extends State<LibraryScreen> {
       builder: (context, _) => LayoutBuilder(
         builder: (context, constraints) {
           final width = constraints.maxWidth;
-          final roomForPanel = width >= sidePanelMinWidth;
+          final roomForPanel =
+              width >= sidePanelMinWidth &&
+              constraints.maxHeight >= sidePanelMinHeight;
           final roomForSidebar = width >= fullSidebarMinWidth;
           final sidePanel = roomForPanel && _settings.dock == PlayerDock.side;
           final colors = OwnColors.of(context);
           final rail = _settings.rail || !roomForSidebar;
+          final listWidth =
+              width -
+              (rail ? railWidth : sidebarWidth) -
+              (sidePanel ? sidePanelWidth : 0);
+          final showAlbum = listWidth >= albumColumnMinWidth;
+          final tight = constraints.maxHeight < tightWindowHeight;
           // Messages ("Cannot play: ...") float over the song list only:
           // the insets keep them off the sidebar and the side panel, and
           // the bottom bar below is the Scaffold's, so they sit above it.
@@ -512,7 +532,13 @@ class _LibraryScreenState extends State<LibraryScreen> {
                               onToggleRail: _settings.toggleRail,
                             ),
                           ),
-                          Expanded(child: _main(colors)),
+                          Expanded(
+                            child: _main(
+                              colors,
+                              showAlbum: showAlbum,
+                              tight: tight,
+                            ),
+                          ),
                           if (sidePanel)
                             NowPlayingPanel(
                               playback: widget.playback,
@@ -549,12 +575,16 @@ class _LibraryScreenState extends State<LibraryScreen> {
   }
 
   /// Search and toggles, the view's title, and its songs.
-  Widget _main(OwnColors colors) {
+  Widget _main(
+    OwnColors colors, {
+    required bool showAlbum,
+    required bool tight,
+  }) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Padding(
-          padding: const EdgeInsets.fromLTRB(20, 14, 20, 14),
+          padding: EdgeInsets.fromLTRB(20, tight ? 4 : 14, 20, tight ? 4 : 14),
           child: Row(
             children: [
               Expanded(
@@ -631,13 +661,17 @@ class _LibraryScreenState extends State<LibraryScreen> {
                         : '${library.visible.length} of '
                               '${library.viewCount} songs',
                     jump: library.jump,
+                    tight: tight,
                   ),
-                  if (!view.isLater && library.visible.isNotEmpty)
-                    _ListHeader(numbered: !_settings.thumbnails),
+                  if (!tight && !view.isLater && library.visible.isNotEmpty)
+                    _ListHeader(
+                      numbered: !_settings.thumbnails,
+                      showAlbum: showAlbum,
+                    ),
                   Expanded(
                     child: view.isLater
                         ? _LaterPage(view: view)
-                        : _songList(colors),
+                        : _songList(colors, showAlbum: showAlbum),
                   ),
                 ],
               );
@@ -663,7 +697,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
     ViewKind.charts => 'Charts',
   };
 
-  Widget _songList(OwnColors colors) {
+  Widget _songList(OwnColors colors, {required bool showAlbum}) {
     if (library.visible.isEmpty) {
       final empty = library.searchText.text.isNotEmpty
           ? 'No songs match "${library.searchText.text}"'
@@ -738,6 +772,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
                 saving: _storage?.isSaving(track) ?? false,
                 storage: _storage,
                 thumbnails: _settings.thumbnails,
+                showAlbum: showAlbum,
                 isCurrent: track.id == current.data?.id,
                 isJump: index == library.jump.row,
                 playing: playing,
@@ -829,17 +864,21 @@ class _ViewHeading extends StatelessWidget {
     required this.title,
     required this.count,
     required this.jump,
+    required this.tight,
   });
 
   final String title;
   final String? count;
   final TypeJump jump;
 
+  /// A short window: a smaller title, so that the list keeps its rows.
+  final bool tight;
+
   @override
   Widget build(BuildContext context) {
     final colors = OwnColors.of(context);
     return Padding(
-      padding: const EdgeInsets.fromLTRB(24, 0, 24, 10),
+      padding: EdgeInsets.fromLTRB(24, 0, 24, tight ? 4 : 10),
       child: Row(
         children: [
           Expanded(
@@ -852,8 +891,8 @@ class _ViewHeading extends StatelessWidget {
                     title,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      fontSize: 26,
+                    style: TextStyle(
+                      fontSize: tight ? 16 : 26,
                       fontWeight: FontWeight.w700,
                     ),
                   ),
@@ -884,10 +923,11 @@ class _ViewHeading extends StatelessWidget {
 /// Names the columns of [_SongRow] above the list, where scrolling leaves it
 /// in place. Its widths and gaps are the row's, or the two would drift apart.
 class _ListHeader extends StatelessWidget {
-  const _ListHeader({required this.numbered});
+  const _ListHeader({required this.numbered, required this.showAlbum});
 
   /// Whether the rows show numbers instead of tiles.
   final bool numbered;
+  final bool showAlbum;
 
   @override
   Widget build(BuildContext context) {
@@ -915,8 +955,10 @@ class _ListHeader extends StatelessWidget {
           ),
           const SizedBox(width: 14),
           Expanded(flex: 16, child: Text('Title', style: style)),
-          const SizedBox(width: 14),
-          Expanded(flex: 10, child: Text('Album', style: style)),
+          if (showAlbum) ...[
+            const SizedBox(width: 14),
+            Expanded(flex: 10, child: Text('Album', style: style)),
+          ],
           // The stored mark has no header: its tooltip explains it.
           const SizedBox(width: 14 + 18 + 14),
           SizedBox(
@@ -1015,6 +1057,7 @@ class _SongRow extends StatelessWidget {
     required this.saving,
     required this.storage,
     required this.thumbnails,
+    required this.showAlbum,
     required this.isCurrent,
     required this.isJump,
     required this.playing,
@@ -1034,6 +1077,10 @@ class _SongRow extends StatelessWidget {
   final bool saving;
   final AudioStorage? storage;
   final bool thumbnails;
+
+  /// Whether there is room for the Album column. Without it the song's tags
+  /// stay on the row, as icons after the title.
+  final bool showAlbum;
   final bool isCurrent;
 
   /// The row reached by typing: outlined, so that it reads apart from the
@@ -1070,6 +1117,34 @@ class _SongRow extends StatelessWidget {
       _ => (Icons.music_note_outlined, 'Generated test song'),
     };
     final dimStyle = TextStyle(fontSize: 13, color: colors.dim);
+    List<Widget> tags({required bool compact}) => [
+      if (track.isGone) ...[
+        const SizedBox(width: 8),
+        _Tag(
+          key: const ValueKey('gone-tag'),
+          label: 'gone from VK',
+          icon: Icons.cloud_off_outlined,
+          compact: compact,
+          explanation: stored.path != null
+              ? 'VK no longer has this song. It stays in your library and '
+                    'plays from the stored copy.'
+              : 'VK no longer has this song. It stays in your library, '
+                    'History and Stacks, but there is no stored copy to play.',
+        ),
+      ],
+      if (track.source == TrackSource.generated) ...[
+        const SizedBox(width: 8),
+        _Tag(
+          key: const ValueKey('filler-tag'),
+          label: 'filler',
+          icon: Icons.science_outlined,
+          compact: compact,
+          explanation:
+              'Generated speed-test song: made-up name, plays one of a few '
+              'cached real songs.',
+        ),
+      ],
+    ];
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 1),
       child: Material(
@@ -1164,16 +1239,15 @@ class _SongRow extends StatelessWidget {
                       ],
                     ),
                   ),
-                  const SizedBox(width: 14),
                   // Album, with the gone and filler tags at its end, so
                   // a tag never shifts the columns. In a narrow column the
                   // tags shrink to an icon with the same explanation.
-                  Expanded(
-                    flex: 10,
-                    child: LayoutBuilder(
-                      builder: (context, box) {
-                        final roomy = box.maxWidth >= 150;
-                        return Row(
+                  if (showAlbum) ...[
+                    const SizedBox(width: 14),
+                    Expanded(
+                      flex: 10,
+                      child: LayoutBuilder(
+                        builder: (context, box) => Row(
                           children: [
                             Expanded(
                               child: Text(
@@ -1183,41 +1257,13 @@ class _SongRow extends StatelessWidget {
                                 style: dimStyle,
                               ),
                             ),
-                            if (track.isGone) ...[
-                              const SizedBox(width: 8),
-                              _Tag(
-                                key: const ValueKey('gone-tag'),
-                                label: 'gone from VK',
-                                icon: Icons.cloud_off_outlined,
-                                compact: !roomy,
-                                explanation: stored.path != null
-                                    ? 'VK no longer has this song. It stays '
-                                          'in your library and plays from the '
-                                          'stored copy.'
-                                    : 'VK no longer has this song. It stays '
-                                          'in your library, History and '
-                                          'Stacks, but there is no stored '
-                                          'copy to play.',
-                              ),
-                            ],
-                            if (track.source == TrackSource.generated) ...[
-                              const SizedBox(width: 8),
-                              _Tag(
-                                key: const ValueKey('filler-tag'),
-                                label: 'filler',
-                                icon: Icons.science_outlined,
-                                compact: !roomy,
-                                explanation:
-                                    'Generated speed-test song: made-up '
-                                    'name, plays one of a few cached real '
-                                    'songs.',
-                              ),
-                            ],
+                            ...tags(compact: box.maxWidth < 150),
                           ],
-                        );
-                      },
+                        ),
+                      ),
                     ),
-                  ),
+                  ] else
+                    ...tags(compact: true),
                   const SizedBox(width: 14),
                   Tooltip(
                     message: meaning,

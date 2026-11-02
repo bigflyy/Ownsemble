@@ -17,6 +17,7 @@ import 'package:ownsemble/ui/library_screen.dart';
 import 'package:ownsemble/ui/player_bar.dart';
 import 'package:ownsemble/ui/sidebar.dart';
 import 'package:ownsemble/ui/shell_settings.dart';
+import 'package:ownsemble/ui/sync_controller.dart';
 import 'package:ownsemble/ui/theme.dart';
 import 'package:ownsemble/ui/type_jump.dart';
 
@@ -120,6 +121,7 @@ void main() {
     WidgetTester tester, {
     Size size = const Size(1400, 900),
     PlayerService? player,
+    SyncController? sync,
   }) async {
     final playback = PlaybackController(
       player: player ?? PlayerService(vk: null, muted: true, dataDir: '.'),
@@ -139,6 +141,7 @@ void main() {
               library: library,
               playback: playback,
               collections: collections,
+              sync: sync,
               settings: settings,
             ),
           ),
@@ -1184,6 +1187,161 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  group('a small window', () {
+    /// The size the Windows runner refuses to go under (win32_window.cpp).
+    const smallest = Size(480, 440);
+
+    /// The status bar takes height from everything else, so it is on screen.
+    SyncController statusBar() => SyncController(
+      sources: [
+        SourceInfo(
+          id: 1,
+          kind: TrackSource.vk,
+          account: '1',
+          name: 'VK',
+          songCount: 6,
+          goneCount: 0,
+        ),
+      ],
+      runner: null,
+      onLibraryChanged: (_) {},
+    );
+
+    Future<void> pumpWithSong(
+      WidgetTester tester,
+      Size size, {
+      PlayerDock dock = PlayerDock.bottom,
+    }) async {
+      settings.dockTo(dock);
+      final player = _StartedPlayer();
+      await pumpShell(tester, size: size, player: player, sync: statusBar());
+      await player.play(library.visible.first);
+      await tester.pump();
+    }
+
+    testWidgets('the smallest one keeps three songs and every control', (
+      tester,
+    ) async {
+      await pumpWithSong(tester, smallest);
+      expect(tester.takeException(), isNull);
+      expect(
+        library.scroll.position.viewportDimension,
+        greaterThanOrEqualTo(3 * rowHeight),
+      );
+      final window = Offset.zero & smallest;
+      for (final key in const [
+        'shuffle',
+        'prev',
+        'play-pause',
+        'next',
+        'repeat',
+        'seek',
+        'time',
+        'toggle-theme',
+      ]) {
+        final control = tester.getRect(find.byKey(ValueKey(key)));
+        expect(
+          window.intersect(control),
+          control,
+          reason: '$key is cut off by the window',
+        );
+      }
+    });
+
+    testWidgets('a side panel that would hide its controls moves to the '
+        'bottom bar, and the choice stays', (tester) async {
+      await pumpWithSong(
+        tester,
+        const Size(1400, sidePanelMinHeight - 1),
+        dock: PlayerDock.side,
+      );
+      expect(find.byType(NowPlayingPanel), findsNothing);
+      expect(find.byType(DockBar), findsOneWidget);
+      expect(find.byKey(const ValueKey('dock-side')), findsNothing);
+      expect(settings.dock, PlayerDock.side);
+
+      await pumpWithSong(
+        tester,
+        const Size(1400, sidePanelMinHeight),
+        dock: PlayerDock.side,
+      );
+      final panel = tester.getRect(find.byType(NowPlayingPanel));
+      expect(
+        tester.getRect(find.byKey(const ValueKey('volume'))).bottom,
+        lessThanOrEqualTo(panel.bottom),
+        reason: 'the panel must not need scrolling to reach its controls',
+      );
+    });
+
+    testWidgets('a narrow list has no Album column, but keeps the tags', (
+      tester,
+    ) async {
+      final vk = store.ensureSource(TrackSource.vk, account: '1', name: 'VK');
+      store.markGone(vk, ['1_1']);
+      library = LibraryController(store.loadAll(), collections: collections);
+
+      await pumpShell(tester, size: const Size(1400, 800));
+      expect(find.text('Album'), findsOneWidget);
+      expect(find.text('Альбом'), findsWidgets);
+
+      // The list is as wide as the window, less the rail.
+      await pumpShell(
+        tester,
+        size: const Size(railWidth + albumColumnMinWidth - 1, 800),
+      );
+      expect(find.text('Album'), findsNothing);
+      expect(find.text('Альбом'), findsNothing);
+      expect(
+        find.descendant(
+          of: find.byKey(ValueKey('song-${ids[1]}')),
+          matching: find.byKey(const ValueKey('gone-tag')),
+        ),
+        findsOneWidget,
+      );
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('a short window drops the column names and shrinks the title', (
+      tester,
+    ) async {
+      await pumpShell(tester, size: const Size(1000, tightWindowHeight));
+      expect(find.byKey(const ValueKey('list-header')), findsOneWidget);
+      final tallList = tester.getSize(find.byType(ListView).last).height;
+      final tallTitle = tester.getSize(find.text('All songs')).height;
+
+      await pumpShell(tester, size: const Size(1000, tightWindowHeight - 1));
+      expect(find.byKey(const ValueKey('list-header')), findsNothing);
+      expect(
+        tester.getSize(find.text('All songs')).height,
+        lessThan(tallTitle),
+      );
+      expect(
+        tester.getSize(find.byType(ListView).last).height,
+        greaterThan(tallList),
+        reason: 'a shorter window must not lose rows at this step',
+      );
+    });
+
+    testWidgets('dialogs fit the smallest window', (tester) async {
+      await pumpWithSong(tester, smallest);
+      await tester.tap(find.byKey(const ValueKey('keyboard-help')));
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+      await tester.tap(find.text('Close'));
+      await tester.pumpAndSettle();
+
+      await tester.tap(
+        find.byKey(ValueKey('song-${ids[0]}')),
+        buttons: kSecondaryMouseButton,
+      );
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+      await tester.tap(find.text('New Stack...'));
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+    });
+  });
+
   testWidgets('right click queues a song; Play next goes first', (
     tester,
   ) async {
@@ -1532,7 +1690,7 @@ void main() {
     });
 
     testWidgets('stay in place when the list scrolls', (tester) async {
-      await pumpShell(tester, size: const Size(1400, 330));
+      await pumpShell(tester, size: const Size(1400, tightWindowHeight));
       final header = find.byKey(const ValueKey('list-header'));
       final before = tester.getTopLeft(header);
       library.scroll.jumpTo(40);
