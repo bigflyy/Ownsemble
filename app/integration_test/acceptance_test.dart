@@ -43,6 +43,8 @@ import 'package:ownsemble/vk/vk_sync.dart';
 import 'package:path/path.dart' as p;
 import 'package:sqlite3/sqlite3.dart';
 
+import 'own_window.dart';
+
 const dataDir = String.fromEnvironment('OWNSEMBLE_DATA');
 const sessionFile = String.fromEnvironment('OWNSEMBLE_SESSION');
 
@@ -815,6 +817,50 @@ void main() {
     // ignore: avoid_print
     print('Queue: Play next, Add to queue, remove, order all ok');
 
+    // The smallest window, by a real resize that Windows limits: the song
+    // list keeps three rows, the column that does not fit goes, and a song
+    // still plays from a row and seeks from the bar.
+    final window = OwnWindow.find();
+    final normalFrame = window.frameSize;
+    window.resize(100, 100);
+    await waitUntil(
+      tester,
+      () => find.byKey(const ValueKey('list-header')).evaluate().isEmpty,
+      what: 'the short layout after a real resize',
+    );
+    await tester.pumpAndSettle();
+    final (smallWidth, smallHeight) = window.clientSize;
+    expect(smallWidth, closeTo(480 * window.scale, 1));
+    expect(smallHeight, closeTo(440 * window.scale, 1));
+    expect(find.text('Album'), findsNothing);
+    expect(
+      library.scroll.position.viewportDimension,
+      greaterThanOrEqualTo(3 * rowHeight),
+    );
+    // Not list[i]: that one is playing, and a click would only pause it.
+    final smallWindowSong = list[i + 1];
+    expect(
+      (await playByTap(tester, smallWindowSong, label: 'small window')).ok,
+      isTrue,
+    );
+    await tapSeekAt(0.5);
+    await waitForPosition(
+      (at) => at.inSeconds >= smallWindowSong.durationSec * 0.4,
+      'a seek in the smallest window',
+    );
+    window.resize(normalFrame.$1, normalFrame.$2);
+    await waitUntil(
+      tester,
+      () => find.byKey(const ValueKey('list-header')).evaluate().isNotEmpty,
+      what: 'the normal layout after a real resize',
+    );
+    await tester.pumpAndSettle();
+    // ignore: avoid_print
+    print(
+      'Smallest window: $smallWidth x $smallHeight px at '
+      'scale ${window.scale}, a row played and the bar seeked',
+    );
+
     // The time label switches between total and remaining time. (The song
     // shuffle picked may be one VK blocks; then a known good one is used.)
     if (!player.currentLoaded) {
@@ -892,7 +938,11 @@ void main() {
     await playback.seek(const Duration(seconds: 30));
     await waitUntil(
       tester,
-      () => player.position >= const Duration(seconds: 30),
+      // Both ends: the song may already be past 30 s, so a lower bound alone
+      // would hold before the seek back has landed.
+      () =>
+          player.position >= const Duration(seconds: 30) &&
+          player.position < const Duration(seconds: 40),
       what: 'seek before the keys',
       timeout: const Duration(seconds: 60),
     );
@@ -906,12 +956,35 @@ void main() {
     );
     final afterRight = player.position;
     await tester.sendKeyEvent(LogicalKeyboardKey.arrowLeft);
-    await waitUntil(
-      tester,
-      () => player.position <= afterRight - const Duration(seconds: 3),
-      what: 'Left moves 5 s back',
-      timeout: const Duration(seconds: 60),
-    );
+    try {
+      await waitUntil(
+        tester,
+        () => player.position <= afterRight - const Duration(seconds: 3),
+        what: 'Left moves 5 s back',
+        timeout: const Duration(seconds: 60),
+      );
+    } on TestFailure {
+      // Says whether mpv is stuck in the seek, waiting for the network, or
+      // somewhere else than the app believes.
+      final state = <String>[
+        'app position ${player.position}, after Right $afterRight',
+      ];
+      for (final name in const [
+        'time-pos',
+        'seeking',
+        'paused-for-cache',
+        'core-idle',
+        'pause',
+        'eof-reached',
+        'duration',
+        'demuxer-via-network',
+      ]) {
+        state.add('$name=${await mpv.getProperty(name)}');
+      }
+      // ignore: avoid_print
+      print('Left did not land: ${state.join(', ')}');
+      rethrow;
+    }
     final volumeBefore = playback.volume;
     await tester.sendKeyEvent(LogicalKeyboardKey.arrowUp);
     await Future<void>.delayed(const Duration(milliseconds: 200));
@@ -1235,7 +1308,14 @@ void main() {
     );
 
     // The player bar's button downloads the playing (cached) song at once
-    // and removes the download again.
+    // and removes the download again. A slow download can outlast that song,
+    // and the button belongs to whichever song plays by then.
+    if (player.current?.id != toCache.id) {
+      expect(
+        (await playByTap(tester, toCache, label: 'cached song again')).ok,
+        isTrue,
+      );
+    }
     await tester.tap(find.byKey(const ValueKey('download')));
     await tester.pump();
     expect(storage.stateOf(toCache).pinned, isTrue);
