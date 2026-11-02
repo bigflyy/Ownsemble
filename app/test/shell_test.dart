@@ -399,6 +399,17 @@ void main() {
         await tester.pump(TypeJump.resetAfter);
       });
 
+      testWidgets('Ctrl+Backspace takes one word back', (tester) async {
+        await pumpPlaying(tester);
+        await typeOnList(tester, 'песня 3');
+        await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+        await tester.sendKeyEvent(LogicalKeyboardKey.backspace);
+        await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+        await tester.pump();
+        expect(library.jump.text, 'песня ');
+        await tester.pump(TypeJump.resetAfter);
+      });
+
       testWidgets('during a jump Down and Up move, held too, and not the '
           'volume', (tester) async {
         await pumpPlaying(tester);

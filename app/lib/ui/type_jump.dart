@@ -62,11 +62,30 @@ class TypeJump extends ChangeNotifier {
   void backspace() {
     if (!isTyping) return;
     final characters = _text.runes.toList()..removeLast();
-    if (characters.isEmpty) {
+    _shortenTo(String.fromCharCodes(characters));
+  }
+
+  /// Takes back the last word, as Ctrl+Backspace does in a text editor: the
+  /// spaces at the end, then a run of letters and digits or of punctuation.
+  void backspaceWord() {
+    if (!isTyping) return;
+    final kept = _text.trimRight();
+    final lastWord = _lastWord.firstMatch(kept);
+    _shortenTo(lastWord == null ? '' : kept.substring(0, lastWord.start));
+  }
+
+  static final _lastWord = RegExp(
+    r'([\p{L}\p{N}_]+|[^\p{L}\p{N}_\s]+)$',
+    unicode: true,
+  );
+
+  /// Goes on with less [text]; with nothing left, the jump ends.
+  void _shortenTo(String text) {
+    if (text.isEmpty) {
       clear();
       return;
     }
-    _text = String.fromCharCodes(characters);
+    _text = text;
     _findMatches();
     _settle();
   }

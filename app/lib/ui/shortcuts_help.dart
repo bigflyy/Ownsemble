@@ -20,6 +20,7 @@ const shortcuts = <(String keys, String action)>[
   ('Letters', 'Jump to a matching song'),
   ('Up, Down after letters', 'Next or previous match'),
   ('Enter after letters', 'Play the song jumped to'),
+  ('Ctrl + Backspace after letters', 'Delete the last word typed'),
   ('Esc', 'End the jump, clear the search, leave the search box'),
   ('F1', 'This list'),
 ];

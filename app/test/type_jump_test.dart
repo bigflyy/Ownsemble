@@ -195,6 +195,52 @@ void main() {
     });
   });
 
+  group('Ctrl+Backspace takes one word back, as a text editor does', () {
+    void typeAll(String text) => text.split('').forEach(jump.type);
+
+    test('the last word goes, the space before it stays', () {
+      typeAll('звезда по');
+      jump.backspaceWord();
+      expect(jump.text, 'звезда ');
+    });
+
+    test('spaces at the end go with the word before them', () {
+      typeAll('звезда по  ');
+      jump.backspaceWord();
+      expect(jump.text, 'звезда ');
+    });
+
+    test('punctuation is a word of its own', () {
+      typeAll("don't");
+      jump.backspaceWord();
+      expect(jump.text, "don'");
+      jump.backspaceWord();
+      expect(jump.text, 'don');
+    });
+
+    test('the row follows the shorter text', () {
+      typeAll('звезда по');
+      final row = jump.row;
+      typeAll('ъ');
+      expect(jump.row, isNull);
+      jump.backspaceWord();
+      expect(jump.text, 'звезда ');
+      expect(jump.row, row);
+    });
+
+    test('the only word ends the jump', () {
+      typeAll('мад');
+      jump.backspaceWord();
+      expect(jump.isTyping, isFalse);
+      expect(jump.row, isNull);
+    });
+
+    test('does nothing with no text', () {
+      jump.backspaceWord();
+      expect(jump.isTyping, isFalse);
+    });
+  });
+
   group('after 2 s without a key', () {
     testWidgets('the text goes, the row stays', (tester) async {
       typeAll('mad');

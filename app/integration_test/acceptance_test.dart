@@ -1082,6 +1082,17 @@ void main() {
     await tester.sendKeyEvent(LogicalKeyboardKey.escape);
     await tester.pump();
     expect(library.jump.isTyping, isFalse, reason: 'Esc ends the jump');
+    // Ctrl+Backspace takes back the last word only, and the matches return.
+    await typeOnList('$jumpText ъъъ');
+    expect(library.jump.matchCount, 0);
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+    await tester.sendKeyEvent(LogicalKeyboardKey.backspace);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+    await tester.pump();
+    expect(library.jump.text, '$jumpText ');
+    expect(library.jump.matchCount, jumpMatches);
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await tester.pump();
     // ignore: avoid_print
     print(
       'Type to jump: "$jumpText" reached row '

@@ -225,13 +225,14 @@ class _LibraryScreenState extends State<LibraryScreen> {
     if (_typing || _covered) return false;
     if (library.view.isLater || library.visible.isEmpty) return false;
     final keyboard = HardwareKeyboard.instance;
-    if (keyboard.isControlPressed ||
-        keyboard.isAltPressed ||
-        keyboard.isMetaPressed) {
-      return false;
-    }
     final jump = library.jump;
     final key = event.logicalKey;
+    if (keyboard.isAltPressed || keyboard.isMetaPressed) return false;
+    if (keyboard.isControlPressed) {
+      if (key != LogicalKeyboardKey.backspace || !jump.isTyping) return false;
+      jump.backspaceWord();
+      return true;
+    }
     if (jump.isTyping) {
       if (key == LogicalKeyboardKey.arrowDown) {
         jump.next();
