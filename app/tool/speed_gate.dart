@@ -66,6 +66,8 @@ const _wmClose = 0x0010;
 const _wmKeyDown = 0x0100;
 const _wmKeyUp = 0x0101;
 const _wmChar = 0x0102;
+const _wmXButtonDown = 0x020B;
+const _wmXButtonUp = 0x020C;
 
 /// Whether process [pid] has a visible Flutter runner window.
 bool _hasVisibleWindow(int pid) => _visibleWindow(pid) != 0;
@@ -336,9 +338,18 @@ void _typeLetter(int window, int codeUnit) {
   _postMessage(window, _wmKeyUp, virtualKey, bits | (3 << 30));
 }
 
+/// Posts a press of a mouse side button to [window], at a point inside it:
+/// [button] is 1 for back and 2 for forward. Never touches the user's mouse.
+void _pressSideButton(int window, int button) {
+  const point = 200 | (200 << 16);
+  _postMessage(window, _wmXButtonDown, button << 16, point);
+  _postMessage(window, _wmXButtonUp, button << 16, point);
+}
+
 /// The real keyboard path of the release, which simulated keys in the tests
 /// skip: Right, Up, Space and Cyrillic letters sent to the engine's own window
-/// as messages.
+/// as messages. The mouse's side buttons too, which only the engine turns
+/// into Flutter's buttons.
 Future<Map<String, Object?>> _checkRealKeys(String benchFile) async {
   final file = File(benchFile);
   final ready = File('$benchFile.ready');
@@ -379,6 +390,10 @@ Future<Map<String, Object?>> _checkRealKeys(String benchFile) async {
     _typeLetter(view, codeUnit);
     await Future<void>.delayed(const Duration(milliseconds: 60));
   }
+  await Future<void>.delayed(const Duration(milliseconds: 300));
+  _pressSideButton(view, 1);
+  await Future<void>.delayed(const Duration(milliseconds: 300));
+  _pressSideButton(view, 2);
   await process.exitCode.timeout(
     const Duration(seconds: 30),
     onTimeout: () {

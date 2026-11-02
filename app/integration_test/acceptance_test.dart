@@ -971,6 +971,58 @@ void main() {
       '$jumpMatches matches, played in ${jumpPlay.toSoundMs} ms',
     );
 
+    // Going to the playing song, on real rows: the song was started by Enter
+    // from the whole list. From History a click on the player's title comes
+    // back to its row, Alt+Left and Alt+Right walk the places, Ctrl+L does it
+    // by key, and the scroll offset comes back too.
+    final playingRow = library.visible.indexWhere(
+      (t) => t.id == player.current?.id,
+    );
+    final rowKey = ValueKey('song-${player.current?.id}');
+    library.scroll.jumpTo(0);
+    await tester.pump();
+    library.showView(const LibraryView(ViewKind.history));
+    await tester.pump();
+    await tester.tap(find.byKey(const ValueKey('go-to-song')));
+    await tester.pump();
+    await tester.pump();
+    expect(library.view, LibraryView.songs, reason: 'the title goes to Songs');
+    expect(library.jump.row, playingRow, reason: 'the row is outlined');
+    expect(find.byKey(rowKey), findsOneWidget, reason: 'the row is on screen');
+    final revealedAt = library.scroll.offset;
+    Future<void> pressAlt(LogicalKeyboardKey key) async {
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.altLeft);
+      await tester.sendKeyEvent(key);
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.altLeft);
+      await tester.pump();
+      await tester.pump();
+    }
+
+    await pressAlt(LogicalKeyboardKey.arrowLeft);
+    expect(library.view, const LibraryView(ViewKind.history));
+    await pressAlt(LogicalKeyboardKey.arrowLeft);
+    expect(library.view, LibraryView.songs);
+    expect(library.scroll.offset, 0, reason: 'the old place had the top');
+    await pressAlt(LogicalKeyboardKey.arrowRight);
+    await pressAlt(LogicalKeyboardKey.arrowRight);
+    expect(library.scroll.offset, revealedAt, reason: 'and back to the row');
+    library.showView(const LibraryView(ViewKind.history));
+    await tester.pump();
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyL);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+    await tester.pump();
+    await tester.pump();
+    expect(library.view, LibraryView.songs, reason: 'Ctrl+L');
+    expect(library.jump.row, playingRow);
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await tester.pump();
+    // ignore: avoid_print
+    print(
+      'Go to the song: row $playingRow of ${library.visible.length}, '
+      'title click, Ctrl+L, Alt+Left, Alt+Right ok',
+    );
+
     // Stored audio: a streamed song is saved while it plays and then plays
     // from disk; Download keeps a song; the cache limit removes cached
     // songs but never downloaded ones.

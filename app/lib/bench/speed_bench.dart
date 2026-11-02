@@ -157,9 +157,10 @@ class SpeedBench {
   /// Pauses a cached song at [savedSongProbe] and says so in the result file;
   /// the speed gate then posts real Windows key messages to this window, and
   /// this reports what they did: Right moves the song, Up the volume, Space
-  /// resumes it, and letters jump to a song. The letters are Cyrillic, taken
-  /// from the library: the jump reads them from Windows' text, and only real
-  /// messages have that. The result file's ".ready" holds them.
+  /// resumes it, letters jump to a song, and the mouse's side buttons go to
+  /// the previous and next place. The letters are Cyrillic, taken from the
+  /// library: the jump reads them from Windows' text, and only real messages
+  /// have that. The result file's ".ready" holds them.
   Future<Map<String, Object?>> _keysProbe() async {
     final list = library.visible;
     final index = list.indexWhere(
@@ -180,21 +181,31 @@ class SpeedBench {
     final cyrillic = RegExp('^[а-яА-Я]{3}');
     final jumpTrack = list.firstWhere((t) => cyrillic.hasMatch(t.title));
     final jumpText = jumpTrack.title.substring(0, 3);
+    // A place to go back to.
+    library.showView(const LibraryView(ViewKind.history));
+    await Future<void>.delayed(const Duration(milliseconds: 100));
+    library.showView(LibraryView.songs);
+    await Future<void>.delayed(const Duration(milliseconds: 100));
     File('${resultFile!}.ready').writeAsStringSync(jumpText);
     final clock = Stopwatch()..start();
     // The text is forgotten after 2 s, sooner than the song gets 4 s on.
     Track? jumpedTo;
+    var wentBack = false;
+    var wentForward = false;
     bool done() =>
         player.playing.value &&
         player.position >= position + const Duration(seconds: 4) &&
         playback.volume != volumeBefore &&
-        jumpedTo != null;
+        jumpedTo != null &&
+        wentForward;
     while (!done() && clock.elapsed < const Duration(seconds: 15)) {
       await Future<void>.delayed(const Duration(milliseconds: 50));
       final row = library.jump.row;
       if (library.jump.text == jumpText && row != null) {
         jumpedTo = list[row];
       }
+      if (library.view.kind == ViewKind.history) wentBack = true;
+      if (wentBack && library.view == LibraryView.songs) wentForward = true;
     }
     final wanted = normalizeForSearch(jumpText);
     return {
@@ -205,6 +216,8 @@ class SpeedBench {
       'jumpText': jumpText,
       'jumpedToTitle': jumpedTo?.title,
       'jumpedToArtist': jumpedTo?.artist,
+      'mouseBack': wentBack,
+      'mouseForward': wentForward,
       'positionBeforeMs': position.inMilliseconds,
       'positionAfterMs': player.position.inMilliseconds,
       'volumeBefore': volumeBefore,
