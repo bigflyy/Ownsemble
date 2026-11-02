@@ -96,6 +96,7 @@ void main() {
     double pixelRatio = 1,
     bool shortcutsList = false,
     String jump = '',
+    LibraryView view = LibraryView.songs,
   }) async {
     final store = LibraryStore.open(':memory:');
     addTearDown(store.close);
@@ -136,6 +137,7 @@ void main() {
       store.loadAll(),
       collections: collections,
     );
+    library.showView(view);
     final settings = ShellSettings.inMemory();
     if (!dark) settings.toggleTheme();
     if (rail) settings.toggleRail();
@@ -247,5 +249,25 @@ void main() {
   testWidgets(
     'light, narrow',
     (t) => shoot(t, 'light-narrow', dark: false, size: const Size(900, 760)),
+  );
+  testWidgets(
+    'dark, On this computer',
+    (t) => shoot(
+      t,
+      'dark-stored',
+      dark: true,
+      view: const LibraryView(ViewKind.stored),
+    ),
+  );
+  testWidgets(
+    'light, On this computer, rail',
+    (t) => shoot(
+      t,
+      'light-stored-rail',
+      dark: false,
+      rail: true,
+      dock: PlayerDock.bottom,
+      view: const LibraryView(ViewKind.stored),
+    ),
   );
 }

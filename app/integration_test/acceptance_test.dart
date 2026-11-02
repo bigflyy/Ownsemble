@@ -1334,13 +1334,44 @@ void main() {
     await tester.pump();
     expect(storage.stateOf(toCache).pinned, isFalse);
 
+    // On this computer lists exactly what is stored, with each song's mark.
+    Set<int> storedIds() => {
+      for (final t in library.all)
+        if (storedNow(t)) t.id,
+    };
+    await tester.tap(find.byKey(const ValueKey('nav-stored')));
+    await tester.pump();
+    expect(library.view, const LibraryView(ViewKind.stored));
+    expect(library.visible.map((t) => t.id).toSet(), storedIds());
+    final storedBefore = library.visible.length;
+    expect(storedBefore, greaterThanOrEqualTo(2));
+    Future<void> expectMark(Track song, IconData icon) async {
+      final row = library.visible.indexWhere((t) => t.id == song.id);
+      expect(row, isNonNegative, reason: '${song.id} is in the view');
+      library.scroll.jumpTo(
+        (row * rowHeight).clamp(0, library.scroll.position.maxScrollExtent),
+      );
+      await tester.pump();
+      expect(
+        find.byKey(ValueKey('mark-${song.id}-${icon.codePoint}')),
+        findsOneWidget,
+      );
+    }
+
+    await expectMark(toCache, Icons.cloud_done_outlined);
+    await expectMark(toDownload, Icons.download_done);
+
     // A cache limit of 1 byte: every cached song goes except the one
-    // playing; the downloaded song and its file stay.
+    // playing; the downloaded song and its file stay. The view on screen
+    // follows it.
     final settings = LibraryStore.open(p.join(copyDir, 'library.db'));
     settings.writeSetting(AudioStorage.limitSetting, '1');
     settings.close();
     final evicted = storage.applyLimit(keep: {player.current!.id});
     await tester.pump();
+    expect(evicted, isNotEmpty);
+    expect(library.visible.map((t) => t.id).toSet(), storedIds());
+    expect(library.visible.length, storedBefore - evicted.length);
     expect(storage.stateOf(toDownload).pinned, isTrue);
     expect(downloadedFile.existsSync(), isTrue);
     expect(storedNow(toCache), isTrue, reason: 'playing now, kept');
@@ -1351,7 +1382,7 @@ void main() {
           t.id != player.current?.id,
     );
     expect(stillCached, isEmpty);
-    // The downloaded song plays from disk.
+    // The downloaded song plays from disk, clicked in this view.
     final offline = await playByTap(tester, toDownload, label: 'downloaded');
     expect(offline.ok && offline.cached, isTrue);
     // ignore: avoid_print
@@ -1359,8 +1390,12 @@ void main() {
       'storage: song saved while streaming after $cachedAfterMs ms '
       '(${cachedFile.lengthSync() ~/ 1024} KB), replayed from disk in '
       '${fromDisk.toSoundMs} ms; download kept; cache limit removed '
-      '${evicted.length} cached songs, kept downloads and the playing song',
+      '${evicted.length} cached songs, kept downloads and the playing song; '
+      'On this computer showed $storedBefore songs, then '
+      '${library.visible.length}, and played one from disk',
     );
+    library.showView(LibraryView.songs);
+    await tester.pump();
     // Download of the song whose own file is broken: the audio comes from
     // the official release, and from disk it is the whole song. Last here:
     // it applies the 1-byte limit again, removing the song cached above.
