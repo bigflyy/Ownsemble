@@ -42,7 +42,11 @@ Track song(int id, String title, {bool gone = false, String? file}) => Track(
   localPath: file,
 );
 
-VkSyncResult result({int added = 0, int newlyGone = 0}) => VkSyncResult(
+VkSyncResult result({
+  int added = 0,
+  int newlyGone = 0,
+  int albumsSkipped = 0,
+}) => VkSyncResult(
   sourceId: 1,
   listed: 2,
   declared: 2,
@@ -50,9 +54,52 @@ VkSyncResult result({int added = 0, int newlyGone = 0}) => VkSyncResult(
   updated: 0,
   back: 0,
   newlyGone: newlyGone,
+  albumsSkipped: albumsSkipped,
 );
 
 void main() {
+  group('a first sync', () {
+    test('runs once more for the album titles it left', () async {
+      final outcomes = [
+        SyncOutcome(
+          sources: [vkSource()],
+          result: result(added: 2, albumsSkipped: 1),
+        ),
+        SyncOutcome(sources: [vkSource()], result: result()),
+      ];
+      var runs = 0;
+      final sync = SyncController(
+        sources: [vkSource()],
+        runner: (_) async => outcomes[runs++],
+        onLibraryChanged: (_) {},
+      );
+      final last = await sync.syncNow();
+      expect(runs, 2);
+      expect(last, same(outcomes[1]));
+      expect(sync.running, isFalse);
+    });
+
+    test('does not run again once the session is gone', () async {
+      var runs = 0;
+      late SyncController sync;
+      sync = SyncController(
+        sources: [vkSource()],
+        runner: (_) async {
+          runs++;
+          // Logging out while the first sync runs.
+          sync.runner = null;
+          return SyncOutcome(
+            sources: [vkSource()],
+            result: result(albumsSkipped: 1),
+          );
+        },
+        onLibraryChanged: (_) {},
+      );
+      await sync.syncNow();
+      expect(runs, 1);
+    });
+  });
+
   group('status text', () {
     final now = DateTime(2026, 10, 30, 15, 0);
 

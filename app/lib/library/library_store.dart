@@ -314,6 +314,21 @@ class LibraryStore {
       ),
   };
 
+  /// The album titles VK gave so far, by "ownerId_albumId".
+  Map<String, String> vkAlbumTitles() => {
+    for (final row in _db.select(
+      'SELECT album_key, title FROM vk_album_titles',
+    ))
+      row['album_key'] as String: row['title'] as String,
+  };
+
+  /// Keeps the [title] of the album [albumKey].
+  void saveVkAlbumTitle(String albumKey, String title) => _db.execute(
+    'INSERT INTO vk_album_titles (album_key, title) VALUES (?, ?) '
+    'ON CONFLICT (album_key) DO UPDATE SET title = excluded.title',
+    [albumKey, title],
+  );
+
   /// Marks the songs [keys] of [sourceId] as gone from their source. Songs
   /// stay in the library (with their History, Stacks and stored audio);
   /// songs already marked keep their first mark. Returns how many were

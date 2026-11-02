@@ -48,6 +48,12 @@ class FakeVk {
   int audioGetCalls = 0;
   int getByIdCalls = 0;
 
+  /// What `audio.getPlaylistById` answers, by "ownerId_albumId".
+  final albums = <String, Object>{};
+
+  /// Every `audio.getPlaylistById` request, with its parameters.
+  final albumRequests = <Map<String, String>>[];
+
   Map<String, dynamic> item(FakeSong song) =>
       itemOverride?.call(song) ?? song.toItem();
 
@@ -80,6 +86,13 @@ class FakeVk {
           for (final song in [...library, ...elsewhere])
             if (wanted.contains('${userId}_${song.id}')) item(song),
         ];
+      case 'audio.getPlaylistById':
+        albumRequests.add(params);
+        final answer =
+            albums['${params['owner_id']}_${params['playlist_id']}'] ??
+            VkException('audio.getPlaylistById error 100: no such album');
+        if (answer is String) return {'title': answer, 'count': 3};
+        throw answer;
     }
     throw StateError('unexpected $method');
   }
@@ -213,6 +226,43 @@ void main() {
     expect(untitledAlbum.coverUrl, isNull);
   });
 
+  group('album names', () {
+    Map<String, dynamic> songOf(Map<String, dynamic> album) => {
+      'owner_id': 1,
+      'id': 1,
+      'album': album,
+      'thumb': {'photo_135': 'cover-135'},
+    };
+    const unnamed = {'id': 7, 'owner_id': -2, 'title': 'unnamed'};
+
+    test('"unnamed" is not a name, and its song keeps its real cover', () {
+      final track = vkItemToTrack(songOf(unnamed));
+      expect(track.album, isNull);
+      expect(track.coverUrl, 'cover-135');
+    });
+
+    test('the real title of an "unnamed" album is shown', () {
+      final track = vkItemToTrack(
+        songOf(unnamed),
+        albumTitles: {'-2_7': 'Молодость и панк-рок'},
+      );
+      expect(track.album, 'Молодость и панк-рок');
+    });
+
+    test('a title VK gives on the song wins over a stored one', () {
+      final track = vkItemToTrack(
+        songOf({'id': 7, 'owner_id': -2, 'title': 'Новое имя'}),
+        albumTitles: {'-2_7': 'Старое имя'},
+      );
+      expect(track.album, 'Новое имя');
+    });
+
+    test('an empty title and no album object both show nothing', () {
+      expect(vkItemToTrack(songOf({'title': ' '})).album, isNull);
+      expect(vkItemToTrack({'owner_id': 1, 'id': 1}).album, isNull);
+    });
+  });
+
   group('syncVkSource', () {
     late LibraryStore store;
     late FakeVk vk;
@@ -227,10 +277,141 @@ void main() {
       userId: FakeVk.userId,
       store: store,
       pageSize: pageSize,
+      albumGap: Duration.zero,
     );
 
     Track byKey(String key) =>
         store.loadAll().firstWhere((t) => t.sourceKey == key);
+
+    /// Makes [songs] the library, with each song's album from [albumOf].
+    void useAlbums(
+      List<FakeSong> songs,
+      Map<String, dynamic> Function(FakeSong song) albumOf,
+    ) {
+      vk.library.addAll(songs);
+      vk.itemOverride = (song) => song.toItem()..['album'] = albumOf(song);
+    }
+
+    Map<String, dynamic> unnamedAlbum(int id, {String key = 'albumkey'}) => {
+      'id': id,
+      'owner_id': -2,
+      'access_key': key,
+      'title': 'unnamed',
+    };
+
+    group('album titles', () {
+      test('the first sync shows the songs and leaves the titles', () async {
+        useAlbums([vk.song(1)], (_) => unnamedAlbum(7));
+        vk.albums['-2_7'] = 'Байполар';
+        final result = await sync();
+        expect(result.added, 1);
+        expect(result.albumsSkipped, 1);
+        expect(vk.albumRequests, isEmpty);
+        expect(byKey('42_1').album, isNull);
+      });
+
+      test('the next sync asks once per album and stores the title', () async {
+        useAlbums([
+          vk.song(1),
+          vk.song(2),
+          vk.song(3),
+        ], (song) => unnamedAlbum(song.id == 3 ? 8 : 7));
+        vk.albums['-2_7'] = 'Байполар';
+        vk.albums['-2_8'] = 'Молодость и панк-рок';
+        await sync();
+
+        final result = await sync();
+        expect(result.updated, 3);
+        expect(result.albumsSkipped, 0);
+        expect(vk.albumRequests, hasLength(2));
+        expect(vk.albumRequests.first, {
+          'owner_id': '-2',
+          'playlist_id': '7',
+          'access_key': 'albumkey',
+        });
+        expect(byKey('42_1').album, 'Байполар');
+        expect(byKey('42_2').album, 'Байполар');
+        expect(byKey('42_3').album, 'Молодость и панк-рок');
+
+        // The titles are kept: no more questions and nothing to reload.
+        final third = await sync();
+        expect(third.changedLibrary, isFalse);
+        expect(vk.albumRequests, hasLength(2));
+      });
+
+      test('a new access key of the album does not ask again', () async {
+        var key = 'first';
+        useAlbums([vk.song(1)], (_) => unnamedAlbum(7, key: key));
+        vk.albums['-2_7'] = 'Байполар';
+        await sync();
+        await sync();
+        key = 'second';
+        await sync();
+        expect(vk.albumRequests, hasLength(1));
+        expect(byKey('42_1').album, 'Байполар');
+      });
+
+      test('an album with a name of its own is not asked about', () async {
+        useAlbums([vk.song(1)], (_) => {'id': 7, 'title': 'Альбом'});
+        await sync();
+        await sync();
+        expect(vk.albumRequests, isEmpty);
+        expect(byKey('42_1').album, 'Альбом');
+      });
+
+      test('a refused album is skipped and asked again next time', () async {
+        useAlbums([
+          vk.song(1),
+          vk.song(2),
+        ], (song) => unnamedAlbum(song.id == 1 ? 7 : 8));
+        vk.albums['-2_8'] = 'Байполар';
+        await sync();
+
+        final result = await sync();
+        expect(result.updated, 1);
+        expect(store.sources().single.lastSyncError, isNull);
+        expect(byKey('42_1').album, isNull);
+        expect(byKey('42_2').album, 'Байполар');
+
+        vk.albums['-2_7'] = 'Молодость';
+        await sync();
+        expect(byKey('42_1').album, 'Молодость');
+        expect(vk.albumRequests, hasLength(3));
+      });
+
+      test('a dead line stops the lookups, not the sync', () async {
+        useAlbums([
+          vk.song(1),
+          vk.song(2),
+          vk.song(3),
+        ], (song) => unnamedAlbum(song.id));
+        vk.albums['-2_1'] = 'Первый';
+        vk.albums['-2_2'] = VkException('stalled', transient: true);
+        vk.albums['-2_3'] = 'Третий';
+        await sync();
+
+        final result = await sync();
+        expect(vk.albumRequests, hasLength(2), reason: 'stopped at the second');
+        expect(result.updated, 1);
+        expect(store.sources().single.lastSyncError, isNull);
+        expect(byKey('42_1').album, 'Первый');
+
+        vk.albums['-2_2'] = 'Второй';
+        await sync();
+        expect(byKey('42_2').album, 'Второй');
+        expect(byKey('42_3').album, 'Третий');
+        expect(vk.albumRequests, hasLength(4), reason: 'the first is kept');
+      });
+
+      test('an album reply without a title stays unknown', () async {
+        useAlbums([vk.song(1)], (_) => unnamedAlbum(7));
+        vk.albums['-2_7'] = '  ';
+        await sync();
+        await sync();
+        expect(store.vkAlbumTitles(), isEmpty);
+        expect(byKey('42_1').album, isNull);
+      });
+    });
 
     test('the first sync adds every listed song with Cyrillic text', () async {
       vk.library.addAll([

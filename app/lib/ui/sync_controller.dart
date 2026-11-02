@@ -65,15 +65,14 @@ class SyncController extends ChangeNotifier {
     _progress = const SyncProgress(SyncStage.connecting);
     notifyListeners();
     try {
-      final outcome = await runner((progress) {
-        _progress = progress;
-        notifyListeners();
-      });
-      _lastOutcome = outcome;
-      _sources = outcome.sources;
-      final library = outcome.library;
-      if (library != null) onLibraryChanged(library);
-      return outcome;
+      final outcome = await _runOnce(runner);
+      // A first sync shows the songs and leaves their album titles to a
+      // second one, which only then costs the calls.
+      final next = this.runner;
+      if (next == null || (outcome.result?.albumsSkipped ?? 0) == 0) {
+        return outcome;
+      }
+      return await _runOnce(next);
     } catch (error) {
       // The runner reports sync failures in its outcome; this is a bug in
       // the runner itself, still shown instead of a stuck progress line.
@@ -83,5 +82,18 @@ class SyncController extends ChangeNotifier {
       _running = false;
       notifyListeners();
     }
+  }
+
+  /// One run of [runner], with its outcome taken over.
+  Future<SyncOutcome> _runOnce(SyncRunner runner) async {
+    final outcome = await runner((progress) {
+      _progress = progress;
+      notifyListeners();
+    });
+    _lastOutcome = outcome;
+    _sources = outcome.sources;
+    final library = outcome.library;
+    if (library != null) onLibraryChanged(library);
+    return outcome;
   }
 }

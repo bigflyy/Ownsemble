@@ -6,7 +6,7 @@ import 'package:sqlite3/sqlite3.dart';
 /// Schema version this build reads and writes (`PRAGMA user_version`).
 ///
 /// 0 is the speed-gate build's single `tracks` table (or an empty file).
-const librarySchemaVersion = 2;
+const librarySchemaVersion = 3;
 
 /// Thrown when the library was written by a newer build of the app.
 class NewerLibraryException implements Exception {
@@ -39,6 +39,7 @@ void migrateLibrary(Database db, {String? dataDir}) {
   try {
     if (version < 1) _upgradeToVersion1(db, dataDir);
     if (version < 2) _addCoverSizes(db);
+    if (version < 3) _addVkAlbumTitles(db);
     db.execute('PRAGMA user_version = $librarySchemaVersion');
     db.execute('COMMIT');
   } catch (_) {
@@ -68,6 +69,18 @@ void _upgradeToVersion1(Database db, String? dataDir) {
 void _addCoverSizes(Database db) {
   db.execute('ALTER TABLE tracks ADD COLUMN cover_mid_url TEXT');
   db.execute('ALTER TABLE tracks ADD COLUMN cover_full_url TEXT');
+}
+
+/// Version 3: the real titles of albums VK calls "unnamed" on a song, by the
+/// album's "ownerId_albumId". The album's access key is left out: it may
+/// change, the album does not. The next sync fills the table in.
+void _addVkAlbumTitles(Database db) {
+  db.execute('''
+    CREATE TABLE vk_album_titles (
+      album_key TEXT PRIMARY KEY,
+      title TEXT NOT NULL
+    )
+  ''');
 }
 
 void _createVersion1(Database db) {

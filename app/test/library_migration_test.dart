@@ -147,6 +147,7 @@ void main() {
     final db = sqlite3.open(dbPath);
     db.execute('ALTER TABLE tracks DROP COLUMN cover_mid_url');
     db.execute('ALTER TABLE tracks DROP COLUMN cover_full_url');
+    db.execute('DROP TABLE vk_album_titles');
     db.execute('PRAGMA user_version = 1');
     db.close();
 
@@ -158,6 +159,36 @@ void main() {
     expect(track.coverUrl, 'https://example.invalid/135.jpg');
     expect(track.coverMidUrl, isNull);
     expect(track.coverFullUrl, isNull);
+  });
+
+  test('version 2 gains the album titles and keeps its songs', () {
+    // A current library taken back to version 2.
+    final store = LibraryStore.open(dbPath);
+    final vk = store.ensureSource(TrackSource.vk, account: '1', name: 'VK');
+    store.upsertAll(vk, [
+      const NewTrack(
+        sourceKey: '1_1',
+        artist: 'Сплин',
+        title: 'Выхода нет',
+        album: 'unnamed',
+        durationSec: 236,
+        addedAt: 5,
+      ),
+    ]);
+    store.close();
+    final db = sqlite3.open(dbPath);
+    db.execute('DROP TABLE vk_album_titles');
+    db.execute('PRAGMA user_version = 2');
+    db.close();
+
+    final migrated = LibraryStore.open(dbPath);
+    addTearDown(migrated.close);
+    expect(versionOf(dbPath), librarySchemaVersion);
+    expect(migrated.loadAll().single.title, 'Выхода нет');
+    expect(migrated.vkAlbumTitles(), isEmpty);
+
+    migrated.saveVkAlbumTitle('-2_7', 'Молодость и панк-рок');
+    expect(migrated.vkAlbumTitles(), {'-2_7': 'Молодость и панк-рок'});
   });
 
   test('a library from a newer build is refused and left alone', () {

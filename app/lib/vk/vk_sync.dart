@@ -108,8 +108,62 @@ Future<Set<String>> findGoneKeys(
   return gone;
 }
 
+/// What VK puts as the title of a song's album when it keeps the real title
+/// to the album itself.
+const _unnamedAlbum = 'unnamed';
+
+/// The albums of [items] that VK calls "unnamed" and [titles] has no title
+/// for, each once, by [vkAlbumKey].
+Map<String, Map<String, dynamic>> unnamedAlbums(
+  List<Map<String, dynamic>> items,
+  Map<String, String> titles,
+) => {
+  for (final item in items)
+    if (item['album'] case final Map<String, dynamic> album
+        when album['title'] == _unnamedAlbum &&
+            !titles.containsKey(vkAlbumKey(album)))
+      vkAlbumKey(album): album,
+};
+
+/// Asks VK for the real title of each of [albums] and hands every title found
+/// to [onTitle] at once, so a sync that ends early keeps them.
+///
+/// `audio.getById` says "unnamed" again even for an album's release copy; only
+/// `audio.getPlaylistById` knows the title, and it takes one call per album.
+/// [gap] keeps the pace: at 150 ms VK answered 293 of 300 calls with no limit.
+///
+/// Titles are extras, so a failure never fails the sync. VK refuses a few
+/// albums (errors 15 and 100): that album stays blank and the next sync asks
+/// again. A dead line or an overloaded VK stops the
+/// lookups: the songs matter more than waiting out every album's retries.
+Future<void> lookUpAlbumTitles(
+  VkApiCall call,
+  Map<String, Map<String, dynamic>> albums, {
+  required void Function(String albumKey, String title) onTitle,
+  Duration gap = const Duration(milliseconds: 150),
+  void Function(int asked, int total)? onAsked,
+}) async {
+  var asked = 0;
+  for (final MapEntry(:key, value: album) in albums.entries) {
+    if (asked > 0) await Future<void>.delayed(gap);
+    try {
+      final reply = await call('audio.getPlaylistById', {
+        'owner_id': '${album['owner_id']}',
+        'playlist_id': '${album['id']}',
+        if (album['access_key'] case final String accessKey)
+          'access_key': accessKey,
+      }) as Map<String, dynamic>;
+      final title = (reply['title'] as String?)?.trim() ?? '';
+      if (title.isNotEmpty) onTitle(key, title);
+    } catch (error) {
+      if (isTransientVkError(error)) return;
+    }
+    onAsked?.call(++asked, albums.length);
+  }
+}
+
 /// Where a sync is, for the progress line.
-enum SyncStage { connecting, reading, checking, saving }
+enum SyncStage { connecting, reading, checking, albums, saving }
 
 /// Progress of one sync.
 class SyncProgress {
@@ -117,7 +171,8 @@ class SyncProgress {
 
   final SyncStage stage;
 
-  /// Pages read (reading) or songs looked up (checking) so far.
+  /// Pages read (reading), songs looked up (checking) or albums asked about
+  /// (albums) so far.
   final int done;
   final int total;
 
@@ -128,7 +183,8 @@ class SyncProgress {
     return switch (stage) {
       SyncStage.connecting => 0.02,
       SyncStage.reading => 0.05 + 0.75 * part,
-      SyncStage.checking => 0.8 + 0.15 * part,
+      SyncStage.checking => 0.8 + 0.05 * part,
+      SyncStage.albums => 0.85 + 0.1 * part,
       SyncStage.saving => 0.95,
     };
   }
@@ -144,6 +200,7 @@ class VkSyncResult {
     required this.updated,
     required this.back,
     required this.newlyGone,
+    this.albumsSkipped = 0,
   });
 
   final int sourceId;
@@ -164,6 +221,9 @@ class VkSyncResult {
   /// Songs marked gone by this sync.
   final int newlyGone;
 
+  /// "Unnamed" albums a first sync did not ask about; see [syncVkSource].
+  final int albumsSkipped;
+
   /// Whether the library the UI shows is out of date after this sync.
   bool get changedLibrary => added + updated + back + newlyGone > 0;
 }
@@ -172,12 +232,18 @@ class VkSyncResult {
 /// changed ones and marks songs VK no longer has as gone (see
 /// [findGoneKeys]). Never deletes songs. Records the outcome on the source;
 /// on failure records the reason and rethrows, leaving gone marks untouched.
+///
+/// Asks VK for the album titles it does not give ([lookUpAlbumTitles]). A
+/// first sync leaves that out and says so in [VkSyncResult.albumsSkipped]: a
+/// big library can have hundreds of such albums, and a new user's list must
+/// not stay empty meanwhile. The caller then runs one more sync.
 Future<VkSyncResult> syncVkSource({
   required VkApiCall call,
   required int userId,
   required LibraryStore store,
   void Function(SyncProgress progress)? onProgress,
   int pageSize = 200,
+  Duration albumGap = const Duration(milliseconds: 150),
 }) async {
   final sourceId = store.ensureSource(
     TrackSource.vk,
@@ -210,8 +276,28 @@ Future<VkSyncResult> syncVkSource({
       ),
     );
 
+    final albumTitles = store.vkAlbumTitles();
+    final unnamed = unnamedAlbums(library.items, albumTitles);
+    if (known.isNotEmpty) {
+      await lookUpAlbumTitles(
+        call,
+        unnamed,
+        gap: albumGap,
+        onTitle: (key, title) {
+          store.saveVkAlbumTitle(key, title);
+          albumTitles[key] = title;
+        },
+        onAsked: (asked, total) => onProgress?.call(
+          SyncProgress(SyncStage.albums, done: asked, total: total),
+        ),
+      );
+    }
+
     onProgress?.call(const SyncProgress(SyncStage.saving));
-    final fresh = library.items.map(vkItemToTrack).toList();
+    final fresh = [
+      for (final item in library.items)
+        vkItemToTrack(item, albumTitles: albumTitles),
+    ];
     final written = store.upsertTracks(sourceId, [
       for (final track in fresh) _keepSameCovers(track, known[track.sourceKey]),
     ]);
@@ -231,6 +317,7 @@ Future<VkSyncResult> syncVkSource({
       updated: written.changedIds.length - added - back,
       back: back,
       newlyGone: newlyGone,
+      albumsSkipped: known.isEmpty ? unnamed.length : 0,
     );
   } catch (error) {
     store.recordSync(sourceId, error: describeSyncError(error));
@@ -285,14 +372,25 @@ String describeSyncError(Object error) {
 String vkSourceKey(Map<String, dynamic> item) =>
     '${item['owner_id']}_${item['id']}';
 
+/// The key of an album in a song's reply: "ownerId_albumId".
+String vkAlbumKey(Map<String, dynamic> album) =>
+    '${album['owner_id']}_${album['id']}';
+
 /// Converts one `audio.get` item into a library song.
+///
+/// The album's name is VK's title for it. "unnamed" stands for a real album
+/// whose title is in [albumTitles] (by [vkAlbumKey]) once a sync found it, and
+/// shows nothing until then.
 ///
 /// Covers come from the item's own `thumb`, else from its album's. A song
 /// without a named album has no cover of its own: VK then sends one of its
 /// generic gradient placeholders as `thumb` (all 18 such songs of the test
 /// library, 3 of them with an album whose title is empty), and the song's
 /// stand-in tile says more than that.
-NewTrack vkItemToTrack(Map<String, dynamic> item) {
+NewTrack vkItemToTrack(
+  Map<String, dynamic> item, {
+  Map<String, String> albumTitles = const {},
+}) {
   final album = item['album'];
   final albumTitle = album is Map<String, dynamic>
       ? (album['title'] as String?)?.trim() ?? ''
@@ -305,7 +403,11 @@ NewTrack vkItemToTrack(Map<String, dynamic> item) {
     accessKey: item['access_key'] as String?,
     artist: (item['artist'] as String?)?.trim() ?? '',
     title: (item['title'] as String?)?.trim() ?? '',
-    album: album is Map<String, dynamic> ? album['title'] as String? : null,
+    album: switch (albumTitle) {
+      '' => null,
+      _unnamedAlbum => albumTitles[vkAlbumKey(album as Map<String, dynamic>)],
+      _ => albumTitle,
+    },
     durationSec: item['duration'] as int? ?? 0,
     addedAt: item['date'] as int? ?? 0,
     coverUrl: thumb?['photo_135'] as String?,
