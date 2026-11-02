@@ -168,6 +168,23 @@ void main() {
     // ignore: avoid_print
     print('after login: ${library.all.length} songs synced');
 
+    // The first sync shows the songs at once; a second one, with no step from
+    // the user, then brings the album titles VK leaves out of a song's reply.
+    final namedBefore = library.all.where((t) => t.album != null).length;
+    await waitUntil(
+      tester,
+      () => !sync.running,
+      timeout: const Duration(minutes: 3),
+      what: 'the sync for the album titles',
+    );
+    await tester.pump();
+    final namedAfter = library.all.where((t) => t.album != null).length;
+    // ignore: avoid_print
+    print('album titles: $namedBefore songs named, then $namedAfter');
+    expect(sync.lastOutcome?.error, isNull);
+    expect(namedAfter, greaterThan(namedBefore));
+    expect(library.all.where((t) => t.album == 'unnamed'), isEmpty);
+
     // A song streams with the new login. Withdrawn songs have no sound.
     var played = false;
     for (final track in library.all.take(10)) {

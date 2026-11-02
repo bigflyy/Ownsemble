@@ -138,6 +138,8 @@ Future<void> main(List<String> args) async {
     print('  launch ${i + 1}: ${jsonEncode(startRuns.last)}');
     await Future<void>.delayed(const Duration(seconds: 1));
   }
+  // Only the start time: for comparing two builds under the same load.
+  if (args.contains('--only-starts')) return;
 
   print('Idle RAM...');
   final memory = await _measureIdleMemory();
