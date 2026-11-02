@@ -1507,6 +1507,47 @@ void main() {
     expect(player.pauseToggles, 1, reason: 'typing a Stack name');
   });
 
+  group('column headers', () {
+    double leftOf(WidgetTester tester, Finder finder) =>
+        tester.getTopLeft(finder).dx;
+
+    testWidgets('sit above the columns they name', (tester) async {
+      await pumpShell(tester);
+      final header = find.byKey(const ValueKey('list-header'));
+      expect(header, findsOneWidget);
+      final title = find.descendant(of: header, matching: find.text('Title'));
+      final album = find.descendant(of: header, matching: find.text('Album'));
+      final time = find.descendant(of: header, matching: find.text('Time'));
+
+      expect(leftOf(tester, title), leftOf(tester, find.text('Песня 0')));
+      expect(leftOf(tester, album), leftOf(tester, find.text('Альбом').first));
+      expect(
+        tester.getTopRight(time).dx,
+        tester.getTopRight(find.text('3:20').first).dx,
+      );
+      expect(
+        tester.getBottomLeft(header).dy,
+        lessThanOrEqualTo(tester.getTopLeft(find.text('Песня 0')).dy),
+      );
+    });
+
+    testWidgets('stay in place when the list scrolls', (tester) async {
+      await pumpShell(tester, size: const Size(1400, 330));
+      final header = find.byKey(const ValueKey('list-header'));
+      final before = tester.getTopLeft(header);
+      library.scroll.jumpTo(40);
+      await tester.pump();
+      expect(tester.getTopLeft(header), before);
+    });
+
+    testWidgets('are left out of an empty list', (tester) async {
+      await pumpShell(tester);
+      await tester.enterText(find.byType(TextField), 'нет такой песни');
+      await tester.pump(const Duration(milliseconds: 400));
+      expect(find.byKey(const ValueKey('list-header')), findsNothing);
+    });
+  });
+
   testWidgets('messages never cover the player or the sidebar', (tester) async {
     for (final size in const [Size(1400, 900), Size(900, 700)]) {
       await pumpShell(tester, size: size);

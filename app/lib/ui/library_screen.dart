@@ -632,6 +632,8 @@ class _LibraryScreenState extends State<LibraryScreen> {
                               '${library.viewCount} songs',
                     jump: library.jump,
                   ),
+                  if (!view.isLater && library.visible.isNotEmpty)
+                    _ListHeader(numbered: !_settings.thumbnails),
                   Expanded(
                     child: view.isLater
                         ? _LaterPage(view: view)
@@ -873,6 +875,54 @@ class _ViewHeading extends StatelessWidget {
               child: _JumpPill(jump: jump),
             ),
           ],
+        ],
+      ),
+    );
+  }
+}
+
+/// Names the columns of [_SongRow] above the list, where scrolling leaves it
+/// in place. Its widths and gaps are the row's, or the two would drift apart.
+class _ListHeader extends StatelessWidget {
+  const _ListHeader({required this.numbered});
+
+  /// Whether the rows show numbers instead of tiles.
+  final bool numbered;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = OwnColors.of(context);
+    final style = TextStyle(
+      fontSize: 12,
+      fontWeight: FontWeight.w500,
+      color: colors.dim2,
+    );
+    return Container(
+      key: const ValueKey('list-header'),
+      // The list's side padding plus the row's.
+      padding: const EdgeInsets.fromLTRB(22, 0, 22, 6),
+      margin: const EdgeInsets.only(bottom: 2),
+      decoration: BoxDecoration(
+        border: Border(bottom: BorderSide(color: colors.line)),
+      ),
+      child: Row(
+        children: [
+          SizedBox(
+            width: 44,
+            child: numbered
+                ? Text('#', textAlign: TextAlign.right, style: style)
+                : null,
+          ),
+          const SizedBox(width: 14),
+          Expanded(flex: 16, child: Text('Title', style: style)),
+          const SizedBox(width: 14),
+          Expanded(flex: 10, child: Text('Album', style: style)),
+          // The stored mark has no header: its tooltip explains it.
+          const SizedBox(width: 14 + 18 + 14),
+          SizedBox(
+            width: 44,
+            child: Text('Time', textAlign: TextAlign.right, style: style),
+          ),
         ],
       ),
     );
