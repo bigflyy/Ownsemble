@@ -190,6 +190,8 @@ class SpeedBench {
     final clock = Stopwatch()..start();
     // The text is forgotten after 2 s, sooner than the song gets 4 s on.
     Track? jumpedTo;
+    // Every text the jump held, so that a lost letter shows as itself.
+    final jumpTextsSeen = <String>{};
     var wentBack = false;
     var wentForward = false;
     bool done() =>
@@ -201,6 +203,7 @@ class SpeedBench {
     while (!done() && clock.elapsed < const Duration(seconds: 15)) {
       await Future<void>.delayed(const Duration(milliseconds: 50));
       final row = library.jump.row;
+      if (library.jump.text.isNotEmpty) jumpTextsSeen.add(library.jump.text);
       if (library.jump.text == jumpText && row != null) {
         jumpedTo = list[row];
       }
@@ -214,6 +217,7 @@ class SpeedBench {
           (normalizeForSearch(jumpedTo!.title).startsWith(wanted) ||
               normalizeForSearch(jumpedTo.artist).startsWith(wanted)),
       'jumpText': jumpText,
+      'jumpTextsSeen': jumpTextsSeen.toList(),
       'jumpedToTitle': jumpedTo?.title,
       'jumpedToArtist': jumpedTo?.artist,
       'mouseBack': wentBack,

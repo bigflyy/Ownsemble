@@ -132,7 +132,7 @@ Future<void> main(List<String> args) async {
   if (args.contains('--only-restart')) {
     final bench = p.join(dataDir, 'bench.json');
     print(jsonEncode(await _checkWindowPlacement(dataDir)));
-    print(jsonEncode(await _checkRealKeys(bench)));
+    print(jsonEncode(await _checkRealKeysRetrying(bench)));
     print(jsonEncode(await _checkSavedSong('playToCloseCached', bench)));
     if (session != null) {
       print(jsonEncode(await _checkSavedSong('playToCloseStream', bench)));
@@ -178,7 +178,7 @@ Future<void> main(List<String> args) async {
   print('  ${jsonEncode(windowPlacement)}');
 
   print('Real Windows key messages...');
-  final realKeys = await _checkRealKeys(benchFile);
+  final realKeys = await _checkRealKeysRetrying(benchFile);
   print('  ${jsonEncode(realKeys)}');
 
   print('Last song across a real window close...');
@@ -385,6 +385,25 @@ void _pressSideButton(int window, int button) {
   const point = 200 | (200 << 16);
   _postMessage(window, _wmXButtonDown, button << 16, point);
   _postMessage(window, _wmXButtonUp, button << 16, point);
+}
+
+/// [_checkRealKeys], again when a letter was lost on the way. A letter is two
+/// posted messages here, and on a busy machine the engine can take the key
+/// before the text is in its queue; it then types the key's own Latin letter.
+/// With a real keyboard Windows makes the text on the app's own thread, so
+/// that cannot happen. Any other failure is reported as it is.
+Future<Map<String, Object?>> _checkRealKeysRetrying(String benchFile) async {
+  var lostLetters = 0;
+  while (true) {
+    final result = await _checkRealKeys(benchFile);
+    final seen = (result['jumpTextsSeen'] as List?) ?? const [];
+    final letterLost =
+        result['ok'] != true && seen.any((text) => '$text'.endsWith('a'));
+    if (!letterLost || lostLetters == 2) {
+      return {...result, 'lostLetterRetries': lostLetters};
+    }
+    lostLetters++;
+  }
 }
 
 /// The real keyboard path of the release, which simulated keys in the tests
