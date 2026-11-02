@@ -71,6 +71,21 @@ own signed link. Two faults, both seen on the same 3 of 108 covers:
   those 3 images failed, and the next sync's links worked. A link that failed once
   is worth replacing, so store the newest link.
 
+## Album titles (test account, 2026-11-02)
+
+A song's `album` object has three shapes in the 126 test songs: a real title (92),
+the word "unnamed" (16), and an empty title (3, the withdrawn songs). 15 songs have
+no `album` object at all: user uploads with nothing to show.
+
+- **"unnamed" is not a name.** Those albums are real and have real covers.
+  `audio.getPlaylistById` with the object's `owner_id`, `id` and `access_key` gave
+  the true title for 16 of 16, in 236-326 ms each. A batched `audio.getById` on the
+  songs' `release_audio_id` keys says "unnamed" again, so it takes one call per
+  album. The app stores each title once, by `owner_id` + `id`.
+- **Pace.** 300 calls with 150 ms between them took 131 s and hit no rate limit. 7
+  calls failed, all with errors 100 and 15 (refused, not limited): among the 88
+  albums of the test library a few cannot be read at all.
+
 ## Answers that are not the song (test account, 2026-10-30)
 
 `206` for `Range: bytes=0-` is normal: 305 of 738 whole-file answers were 206 with
