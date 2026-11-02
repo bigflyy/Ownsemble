@@ -65,10 +65,15 @@ class VkStream {
     this.restricted = false,
     this.trackId,
     this.releaseKey,
+    this.playlistLinks = 0,
   });
 
   /// Fresh link to the audio; null when VK gives none.
   final Uri? link;
+
+  /// How many HLS playlist links VK gave for this song on this request,
+  /// counted in [VkClient.resolveStream]. 0 on almost every song.
+  final int playlistLinks;
 
   /// VK's `content_restricted` is 1: `audio.getRestrictionPopup` says the
   /// musician or their representative decided the song is unavailable.
@@ -164,20 +169,43 @@ class VkClient {
     return reply['response'];
   }
 
+  /// How many links are asked for before a playlist link is accepted.
+  static const _linkTries = 4;
+
   /// What VK offers for one song right now, with a fresh link.
+  ///
+  /// Now and then (3 of 492 links, on songs that gave the MP3 before and
+  /// after) VK gives a link to an HLS playlist instead: an encrypted form of
+  /// the song that the proxy can neither pass to mpv nor save as one file. A
+  /// new link brought the MP3 15 times of 15, so a playlist link is asked
+  /// for again. If VK insists, the link is handed over and the proxy reports
+  /// it as not audio.
   Future<VkStream> resolveStream(String sourceKey, String? accessKey) async {
     final id = accessKey == null ? sourceKey : '${sourceKey}_$accessKey';
-    final reply = await call('audio.getById', {'audios': id}) as List;
-    if (reply.isEmpty) return const VkStream();
-    final audio = reply.first as Map<String, dynamic>;
-    final url = audio['url'] as String?;
-    return VkStream(
-      link: (url == null || url.isEmpty) ? null : Uri.parse(url),
-      restricted: audio['content_restricted'] == 1,
-      trackId: audio['track_id'] as int?,
-      releaseKey: audio['release_audio_id'] as String?,
-    );
+    var playlistLinks = 0;
+    while (true) {
+      final reply = await call('audio.getById', {'audios': id}) as List;
+      if (reply.isEmpty) return VkStream(playlistLinks: playlistLinks);
+      final audio = reply.first as Map<String, dynamic>;
+      final url = audio['url'] as String?;
+      final link = (url == null || url.isEmpty) ? null : Uri.parse(url);
+      final isPlaylist = link != null && _isPlaylistLink(link);
+      if (isPlaylist) playlistLinks++;
+      if (isPlaylist && playlistLinks < _linkTries) continue;
+      return VkStream(
+        link: link,
+        restricted: audio['content_restricted'] == 1,
+        trackId: audio['track_id'] as int?,
+        releaseKey: audio['release_audio_id'] as String?,
+        playlistLinks: playlistLinks,
+      );
+    }
   }
+
+  /// Whether [link] leads to an HLS playlist; its path says so, with no need
+  /// to ask the audio server.
+  static bool _isPlaylistLink(Uri link) =>
+      link.path.toLowerCase().endsWith('.m3u8');
 
   /// A link to the official release of [stream]'s recording, or null when it
   /// has none. Another recording is never accepted: a wrong song is worse

@@ -76,6 +76,19 @@ void main() {
         await request.response.close();
         return;
       }
+      if (request.uri.path == '/long-playlist') {
+        // An HLS playlist of a very long song: too big to look like a stub.
+        request.response
+          ..statusCode = HttpStatus.partialContent
+          ..headers.contentType = ContentType(
+            'application',
+            'vnd.apple.mpegurl',
+          )
+          ..contentLength = 40000
+          ..add(List.filled(40000, 35));
+        await request.response.close();
+        return;
+      }
       if (request.uri.path == '/broken') {
         // What VK's audio server sometimes answers: an HTML error page.
         request.response
@@ -284,6 +297,13 @@ void main() {
       stubs = 99;
       final stream = proxy.add(upstreamUri('/stub'));
       final (response, _) = await get(stream.localUri);
+      expect(response.statusCode, HttpStatus.badGateway);
+      expect(await stream.upstreamFailure, HttpStatus.badGateway);
+    });
+
+    test('an HLS playlist never reaches mpv, however long', () async {
+      final stream = proxy.add(upstreamUri('/long-playlist'));
+      final (response, _) = await get(stream.localUri, range: 'bytes=0-');
       expect(response.statusCode, HttpStatus.badGateway);
       expect(await stream.upstreamFailure, HttpStatus.badGateway);
     });

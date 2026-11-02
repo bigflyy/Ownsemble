@@ -20,10 +20,14 @@ class PlayTiming {
     this.networkFirstChunkMs,
     this.sampleRate,
     this.error,
+    this.playlistLinks = 0,
   });
 
   final bool ok;
   final bool cached;
+
+  /// HLS playlist links VK gave before the link that was used, for perf.log.
+  final int playlistLinks;
 
   /// Time spent getting a fresh stream URL from VK (0 for cached songs).
   final int resolveMs;
@@ -238,6 +242,7 @@ class PlayerService {
     _restored = false;
     _currentController.add(track);
     var resolveMs = 0;
+    var playlistLinks = 0;
     PlayTiming finish(PlayTiming timing) {
       if (generation == _generation) _timingController.add(timing);
       return timing;
@@ -267,6 +272,7 @@ class PlayerService {
           track.accessKey,
         );
         resolveMs = clock.elapsedMilliseconds;
+        playlistLinks = stream.playlistLinks;
         final link = stream.link;
         if (link == null) {
           throw StateError(
@@ -384,6 +390,7 @@ class PlayerService {
           toSoundMs: clock.elapsedMilliseconds,
           networkFirstChunkMs: await proxied?.networkFirstChunkMs,
           sampleRate: _player.state.audioParams.sampleRate,
+          playlistLinks: playlistLinks,
         ),
       );
     } catch (error) {
@@ -402,6 +409,7 @@ class PlayerService {
           error: error is TimeoutException
               ? 'no sound after 20 s. The connection may be too slow'
               : describePlayError(error),
+          playlistLinks: playlistLinks,
         ),
       );
     }

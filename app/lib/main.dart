@@ -313,10 +313,13 @@ void _logPlayTimings(PlayerService player, File log) {
   });
   player.timings.listen((timing) {
     final kind = timing.cached ? 'cached' : 'stream';
+    final skipped = timing.playlistLinks == 0
+        ? ''
+        : ', ${timing.playlistLinks} HLS links from VK';
     final line = timing.ok
         ? '$kind sound ${timing.toSoundMs} ms'
-              '${timing.cached ? '' : ' (VK link ${timing.resolveMs} ms)'}'
-        : '$kind failed after ${timing.toSoundMs} ms: ${timing.error}';
+              '${timing.cached ? '' : ' (VK link ${timing.resolveMs} ms$skipped)'}'
+        : '$kind failed after ${timing.toSoundMs} ms$skipped: ${timing.error}';
     log.writeAsStringSync(
       '${DateTime.now().toIso8601String()} $line\n',
       mode: FileMode.append,

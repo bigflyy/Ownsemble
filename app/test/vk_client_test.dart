@@ -17,6 +17,24 @@ class FakeVkAudio extends VkClient {
   }
 }
 
+/// [VkClient] answering `audio.getById` with [links], one per request; the
+/// last one repeats.
+class ScriptedVkLinks extends VkClient {
+  ScriptedVkLinks(this.links) : super(const []);
+
+  final List<String> links;
+  int asked = 0;
+
+  @override
+  Future<Object?> call(String method, Map<String, String> params) async {
+    final link = links[asked < links.length ? asked : links.length - 1];
+    asked++;
+    return [
+      {'url': link},
+    ];
+  }
+}
+
 void main() {
   group('resolveStream', () {
     const copy = '660306161_456239124';
@@ -40,6 +58,39 @@ void main() {
       expect(stream.restricted, isFalse);
       expect(stream.trackId, 20587574);
       expect(stream.releaseKey, release);
+    });
+
+    group('an HLS playlist link instead of the MP3', () {
+      const playlist = 'https://a.invalid/x/index.m3u8?extra=secret';
+      const song = 'https://a.invalid/x/song.mp3?extra=secret';
+
+      test('a new link is asked for and it brings the MP3', () async {
+        final vk = ScriptedVkLinks([playlist, song]);
+        final stream = await vk.resolveStream(copy, 'key');
+        expect(stream.link, Uri.parse(song));
+        expect(stream.playlistLinks, 1);
+        expect(vk.asked, 2);
+      });
+
+      test('a link to the MP3 is taken at once', () async {
+        final vk = ScriptedVkLinks([song]);
+        final stream = await vk.resolveStream(copy, 'key');
+        expect(stream.playlistLinks, 0);
+        expect(vk.asked, 1);
+      });
+
+      test('only the path decides, not the query', () async {
+        final vk = ScriptedVkLinks(['https://a.invalid/song.mp3?x=index.m3u8']);
+        expect((await vk.resolveStream(copy, 'key')).playlistLinks, 0);
+      });
+
+      test('it gives up after a few and hands over what VK gave', () async {
+        final vk = ScriptedVkLinks([playlist]);
+        final stream = await vk.resolveStream(copy, 'key');
+        expect(stream.link, Uri.parse(playlist));
+        expect(stream.playlistLinks, 4);
+        expect(vk.asked, 4);
+      });
     });
 
     test('a song VK withdrew has no link and is marked restricted', () async {

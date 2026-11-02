@@ -239,11 +239,13 @@ class StreamProxy {
   /// A whole song is never this short: at 128 kbit/s this is 2 seconds.
   static const _stubBytes = 32 * 1024;
 
-  /// Whether [reply] is something other than the song: an error page or, for
-  /// a whole-file request, a stub. VK has answered with a 206 of 1.7 KB and
-  /// closed (twice in about 300 plays); the song played on the next try.
+  /// Whether [reply] is something other than the song: an error page, an HLS
+  /// playlist (the "206 of 1.7 KB" VK sometimes answers, see
+  /// [VkClient.resolveStream]) or, for a whole-file request, a stub.
   static bool _isNotAudio(HttpClientResponse reply, bool wholeFile) {
     if (reply.statusCode >= 400) return true;
+    final type = reply.headers.value(HttpHeaders.contentTypeHeader);
+    if (type != null && type.toLowerCase().contains('mpegurl')) return true;
     final length = reply.contentLength;
     return wholeFile && length >= 0 && length < _stubBytes;
   }
