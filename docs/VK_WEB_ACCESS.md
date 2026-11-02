@@ -22,7 +22,12 @@ VK moved to `vk.ru`; `vk.com` redirects there and the session cookies live on
    - `catalog.getAudio`: what the web music page itself loads.
 4. A track carries artist, title, duration, date added, album with covers up to
    1200 px, `has_lyrics`, `is_explicit`, `access_key`, `track_code` and a
-   direct stream `url` (plain MP3 on an `okcdn.ru` host, not HLS).
+   direct stream `url` (plain MP3 on an `okcdn.ru` host). About 1 link in 160
+   is an HLS playlist instead: the path ends in `.m3u8`, the reply is `206`,
+   `application/vnd.apple.mpegurl`, 1.3-1.7 KB, about every second segment
+   AES-128 encrypted. Which song gets one looks random (3 of 492 links, 3
+   different songs in 4 passes over the library). A new `audio.getById` gave the
+   MP3 15 times of 15, so the app asks again instead of playing the playlist.
 
 ## Measurements
 
