@@ -368,6 +368,39 @@ void main() {
     expect(find.textContaining('1 gone from VK'), findsOneWidget);
     final fakeSong = gone.single;
 
+    // Album titles VK leaves out of a song's reply come from the album itself.
+    // A song still blank is named, so a blank is never just a number.
+    expect(progressSeen, contains(SyncStage.albums));
+    expect(
+      library.all.where((t) => t.album == 'unnamed').map((t) => t.title),
+      isEmpty,
+      reason: '"unnamed" never reaches the list',
+    );
+    final albumOf = {for (final t in library.all) t.title: t.album};
+    expect(albumOf['Молодость'], 'Молодость и панк-рок');
+    expect(albumOf['дурень'], 'бесполезно, но красиво');
+    expect(albumOf['Я и одиночество'], 'Байполар');
+    // ignore: avoid_print
+    print(
+      'albums: ${library.all.where((t) => t.album != null).length} of '
+      '${library.all.length} songs named; blank: '
+      '${library.all.where((t) => t.album == null).map((t) => t.title).join(', ')}',
+    );
+
+    // The column headers name what the rows show, on real rows.
+    final listHeader = find.byKey(const ValueKey('list-header'));
+    expect(listHeader, findsOneWidget);
+    final firstTitle = find.text(library.visible.first.title).first;
+    expect(
+      tester
+          .getTopLeft(
+            find.descendant(of: listHeader, matching: find.text('Title')),
+          )
+          .dx,
+      tester.getTopLeft(firstTitle).dx,
+      reason: 'Title sits above the titles',
+    );
+
     final covers = CoverScope.maybeOf(
       tester.element(find.byType(LibraryScreen)),
     )!;
@@ -536,6 +569,18 @@ void main() {
     await tester.pump();
     expect(library.searchText.text, isEmpty, reason: 'Esc clears search');
     expect(library.visible.length, library.all.length);
+
+    // Search finds a real album title, which VK's song reply never said.
+    await tester.enterText(field, 'байпол');
+    await tester.pump();
+    expect(
+      library.visible.map((t) => t.title),
+      contains('Я и одиночество'),
+      reason: 'search finds the real album title',
+    );
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await tester.pump();
+    expect(library.searchText.text, isEmpty);
 
     // Player controls on real playback, used through the player bar.
     Future<PlayTiming> waitForTiming(
