@@ -16,6 +16,7 @@ class Sidebar extends StatelessWidget {
     required this.library,
     required this.collections,
     required this.downloads,
+    required this.stored,
     required this.rail,
     required this.canExpand,
     required this.onToggleRail,
@@ -26,6 +27,9 @@ class Sidebar extends StatelessWidget {
 
   /// How many songs are downloaded, for the Downloads count.
   final int downloads;
+
+  /// How many songs have a stored copy, for the On this computer count.
+  final int stored;
 
   /// Shown as an icon rail.
   final bool rail;
@@ -110,6 +114,12 @@ class Sidebar extends StatelessWidget {
                   Icons.download_done,
                   const LibraryView(ViewKind.downloads),
                   count: downloads,
+                ),
+                item(
+                  'On this computer',
+                  Icons.computer_outlined,
+                  const LibraryView(ViewKind.stored),
+                  count: stored,
                 ),
                 if (!rail) const _Section('Collections'),
                 if (rail)

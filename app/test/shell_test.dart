@@ -1646,6 +1646,157 @@ void main() {
     });
   });
 
+  group('views of stored songs', () {
+    late AudioStorage storage;
+
+    Track song(int index) => library.byId(ids[index])!;
+
+    setUp(() {
+      store.saveAudioFile(ids[4], 'cache/b.mp3', 20);
+      storage = AudioStorage(dataDir: '.', store: store);
+      library = LibraryController(
+        store.loadAll(),
+        collections: collections,
+        storage: storage,
+      );
+    });
+
+    const onComputer = LibraryView(ViewKind.stored);
+    const downloads = LibraryView(ViewKind.downloads);
+
+    Future<void> openOnComputer(WidgetTester tester) async {
+      await pumpShell(tester, player: _StartedPlayer(storage: storage));
+      await tester.tap(find.byKey(const ValueKey('nav-stored')));
+      await tester.pump();
+    }
+
+    Finder mark(int index, IconData icon) =>
+        find.byKey(ValueKey('mark-${ids[index]}-${icon.codePoint}'));
+
+    Finder sidebarCount(String item, String count) => find.descendant(
+      of: find.byKey(ValueKey('nav-$item')),
+      matching: find.text(count),
+    );
+
+    testWidgets('On this computer lists cached and downloaded songs with '
+        'their marks, in library order', (tester) async {
+      await openOnComputer(tester);
+      expect(find.text('On this computer'), findsWidgets);
+      expect(find.text('2 songs'), findsOneWidget);
+      expect(library.visible.map((t) => t.id), [ids[2], ids[4]]);
+      expect(mark(2, Icons.download_done), findsOneWidget);
+      expect(mark(4, Icons.cloud_done_outlined), findsOneWidget);
+      expect(find.byKey(ValueKey('song-${ids[0]}')), findsNothing);
+      expect(sidebarCount('stored', '2'), findsOneWidget);
+      expect(sidebarCount('downloads', '1'), findsOneWidget);
+    });
+
+    testWidgets('the rail keeps the view, without a count', (tester) async {
+      settings.toggleRail();
+      await openOnComputer(tester);
+      expect(library.view, onComputer);
+      expect(find.byTooltip('On this computer'), findsOneWidget);
+      expect(sidebarCount('stored', '2'), findsNothing);
+    });
+
+    testWidgets('it follows the storage while on screen: songs come in when '
+        'saved and go when the cache limit removes them', (tester) async {
+      await openOnComputer(tester);
+
+      storage.recordStored(song(0), 'cache/c.mp3', 30);
+      await tester.pump();
+      expect(library.visible.map((t) => t.id), [ids[0], ids[2], ids[4]]);
+      expect(mark(0, Icons.cloud_done_outlined), findsOneWidget);
+      expect(find.text('3 songs'), findsOneWidget);
+      expect(sidebarCount('stored', '3'), findsOneWidget);
+
+      store.writeSetting(AudioStorage.limitSetting, '1');
+      storage.applyLimit();
+      await tester.pump();
+      expect(library.visible.map((t) => t.id), [ids[2]], reason: 'downloaded');
+      expect(find.text('1 song'), findsOneWidget);
+      expect(sidebarCount('stored', '1'), findsOneWidget);
+    });
+
+    testWidgets('a removed download stays here as cached, and leaves '
+        'Downloads', (tester) async {
+      await openOnComputer(tester);
+      storage.removeDownload(song(2));
+      await tester.pump();
+      expect(library.visible.map((t) => t.id), [ids[2], ids[4]]);
+      expect(mark(2, Icons.cloud_done_outlined), findsOneWidget);
+      expect(sidebarCount('downloads', '0'), findsOneWidget);
+
+      library.showView(downloads);
+      expect(library.visible, isEmpty);
+    });
+
+    testWidgets('it says what it is for when empty', (tester) async {
+      store.removeAudioFile(ids[2]);
+      store.removeAudioFile(ids[4]);
+      library = LibraryController(
+        store.loadAll(),
+        collections: collections,
+        storage: storage,
+      );
+      await openOnComputer(tester);
+      expect(find.textContaining('Nothing stored yet'), findsOneWidget);
+      expect(find.byKey(const ValueKey('list-header')), findsNothing);
+    });
+
+    test('search works inside it and the view comes back after a restart', () {
+      final kept = <String, String?>{};
+      LibraryController restart() => LibraryController(
+        store.loadAll(),
+        collections: collections,
+        storage: storage,
+        readSetting: (key) => kept[key],
+        writeSetting: (key, value) => kept[key] = value,
+      );
+
+      restart().showView(onComputer);
+      final second = restart();
+      expect(second.view, onComputer);
+      expect(second.visible.map((t) => t.id), [ids[2], ids[4]]);
+      second.searchText.text = 'песня 4';
+      expect(second.visible.map((t) => t.id), [ids[4]]);
+      expect(second.viewCount, 2);
+    });
+
+    for (final view in [downloads, onComputer]) {
+      test('${view.kind.name}: a save starting or ending keeps a jump, '
+          'because the rows stay the same', () async {
+        library.showView(view);
+        library.jump.mark(0);
+        var changes = 0;
+        library.addListener(() => changes++);
+
+        final save = Completer<int?>();
+        storage.noteSaving(song(0), save.future);
+        save.complete(null);
+        await save.future;
+        await Future<void>.delayed(Duration.zero);
+
+        expect(library.jump.row, 0);
+        expect(changes, 0, reason: 'nothing on the list changed');
+      });
+    }
+
+    test('a change of the rows ends a jump: it holds a row number', () {
+      library.showView(onComputer);
+      library.jump.mark(1);
+      storage.recordStored(song(0), 'cache/c.mp3', 30);
+      expect(library.jump.row, isNull);
+    });
+
+    test('other views do not look at the storage', () {
+      library.jump.mark(0);
+      storage.recordStored(song(0), 'cache/c.mp3', 30);
+      expect(library.jump.row, 0);
+      expect(library.visible.length, 6);
+    });
+  });
+
   testWidgets('Space types in text fields and plays or pauses elsewhere', (
     tester,
   ) async {

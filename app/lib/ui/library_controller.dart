@@ -12,7 +12,19 @@ const rowHeight = 58.0;
 
 /// The views of the sidebar. Artists, Playlists and Charts are planned
 /// after the MVP and show a "later" page.
-enum ViewKind { songs, artists, downloads, stack, playlists, history, charts }
+///
+/// Downloads holds the songs kept for good; stored holds everything that
+/// plays without the network, cached songs too ("On this computer").
+enum ViewKind {
+  songs,
+  artists,
+  downloads,
+  stored,
+  stack,
+  playlists,
+  history,
+  charts,
+}
 
 /// One view: its kind and, for a Stack, which one.
 @immutable
@@ -33,6 +45,10 @@ class LibraryView {
   /// Whether a song can appear more than once (History, Stacks).
   bool get hasEntries => kind == ViewKind.history || kind == ViewKind.stack;
 
+  /// Whether the songs of this view depend on what is stored.
+  bool get listsStorage =>
+      kind == ViewKind.downloads || kind == ViewKind.stored;
+
   @override
   bool operator ==(Object other) =>
       other is LibraryView && other.kind == kind && other.stackId == stackId;
@@ -45,7 +61,7 @@ class LibraryView {
 /// search text and what is shown.
 ///
 /// Songs searches the whole library through the index. Other views list
-/// their own songs (downloads, History plays, Stack entries) and the search
+/// their own songs (stored songs, History plays, Stack entries) and the search
 /// keeps those that match, in the view's order; History and Stacks may list
 /// a song more than once.
 class LibraryController extends ChangeNotifier {
@@ -110,7 +126,7 @@ class LibraryController extends ChangeNotifier {
   /// History and Stacks; without it those views are empty.
   final CollectionsController? collections;
 
-  /// Stored audio, for the Downloads view.
+  /// Stored audio, for the Downloads and On this computer views.
   final AudioStorage? storage;
 
   SearchIndex _index;
@@ -323,13 +339,43 @@ class LibraryController extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Stored audio changed: the Downloads view may gain or lose songs.
+  /// Stored audio changed: the view on screen may gain or lose songs. Saves
+  /// starting and ending also land here without changing its rows, and those
+  /// must not end a jump. A new mark on a row is the list's own business: it
+  /// listens to the storage itself.
   void _onStorageChanged() {
-    if (_view.kind != ViewKind.downloads) return;
+    if (!_view.listsStorage) return;
+    final before = _base;
     _rebuildBase();
+    if (_sameSongs(before, _base)) {
+      _base = before;
+      return;
+    }
     _applySearch();
     jump.clear();
     notifyListeners();
+  }
+
+  /// Whether [a] and [b] are the same songs in the same order.
+  static bool _sameSongs(List<Track>? a, List<Track>? b) {
+    if (a == null || b == null || a.length != b.length) return false;
+    for (var i = 0; i < a.length; i++) {
+      if (a[i].id != b[i].id) return false;
+    }
+    return true;
+  }
+
+  /// The songs whose stored state passes [keep], in library order.
+  List<Track> _storedSongs(bool Function(StoredState state) keep) {
+    final storage = this.storage;
+    return [
+      for (final track in _all)
+        if (keep(
+          storage?.stateOf(track) ??
+              (path: track.localPath, pinned: track.pinned),
+        ))
+          track,
+    ];
   }
 
   void _rebuildBase() {
@@ -338,14 +384,9 @@ class LibraryController extends ChangeNotifier {
       case ViewKind.songs:
         _base = null;
       case ViewKind.downloads:
-        final storage = this.storage;
-        _base = [
-          for (final track in _all)
-            if (storage == null
-                ? track.isDownloaded
-                : storage.stateOf(track).pinned)
-              track,
-        ];
+        _base = _storedSongs((state) => state.path != null && state.pinned);
+      case ViewKind.stored:
+        _base = _storedSongs((state) => state.path != null);
       case ViewKind.history || ViewKind.stack:
         final collections = this.collections;
         final entries =

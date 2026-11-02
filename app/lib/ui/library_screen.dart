@@ -524,14 +524,18 @@ class _LibraryScreenState extends State<LibraryScreen> {
                               ?widget.collections,
                               ?_storage,
                             ]),
-                            builder: (context, _) => Sidebar(
-                              library: library,
-                              collections: widget.collections,
-                              downloads: _downloadCount(),
-                              rail: rail,
-                              canExpand: roomForSidebar,
-                              onToggleRail: _settings.toggleRail,
-                            ),
+                            builder: (context, _) {
+                              final counts = _storedCounts();
+                              return Sidebar(
+                                library: library,
+                                collections: widget.collections,
+                                downloads: counts.downloaded,
+                                stored: counts.stored,
+                                rail: rail,
+                                canExpand: roomForSidebar,
+                                onToggleRail: _settings.toggleRail,
+                              );
+                            },
                           ),
                           Expanded(
                             child: _main(
@@ -562,17 +566,20 @@ class _LibraryScreenState extends State<LibraryScreen> {
     );
   }
 
-  int _downloadCount() {
+  /// How many songs are downloaded and how many have any stored copy.
+  ({int downloaded, int stored}) _storedCounts() {
     final storage = _storage;
-    var count = 0;
+    var downloaded = 0;
+    var stored = 0;
     for (final track in library.all) {
-      if (storage == null
-          ? track.isDownloaded
-          : storage.stateOf(track).pinned) {
-        count++;
-      }
+      final state =
+          storage?.stateOf(track) ??
+          (path: track.localPath, pinned: track.pinned);
+      if (state.path == null) continue;
+      stored++;
+      if (state.pinned) downloaded++;
     }
-    return count;
+    return (downloaded: downloaded, stored: stored);
   }
 
   /// Search and toggles, the view's title, and its songs.
@@ -655,12 +662,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
                 children: [
                   _ViewHeading(
                     title: _viewTitle(view),
-                    count: view.isLater
-                        ? null
-                        : library.visible.length == library.viewCount
-                        ? '${library.viewCount} songs'
-                        : '${library.visible.length} of '
-                              '${library.viewCount} songs',
+                    count: view.isLater ? null : _countLabel(),
                     jump: library.jump,
                     tight: tight,
                   ),
@@ -683,10 +685,19 @@ class _LibraryScreenState extends State<LibraryScreen> {
     );
   }
 
+  /// "12 songs", "1 song", or "3 of 12 songs" while a search filters them.
+  String _countLabel() {
+    final all = library.viewCount;
+    final songs = all == 1 ? '1 song' : '$all songs';
+    final shown = library.visible.length;
+    return shown == all ? songs : '$shown of $songs';
+  }
+
   String _viewTitle(LibraryView view) => switch (view.kind) {
     ViewKind.songs => 'All songs',
     ViewKind.artists => 'Artists',
     ViewKind.downloads => 'Downloads',
+    ViewKind.stored => 'On this computer',
     ViewKind.stack =>
       widget.collections?.stacks
               .where((s) => s.id == view.stackId)
@@ -706,6 +717,9 @@ class _LibraryScreenState extends State<LibraryScreen> {
               ViewKind.downloads =>
                 'No downloads yet. Right-click a song and choose Download '
                     'to keep it on this computer.',
+              ViewKind.stored =>
+                'Nothing stored yet. Songs you play and songs you download '
+                    'land here, and these play without the network.',
               ViewKind.history => 'Songs you play show up here.',
               ViewKind.stack =>
                 'Put songs on top of a Stack from the player or a song\'s '
