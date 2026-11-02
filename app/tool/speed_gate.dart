@@ -46,6 +46,15 @@ final _getWindowRect = _user32
       Int32 Function(IntPtr, Pointer<Int32>),
       int Function(int, Pointer<Int32>)
     >('GetWindowRect');
+final _getClientRect = _user32
+    .lookupFunction<
+      Int32 Function(IntPtr, Pointer<Int32>),
+      int Function(int, Pointer<Int32>)
+    >('GetClientRect');
+final _getDpiForWindow = _user32
+    .lookupFunction<Uint32 Function(IntPtr), int Function(int)>(
+      'GetDpiForWindow',
+    );
 final _isZoomed = _user32
     .lookupFunction<Int32 Function(IntPtr), int Function(int)>('IsZoomed');
 final _setWindowPos = _user32
@@ -246,10 +255,23 @@ Future<Map<String, Object?>> _checkSavedVolume(String benchFile) async {
   return size;
 }
 
+/// The content's width and height in logical pixels, rounded: the sizes the
+/// runner's minimum is written in (win32_window.cpp).
+(int, int) _logicalClientSize(int window) {
+  final rect = calloc<Int32>(4);
+  _getClientRect(window, rect);
+  final scale = _getDpiForWindow(window) / 96;
+  final size = ((rect[2] / scale).round(), (rect[3] / scale).round());
+  calloc.free(rect);
+  return size;
+}
+
 /// The window comes back at a saved size, maximized when saved so, and a real
-/// close saves a new size. Run with OWNSEMBLE_BACKGROUND_WINDOW the window
-/// stays off-screen, so its place is not checked here, only its size. Removes
-/// the placement file afterwards, so other checks start from the default.
+/// close saves a new size. It cannot get smaller than the minimum, neither
+/// from a saved size nor by a resize. Run with OWNSEMBLE_BACKGROUND_WINDOW the
+/// window stays off-screen, so its place is not checked here, only its size.
+/// Removes the placement file afterwards, so other checks start from the
+/// default.
 Future<Map<String, Object?>> _checkWindowPlacement(String dataDir) async {
   final file = File(p.join(dataDir, 'window-placement.txt'));
 
@@ -283,9 +305,22 @@ Future<Map<String, Object?>> _checkWindowPlacement(String dataDir) async {
     '50000 50000 900 700 0\n',
     (window, _) async => _windowSize(window),
   );
+  const noMoveNoZorderNoActivate = 0x0002 | 0x0004 | 0x0010;
+  const smallest = (480, 440);
+  final smallSaved = await withWindow(
+    '100 100 400 300 0\n',
+    (window, _) async => _logicalClientSize(window),
+  );
+  final smallResize = await withWindow('100 100 900 700 0\n', (
+    window,
+    _,
+  ) async {
+    _setWindowPos(window, 0, 0, 0, 100, 100, noMoveNoZorderNoActivate);
+    await Future<void>.delayed(const Duration(milliseconds: 300));
+    return _logicalClientSize(window);
+  });
   final exit = await withWindow('100 100 900 700 0\n', (window, app) async {
     await Future<void>.delayed(const Duration(seconds: 2));
-    const noMoveNoZorderNoActivate = 0x0002 | 0x0004 | 0x0010;
     _setWindowPos(window, 0, 0, 0, 1000, 720, noMoveNoZorderNoActivate);
     await Future<void>.delayed(const Duration(milliseconds: 300));
     _postMessage(window, _wmClose, 0, 0);
@@ -300,6 +335,8 @@ Future<Map<String, Object?>> _checkWindowPlacement(String dataDir) async {
     'normal': '${normal.$1}',
     'maximized': maximized,
     'offScreenFallsBackTo': '$offScreen',
+    'smallSavedOpensAt': '$smallSaved',
+    'smallResizeStopsAt': '$smallResize',
     'closeExit': exit,
     'saved': saved.join(' '),
     'ok':
@@ -307,6 +344,8 @@ Future<Map<String, Object?>> _checkWindowPlacement(String dataDir) async {
         !normal.$2 &&
         maximized &&
         offScreen != (900, 700) &&
+        smallSaved == smallest &&
+        smallResize == smallest &&
         exit == 0 &&
         saved[2] == '1000' &&
         saved[3] == '720' &&

@@ -3,6 +3,8 @@
 #include <dwmapi.h>
 #include <flutter_windows.h>
 
+#include <algorithm>
+
 #include "resource.h"
 
 namespace {
@@ -51,6 +53,21 @@ void EnableFullDpiSupportIfAvailable(HWND hwnd) {
     enable_non_client_dpi_scaling(hwnd);
   }
   FreeLibrary(user32_module);
+}
+
+// The smallest window content the layout is made for, in logical pixels:
+// narrower and the player's buttons do not fit, shorter and too few song rows
+// are left. tool/window_size_sweep_test.dart measures both.
+constexpr int kMinimumClientWidth = 480;
+constexpr int kMinimumClientHeight = 440;
+
+// The size of a window frame around the minimum content, at |dpi|.
+SIZE MinimumFrameSize(UINT dpi) {
+  const double scale_factor = dpi / 96.0;
+  RECT frame = {0, 0, Scale(kMinimumClientWidth, scale_factor),
+                Scale(kMinimumClientHeight, scale_factor)};
+  AdjustWindowRectExForDpi(&frame, WS_OVERLAPPEDWINDOW, FALSE, 0, dpi);
+  return {frame.right - frame.left, frame.bottom - frame.top};
 }
 
 }  // namespace
@@ -150,6 +167,12 @@ bool Win32Window::Create(const std::wstring& title,
     top = start_frame_.top;
     width = start_frame_.right - start_frame_.left;
     height = start_frame_.bottom - start_frame_.top;
+    // An older build could save a smaller window. WM_GETMINMAXINFO cannot
+    // correct it: CreateWindow sends that before the window knows its object.
+    const SIZE minimum = MinimumFrameSize(FlutterDesktopGetDpiForMonitor(
+        MonitorFromRect(&start_frame_, MONITOR_DEFAULTTONEAREST)));
+    width = std::max(width, static_cast<int>(minimum.cx));
+    height = std::max(height, static_cast<int>(minimum.cy));
     // Maximized from the start, still hidden: the engine then starts at the
     // final size, and no second frame has to be drawn when the window shows.
     if (start_maximized_) {
@@ -216,6 +239,14 @@ Win32Window::MessageHandler(HWND hwnd,
         PostQuitMessage(0);
       }
       return 0;
+
+    case WM_GETMINMAXINFO: {
+      const SIZE minimum = MinimumFrameSize(GetDpiForWindow(hwnd));
+      auto limits = reinterpret_cast<MINMAXINFO*>(lparam);
+      limits->ptMinTrackSize.x = minimum.cx;
+      limits->ptMinTrackSize.y = minimum.cy;
+      return 0;
+    }
 
     case WM_DPICHANGED: {
       auto newRectSize = reinterpret_cast<RECT*>(lparam);
