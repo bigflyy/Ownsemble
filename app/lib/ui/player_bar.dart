@@ -8,6 +8,7 @@ import 'collections_controller.dart';
 import 'cover_tile.dart';
 import 'cover_viewer.dart';
 import 'filling_icon.dart';
+import 'sources_scope.dart';
 import 'theme.dart';
 
 /// Width of the side panel.
@@ -350,19 +351,24 @@ class SongTitle extends StatelessWidget {
           const SizedBox(height: 6),
           Row(
             children: [
-              Container(
-                width: 8,
-                height: 8,
-                decoration: BoxDecoration(
-                  color: sourceColor(colors, track),
-                  shape: BoxShape.circle,
+              for (final color in sourceColors(context, track))
+                Container(
+                  width: 8,
+                  height: 8,
+                  margin: const EdgeInsets.only(right: 4),
+                  decoration: BoxDecoration(
+                    color: color,
+                    shape: BoxShape.circle,
+                  ),
                 ),
-              ),
-              const SizedBox(width: 7),
-              Text(
-                '${track.source == TrackSource.vk ? 'VK' : 'Generated'}'
-                ' - $state',
-                style: TextStyle(fontSize: 13, color: colors.dim),
+              const SizedBox(width: 3),
+              Flexible(
+                child: Text(
+                  '${sourceNames(context, track)} - $state',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(fontSize: 13, color: colors.dim),
+                ),
               ),
             ],
           ),
@@ -371,10 +377,6 @@ class SongTitle extends StatelessWidget {
     );
   }
 }
-
-/// The color of [track]'s source (source 1 is VK).
-Color sourceColor(OwnColors colors, Track track) =>
-    track.source == TrackSource.vk ? colors.source1 : colors.source3;
 
 /// Shuffle, previous, play or pause, next, repeat.
 class TransportRow extends StatelessWidget {

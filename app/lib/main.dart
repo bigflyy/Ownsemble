@@ -19,9 +19,11 @@ import 'ui/cover_tile.dart';
 import 'ui/library_controller.dart';
 import 'ui/library_screen.dart';
 import 'ui/shell_settings.dart';
+import 'ui/source_editor.dart';
+import 'ui/sources_scope.dart';
 import 'ui/sync_controller.dart';
 import 'ui/theme.dart';
-import 'ui/vk_account.dart';
+import 'ui/vk_accounts.dart';
 import 'vk/vk_login_window.dart';
 import 'vk/vk_session.dart';
 
@@ -35,7 +37,7 @@ const maxDecodedCoverBytes = 24 * 1024 * 1024;
 class AppOptions {
   AppOptions({
     required this.dataDir,
-    this.vkSession,
+    this.vkSessions = const [],
     this.vkLoginSeed,
     this.muted = false,
     this.metricsFile,
@@ -47,8 +49,8 @@ class AppOptions {
     this.cacheWhileStreaming = true,
   });
 
-  /// Parses `--data-dir DIR --vk-session FILE --vk-login-seed FILE --muted
-  /// --metrics FILE
+  /// Parses `--data-dir DIR --vk-session FILE [--vk-session FILE] --vk-login-seed
+  /// FILE --muted --metrics FILE
   /// --bench FILE --bench-parts a,b --bench-volume N --mpv name=value ...
   /// --mpv-log`.
   factory AppOptions.parse(List<String> args) {
@@ -61,7 +63,10 @@ class AppOptions {
       dataDir:
           valueOf('--data-dir') ??
           p.join(Platform.environment['APPDATA'] ?? '.', 'Ownsemble', 'v2'),
-      vkSession: valueOf('--vk-session'),
+      vkSessions: [
+        for (var i = 0; i + 1 < args.length; i++)
+          if (args[i] == '--vk-session') args[i + 1],
+      ],
       vkLoginSeed: valueOf('--vk-login-seed'),
       muted: args.contains('--muted'),
       metricsFile: valueOf('--metrics'),
@@ -82,9 +87,9 @@ class AppOptions {
   /// Folder with library.db, cached audio and perf.log.
   final String dataDir;
 
-  /// The test account's session file (cookies JSON). Without it the session
-  /// comes from the login window and is kept encrypted in the data folder.
-  final String? vkSession;
+  /// The test accounts' session files (cookies JSON). Without one the sessions
+  /// come from the login window and are kept encrypted in the data folder.
+  final List<String> vkSessions;
 
   /// Test account cookies for the login window: the agent's login check puts
   /// them there because it never types into a login page.
@@ -142,11 +147,10 @@ Future<void> main(List<String> args) async {
     write: store.writeSetting,
   );
 
-  final sessionFile = options.vkSession;
-  final account = VkAccount(
-    sessions: sessionFile != null
-        ? PlainSessionFile(File(sessionFile))
-        : ProtectedSessionFile(File(p.join(options.dataDir, 'session.dpapi'))),
+  final account = VkAccounts(
+    vault: options.vkSessions.isNotEmpty
+        ? PlainSessionFiles([for (final path in options.vkSessions) File(path)])
+        : ProtectedSessionFolder(options.dataDir),
     window: NativeLoginWindow(
       userDataDir: p.join(options.dataDir, 'webview'),
       seedFile: options.vkLoginSeed == null ? null : File(options.vkLoginSeed!),
@@ -186,13 +190,16 @@ Future<void> main(List<String> args) async {
       return AppExitResponse.exit;
     },
   );
-  // The sync reads the session each time: logging in or out changes it.
+  // The sync reads the sessions each time: logging in or out changes them.
   SyncRunner? syncRunner() {
-    final cookies = account.cookies;
-    if (cookies == null) return null;
+    final sessions = [
+      for (final session in account.sessions)
+        VkSyncSession(session.account, session.cookies),
+    ];
+    if (sessions.isEmpty) return null;
     return (onProgress) => syncVkInBackground(
       dbPath: dbPath,
-      cookies: cookies,
+      sessions: sessions,
       onProgress: onProgress,
     );
   }
@@ -203,13 +210,19 @@ Future<void> main(List<String> args) async {
     onLibraryChanged: (loaded) =>
         library.replaceTracks(loaded.tracks, loaded.index),
   );
+  final sourceEditor = SourceEditor(
+    store: store,
+    sync: sync,
+    library: library,
+    dataDir: options.dataDir,
+  );
   // A new login is synced at once, so the library fills without another step.
-  var loggedIn = account.loggedIn;
+  var logins = account.logins;
   account.addListener(() {
     player.vk = account.client;
     sync.runner = syncRunner();
-    if (account.loggedIn && !loggedIn) unawaited(sync.syncNow());
-    loggedIn = account.loggedIn;
+    if (account.logins != logins) unawaited(sync.syncAfterRunning());
+    logins = account.logins;
   });
 
   // Far below Flutter's 100 MB default: decoded covers are the app's largest
@@ -240,6 +253,7 @@ Future<void> main(List<String> args) async {
       playback: playback,
       sync: sync,
       account: account,
+      sources: sourceEditor,
       collections: collections,
       settings: settings,
     ),
@@ -255,7 +269,7 @@ Future<void> _afterFirstFrame({
   required LibraryController library,
   required PlayerService player,
   required PlaybackController playback,
-  required VkAccount account,
+  required VkAccounts account,
   required SyncController sync,
   required CoverStore covers,
   required CollectionsController collections,
@@ -276,11 +290,7 @@ Future<void> _afterFirstFrame({
   // The library syncs itself on every start, in the background.
   final startSync = sync.syncNow();
   _logPlayTimings(player, File(p.join(options.dataDir, 'perf.log')));
-  try {
-    await account.client?.ensureToken();
-  } catch (_) {
-    // Offline or session expired: VK songs fail at play time with a message.
-  }
+  await account.identify();
 
   if (options.benchFile != null) {
     // Measure the library as it is after the start sync, not while the
@@ -337,6 +347,7 @@ class OwnsembleApp extends StatelessWidget {
     required this.covers,
     this.sync,
     this.account,
+    this.sources,
   });
 
   final CoverStore covers;
@@ -345,11 +356,12 @@ class OwnsembleApp extends StatelessWidget {
   final CollectionsController collections;
   final ShellSettings settings;
   final SyncController? sync;
-  final VkAccount? account;
+  final VkAccounts? account;
+  final SourceEditor? sources;
 
   @override
   Widget build(BuildContext context) {
-    return CoverScope(
+    final app = CoverScope(
       store: covers,
       child: ListenableBuilder(
         listenable: settings,
@@ -362,11 +374,16 @@ class OwnsembleApp extends StatelessWidget {
             playback: playback,
             sync: sync,
             account: account,
+            sources: sources,
             collections: collections,
             settings: settings,
           ),
         ),
       ),
     );
+    final syncing = sync;
+    return syncing == null
+        ? app
+        : SourcesScope(sources: syncing.sourceList, child: app);
   }
 }

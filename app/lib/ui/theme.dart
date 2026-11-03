@@ -23,6 +23,9 @@ class OwnColors extends ThemeExtension<OwnColors> {
     required this.source1,
     required this.source2,
     required this.source3,
+    required this.source4,
+    required this.source5,
+    required this.source6,
     required this.shadow,
     required this.isDark,
   });
@@ -43,6 +46,9 @@ class OwnColors extends ThemeExtension<OwnColors> {
     source1: Color(0xFF5B9BFF),
     source2: Color(0xFFFF8A5C),
     source3: Color(0xFF43C98F),
+    source4: Color(0xFFF2C14E),
+    source5: Color(0xFFE56BB5),
+    source6: Color(0xFF4FD0E0),
     shadow: Color(0x80000000),
     isDark: true,
   );
@@ -63,6 +69,9 @@ class OwnColors extends ThemeExtension<OwnColors> {
     source1: Color(0xFF2A68D8),
     source2: Color(0xFFC94F22),
     source3: Color(0xFF16875A),
+    source4: Color(0xFF9A7000),
+    source5: Color(0xFFB83B8A),
+    source6: Color(0xFF0F7F93),
     shadow: Color(0x29151821),
     isDark: false,
   );
@@ -84,6 +93,19 @@ class OwnColors extends ThemeExtension<OwnColors> {
   final Color source1;
   final Color source2;
   final Color source3;
+  final Color source4;
+  final Color source5;
+  final Color source6;
+
+  /// The color of slot [slot], from 1; see `SourceInfo.color`.
+  Color sourceColor(int slot) => switch ((slot - 1) % 6) {
+    0 => source1,
+    1 => source2,
+    2 => source3,
+    3 => source4,
+    4 => source5,
+    _ => source6,
+  };
   final Color shadow;
   final bool isDark;
 

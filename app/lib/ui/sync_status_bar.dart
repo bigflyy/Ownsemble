@@ -3,20 +3,66 @@ import 'package:flutter/material.dart';
 import '../library/library_store.dart';
 import '../vk/vk_login_window.dart';
 import '../vk/vk_sync.dart';
+import 'accounts_dialog.dart';
+import 'source_editor.dart';
 import 'sync_controller.dart';
 import 'theme.dart';
-import 'vk_account.dart';
+import 'vk_accounts.dart';
 
 /// The bottom status bar: each synced source with its state, a thin progress
-/// line while a sync runs, and the Sync now button. Logged out, or with a
-/// session VK no longer takes, the button logs in instead.
+/// line while a sync runs, and the Sync now button. Logged out, or with every
+/// session refused by VK, the button logs in instead. Several accounts share
+/// the one line, so each shows less; its tooltip has the rest.
 class SyncStatusBar extends StatelessWidget {
-  const SyncStatusBar({super.key, required this.sync, this.account});
+  const SyncStatusBar({
+    super.key,
+    required this.sync,
+    this.account,
+    this.sources,
+  });
 
   final SyncController sync;
 
-  /// The VK account; without one there is nothing to log in to.
-  final VkAccount? account;
+  /// The VK accounts; without them there is nothing to log in to.
+  final VkAccounts? account;
+
+  /// Renames, recolors and removes accounts.
+  final SourceEditor? sources;
+
+  /// The status of [source]. Compact, it shows the song count or what is
+  /// wrong, and the whole state in its tooltip.
+  Widget _state(SourceInfo source, TextStyle? style, {required bool compact}) {
+    final account = this.account;
+    final failed = !sync.running && source.lastSyncError != null;
+    final full = describeSourceState(
+      source,
+      lastResult: sync.lastOutcome?.resultOf(source.id),
+      now: DateTime.now(),
+    );
+    final loggedOut = account != null && !account.hasSession(source.account);
+    final state = sync.running
+        ? 'syncing...'
+        : !compact
+        ? full
+        : loggedOut
+        ? 'not logged in'
+        : failed
+        ? source.lastSyncError!
+        : '${source.songCount} songs';
+    return Builder(
+      builder: (context) {
+        final row = _SourceState(
+          key: ValueKey('sync-source-${source.id}'),
+          name: source.name,
+          state: state,
+          color: OwnColors.of(context).sourceColor(source.color),
+          failed: failed,
+          style: style,
+        );
+        return compact ? Tooltip(message: full, child: row) : row;
+      },
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -45,37 +91,37 @@ class SyncStatusBar extends StatelessWidget {
               child: Row(
                 children: [
                   Expanded(
-                    child: Wrap(
-                      spacing: 18,
-                      runSpacing: 4,
-                      children: [
-                        if (sources.isEmpty)
-                          _SourceState(
-                            name: 'VK',
-                            state: sync.canSync
-                                ? (sync.running
-                                      ? 'syncing...'
-                                      : 'not synced yet')
-                                : 'not logged in',
-                            style: style,
-                          ),
-                        for (final source in sources)
-                          _SourceState(
-                            key: ValueKey('sync-source-${source.id}'),
-                            name: source.name,
-                            state: sync.running
-                                ? 'syncing...'
-                                : describeSourceState(
-                                    source,
-                                    lastResult: sync.lastOutcome?.result,
-                                    now: DateTime.now(),
+                    child: sources.length > 1
+                        ? Row(
+                            children: [
+                              for (final source in sources)
+                                Flexible(
+                                  child: Padding(
+                                    padding: const EdgeInsets.only(right: 18),
+                                    child: _state(source, style, compact: true),
                                   ),
-                            failed:
-                                !sync.running && source.lastSyncError != null,
-                            style: style,
+                                ),
+                            ],
+                          )
+                        : Wrap(
+                            spacing: 18,
+                            runSpacing: 4,
+                            children: [
+                              if (sources.isEmpty)
+                                _SourceState(
+                                  name: 'VK',
+                                  state: sync.canSync
+                                      ? (sync.running
+                                            ? 'syncing...'
+                                            : 'not synced yet')
+                                      : 'not logged in',
+                                  color: own.source1,
+                                  style: style,
+                                ),
+                              for (final source in sources)
+                                _state(source, style, compact: false),
+                            ],
                           ),
-                      ],
-                    ),
                   ),
                   const SizedBox(width: 12),
                   if (loginNeeded)
@@ -98,21 +144,23 @@ class SyncStatusBar extends StatelessWidget {
                         sync.running ? 'Syncing $percent%' : 'Sync now',
                       ),
                     ),
-                  if (account != null && account.loggedIn)
-                    PopupMenuButton<String>(
-                      key: const ValueKey('vk-account-menu'),
-                      tooltip: 'VK account',
-                      padding: EdgeInsets.zero,
+                  if (account != null &&
+                      (account.loggedIn || sources.isNotEmpty))
+                    IconButton(
+                      key: const ValueKey('vk-accounts'),
+                      tooltip: 'VK accounts',
                       iconSize: 18,
-                      icon: Icon(Icons.more_vert, color: own.dim),
-                      onSelected: (_) => account.logOut(),
-                      itemBuilder: (context) => const [
-                        PopupMenuItem(
-                          key: ValueKey('vk-log-out'),
-                          value: 'log-out',
-                          child: Text('Log out of VK'),
-                        ),
-                      ],
+                      visualDensity: VisualDensity.compact,
+                      icon: Icon(
+                        Icons.manage_accounts_outlined,
+                        color: own.dim,
+                      ),
+                      onPressed: () => showAccountsDialog(
+                        context,
+                        accounts: account,
+                        sync: sync,
+                        sources: this.sources,
+                      ),
                     ),
                 ],
               ),
@@ -139,9 +187,18 @@ class SyncStatusBar extends StatelessWidget {
 /// then brings the window back to the front. A window that cannot open says
 /// why in a message.
 class LogInButton extends StatelessWidget {
-  const LogInButton({super.key, required this.account});
+  const LogInButton({
+    super.key,
+    required this.account,
+    this.buttonKey = const ValueKey('vk-log-in'),
+    this.label = 'Log in to VK',
+  });
 
-  final VkAccount account;
+  final VkAccounts account;
+  final Key buttonKey;
+
+  /// What the button says while the window is closed.
+  final String label;
 
   Future<void> _logIn(BuildContext context) async {
     final messenger = ScaffoldMessenger.maybeOf(context);
@@ -157,7 +214,7 @@ class LogInButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return FilledButton.icon(
-      key: const ValueKey('vk-log-in'),
+      key: buttonKey,
       style: FilledButton.styleFrom(
         minimumSize: const Size(0, 30),
         padding: const EdgeInsets.symmetric(horizontal: 12),
@@ -165,7 +222,7 @@ class LogInButton extends StatelessWidget {
       ),
       onPressed: () => _logIn(context),
       icon: const Icon(Icons.login, size: 16),
-      label: Text(account.loggingIn ? 'Logging in...' : 'Log in to VK'),
+      label: Text(account.loggingIn ? 'Logging in...' : label),
     );
   }
 }
@@ -176,19 +233,22 @@ class _SourceState extends StatelessWidget {
     super.key,
     required this.name,
     required this.state,
+    required this.color,
     required this.style,
     this.failed = false,
   });
 
   final String name;
   final String state;
+
+  /// The source's own color.
+  final Color color;
   final TextStyle? style;
   final bool failed;
 
   @override
   Widget build(BuildContext context) {
     final colors = Theme.of(context).colorScheme;
-    final own = OwnColors.of(context);
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
@@ -196,12 +256,19 @@ class _SourceState extends StatelessWidget {
           width: 8,
           height: 8,
           decoration: BoxDecoration(
-            color: failed ? colors.error : own.source1,
+            color: failed ? colors.error : color,
             shape: BoxShape.circle,
           ),
         ),
         const SizedBox(width: 7),
-        Text(name, style: style?.copyWith(color: colors.onSurface)),
+        Flexible(
+          child: Text(
+            name,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: style?.copyWith(color: colors.onSurface),
+          ),
+        ),
         const SizedBox(width: 7),
         Flexible(
           child: Text(

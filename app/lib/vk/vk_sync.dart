@@ -167,7 +167,13 @@ enum SyncStage { connecting, reading, checking, albums, saving }
 
 /// Progress of one sync.
 class SyncProgress {
-  const SyncProgress(this.stage, {this.done = 0, this.total = 0});
+  const SyncProgress(
+    this.stage, {
+    this.done = 0,
+    this.total = 0,
+    this.account = 0,
+    this.accounts = 1,
+  });
 
   final SyncStage stage;
 
@@ -176,17 +182,32 @@ class SyncProgress {
   final int done;
   final int total;
 
+  /// Which of the [accounts] being synced this is, from 0.
+  final int account;
+  final int accounts;
+
+  /// This progress as part of syncing [accounts] accounts one after another.
+  SyncProgress inAccount(int account, int accounts) => SyncProgress(
+    stage,
+    done: done,
+    total: total,
+    account: account,
+    accounts: accounts,
+  );
+
   /// Rough share of the whole sync that is finished, 0 to 1. Reading the
-  /// pages is most of the time; the gone check and saving are short.
+  /// pages is most of the time; the gone check and saving are short. Accounts
+  /// count alike, however many songs they have.
   double get fraction {
     final part = total == 0 ? 0.0 : (done / total).clamp(0.0, 1.0);
-    return switch (stage) {
+    final ofAccount = switch (stage) {
       SyncStage.connecting => 0.02,
       SyncStage.reading => 0.05 + 0.75 * part,
       SyncStage.checking => 0.8 + 0.05 * part,
       SyncStage.albums => 0.85 + 0.1 * part,
       SyncStage.saving => 0.95,
     };
+    return (account + ofAccount) / accounts;
   }
 }
 
@@ -228,6 +249,9 @@ class VkSyncResult {
   bool get changedLibrary => added + updated + back + newlyGone > 0;
 }
 
+/// The name of a VK source until the account's own name is known.
+const vkDefaultSourceName = 'VK';
+
 /// Syncs the VK library of [userId] into [store]: adds new songs, updates
 /// changed ones and marks songs VK no longer has as gone (see
 /// [findGoneKeys]). Never deletes songs. Records the outcome on the source;
@@ -248,7 +272,7 @@ Future<VkSyncResult> syncVkSource({
   final sourceId = store.ensureSource(
     TrackSource.vk,
     account: '$userId',
-    name: 'VK',
+    name: vkDefaultSourceName,
   );
   try {
     onProgress?.call(const SyncProgress(SyncStage.reading));
@@ -323,6 +347,16 @@ Future<VkSyncResult> syncVkSource({
     store.recordSync(sourceId, error: describeSyncError(error));
     rethrow;
   }
+}
+
+/// The account's own name as VK has it, for telling accounts apart; null
+/// when VK does not say. `users.get` only reads.
+Future<String?> fetchVkAccountName(VkApiCall call, int userId) async {
+  final reply = await call('users.get', {'user_ids': '$userId'});
+  if (reply is! List || reply.isEmpty) return null;
+  final user = reply.first as Map<String, dynamic>;
+  final name = '${user['first_name'] ?? ''} ${user['last_name'] ?? ''}'.trim();
+  return name.isEmpty ? null : name;
 }
 
 /// [fresh] with the stored cover links of [known] where VK only moved the

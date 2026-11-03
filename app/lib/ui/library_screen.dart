@@ -17,11 +17,13 @@ import 'player_bar.dart';
 import 'shell_settings.dart';
 import 'shortcuts_help.dart';
 import 'sidebar.dart';
+import 'source_editor.dart';
+import 'sources_scope.dart';
 import 'sync_controller.dart';
 import 'sync_status_bar.dart';
 import 'theme.dart';
 import 'type_jump.dart';
-import 'vk_account.dart';
+import 'vk_accounts.dart';
 
 /// Narrower than this, the side panel gives way to the bottom bar.
 const sidePanelMinWidth = 980.0;
@@ -56,6 +58,7 @@ class LibraryScreen extends StatefulWidget {
     required this.playback,
     this.sync,
     this.account,
+    this.sources,
     this.collections,
     this._settings,
   });
@@ -68,8 +71,11 @@ class LibraryScreen extends StatefulWidget {
   /// Sync state for the status bar; no status bar when null.
   final SyncController? sync;
 
-  /// The VK account, for logging in and out.
-  final VkAccount? account;
+  /// The VK accounts, for logging in and out.
+  final VkAccounts? account;
+
+  /// Renames, recolors and removes accounts.
+  final SourceEditor? sources;
 
   /// History and Stacks; without them those views stay empty.
   final CollectionsController? collections;
@@ -509,7 +515,11 @@ class _LibraryScreenState extends State<LibraryScreen> {
                         compact: !roomForSidebar,
                       ),
                     if (widget.sync case final sync?)
-                      SyncStatusBar(sync: sync, account: widget.account),
+                      SyncStatusBar(
+                        sync: sync,
+                        account: widget.account,
+                        sources: widget.sources,
+                      ),
                   ],
                 ),
                 body: Column(
@@ -1280,8 +1290,9 @@ class _SongRow extends StatelessWidget {
                   ] else
                     ...tags(compact: true),
                   const SizedBox(width: 14),
-                  Tooltip(
-                    message: meaning,
+                  _SourceMark(
+                    track: track,
+                    meaning: meaning,
                     child: storage != null && (downloading || saving)
                         ? FillingIcon(
                             key: ValueKey('filling-${track.id}'),
@@ -1290,13 +1301,13 @@ class _SongRow extends StatelessWidget {
                             icon: icon,
                             filled: downloading ? Icons.download : Icons.cloud,
                             size: 18,
-                            color: sourceColor(colors, track),
+                            color: sourceColor(context, track),
                           )
                         : Icon(
                             icon,
                             key: ValueKey('mark-${track.id}-${icon.codePoint}'),
                             size: 18,
-                            color: sourceColor(colors, track),
+                            color: sourceColor(context, track),
                           ),
                   ),
                   const SizedBox(width: 14),
@@ -1313,6 +1324,49 @@ class _SongRow extends StatelessWidget {
             ),
           ),
         ),
+      ),
+    );
+  }
+}
+
+/// A row's mark with what it means on hover. A song in several accounts also
+/// shows the second account's color, as a dot at the mark's corner, which
+/// leaves the columns where they are.
+class _SourceMark extends StatelessWidget {
+  const _SourceMark({
+    required this.track,
+    required this.meaning,
+    required this.child,
+  });
+
+  final Track track;
+  final String meaning;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    if (track.copies.isEmpty) return Tooltip(message: meaning, child: child);
+    return Tooltip(
+      message: '$meaning. In ${sourceNames(context, track)}',
+      child: Stack(
+        clipBehavior: Clip.none,
+        children: [
+          child,
+          Positioned(
+            right: -4,
+            bottom: -3,
+            child: Container(
+              key: ValueKey('merged-${track.id}'),
+              width: 8,
+              height: 8,
+              decoration: BoxDecoration(
+                color: sourceColors(context, track)[1],
+                shape: BoxShape.circle,
+                border: Border.all(color: OwnColors.of(context).bg),
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }

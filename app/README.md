@@ -34,6 +34,14 @@ OWNSEMBLE_BACKGROUND_WINDOW=1 flutter test integration_test/login_test.dart \
     --dart-define=OWNSEMBLE_SESSION=<absolute path>/.local/v2-test/session.json \
     --dart-define=OWNSEMBLE_SHOT=<absolute path>/login-page.png
 
+# Several accounts check: an empty folder (<data dir>-accounts, replaced on every
+# run), two real accounts logged in through the real window off-screen, one
+# library. The second account's session is only read; prints counts, no titles.
+OWNSEMBLE_BACKGROUND_WINDOW=1 flutter test integration_test/accounts_test.dart \
+    -d windows --dart-define=OWNSEMBLE_DATA=<absolute path>/.local/v2-test/accounts \
+    --dart-define=OWNSEMBLE_SESSION=<absolute path>/.local/v2-test/session.json \
+    --dart-define=OWNSEMBLE_SESSION_2=<absolute path>/.local/v2-test/session-2.json
+
 # Check the "gone from VK" rule against real VK on a copy of a library (the
 # folder itself is not written).
 dart run tool/check_gone_marks.dart --data-dir ../.local/v2-test/feel \

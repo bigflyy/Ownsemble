@@ -19,11 +19,15 @@ SourceInfo vkSource({
   int gone = 0,
   int? syncedAtMs,
   String? error,
+  int id = 1,
+  String name = 'VK',
+  int color = 1,
 }) => SourceInfo(
-  id: 1,
+  id: id,
   kind: TrackSource.vk,
-  account: '42',
-  name: 'VK',
+  account: '${41 + id}',
+  name: name,
+  color: color,
   songCount: songs,
   goneCount: gone,
   lastSyncAtMs: syncedAtMs,
@@ -58,14 +62,145 @@ VkSyncResult result({
 );
 
 void main() {
+  group('several accounts', () {
+    final both = [
+      vkSource(syncedAtMs: 1000, name: 'Анна'),
+      vkSource(id: 2, syncedAtMs: 1000, name: 'Борис', color: 2, songs: 2619),
+    ];
+
+    test('a login during a sync syncs again after it', () async {
+      final finish = Completer<SyncOutcome>();
+      var runs = 0;
+      final sync = SyncController(
+        sources: const [],
+        onLibraryChanged: (_) {},
+        runner: (_) {
+          runs++;
+          return runs == 1
+              ? finish.future
+              : Future.value(SyncOutcome(sources: both));
+        },
+      );
+      final first = sync.syncNow();
+      sync.syncAfterRunning();
+      finish.complete(const SyncOutcome(sources: []));
+      await first;
+      expect(runs, 2);
+      expect(sync.syncedSources, hasLength(2));
+    });
+
+    test('with no sync running a login syncs at once', () async {
+      var runs = 0;
+      final sync = SyncController(
+        sources: const [],
+        onLibraryChanged: (_) {},
+        runner: (_) async {
+          runs++;
+          return const SyncOutcome(sources: []);
+        },
+      );
+      await sync.syncAfterRunning();
+      expect(runs, 1);
+    });
+
+    test('one expired account of two is not "log in again" for all', () async {
+      final sync = SyncController(
+        sources: both,
+        onLibraryChanged: (_) {},
+        runner: (_) async => SyncOutcome(
+          sources: both,
+          results: [result()],
+          errors: const [vkLoginExpired],
+        ),
+      );
+      await sync.syncNow();
+      expect(sync.loginExpired, isFalse);
+    });
+
+    test('all accounts expired is "log in again"', () async {
+      final sync = SyncController(
+        sources: both,
+        onLibraryChanged: (_) {},
+        runner: (_) async => SyncOutcome(
+          sources: both,
+          errors: const [vkLoginExpired, vkLoginExpired],
+        ),
+      );
+      await sync.syncNow();
+      expect(sync.loginExpired, isTrue);
+    });
+
+    test('progress runs through the accounts one after another', () {
+      const reading = SyncProgress(SyncStage.reading, done: 1, total: 2);
+      expect(reading.inAccount(0, 2).fraction, closeTo(0.2125, 0.001));
+      expect(reading.inAccount(1, 2).fraction, closeTo(0.7125, 0.001));
+    });
+
+    test('an outcome tells each account\'s result apart', () {
+      final outcome = SyncOutcome(
+        sources: both,
+        results: [
+          VkSyncResult(
+            sourceId: 2,
+            listed: 1,
+            declared: 1,
+            added: 1,
+            updated: 0,
+            back: 0,
+            newlyGone: 0,
+          ),
+        ],
+      );
+      expect(outcome.resultOf(2)?.added, 1);
+      expect(outcome.resultOf(1), isNull);
+    });
+
+    testWidgets('the bar shows both on one line, each with its color', (
+      tester,
+    ) async {
+      final sync = SyncController(
+        sources: both,
+        runner: null,
+        onLibraryChanged: (_) {},
+      );
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            bottomNavigationBar: SizedBox(
+              width: 480,
+              child: SyncStatusBar(sync: sync),
+            ),
+          ),
+        ),
+      );
+      expect(find.text('Анна'), findsOneWidget);
+      expect(find.text('Борис'), findsOneWidget);
+      expect(find.text('2619 songs'), findsOneWidget);
+      expect(find.byType(Tooltip), findsWidgets);
+      final dots = tester
+          .widgetList<Container>(
+            find.descendant(
+              of: find.byType(SyncStatusBar),
+              matching: find.byWidgetPredicate(
+                (w) => w is Container && w.constraints?.maxWidth == 8,
+              ),
+            ),
+          )
+          .map((w) => (w.decoration! as BoxDecoration).color)
+          .toSet();
+      expect(dots, hasLength(2));
+      expect(tester.takeException(), isNull);
+    });
+  });
+
   group('a first sync', () {
     test('runs once more for the album titles it left', () async {
       final outcomes = [
         SyncOutcome(
           sources: [vkSource()],
-          result: result(added: 2, albumsSkipped: 1),
+          results: [result(added: 2, albumsSkipped: 1)],
         ),
-        SyncOutcome(sources: [vkSource()], result: result()),
+        SyncOutcome(sources: [vkSource()], results: [result()]),
       ];
       var runs = 0;
       final sync = SyncController(
@@ -90,7 +225,7 @@ void main() {
           sync.runner = null;
           return SyncOutcome(
             sources: [vkSource()],
-            result: result(albumsSkipped: 1),
+            results: [result(albumsSkipped: 1)],
           );
         },
         onLibraryChanged: (_) {},
@@ -224,7 +359,7 @@ void main() {
               syncedAtMs: DateTime.now().millisecondsSinceEpoch,
             ),
           ],
-          result: result(added: 1, newlyGone: 1),
+          results: [result(added: 1, newlyGone: 1)],
           library: LoadedLibrary(tracks, SearchIndex(tracks)),
         ),
       );
@@ -264,7 +399,7 @@ void main() {
       finish.complete(
         SyncOutcome(
           sources: [vkSource(songs: 3, syncedAtMs: 1)],
-          result: result(added: 1),
+          results: [result(added: 1)],
           library: LoadedLibrary(tracks, SearchIndex(tracks)),
         ),
       );
@@ -286,7 +421,7 @@ void main() {
               error: 'VK login expired, log in again',
             ),
           ],
-          error: 'VK login expired, log in again',
+          errors: ['VK login expired, log in again'],
         ),
       );
       await tester.pump();

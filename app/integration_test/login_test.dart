@@ -26,7 +26,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
 import 'package:ownsemble/main.dart' as app;
 import 'package:ownsemble/ui/library_screen.dart';
-import 'package:ownsemble/ui/vk_account.dart';
+import 'package:ownsemble/ui/vk_accounts.dart';
 import 'package:ownsemble/vk/vk_client.dart';
 import 'package:ownsemble/vk/vk_session.dart';
 import 'package:path/path.dart' as p;
@@ -60,7 +60,6 @@ void main() {
     if (data.existsSync()) data.deleteSync(recursive: true);
     data.createSync(recursive: true);
     final seedFile = File(p.join(data.path, 'seed.json'));
-    final saved = File(p.join(data.path, 'session.dpapi'));
 
     await app.main([
       '--data-dir',
@@ -74,7 +73,7 @@ void main() {
     final library = screen.library;
     final player = screen.player;
     final sync = screen.sync!;
-    final VkAccount account = screen.account!;
+    final VkAccounts account = screen.account!;
     await waitUntil(tester, () => player.isReady, what: 'player ready');
 
     // Logged out, empty: the list and the status bar both offer the login.
@@ -124,7 +123,7 @@ void main() {
     await window.invokeMethod<void>('close');
     await waitUntil(tester, () => !account.loggingIn, what: 'window closed');
     expect(account.loggedIn, isFalse);
-    expect(saved.existsSync(), isFalse);
+    expect(Directory(p.join(data.path, 'sessions')).existsSync(), isFalse);
     expect(sync.canSync, isFalse);
 
     // The login itself, with the test account's cookies in the page.
@@ -141,6 +140,9 @@ void main() {
     seedFile.deleteSync();
 
     // The session on disk is encrypted, and still a working session.
+    final saved = File(
+      p.join(data.path, 'sessions', '${account.sessions.single.account}.dpapi'),
+    );
     expect(saved.existsSync(), isTrue);
     final onDisk = String.fromCharCodes(saved.readAsBytesSync());
     expect(onDisk, isNot(contains('remixsid')));
@@ -203,9 +205,14 @@ void main() {
     await player.playOrPause();
 
     // Logging out forgets the session and keeps the library.
-    await tester.tap(find.byKey(const ValueKey('vk-account-menu')));
+    await tester.tap(find.byKey(const ValueKey('vk-accounts')));
+    await tester.pumpAndSettle();
+    final sourceId = sync.syncedSources.single.id;
+    await tester.tap(find.byKey(ValueKey('account-menu-$sourceId')));
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const ValueKey('vk-log-out')));
+    await tester.pumpAndSettle(const Duration(milliseconds: 200));
+    await tester.tap(find.byKey(const ValueKey('accounts-close')));
     await tester.pumpAndSettle(const Duration(milliseconds: 200));
     expect(account.loggedIn, isFalse);
     expect(saved.existsSync(), isFalse);

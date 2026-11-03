@@ -4,6 +4,7 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:ffi/ffi.dart';
+import 'package:path/path.dart' as p;
 
 import 'vk_client.dart';
 
@@ -18,37 +19,125 @@ abstract class VkSessionStore {
   void clear();
 }
 
-/// A session file of the agent's test account, plain JSON made by the login
-/// helper (`--vk-session`). It is only ever read: logging out forgets it for
-/// this run and leaves the file alone.
-class PlainSessionFile implements VkSessionStore {
-  PlainSessionFile(this.file);
+/// One saved login.
+class SavedSession {
+  const SavedSession(this.id, this.account, this.cookies);
 
-  final File file;
-  bool _forgotten = false;
-  List<SessionCookie>? _saved;
+  /// Which saved session this is, for [VkSessionVault].
+  final String id;
+
+  /// VK user id; null until VK says whose session this is, which only happens
+  /// for a session saved before there could be several.
+  final String? account;
+  final List<SessionCookie> cookies;
+}
+
+/// All VK sessions kept between runs, one per VK account.
+abstract class VkSessionVault {
+  /// The saved sessions that can be read.
+  List<SavedSession> load();
+
+  /// Keeps [cookies] as the session of [account], in place of an older one.
+  /// Returns the session's id.
+  String save(String account, List<SessionCookie> cookies);
+
+  /// Notes that [session], saved with no owner, belongs to [account]. Returns
+  /// its id from now on.
+  String adopt(SavedSession session, String account);
+
+  /// Forgets the session [id].
+  void remove(String id);
+}
+
+/// Sessions of the login window: one encrypted file per VK account in the
+/// `sessions` folder, named by the VK user id. A single `session.dpapi` is what
+/// earlier builds wrote; it moves into the folder once VK says whose it is.
+class ProtectedSessionFolder implements VkSessionVault {
+  ProtectedSessionFolder(String dataDir)
+    : _single = File(p.join(dataDir, 'session.dpapi')),
+      _folder = Directory(p.join(dataDir, 'sessions'));
+
+  static const _singleId = 'session.dpapi';
+
+  final File _single;
+  final Directory _folder;
+
+  File _fileOf(String id) =>
+      id == _singleId ? _single : File(p.join(_folder.path, '$id.dpapi'));
 
   @override
-  List<SessionCookie>? load() {
-    if (_forgotten) return _saved;
-    return file.existsSync() ? SessionCookie.loadAll(file) : null;
+  List<SavedSession> load() {
+    final saved = <SavedSession>[];
+    final files = _folder.existsSync()
+        ? (_folder.listSync().whereType<File>().toList()
+            ..sort((a, b) => a.path.compareTo(b.path)))
+        : const <File>[];
+    for (final file in files) {
+      if (p.extension(file.path) != '.dpapi') continue;
+      final cookies = ProtectedSessionFile(file).load();
+      final account = p.basenameWithoutExtension(file.path);
+      if (cookies != null) saved.add(SavedSession(account, account, cookies));
+    }
+    if (ProtectedSessionFile(_single).load() case final cookies?) {
+      saved.add(SavedSession(_singleId, null, cookies));
+    }
+    return saved;
   }
 
   @override
-  void save(List<SessionCookie> cookies) {
-    _forgotten = true;
-    _saved = cookies;
+  String save(String account, List<SessionCookie> cookies) {
+    _folder.createSync(recursive: true);
+    ProtectedSessionFile(_fileOf(account)).save(cookies);
+    return account;
   }
 
   @override
-  void clear() {
-    _forgotten = true;
-    _saved = null;
+  String adopt(SavedSession session, String account) {
+    save(account, session.cookies);
+    remove(session.id);
+    return account;
+  }
+
+  @override
+  void remove(String id) => ProtectedSessionFile(_fileOf(id)).clear();
+}
+
+/// Session files of the agent's test accounts, plain JSON made by the login
+/// helper (`--vk-session`). The files are only ever read: logging out forgets
+/// a session for this run, and a new login lasts for this run.
+class PlainSessionFiles implements VkSessionVault {
+  PlainSessionFiles(this.files);
+
+  final List<File> files;
+  final _forgotten = <String>{};
+  final _added = <String, SavedSession>{};
+
+  @override
+  List<SavedSession> load() => [
+    for (final file in files)
+      if (file.existsSync() && !_forgotten.contains(file.path))
+        SavedSession(file.path, null, SessionCookie.loadAll(file)),
+    ..._added.values,
+  ];
+
+  @override
+  String save(String account, List<SessionCookie> cookies) {
+    final id = 'login-$account';
+    _added[id] = SavedSession(id, account, cookies);
+    return id;
+  }
+
+  @override
+  String adopt(SavedSession session, String account) => session.id;
+
+  @override
+  void remove(String id) {
+    _forgotten.add(id);
+    _added.remove(id);
   }
 }
 
-/// The session of the login window: `session.dpapi` in the data folder,
-/// encrypted by Windows for this Windows user.
+/// One session in a file, encrypted by Windows for this Windows user.
 ///
 /// These cookies are as good as the account's password, so they are never
 /// stored as plain text. Another Windows user, or a copy of the file on
