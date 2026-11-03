@@ -22,6 +22,7 @@ import 'package:ownsemble/ui/collections_controller.dart';
 import 'package:ownsemble/ui/library_controller.dart';
 import 'package:ownsemble/ui/library_screen.dart';
 import 'package:ownsemble/ui/shell_settings.dart';
+import 'package:ownsemble/ui/sources_scope.dart';
 import 'package:ownsemble/ui/theme.dart';
 import 'package:path/path.dart' as p;
 
@@ -97,10 +98,16 @@ void main() {
     bool shortcutsList = false,
     String jump = '',
     LibraryView view = LibraryView.songs,
+    bool twoAccounts = false,
+    bool filtered = false,
   }) async {
     final store = LibraryStore.open(':memory:');
     addTearDown(store.close);
-    final vk = store.ensureSource(TrackSource.vk, account: '1', name: 'VK');
+    final vk = store.ensureSource(
+      TrackSource.vk,
+      account: '1',
+      name: twoAccounts ? 'Мой VK' : 'VK',
+    );
     const songs = [
       ('Кино', 'Группа крови', 'Группа крови'),
       ('Земфира', 'Хочешь?', 'Прости меня моя любовь'),
@@ -124,8 +131,45 @@ void main() {
           album: album,
           durationSec: 180 + i * 17,
           addedAt: 1000 - i,
+          vkTrackId: 500 + i,
         ),
     ]);
+    // A second, made-up account: two songs of the first one merge into its
+    // rows, two more are its own.
+    final second = twoAccounts
+        ? store.ensureSource(TrackSource.vk, account: '2', name: 'Рабочий')
+        : null;
+    if (second != null) {
+      store.setSourceColor(second, 2);
+      store.upsertAll(second, [
+        for (final (i, (artist, title, album)) in songs.indexed)
+          if (i == 0 || i == 4)
+            NewTrack(
+              sourceKey: '2_$i',
+              artist: artist,
+              title: title,
+              album: album,
+              durationSec: 180 + i * 17,
+              addedAt: 2000 - i,
+              vkTrackId: 500 + i,
+            ),
+        const NewTrack(
+          sourceKey: '2_100',
+          artist: 'Ленинград',
+          title: 'Экспонат',
+          durationSec: 201,
+          addedAt: 900,
+        ),
+        const NewTrack(
+          sourceKey: '2_101',
+          artist: 'Placebo',
+          title: 'Every You Every Me',
+          durationSec: 213,
+          addedAt: 899,
+        ),
+      ]);
+      store.mergeSameSongs();
+    }
     store.saveAudioFile(ids[1], 'cache/a.mp3', 10, pinned: true);
     store.saveAudioFile(ids[3], 'cache/b.mp3', 10);
     store.markGone(vk, ['1_6']);
@@ -137,7 +181,10 @@ void main() {
       store.loadAll(),
       collections: collections,
     );
+    final sources = ValueNotifier(store.sources());
+    if (twoAccounts) library.watchSources(sources);
     library.showView(view);
+    if (filtered) library.showSource(second);
     final settings = ShellSettings.inMemory();
     if (!dark) settings.toggleTheme();
     if (rail) settings.toggleRail();
@@ -168,11 +215,14 @@ void main() {
         child: MaterialApp(
           debugShowCheckedModeBanner: false,
           theme: buildTheme(dark ? OwnColors.dark : OwnColors.light),
-          home: LibraryScreen(
-            library: library,
-            playback: PlaybackController(player: player, recordPlay: (_) {}),
-            collections: collections,
-            settings: settings,
+          home: SourcesScope(
+            sources: sources,
+            child: LibraryScreen(
+              library: library,
+              playback: PlaybackController(player: player, recordPlay: (_) {}),
+              collections: collections,
+              settings: settings,
+            ),
           ),
         ),
       ),
@@ -245,6 +295,34 @@ void main() {
   testWidgets(
     'dark, jump without a match',
     (t) => shoot(t, 'dark-jump-none', dark: true, jump: 'ъъ', pixelRatio: 2),
+  );
+  testWidgets(
+    'dark, two accounts',
+    (t) => shoot(t, 'dark-accounts', dark: true, twoAccounts: true),
+  );
+  testWidgets(
+    'light, two accounts, filtered to the second',
+    (t) => shoot(
+      t,
+      'light-accounts-filtered',
+      dark: false,
+      twoAccounts: true,
+      filtered: true,
+      pixelRatio: 2,
+    ),
+  );
+  testWidgets(
+    'dark, two accounts, smallest window',
+    (t) => shoot(
+      t,
+      'dark-accounts-small',
+      dark: true,
+      twoAccounts: true,
+      rail: true,
+      dock: PlayerDock.bottom,
+      size: const Size(480, 440),
+      pixelRatio: 2,
+    ),
   );
   testWidgets(
     'light, narrow',
