@@ -675,6 +675,9 @@ class _LibraryScreenState extends State<LibraryScreen> {
                     count: view.isLater ? null : _countLabel(),
                     jump: library.jump,
                     tight: tight,
+                    filter: view.isLater || library.filterSources.length < 2
+                        ? null
+                        : _SourceFilter(library: library, tight: tight),
                   ),
                   if (!tight && !view.isLater && library.visible.isNotEmpty)
                     _ListHeader(
@@ -721,8 +724,16 @@ class _LibraryScreenState extends State<LibraryScreen> {
 
   Widget _songList(OwnColors colors, {required bool showAlbum}) {
     if (library.visible.isEmpty) {
+      final filtered = library.filterSources
+          .where((source) => source.id == library.sourceFilter)
+          .firstOrNull;
       final empty = library.searchText.text.isNotEmpty
-          ? 'No songs match "${library.searchText.text}"'
+          ? filtered == null
+                ? 'No songs match "${library.searchText.text}"'
+                : 'No songs from ${filtered.name} match '
+                      '"${library.searchText.text}"'
+          : filtered != null
+          ? 'None of these songs are from ${filtered.name}.'
           : switch (library.view.kind) {
               ViewKind.downloads =>
                 'No downloads yet. Right-click a song and choose Download '
@@ -890,6 +901,7 @@ class _ViewHeading extends StatelessWidget {
     required this.count,
     required this.jump,
     required this.tight,
+    this.filter,
   });
 
   final String title;
@@ -898,6 +910,9 @@ class _ViewHeading extends StatelessWidget {
 
   /// A short window: a smaller title, so that the list keeps its rows.
   final bool tight;
+
+  /// The source filter, when there are sources to choose from.
+  final Widget? filter;
 
   @override
   Widget build(BuildContext context) {
@@ -932,6 +947,11 @@ class _ViewHeading extends StatelessWidget {
               ],
             ),
           ),
+          if (filter != null) ...[
+            const SizedBox(width: 12),
+            // Up to half the row; more chips than fit scroll sideways.
+            Flexible(child: filter!),
+          ],
           if (jump.isTyping) ...[
             const SizedBox(width: 16),
             ConstrainedBox(
@@ -940,6 +960,132 @@ class _ViewHeading extends StatelessWidget {
             ),
           ],
         ],
+      ),
+    );
+  }
+}
+
+/// Chips that filter every list to one account's songs: "All", then one per
+/// source with songs, in its color. A song merged from several accounts is
+/// under each of them.
+class _SourceFilter extends StatelessWidget {
+  const _SourceFilter({required this.library, required this.tight});
+
+  final LibraryController library;
+  final bool tight;
+
+  @override
+  Widget build(BuildContext context) {
+    final chosen = library.sourceFilter;
+    return SingleChildScrollView(
+      key: const ValueKey('source-filter'),
+      scrollDirection: Axis.horizontal,
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          _SourceChip(
+            key: const ValueKey('source-filter-all'),
+            label: 'All',
+            tooltip: 'Songs from every account',
+            selected: chosen == null,
+            tight: tight,
+            onTap: () => library.showSource(null),
+          ),
+          for (final source in library.filterSources) ...[
+            const SizedBox(width: 6),
+            _SourceChip(
+              key: ValueKey('source-filter-${source.id}'),
+              label: source.name,
+              tooltip: 'Only songs from ${source.name}',
+              dot: colorOfSource(context, source),
+              selected: chosen == source.id,
+              tight: tight,
+              onTap: () =>
+                  library.showSource(chosen == source.id ? null : source.id),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+/// One choice of [_SourceFilter]: a pill, filled when chosen.
+class _SourceChip extends StatelessWidget {
+  const _SourceChip({
+    super.key,
+    required this.label,
+    required this.tooltip,
+    required this.selected,
+    required this.tight,
+    required this.onTap,
+    this.dot,
+  });
+
+  final String label;
+  final String tooltip;
+  final bool selected;
+  final bool tight;
+  final VoidCallback onTap;
+
+  /// The source's color, left of the name.
+  final Color? dot;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = OwnColors.of(context);
+    return Tooltip(
+      message: tooltip,
+      child: Semantics(
+        button: true,
+        selected: selected,
+        child: Material(
+          color: selected ? colors.accentBg : Colors.transparent,
+          shape: StadiumBorder(
+            side: BorderSide(color: selected ? colors.accent : colors.line),
+          ),
+          child: InkWell(
+            customBorder: const StadiumBorder(),
+            onTap: onTap,
+            child: Padding(
+              padding: EdgeInsets.symmetric(
+                horizontal: 10,
+                vertical: tight ? 2 : 5,
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if (dot != null) ...[
+                    Container(
+                      width: 8,
+                      height: 8,
+                      decoration: BoxDecoration(
+                        color: dot,
+                        shape: BoxShape.circle,
+                      ),
+                    ),
+                    const SizedBox(width: 6),
+                  ],
+                  ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 140),
+                    child: Text(
+                      label,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: selected
+                            ? FontWeight.w600
+                            : FontWeight.w400,
+                        color: selected ? colors.accent : colors.dim,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
       ),
     );
   }

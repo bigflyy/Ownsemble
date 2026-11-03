@@ -2,13 +2,22 @@ import 'package:flutter/foundation.dart';
 
 import 'library_controller.dart' show LibraryView;
 
-/// Somewhere the song list has been: its view, search text and scroll offset.
+/// Somewhere the song list has been: its view, search text, source filter
+/// and scroll offset.
 @immutable
 class Place {
-  const Place({required this.view, required this.search, this.scroll = 0});
+  const Place({
+    required this.view,
+    required this.search,
+    this.source,
+    this.scroll = 0,
+  });
 
   final LibraryView view;
   final String search;
+
+  /// The source the list was filtered to; null for all sources.
+  final int? source;
   final double scroll;
 
   @override
@@ -16,10 +25,11 @@ class Place {
       other is Place &&
       other.view == view &&
       other.search == search &&
+      other.source == source &&
       other.scroll == scroll;
 
   @override
-  int get hashCode => Object.hash(view, search, scroll);
+  int get hashCode => Object.hash(view, search, source, scroll);
 }
 
 /// The previous and next places, like a browser's back and forward. Kept in

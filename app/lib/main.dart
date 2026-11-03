@@ -223,6 +223,9 @@ Future<void> main(List<String> args) async {
     onLibraryChanged: (loaded) =>
         library.replaceTracks(loaded.tracks, loaded.index),
   );
+  // The source filter offers the sources with songs, and drops a filter
+  // whose source left.
+  library.watchSources(sync.sourceList);
   final sourceEditor = SourceEditor(
     store: store,
     sync: sync,

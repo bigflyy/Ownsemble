@@ -1,5 +1,7 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart';
 
+import '../library/library_records.dart';
 import '../library/search_index.dart';
 import '../library/track.dart';
 import '../storage/audio_storage.dart';
@@ -58,12 +60,13 @@ class LibraryView {
 }
 
 /// State of the song list: all songs, the view chosen in the sidebar, the
-/// search text and what is shown.
+/// source filter, the search text and what is shown.
 ///
 /// Songs searches the whole library through the index. Other views list
 /// their own songs (stored songs, History plays, Stack entries) and the search
 /// keeps those that match, in the view's order; History and Stacks may list
-/// a song more than once.
+/// a song more than once. The source filter keeps, in every view, the songs
+/// one account has; a song merged from several accounts counts for each.
 class LibraryController extends ChangeNotifier {
   LibraryController(
     this._all, {
@@ -79,8 +82,9 @@ class LibraryController extends ChangeNotifier {
     collections?.addListener(_onSourceChanged);
     storage?.addListener(_onStorageChanged);
     final saved = _decodeView(readSetting?.call(viewSetting));
-    if (saved != null) {
-      _view = saved;
+    if (saved != null) _view = saved;
+    _source = int.tryParse(readSetting?.call(sourceSetting) ?? '');
+    if (saved != null || _source != null) {
       _rebuildBase();
       _applySearch();
     }
@@ -89,8 +93,13 @@ class LibraryController extends ChangeNotifier {
   /// Setting with the view shown when the app closed.
   static const viewSetting = 'ui.view';
 
-  /// Setting with the list the playing song was started from: its view and,
-  /// on the next line, its search text.
+  /// Setting with the source the lists were filtered to when the app closed;
+  /// absent for all sources.
+  static const sourceSetting = 'ui.source';
+
+  /// Setting with the list the playing song was started from: its view, on
+  /// the next line its search text, and on the third its source filter
+  /// (empty for all sources; older versions wrote no third line).
   static const playedFromSetting = 'ui.played_from';
 
   final void Function(String key, String? value)? _writeSetting;
@@ -116,12 +125,56 @@ class LibraryController extends ChangeNotifier {
   /// The list stored as [text] in [playedFromSetting], if there is one.
   Place? _decodePlayedFrom(String? text) {
     if (text == null) return null;
-    final lineEnd = text.indexOf('\n');
-    if (lineEnd < 0) return null;
-    final view = _decodeView(text.substring(0, lineEnd));
+    final lines = text.split('\n');
+    if (lines.length < 2) return null;
+    final view = _decodeView(lines[0]);
     if (view == null) return null;
-    return Place(view: view, search: text.substring(lineEnd + 1));
+    return Place(
+      view: view,
+      search: lines[1],
+      source: lines.length > 2 ? int.tryParse(lines[2]) : null,
+    );
   }
+
+  /// Sources the lists can be filtered to: those with songs. Empty until
+  /// [watchSources]; fewer than two means there is nothing to choose.
+  List<SourceInfo> get filterSources => _filterSources;
+  List<SourceInfo> _filterSources = const [];
+  ValueListenable<List<SourceInfo>>? _sources;
+
+  /// Follows the library's sources, for [filterSources]. A filter whose
+  /// source left, or that no longer has another source to choose instead,
+  /// is dropped: no control would show it, and it would hide songs.
+  void watchSources(ValueListenable<List<SourceInfo>> sources) {
+    _sources?.removeListener(_onSourcesChanged);
+    _sources = sources..addListener(_onSourcesChanged);
+    _onSourcesChanged();
+  }
+
+  void _onSourcesChanged() {
+    _filterSources = [
+      for (final source in _sources!.value)
+        if (source.songCount > 0) source,
+    ];
+    if (_filterSourceValid(_source)) {
+      notifyListeners();
+      return;
+    }
+    _source = null;
+    _writeSetting?.call(sourceSetting, null);
+    if (_playedFrom != null && !_filterSourceValid(_playedFrom!.source)) {
+      _playedFrom = Place(view: _playedFrom!.view, search: _playedFrom!.search);
+    }
+    _rebuildBase();
+    _applySearch();
+    jump.clear();
+    notifyListeners();
+  }
+
+  /// Whether the lists may be filtered to [source] (null: all sources).
+  bool _filterSourceValid(int? source) =>
+      source == null ||
+      (_filterSources.length > 1 && _filterSources.any((s) => s.id == source));
 
   /// History and Stacks; without it those views are empty.
   final CollectionsController? collections;
@@ -133,6 +186,9 @@ class LibraryController extends ChangeNotifier {
   List<Track> _all;
   late Map<int, Track> _byId;
   LibraryView _view = LibraryView.songs;
+
+  /// Library id of the source the lists are filtered to; null for all.
+  int? _source;
 
   /// The view's songs before searching (null for Songs: the whole library),
   /// with History or Stack entry ids alongside when the view has entries.
@@ -162,6 +218,9 @@ class LibraryController extends ChangeNotifier {
   List<Track> get all => _all;
   LibraryView get view => _view;
 
+  /// Library id of the source the lists are filtered to; null for all.
+  int? get sourceFilter => _source;
+
   /// The song with library id [id], if it is in the library.
   Track? byId(int id) => _byId[id];
 
@@ -187,24 +246,37 @@ class LibraryController extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Filters every view to the songs of source [sourceId], or shows all
+  /// sources again for null, keeping the view and the search.
+  void showSource(int? sourceId) {
+    if (sourceId == _source) return;
+    _places.leave(_here);
+    _source = sourceId;
+    _writeSetting?.call(sourceSetting, sourceId?.toString());
+    _rebuildBase();
+    _applySearch();
+    jump.clear();
+    if (scroll.hasClients) scroll.jumpTo(0);
+    notifyListeners();
+  }
+
   /// Where the list is now.
   Place get _here => Place(
     view: _view,
     search: _appliedQuery,
+    source: _source,
     scroll: scroll.hasClients ? scroll.offset : 0,
   );
 
   /// Remembers the list on screen as the one the song being started comes
   /// from, for [goToSong]. Saved, since the song comes back in the next run.
   void notePlayedFrom() {
-    final from = _here;
-    if (_playedFrom?.view == from.view && _playedFrom?.search == from.search) {
-      return;
-    }
-    _playedFrom = Place(view: from.view, search: from.search);
+    final from = Place(view: _view, search: _appliedQuery, source: _source);
+    if (_playedFrom == from) return;
+    _playedFrom = from;
     _writeSetting?.call(
       playedFromSetting,
-      '${_encodeView(from.view)}\n${from.search}',
+      '${_encodeView(from.view)}\n${from.search}\n${from.source ?? ''}',
     );
   }
 
@@ -216,14 +288,17 @@ class LibraryController extends ChangeNotifier {
     final here = _here;
     final from =
         _playedFrom ?? const Place(view: LibraryView.songs, search: '');
-    _showList(from.view, from.search);
+    _showList(from.view, from.search, from.source);
     var row = _rowOf(track, listRow);
     if (row == null) {
-      _showList(LibraryView.songs, '');
+      _showList(LibraryView.songs, '', null);
       row = _rowOf(track, listRow);
     }
     if (row == null) return;
-    final sameList = _view == here.view && _appliedQuery == here.search;
+    final sameList =
+        _view == here.view &&
+        _appliedQuery == here.search &&
+        _source == here.source;
     // Only the outline changes then, which is not a place to come back from.
     if (!sameList || !_rowInSight(row)) _places.leave(here);
     jump.mark(row);
@@ -244,7 +319,12 @@ class LibraryController extends ChangeNotifier {
 
   void _showPlace(Place? place) {
     if (place == null) return;
-    _showList(place.view, place.search);
+    // A place filtered to a source that left shows all sources.
+    _showList(
+      place.view,
+      place.search,
+      _filterSourceValid(place.source) ? place.source : null,
+    );
     jump.clear();
     _afterLayout(() {
       if (!scroll.hasClients) return;
@@ -255,12 +335,16 @@ class LibraryController extends ChangeNotifier {
     });
   }
 
-  /// Shows the list of [view] filtered by [search], unless it is on screen.
-  /// The search box follows, without counting as a new search.
-  void _showList(LibraryView view, String search) {
-    if (view == _view && search == _appliedQuery) return;
+  /// Shows the list of [view] filtered by [search] and to [source], unless it
+  /// is on screen. The search box follows, without counting as a new search.
+  void _showList(LibraryView view, String search, int? source) {
+    if (view == _view && search == _appliedQuery && source == _source) return;
     _view = view;
     _writeSetting?.call(viewSetting, _encodeView(view));
+    if (source != _source) {
+      _source = source;
+      _writeSetting?.call(sourceSetting, source?.toString());
+    }
     _appliedQuery = search;
     searchText.value = TextEditingValue(
       text: search,
@@ -415,6 +499,25 @@ class LibraryController extends ChangeNotifier {
       case ViewKind.artists || ViewKind.playlists || ViewKind.charts:
         _base = const [];
     }
+    _filterBaseBySource();
+  }
+
+  /// Keeps only the songs [_source] has in the view's songs, with their entry
+  /// ids; Songs then gets its own list instead of the whole library.
+  void _filterBaseBySource() {
+    final source = _source;
+    if (source == null) return;
+    final base = _base ?? _all;
+    final ids = _baseEntryIds;
+    final tracks = <Track>[];
+    final keptIds = ids == null ? null : <int>[];
+    for (var i = 0; i < base.length; i++) {
+      if (!base[i].isFrom(source)) continue;
+      tracks.add(base[i]);
+      keptIds?.add(ids![i]);
+    }
+    _base = tracks;
+    _baseEntryIds = keptIds;
   }
 
   void _applySearch() {
@@ -457,6 +560,7 @@ class LibraryController extends ChangeNotifier {
 
   @override
   void dispose() {
+    _sources?.removeListener(_onSourcesChanged);
     collections?.removeListener(_onSourceChanged);
     storage?.removeListener(_onStorageChanged);
     jump.dispose();

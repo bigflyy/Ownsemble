@@ -40,6 +40,10 @@ Color _colorOf(
   return source == null ? colors.source1 : colors.sourceColor(source.color);
 }
 
+/// The color of [source] itself, as its songs' marks show it.
+Color colorOfSource(BuildContext context, SourceInfo source) =>
+    _colorOf(OwnColors.of(context), [source], source.id, source.kind);
+
 /// The color of [track]'s listed source.
 Color sourceColor(BuildContext context, Track track) => _colorOf(
   OwnColors.of(context),
