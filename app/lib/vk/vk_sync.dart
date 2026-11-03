@@ -304,7 +304,7 @@ Future<VkSyncResult> syncVkSource({
     // Only some of VK's image hosts hold a given image, and which one a link
     // names changes with every request. So the newest link replaces the old
     // one, and a cover that failed gets another chance after the next start.
-    store.updateCoverLinks(sourceId, fresh);
+    store.updateQuietDetails(sourceId, fresh);
     final added = listed.where((key) => !known.containsKey(key)).length;
     final back = listed.where((key) => known[key]?.goneAtMs != null).length;
     final newlyGone = store.markGone(sourceId, gone);
@@ -415,6 +415,10 @@ NewTrack vkItemToTrack(
     coverMidUrl: thumb?['photo_300'] as String?,
     coverFullUrl: thumb?['photo_1200'] as String?,
     tint: parseVkColor(item['main_color']),
+    vkTrackId: switch (item['track_id']) {
+      final int id when id != 0 => id,
+      _ => null,
+    },
   );
 }
 

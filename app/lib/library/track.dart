@@ -7,6 +7,24 @@ enum TrackSource {
   vk,
 }
 
+/// One account's copy of a song: another account's row merged into the one
+/// that is listed. See `findSameSongs`.
+class TrackCopy {
+  const TrackCopy({
+    required this.sourceId,
+    required this.sourceKey,
+    this.accessKey,
+    this.goneAtMs,
+  });
+
+  final int sourceId;
+  final String? sourceKey;
+  final String? accessKey;
+
+  /// When this account lost the song, Unix milliseconds.
+  final int? goneAtMs;
+}
+
 /// One song in the library, as the list and the player need it.
 class Track {
   const Track({
@@ -27,6 +45,7 @@ class Track {
     this.goneAtMs,
     this.localPath,
     this.pinned = false,
+    this.copies = const [],
   });
 
   /// Library row id.
@@ -77,8 +96,27 @@ class Track {
   /// Whether VK gave the song a real cover, in any size.
   bool get hasCover => smallCovers.isNotEmpty;
 
-  /// When a sync found the song gone from its source, Unix milliseconds.
+  /// When a sync found the song gone from its source ([sourceId]), Unix
+  /// milliseconds. Another account may still have it: see [isGone].
   final int? goneAtMs;
+
+  /// The same song in other accounts; empty for most songs.
+  final List<TrackCopy> copies;
+
+  /// Every account's copy of this song, this row's own first.
+  List<TrackCopy> get allCopies => [
+    TrackCopy(
+      sourceId: sourceId,
+      sourceKey: sourceKey,
+      accessKey: accessKey,
+      goneAtMs: goneAtMs,
+    ),
+    ...copies,
+  ];
+
+  /// Whether [source] has this song, gone or not.
+  bool isFrom(int source) =>
+      sourceId == source || copies.any((copy) => copy.sourceId == source);
 
   /// Stored audio file, relative to the data folder (or absolute), if any.
   final String? localPath;
@@ -93,6 +131,7 @@ class Track {
   /// Whether the song is downloaded (pinned in storage).
   bool get isDownloaded => localPath != null && pinned;
 
-  /// Whether the source no longer has this song; it plays only if stored.
-  bool get isGone => goneAtMs != null;
+  /// Whether no account has this song any more; it plays only if stored.
+  bool get isGone =>
+      goneAtMs != null && copies.every((copy) => copy.goneAtMs != null);
 }

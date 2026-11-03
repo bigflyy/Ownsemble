@@ -7,6 +7,16 @@ import 'package:ownsemble/library/track.dart';
 import 'package:path/path.dart' as p;
 import 'package:sqlite3/sqlite3.dart';
 
+/// Takes back what version 4 added, for tests that rebuild an older library
+/// from a new one.
+void dropVersion4(Database db) {
+  db.execute('DROP INDEX tracks_copies');
+  db.execute('ALTER TABLE tracks DROP COLUMN same_as');
+  db.execute('ALTER TABLE tracks DROP COLUMN vk_track_id');
+  db.execute('ALTER TABLE sources DROP COLUMN color');
+  db.execute('ALTER TABLE sources DROP COLUMN removed_at_ms');
+}
+
 /// Writes a library in the speed-gate format (schema version 0).
 void writeGateLibrary(String path) {
   final db = sqlite3.open(path);
@@ -148,6 +158,7 @@ void main() {
     db.execute('ALTER TABLE tracks DROP COLUMN cover_mid_url');
     db.execute('ALTER TABLE tracks DROP COLUMN cover_full_url');
     db.execute('DROP TABLE vk_album_titles');
+    dropVersion4(db);
     db.execute('PRAGMA user_version = 1');
     db.close();
 
@@ -178,6 +189,7 @@ void main() {
     store.close();
     final db = sqlite3.open(dbPath);
     db.execute('DROP TABLE vk_album_titles');
+    dropVersion4(db);
     db.execute('PRAGMA user_version = 2');
     db.close();
 

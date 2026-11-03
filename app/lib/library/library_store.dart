@@ -3,10 +3,12 @@ import 'package:sqlite3/sqlite3.dart';
 
 import 'library_records.dart';
 import 'library_schema.dart';
+import 'same_song.dart';
 import 'track.dart';
 
 export 'library_records.dart';
-export 'library_schema.dart' show NewerLibraryException, resolveAudioPath;
+export 'library_schema.dart'
+    show NewerLibraryException, resolveAudioPath, sourceColorCount;
 
 /// A song to add or update, before it has a library id.
 class NewTrack {
@@ -23,6 +25,7 @@ class NewTrack {
     this.coverMidUrl,
     this.coverFullUrl,
     this.tint,
+    this.vkTrackId,
   });
 
   final String artist;
@@ -41,6 +44,9 @@ class NewTrack {
   final String? coverMidUrl;
   final String? coverFullUrl;
   final int? tint;
+
+  /// VK's id of the recording, for finding the song in other accounts.
+  final int? vkTrackId;
 
   /// This song with other cover links.
   NewTrack withCovers({
@@ -61,6 +67,7 @@ class NewTrack {
     coverMidUrl: coverMidUrl,
     coverFullUrl: coverFullUrl,
     tint: tint,
+    vkTrackId: vkTrackId,
   );
 }
 
@@ -113,7 +120,8 @@ class LibraryStore {
   /// The library id of the source [kind] + [account], created if missing.
   ///
   /// A VK source carried over from the speed-gate library has no account; the
-  /// first account asked for takes it over, with its songs.
+  /// first account asked for takes it over, with its songs. An account removed
+  /// earlier comes back with what stayed of its songs.
   int ensureSource(
     TrackSource kind, {
     required String? account,
@@ -123,7 +131,11 @@ class LibraryStore {
       'SELECT id FROM sources WHERE kind = ? AND account IS ?',
       [kind.name, account],
     );
-    if (existing.isNotEmpty) return existing.first['id'] as int;
+    if (existing.isNotEmpty) {
+      final id = existing.first['id'] as int;
+      _db.execute('UPDATE sources SET removed_at_ms = NULL WHERE id = ?', [id]);
+      return id;
+    }
     if (account != null) {
       final unclaimed = _db.select(
         'SELECT id FROM sources WHERE kind = ? AND account IS NULL',
@@ -138,21 +150,35 @@ class LibraryStore {
         return id;
       }
     }
-    _db.execute('INSERT INTO sources (kind, account, name) VALUES (?, ?, ?)', [
-      kind.name,
-      account,
-      name,
-    ]);
+    _db.execute(
+      'INSERT INTO sources (kind, account, name, color) VALUES (?, ?, ?, ?)',
+      [kind.name, account, name, _freeColor()],
+    );
     return _db.lastInsertRowId;
   }
 
-  /// All sources with their song counts and last sync result.
+  /// The lowest color slot no source uses; with every slot taken they repeat.
+  int _freeColor() {
+    final used = _db
+        .select('SELECT color FROM sources WHERE removed_at_ms IS NULL')
+        .map((row) => row['color'] as int?)
+        .nonNulls
+        .toList();
+    for (var slot = 1; slot <= sourceColorCount; slot++) {
+      if (!used.contains(slot)) return slot;
+    }
+    return used.length % sourceColorCount + 1;
+  }
+
+  /// All sources with their song counts and last sync result. Removed accounts
+  /// are left out, though songs of theirs may stay in History or Stacks.
   List<SourceInfo> sources() {
     final rows = _db.select('''
-      SELECT s.id, s.kind, s.account, s.name, s.last_sync_at_ms,
+      SELECT s.id, s.kind, s.account, s.name, s.color, s.last_sync_at_ms,
              s.last_sync_error,
              count(t.id) AS songs, count(t.gone_at_ms) AS gone
       FROM sources s LEFT JOIN tracks t ON t.source_id = s.id
+      WHERE s.removed_at_ms IS NULL
       GROUP BY s.id ORDER BY s.id
     ''');
     return [
@@ -162,12 +188,165 @@ class LibraryStore {
           kind: TrackSource.values.byName(row['kind'] as String),
           account: row['account'] as String?,
           name: row['name'] as String,
+          color: row['color'] as int? ?? 1,
           lastSyncAtMs: row['last_sync_at_ms'] as int?,
           lastSyncError: row['last_sync_error'] as String?,
           songCount: row['songs'] as int,
           goneCount: row['gone'] as int,
         ),
     ];
+  }
+
+  /// Gives [sourceId] the name the user chose.
+  void renameSource(int sourceId, String name) =>
+      _db.execute('UPDATE sources SET name = ? WHERE id = ?', [name, sourceId]);
+
+  /// Replaces the name of [sourceId] if it still is [placeholder], so a name
+  /// the user chose stays.
+  void nameSource(int sourceId, String name, {required String placeholder}) =>
+      _db.execute('UPDATE sources SET name = ? WHERE id = ? AND name = ?', [
+        name,
+        sourceId,
+        placeholder,
+      ]);
+
+  /// Gives [sourceId] the color slot [color].
+  void setSourceColor(int sourceId, int color) => _db.execute(
+    'UPDATE sources SET color = ? WHERE id = ?',
+    [color, sourceId],
+  );
+
+  /// Takes the account of [sourceId] out of the library. Its songs leave the
+  /// lists, except what the user made of them: a song in History, on a Stack or
+  /// stored stays, marked gone, unless another account's copy takes its place.
+  /// Returns stored audio that no row points at any more, for the caller to
+  /// delete.
+  List<String> removeSource(int sourceId) => _transaction(() {
+    final unused = <String>[];
+    final merged = _db.select(
+      'SELECT DISTINCT t.id FROM tracks t '
+      'JOIN tracks c ON c.same_as = t.id WHERE t.source_id = ?',
+      [sourceId],
+    );
+    for (final row in merged) {
+      final id = row['id'] as int;
+      final heir =
+          _db.select('SELECT min(id) AS id FROM tracks WHERE same_as = ?', [
+                id,
+              ]).first['id']
+              as int;
+      _db.execute('UPDATE tracks SET same_as = NULL WHERE id = ?', [heir]);
+      _db.execute('UPDATE tracks SET same_as = ? WHERE same_as = ?', [
+        heir,
+        id,
+      ]);
+      final file = _moveReferences(id, heir);
+      if (file != null) unused.add(file);
+    }
+    _db.execute(
+      '''
+      DELETE FROM tracks WHERE source_id = ?
+        AND id NOT IN (SELECT track_id FROM history)
+        AND id NOT IN (SELECT track_id FROM stack_entries)
+        AND id NOT IN (SELECT track_id FROM audio_files)
+      ''',
+      [sourceId],
+    );
+    final now = _now();
+    _db.execute(
+      'UPDATE tracks SET gone_at_ms = coalesce(gone_at_ms, ?) '
+      'WHERE source_id = ?',
+      [now, sourceId],
+    );
+    final left = _db.select(
+      'SELECT 1 FROM tracks WHERE source_id = ? LIMIT 1',
+      [sourceId],
+    );
+    if (left.isEmpty) {
+      _db.execute('DELETE FROM sources WHERE id = ?', [sourceId]);
+    } else {
+      _db.execute('UPDATE sources SET removed_at_ms = ? WHERE id = ?', [
+        now,
+        sourceId,
+      ]);
+    }
+    return unused;
+  });
+
+  /// Makes History, Stacks and stored audio of row [from] point at row [to].
+  /// When both have stored audio, [to]'s stays, kept if either was a download,
+  /// and the path of [from]'s file is returned.
+  String? _moveReferences(int from, int to) {
+    _db.execute('UPDATE history SET track_id = ? WHERE track_id = ?', [
+      to,
+      from,
+    ]);
+    _db.execute('UPDATE stack_entries SET track_id = ? WHERE track_id = ?', [
+      to,
+      from,
+    ]);
+    final audio = _db.select(
+      'SELECT path, pinned FROM audio_files WHERE track_id = ?',
+      [from],
+    );
+    if (audio.isEmpty) return null;
+    final theirs = _db.select(
+      'SELECT path FROM audio_files WHERE track_id = ?',
+      [to],
+    );
+    if (theirs.isEmpty) {
+      _db.execute('UPDATE audio_files SET track_id = ? WHERE track_id = ?', [
+        to,
+        from,
+      ]);
+      return null;
+    }
+    _db.execute(
+      'UPDATE audio_files SET pinned = max(pinned, ?) WHERE track_id = ?',
+      [audio.first['pinned'], to],
+    );
+    _db.execute('DELETE FROM audio_files WHERE track_id = ?', [from]);
+    final path = audio.first['path'] as String;
+    return path == theirs.first['path'] ? null : path;
+  }
+
+  /// Merges the songs that several accounts share into one listed row (see
+  /// [findSameSongs]). Does nothing with fewer than two accounts.
+  MergeResult mergeSameSongs() {
+    final rows = _db.select('''
+      SELECT t.id, t.source_id, t.source_key, t.artist, t.title,
+             t.duration_sec, t.vk_track_id, t.same_as
+      FROM tracks t JOIN sources s ON s.id = t.source_id
+      WHERE s.kind = 'vk' AND s.removed_at_ms IS NULL
+      ORDER BY t.id
+    ''');
+    final accounts = {for (final row in rows) row['source_id'] as int};
+    if (accounts.length < 2) return const MergeResult(0, []);
+    final copies = findSameSongs([
+      for (final row in rows)
+        SongRow(
+          id: row['id'] as int,
+          sourceId: row['source_id'] as int,
+          sourceKey: row['source_key'] as String,
+          text: songMatchText(row['artist'] as String, row['title'] as String),
+          seconds: row['duration_sec'] as int,
+          vkTrackId: row['vk_track_id'] as int?,
+          sameAs: row['same_as'] as int?,
+        ),
+    ]);
+    if (copies.isEmpty) return const MergeResult(0, []);
+    return _transaction(() {
+      final unused = <String>[];
+      for (final MapEntry(key: copy, value: listed) in copies.entries) {
+        _db.execute('UPDATE tracks SET same_as = ? WHERE id = ?', [
+          listed,
+          copy,
+        ]);
+        final file = _moveReferences(copy, listed);
+        if (file != null) unused.add(file);
+      }
+      return MergeResult(copies.length, unused);
+    });
   }
 
   /// Records how the last sync of [sourceId] ended; null [error] is success.
@@ -198,8 +377,9 @@ class LibraryStore {
     final upsert = _db.prepare('''
       INSERT INTO tracks (source_id, source_key, access_key, artist, title,
                           album, duration_sec, added_at, cover_url,
-                          cover_large_url, cover_mid_url, cover_full_url, tint)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                          cover_large_url, cover_mid_url, cover_full_url, tint,
+                          vk_track_id)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT (source_id, source_key) DO UPDATE SET
         access_key = excluded.access_key,
         artist = excluded.artist,
@@ -249,6 +429,7 @@ class LibraryStore {
             track.coverMidUrl,
             track.coverFullUrl,
             track.tint,
+            track.vkTrackId,
           ]);
           if (written.isNotEmpty) {
             final id = written.first['id'] as int;
@@ -268,13 +449,14 @@ class LibraryStore {
     }
   }
 
-  /// Stores the cover links of [tracks], for songs that exist already. No
-  /// change the UI has to know about: a new host of the same image only
-  /// matters the next time the library loads.
-  void updateCoverLinks(int sourceId, Iterable<NewTrack> tracks) {
+  /// Stores the cover links and VK track ids of [tracks], for songs that
+  /// exist already. No change the UI has to know about: a new host of the same
+  /// image only matters the next time the library loads, and a track id only
+  /// to [mergeSameSongs].
+  void updateQuietDetails(int sourceId, Iterable<NewTrack> tracks) {
     final update = _db.prepare('''
       UPDATE tracks SET cover_url = ?, cover_large_url = ?, cover_mid_url = ?,
-                        cover_full_url = ?
+                        cover_full_url = ?, vk_track_id = ?
       WHERE source_id = ? AND source_key = ?
     ''');
     try {
@@ -285,6 +467,7 @@ class LibraryStore {
             track.coverLargeUrl,
             track.coverMidUrl,
             track.coverFullUrl,
+            track.vkTrackId,
             sourceId,
             track.sourceKey,
           ]);
@@ -353,8 +536,23 @@ class LibraryStore {
     }
   }
 
-  /// The whole library, newest first, with each song's stored audio.
+  /// The whole library, newest first, with each song's stored audio and its
+  /// copies in other accounts. Copies themselves are not listed.
   List<Track> loadAll() {
+    final copies = <int, List<TrackCopy>>{};
+    for (final row in _db.select('''
+      SELECT same_as, source_id, source_key, access_key, gone_at_ms
+      FROM tracks WHERE same_as IS NOT NULL ORDER BY id
+    ''')) {
+      (copies[row['same_as'] as int] ??= []).add(
+        TrackCopy(
+          sourceId: row['source_id'] as int,
+          sourceKey: row['source_key'] as String,
+          accessKey: row['access_key'] as String?,
+          goneAtMs: row['gone_at_ms'] as int?,
+        ),
+      );
+    }
     final rows = _db.select('''
       SELECT t.id, t.source_id, s.kind, t.source_key, t.access_key, t.artist,
              t.title, t.album, t.duration_sec, t.cover_url, t.cover_large_url,
@@ -363,6 +561,7 @@ class LibraryStore {
       FROM tracks t
       JOIN sources s ON s.id = t.source_id
       LEFT JOIN audio_files a ON a.track_id = t.id
+      WHERE t.same_as IS NULL
       ORDER BY t.added_at DESC, t.id DESC
     ''');
     return [
@@ -385,6 +584,7 @@ class LibraryStore {
           goneAtMs: row['gone_at_ms'] as int?,
           localPath: row['path'] as String?,
           pinned: row['pinned'] == 1,
+          copies: copies[row['id'] as int] ?? const [],
         ),
     ];
   }

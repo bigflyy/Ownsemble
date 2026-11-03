@@ -6,7 +6,10 @@ import 'package:sqlite3/sqlite3.dart';
 /// Schema version this build reads and writes (`PRAGMA user_version`).
 ///
 /// 0 is the speed-gate build's single `tracks` table (or an empty file).
-const librarySchemaVersion = 3;
+const librarySchemaVersion = 4;
+
+/// How many colors sources can have; the theme has one per slot, from 1.
+const sourceColorCount = 6;
 
 /// Thrown when the library was written by a newer build of the app.
 class NewerLibraryException implements Exception {
@@ -40,6 +43,7 @@ void migrateLibrary(Database db, {String? dataDir}) {
     if (version < 1) _upgradeToVersion1(db, dataDir);
     if (version < 2) _addCoverSizes(db);
     if (version < 3) _addVkAlbumTitles(db);
+    if (version < 4) _addAccounts(db);
     db.execute('PRAGMA user_version = $librarySchemaVersion');
     db.execute('COMMIT');
   } catch (_) {
@@ -81,6 +85,34 @@ void _addVkAlbumTitles(Database db) {
       title TEXT NOT NULL
     )
   ''');
+}
+
+/// Version 4: several VK accounts. A source gets a color, and the time its
+/// account was removed while songs in History, Stacks or on disk kept it
+/// alive. A song gets VK's `track_id`, which the next sync fills in, and
+/// `same_as`: the row it is a copy of when another account has the same song.
+/// Copies stay in the table, each with its own account's key, so a merged song
+/// streams through whichever account still has it; only the row they point at
+/// is listed, and History, Stacks and stored audio point at that row.
+void _addAccounts(Database db) {
+  db.execute('ALTER TABLE sources ADD COLUMN color INTEGER');
+  db.execute('ALTER TABLE sources ADD COLUMN removed_at_ms INTEGER');
+  db.execute('ALTER TABLE tracks ADD COLUMN vk_track_id INTEGER');
+  db.execute(
+    'ALTER TABLE tracks ADD COLUMN same_as INTEGER REFERENCES tracks (id)',
+  );
+  db.execute(
+    'CREATE INDEX tracks_copies ON tracks (same_as) WHERE same_as IS NOT NULL',
+  );
+  final vkSources = db.select(
+    "SELECT id FROM sources WHERE kind = 'vk' ORDER BY id",
+  );
+  for (final (index, source) in vkSources.indexed) {
+    db.execute('UPDATE sources SET color = ? WHERE id = ?', [
+      index % sourceColorCount + 1,
+      source['id'],
+    ]);
+  }
 }
 
 void _createVersion1(Database db) {

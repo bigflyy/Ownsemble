@@ -11,6 +11,7 @@ class SourceInfo {
     this.account,
     this.lastSyncAtMs,
     this.lastSyncError,
+    this.color = 1,
   });
 
   final int id;
@@ -32,6 +33,9 @@ class SourceInfo {
 
   /// Songs the source no longer has.
   final int goneCount;
+
+  /// The source's color slot, from 1 (see `OwnColors.sourceColor`).
+  final int color;
 }
 
 /// One play in the History, newest first in lists.
@@ -90,6 +94,17 @@ typedef KnownTrack = ({
   String? coverFullUrl,
   int? goneAtMs,
 });
+
+/// What [LibraryStore.mergeSameSongs] did.
+class MergeResult {
+  const MergeResult(this.merged, this.unusedFiles);
+
+  /// Rows that became copies of another row.
+  final int merged;
+
+  /// Stored audio no row points at any more; the caller deletes the files.
+  final List<String> unusedFiles;
+}
 
 /// A cached song's stored file, as the cache limit sees it.
 class CachedAudio {
