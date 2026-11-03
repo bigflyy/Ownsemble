@@ -204,6 +204,45 @@ void reportIdGroups(
   }
 }
 
+/// Counts what the proposed key would merge: the same track_id with a length
+/// within the tolerance, else the same text and exact length when the two do
+/// not both have a track_id. Names the songs the length rule keeps apart.
+void reportProposedKey(List<Song> first, List<Song> second) {
+  final byTrackId = <String, List<Song>>{};
+  final byText = <String, List<Song>>{};
+  for (final song in first) {
+    if (song.trackId case final id?) (byTrackId[id] ??= []).add(song);
+    (byText[song.text] ??= []).add(song);
+  }
+  var byId = 0;
+  var byTextRule = 0;
+  final keptApart = <String>[];
+  for (final song in second) {
+    final sameId = byTrackId[song.trackId] ?? const <Song>[];
+    if (sameId.any((other) => _gap(other, song) <= _lengthToleranceSeconds)) {
+      byId++;
+    } else if ((byText[song.text] ?? const <Song>[]).any(
+      (other) =>
+          _gap(other, song) == 0 &&
+          (other.trackId == null || song.trackId == null),
+    )) {
+      byTextRule++;
+    } else if (sameId.isNotEmpty) {
+      keptApart.add(
+        '${song.label} (${song.seconds} s) ~ ${sameId.first.label} '
+        '(${sameId.first.seconds} s)',
+      );
+    }
+  }
+  print('\nProposed key, second account against the first:');
+  print('  merged by track_id + length: $byId');
+  print('  merged by text + exact length: $byTextRule');
+  print('  same track_id kept apart by length: ${keptApart.length}');
+  for (final line in keptApart.take(_sampleLimit)) {
+    print('     $line');
+  }
+}
+
 /// Reads one account's whole library and prints what its songs carry.
 Future<(int, List<Song>)> readAccount(String label, String sessionPath) async {
   final vk = VkClient(SessionCookie.loadAll(File(sessionPath)));
@@ -246,6 +285,7 @@ Future<void> main(List<String> args) async {
     final firstIndex = SongIndex();
     first.forEach(firstIndex.add);
     report('Second account against the first', second, firstIndex);
+    reportProposedKey(first, second);
     final all = [...first, ...second];
     reportIdGroups('Songs sharing a track_id', all, (song) => song.trackId);
     reportIdGroups(

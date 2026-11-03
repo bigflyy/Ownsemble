@@ -115,9 +115,26 @@ by the end of the connection (twice in about 300 plays; not caught by the probe)
   different length (223 s vs 194 s, 212 s vs 199 s), so they are not known
   to be the same recording. The app does not substitute them.
 
+## One song in two accounts (2026-11-03)
+
+Measured with `tool/probe_duplicate_layers.dart`.
+
+- An account's list holds its own copy: the same song never had the same
+  `owner_id` + `id` in two accounts.
+- `track_id` finds nearly all shared songs, but it is not proof by itself: about
+  15% of the groups sharing one disagree on the title or the length. Some are one
+  recording labeled differently, others clearly are not the same song.
+- `release_audio_id` has the same faults and finds nothing more.
+- The same artist and title with another length is often another cut.
+
+So two songs count as one when they have the same `track_id` and lengths within
+2 s, or the same text and exact length if they do not both have a `track_id`.
+A wrong merge hides a song and a missed one only shows it twice, so doubtful
+cases stay apart.
+
 ## Not yet verified
 
-- Libraries larger than one page of 200, and the maximum page size.
+- The maximum page size.
 - How long the session cookies keep producing tokens, and how VK reacts to
   frequent syncs.
 - Startup latency with the real player (libmpv) and connection reuse: step 2.
