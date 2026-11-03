@@ -316,6 +316,94 @@ void main() {
     }
     expect(rows(), rowsBefore);
 
+    // E4: the chips filter the lists to one account, merged songs in both.
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(find.byKey(const ValueKey('source-filter')), findsOneWidget);
+    expect(library.filterSources.map((s) => s.id), [firstId, secondId]);
+    for (final source in [secondId, firstId]) {
+      final clock = Stopwatch()..start();
+      await tapKey(tester, 'source-filter-$source');
+      final switchMs = clock.elapsedMilliseconds;
+      final wanted = library.all.where((t) => t.isFrom(source)).toList();
+      expect(library.sourceFilter, source);
+      expect(
+        library.visible.map((t) => t.id),
+        wanted.map((t) => t.id),
+        reason: 'the songs of source $source, in library order',
+      );
+      expect(library.visible.where((t) => t.copies.isNotEmpty), isNotEmpty);
+      final firstRow = library.visible.first;
+      expect(find.byKey(ValueKey('song-${firstRow.id}')), findsOneWidget);
+      say(
+        'filter source $source: ${library.visible.length} of ${rows()} rows, '
+        '${library.visible.where((t) => t.copies.isNotEmpty).length} merged, '
+        'tap to list $switchMs ms (two frames of 300 ms pumped)',
+      );
+    }
+    final firstOnly = library.visible.length;
+    // Back undoes the filter, Forward redoes it.
+    library.goBack();
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(library.sourceFilter, secondId);
+    library.goForward();
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(library.sourceFilter, firstId);
+    // Searching inside a filter keeps both; a letter typed in the box.
+    await tester.enterText(find.byType(TextField), 'а');
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(library.visible.every((t) => t.isFrom(firstId)), isTrue);
+    expect(library.visible.length, lessThanOrEqualTo(firstOnly));
+    say('search "а" inside the filter: ${library.visible.length} rows');
+    await tester.enterText(find.byType(TextField), '');
+    await tester.pump(const Duration(milliseconds: 300));
+    // A song played from the filtered list: its queue is that list, and going
+    // to it from another filter comes back here.
+    // The filter's own cost on this library, without the frames.
+    final filterClock = Stopwatch()..start();
+    library.showSource(null);
+    final toAllUs = filterClock.elapsedMicroseconds;
+    filterClock.reset();
+    library.showSource(secondId);
+    final toSecondUs = filterClock.elapsedMicroseconds;
+    say(
+      'filter call on ${rows()} rows: to all $toAllUs us, '
+      'to source $secondId $toSecondUs us',
+    );
+    await tester.pump(const Duration(milliseconds: 300));
+    final playedRow = library.visible.firstWhere(streams);
+    final playedIndex = library.visible.indexOf(playedRow);
+    say('playing row ${playedRow.id} from the filtered list, by a tap');
+    await tester.tap(find.byKey(ValueKey('song-${playedRow.id}')));
+    await waitUntil(
+      tester,
+      () => player.current?.id == playedRow.id,
+      what: 'the tapped song to start',
+    );
+    expect(
+      screen.playback.queue.context.map((t) => t.id),
+      library.visible.map((t) => t.id),
+    );
+    await player.stop();
+    await tapKey(tester, 'source-filter-all');
+    library.goToSong(playedRow);
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(library.sourceFilter, secondId);
+    expect(library.jump.row, playedIndex);
+    // The filter is saved for the next start; one stays chosen for the
+    // log out and remove steps below.
+    final settingsDb = sqlite3.open(
+      p.join(data.path, 'library.db'),
+      mode: OpenMode.readOnly,
+    );
+    expect(
+      settingsDb
+          .select("SELECT value FROM settings WHERE key = 'ui.source'")
+          .first['value'],
+      '$secondId',
+    );
+    settingsDb.close();
+    say('filter: Back/Forward, play from it, go to song, saved: ok');
+
     // Rename and recolor, by hand.
     final second = sync.syncedSources.last;
     await tapKey(tester, 'vk-accounts');
@@ -343,6 +431,9 @@ void main() {
     expect(sync.lastOutcome!.results, hasLength(1));
     expect(find.text('not logged in'), findsOneWidget);
     expect(rows(), rowsBefore);
+    // Its songs stay in the library, so its chip and the filter stay too.
+    expect(library.sourceFilter, second.id);
+    expect(find.byKey(ValueKey('source-filter-${second.id}')), findsOneWidget);
     say('logged out of one: rows stay, the other syncs');
     // Its own songs have no account left to stream through: they fail at once
     // with a reason, and never go through the first account.
@@ -425,14 +516,23 @@ void main() {
       what: 'the account removed',
     );
     expect(accounts.sessions, hasLength(1));
-    // The song downloaded through the second account stays, marked gone:
-    // a stored song is kept when its account is removed (E2's rule).
+    // Two of its songs stay, marked gone (E2's rule): the one downloaded
+    // through it (stored) and the one played from the filtered list (in
+    // History; the E3 steps play without recording, the tap records).
     final stayed = library.all.where((t) => t.sourceId != alone.id).toList();
-    expect(stayed.map((t) => t.id), [toKeep.id]);
-    expect(stayed.single.isGone, isTrue);
-    expect(rows(), alone.songCount + 1);
+    expect(stayed.map((t) => t.id).toSet(), {toKeep.id, playedRow.id});
+    expect(stayed.every((t) => t.isGone), isTrue);
+    expect(rows(), alone.songCount + 2);
     expect(copies(), 0);
-    say('removed: ${rows()} rows left, one source + the downloaded song');
+    // Its filter went with it: one source leaves nothing to choose.
+    expect(library.sourceFilter, isNull);
+    expect(library.visible.length, rows());
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(find.byKey(const ValueKey('source-filter')), findsNothing);
+    say(
+      'removed: ${rows()} rows left, one source + the downloaded row '
+      '${toKeep.id} + the played row ${playedRow.id}',
+    );
     await tapKey(tester, 'accounts-close');
   }, timeout: const Timeout(Duration(minutes: 30)));
 }
