@@ -16,10 +16,12 @@
 // the library's own rows, never a title or an account's name.
 
 import 'dart:io';
+import 'dart:math';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
+import 'package:ownsemble/library/track.dart';
 import 'package:ownsemble/main.dart' as app;
 import 'package:ownsemble/ui/library_screen.dart';
 import 'package:ownsemble/vk/vk_client.dart';
@@ -112,6 +114,49 @@ void main() {
       what: 'the sync',
     );
 
+    /// Streams up to [tries] of [candidates] (muted) until [want] have sound,
+    /// and checks each went through the account [expected] names (a source id;
+    /// null = the song's listed account). Says row ids and errors, never a
+    /// title: the second account's songs stay out of the output.
+    Future<void> streamSome(
+      String what,
+      Iterable<Track> candidates, {
+      required int want,
+      int? expected,
+      int tries = 8,
+    }) async {
+      final picked = candidates.toList()..shuffle(Random(3));
+      var ok = 0;
+      final failed = <String>[];
+      for (final track in picked.take(tries)) {
+        final routes = player.routesFor(track).map((r) => r.sourceId).toList();
+        final timing = await player.play(track);
+        if (!timing.ok) {
+          failed.add('row ${track.id}: ${timing.error}');
+          continue;
+        }
+        ok++;
+        expect(timing.sampleRate, greaterThan(0), reason: 'audio decoded');
+        expect(timing.cached, isFalse);
+        expect(timing.sourceId, expected ?? track.sourceId);
+        say(
+          '$what: row ${track.id} routes $routes, sound ${timing.toSoundMs} ms '
+          '(link ${timing.resolveMs}), source ${timing.sourceId}, '
+          'skipped ${timing.skippedAccounts}',
+        );
+        if (ok == want) break;
+      }
+      await player.stop();
+      for (final line in failed) {
+        say('$what, no sound: $line');
+      }
+      expect(ok, want, reason: '$what: $want with sound');
+    }
+
+    /// Songs that would stream, not play from disk.
+    bool streams(Track t) =>
+        player.storage!.stateOf(t).path == null && !t.isGone;
+
     int rows() => library.all.length;
     int copies() => library.all.fold(0, (n, t) => n + t.copies.length);
     int ownSongs() => sync.syncedSources.fold(0, (n, s) => n + s.songCount);
@@ -191,6 +236,38 @@ void main() {
     expect(sources.every((s) => s.name != vkDefaultSourceName), isTrue);
     say('names and colors differ');
 
+    // E3: each song streams through the account that has it.
+    final firstId = sources.first.id;
+    final secondId = sources.last.id;
+    expect(firstId, alone.id);
+    Iterable<Track> onlyIn(int source) => library.all.where(
+      (t) => t.sourceId == source && t.copies.isEmpty && streams(t),
+    );
+    final merged = library.all.where((t) => t.copies.isNotEmpty && streams(t));
+    for (final track in onlyIn(secondId)) {
+      expect(player.routesFor(track).map((r) => r.sourceId), [secondId]);
+    }
+    for (final track in merged) {
+      expect(player.routesFor(track).map((r) => r.sourceId).toSet(), {
+        track.sourceId,
+        ...track.copies.map((c) => c.sourceId),
+      });
+      expect(player.routesFor(track).first.sourceId, track.sourceId);
+    }
+    await streamSome('second account only', onlyIn(secondId), want: 3);
+    await streamSome('first account only', onlyIn(firstId), want: 1);
+    await streamSome('merged', merged, want: 2);
+    // A download takes the same route.
+    final toKeep = onlyIn(secondId)
+        .firstWhere((t) => player.storage!.stateOf(t).path == null);
+    expect(await screen.playback.download(toKeep), isNull);
+    expect(player.storage!.stateOf(toKeep).path, isNotNull);
+    say('downloaded row ${toKeep.id} through the second account');
+    final perfLog = File(p.join(data.path, 'perf.log')).readAsStringSync();
+    expect(perfLog, contains(', source $secondId'));
+    expect(perfLog, contains(', source $firstId'));
+    expect(perfLog, isNot(contains('http')), reason: 'no links in perf.log');
+
     // Where the key's count may differ from the rows: a second-account song
     // with a partner that stayed apart, because a song listed twice in one
     // account takes only one copy. Counts only.
@@ -267,6 +344,27 @@ void main() {
     expect(find.text('not logged in'), findsOneWidget);
     expect(rows(), rowsBefore);
     say('logged out of one: rows stay, the other syncs');
+    // Its own songs have no account left to stream through: they fail at once
+    // with a reason, and never go through the first account.
+    final orphan = library.all
+        .where((t) => t.sourceId == second.id && t.copies.isEmpty && streams(t))
+        .first;
+    expect(player.routesFor(orphan), isEmpty);
+    final refused = await player.play(orphan);
+    expect(refused.ok, isFalse);
+    expect(refused.error, 'no logged-in VK account has this song');
+    expect(refused.toSoundMs, lessThan(1000));
+    expect(refused.sourceId, isNull);
+    // A downloaded one still plays, from disk.
+    final kept = library.byId(toKeep.id)!;
+    final fromDisk = await player.play(kept);
+    expect(fromDisk.ok, isTrue, reason: 'downloaded song: ${fromDisk.error}');
+    expect(fromDisk.cached, isTrue);
+    await player.stop();
+    say(
+      'logged out: own song refused in ${refused.toSoundMs} ms, '
+      'downloaded one plays from disk',
+    );
 
     // Back in: the same source, its name kept, nothing doubled.
     await tapKey(tester, 'vk-accounts');
@@ -284,6 +382,35 @@ void main() {
     expect(rows(), rowsBefore);
     say('logged in again: same source, same rows');
 
+    // The listed account logs out: a merged song goes through the other one.
+    await tapKey(tester, 'account-menu-$firstId');
+    await tapKey(tester, 'vk-log-out');
+    expect(accounts.sessions, hasLength(1));
+    final listedOut = library.all.where(
+      (t) => t.sourceId == firstId && t.copies.isNotEmpty && streams(t),
+    );
+    expect(listedOut, isNotEmpty);
+    for (final track in listedOut) {
+      expect(player.routesFor(track).map((r) => r.sourceId), [second.id]);
+    }
+    await streamSome(
+      'merged, listed account logged out',
+      listedOut,
+      want: 2,
+      expected: second.id,
+    );
+    await logInWith(firstSession, 'vk-add-account');
+    await waitUntil(
+      tester,
+      () => !sync.running && accounts.sessions.length == 2,
+      timeout: const Duration(minutes: 3),
+      what: 'the first account back',
+    );
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(sync.syncedSources.map((s) => s.id), [firstId, second.id]);
+    expect(rows(), rowsBefore);
+    say('first account back in');
+
     // Remove: the songs that are only the second account's leave.
     await tapKey(tester, 'account-menu-${second.id}');
     await tapKey(tester, 'account-remove');
@@ -298,10 +425,14 @@ void main() {
       what: 'the account removed',
     );
     expect(accounts.sessions, hasLength(1));
-    expect(rows(), alone.songCount);
+    // The song downloaded through the second account stays, marked gone:
+    // a stored song is kept when its account is removed (E2's rule).
+    final stayed = library.all.where((t) => t.sourceId != alone.id).toList();
+    expect(stayed.map((t) => t.id), [toKeep.id]);
+    expect(stayed.single.isGone, isTrue);
+    expect(rows(), alone.songCount + 1);
     expect(copies(), 0);
-    expect(library.all.every((t) => t.sourceId == alone.id), isTrue);
-    say('removed: ${rows()} rows left, one source');
+    say('removed: ${rows()} rows left, one source + the downloaded song');
     await tapKey(tester, 'accounts-close');
   }, timeout: const Timeout(Duration(minutes: 30)));
 }
