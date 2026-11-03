@@ -8,6 +8,7 @@ import 'package:path/path.dart' as p;
 
 import 'bench/speed_bench.dart';
 import 'library/library_store.dart';
+import 'library/track.dart';
 import 'playback/playback_controller.dart';
 import 'platform/end_process.dart';
 import 'playback/player_service.dart';
@@ -24,6 +25,7 @@ import 'ui/sources_scope.dart';
 import 'ui/sync_controller.dart';
 import 'ui/theme.dart';
 import 'ui/vk_accounts.dart';
+import 'vk/vk_client.dart';
 import 'vk/vk_login_window.dart';
 import 'vk/vk_session.dart';
 
@@ -156,8 +158,19 @@ Future<void> main(List<String> args) async {
       seedFile: options.vkLoginSeed == null ? null : File(options.vkLoginSeed!),
     ),
   );
+  // A song streams through the account it came from: each source's account
+  // is looked up at every play, so logins, logouts and new sources count.
+  late final SyncController sync;
+  VkClient? clientOfSource(int sourceId) {
+    final source = sync.sourceList.value
+        .where((s) => s.id == sourceId)
+        .firstOrNull;
+    if (source == null || source.kind != TrackSource.vk) return null;
+    return account.clientFor(source.account);
+  }
+
   final player = PlayerService(
-    vk: account.client,
+    accounts: clientOfSource,
     muted: options.muted,
     dataDir: options.dataDir,
     mpvOptions: options.mpvOptions,
@@ -204,7 +217,7 @@ Future<void> main(List<String> args) async {
     );
   }
 
-  final sync = SyncController(
+  sync = SyncController(
     sources: sources,
     runner: syncRunner(),
     onLibraryChanged: (loaded) =>
@@ -219,7 +232,6 @@ Future<void> main(List<String> args) async {
   // A new login is synced at once, so the library fills without another step.
   var logins = account.logins;
   account.addListener(() {
-    player.vk = account.client;
     sync.runner = syncRunner();
     if (account.logins != logins) unawaited(sync.syncAfterRunning());
     logins = account.logins;
@@ -323,13 +335,20 @@ void _logPlayTimings(PlayerService player, File log) {
   });
   player.timings.listen((timing) {
     final kind = timing.cached ? 'cached' : 'stream';
+    // Which account's session gave the link: a source id, never a name.
+    final via = switch (timing.sourceId) {
+      null => '',
+      final source when timing.skippedAccounts == 0 => ', source $source',
+      final source =>
+        ', source $source after ${timing.skippedAccounts} other account(s)',
+    };
     final skipped = timing.playlistLinks == 0
         ? ''
         : ', ${timing.playlistLinks} HLS links from VK';
     final line = timing.ok
         ? '$kind sound ${timing.toSoundMs} ms'
-              '${timing.cached ? '' : ' (VK link ${timing.resolveMs} ms$skipped)'}'
-        : '$kind failed after ${timing.toSoundMs} ms$skipped: ${timing.error}';
+              '${timing.cached ? '' : ' (VK link ${timing.resolveMs} ms$skipped$via)'}'
+        : '$kind failed after ${timing.toSoundMs} ms$skipped$via: ${timing.error}';
     log.writeAsStringSync(
       '${DateTime.now().toIso8601String()} $line\n',
       mode: FileMode.append,

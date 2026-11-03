@@ -9,6 +9,7 @@ import '../library/track.dart';
 import '../storage/audio_storage.dart';
 import '../vk/vk_client.dart';
 import 'stream_proxy.dart';
+import 'stream_route.dart';
 
 /// Timing of one play request, from the click to audible output.
 class PlayTiming {
@@ -21,6 +22,8 @@ class PlayTiming {
     this.sampleRate,
     this.error,
     this.playlistLinks = 0,
+    this.sourceId,
+    this.skippedAccounts = 0,
   });
 
   final bool ok;
@@ -28,6 +31,14 @@ class PlayTiming {
 
   /// HLS playlist links VK gave before the link that was used, for perf.log.
   final int playlistLinks;
+
+  /// For streams: the source (account) whose session gave the link, so a
+  /// check can prove a song went through the account that owns it.
+  final int? sourceId;
+
+  /// For streams: accounts with the song asked before [sourceId] that gave
+  /// no link or were refused.
+  final int skippedAccounts;
 
   /// Time spent getting a fresh stream URL from VK (0 for cached songs).
   final int resolveMs;
@@ -87,7 +98,7 @@ const defaultMpvOptions = <String, String>{
 /// Plays songs with libmpv (media_kit) and measures how fast sound starts.
 class PlayerService {
   PlayerService({
-    required this.vk,
+    this.accounts,
     required this.muted,
     required this.dataDir,
     this.mpvOptions = const {},
@@ -106,8 +117,9 @@ class PlayerService {
   /// Whether streamed songs are saved to the cache while they play.
   final bool cacheWhileStreaming;
 
-  /// Resolves stream URLs for VK songs; null when no session is configured.
-  VkClient? vk;
+  /// The logged-in client of each source's account, read at every play, so
+  /// logging in or out needs no update here; null when there is no VK at all.
+  StreamAccounts? accounts;
   final bool muted;
 
   /// Extra mpv options (name to value), applied on top of [defaultMpvOptions].
@@ -243,6 +255,7 @@ class PlayerService {
     _currentController.add(track);
     var resolveMs = 0;
     var playlistLinks = 0;
+    RoutedStream? routed;
     PlayTiming finish(PlayTiming timing) {
       if (generation == _generation) _timingController.add(timing);
       return timing;
@@ -265,13 +278,15 @@ class PlayerService {
       if (hasFile) {
         cached = true;
         uri = localFile;
-      } else if (track.source == TrackSource.vk && vk != null) {
-        // Not cached, or the cached file is gone: stream it.
-        final stream = await vk!.resolveStream(
-          track.sourceKey!,
-          track.accessKey,
-        );
+      } else if (track.source == TrackSource.vk && accounts != null) {
+        // Not cached, or the cached file is gone: stream it, through an
+        // account that has the song.
+        routed = await resolveStream(track);
         resolveMs = clock.elapsedMilliseconds;
+        if (routed == null) {
+          throw StateError('no logged-in VK account has this song');
+        }
+        final RoutedStream(:stream, :route) = routed;
         playlistLinks = stream.playlistLinks;
         final link = stream.link;
         if (link == null) {
@@ -288,7 +303,7 @@ class PlayerService {
         proxied = _proxy.add(
           link,
           cacheTo: cachePath == null ? null : storage!.fileAt(cachePath),
-          alternative: () => vk!.releaseLink(stream),
+          alternative: () => route.client.releaseLink(stream),
           onSaved: (written, total) =>
               storage?.noteProgress(track, written, total),
         );
@@ -391,6 +406,8 @@ class PlayerService {
           networkFirstChunkMs: await proxied?.networkFirstChunkMs,
           sampleRate: _player.state.audioParams.sampleRate,
           playlistLinks: playlistLinks,
+          sourceId: routed?.route.sourceId,
+          skippedAccounts: routed?.skipped ?? 0,
         ),
       );
     } catch (error) {
@@ -410,10 +427,24 @@ class PlayerService {
               ? 'no sound after 20 s. The connection may be too slow'
               : describePlayError(error),
           playlistLinks: playlistLinks,
+          sourceId: routed?.route.sourceId,
+          skippedAccounts: routed?.skipped ?? 0,
         ),
       );
     }
   }
+
+  /// The accounts that would be asked for a link to [track], best first.
+  List<StreamRoute> routesFor(Track track) {
+    final accounts = this.accounts;
+    return accounts == null ? const [] : streamRoutes(track, accounts);
+  }
+
+  /// VK's answer for [track] from the first account that has a link for it
+  /// (see [resolveRouted]); null when no logged-in account has the song.
+  /// Downloads use it too, so a song is fetched the way it plays.
+  Future<RoutedStream?> resolveStream(Track track) =>
+      resolveRouted(routesFor(track));
 
   Future<void> playOrPause() async {
     if (_current == null) return;

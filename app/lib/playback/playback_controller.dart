@@ -4,9 +4,9 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 
 import '../library/track.dart';
-import '../vk/vk_client.dart';
 import 'play_queue.dart';
 import 'player_service.dart';
+import 'stream_route.dart';
 
 /// What the player controls do: playing from a list, previous and next,
 /// shuffle, repeat, auto-advance, seeking and volume. Records every song
@@ -219,26 +219,23 @@ class PlaybackController extends ChangeNotifier {
   /// or null on success.
   Future<String?> download(Track track) async {
     final storage = player.storage;
-    final vk = player.vk;
     if (storage == null) return 'no storage';
     try {
-      VkStream? stream;
+      // The account that gave the link also gives the release link.
+      RoutedStream? routed;
       await storage.download(
         track,
         () async {
-          if (vk == null || track.sourceKey == null) return null;
-          final resolved = await vk.resolveStream(
-            track.sourceKey!,
-            track.accessKey,
-          );
-          if (resolved.link == null) {
-            throw StateError(noStreamReason(resolved));
+          final resolved = await player.resolveStream(track);
+          if (resolved == null) return null;
+          if (resolved.stream.link == null) {
+            throw StateError(noStreamReason(resolved.stream));
           }
-          stream = resolved;
-          return resolved.link;
+          routed = resolved;
+          return resolved.stream.link;
         },
         alternative: () async =>
-            stream == null ? null : vk?.releaseLink(stream!),
+            routed?.route.client.releaseLink(routed!.stream),
       );
       return null;
     } catch (error) {

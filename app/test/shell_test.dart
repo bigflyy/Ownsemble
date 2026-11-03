@@ -24,7 +24,7 @@ import 'package:ownsemble/ui/type_jump.dart';
 /// A player that accepts songs without opening any audio, so the panel shows
 /// a song as it does in the app.
 class _StartedPlayer extends PlayerService {
-  _StartedPlayer({super.storage}) : super(vk: null, muted: true, dataDir: '.');
+  _StartedPlayer({super.storage}) : super(muted: true, dataDir: '.');
 
   Track? _track;
   final _changes = StreamController<Track?>.broadcast();
@@ -124,7 +124,7 @@ void main() {
     SyncController? sync,
   }) async {
     final playback = PlaybackController(
-      player: player ?? PlayerService(vk: null, muted: true, dataDir: '.'),
+      player: player ?? PlayerService(muted: true, dataDir: '.'),
       recordPlay: collections.recordPlay,
     );
     tester.view.physicalSize = size;
@@ -153,7 +153,7 @@ void main() {
 
   testWidgets('the first frame shows the restored song, paused at its place, '
       'before the player is ready', (tester) async {
-    final player = PlayerService(vk: null, muted: true, dataDir: '.');
+    final player = PlayerService(muted: true, dataDir: '.');
     final track = store.loadAll()[1];
     player.restore(track, const Duration(seconds: 42));
     await pumpShell(tester, player: player);

@@ -27,7 +27,7 @@ import 'package:path/path.dart' as p;
 /// A player showing a song without opening any audio.
 class _ShownPlayer extends PlayerService {
   _ShownPlayer(AudioStorage storage)
-    : super(vk: null, muted: true, dataDir: '.', storage: storage);
+    : super(muted: true, dataDir: '.', storage: storage);
 
   Track? _track;
   final _changes = StreamController<Track?>.broadcast();

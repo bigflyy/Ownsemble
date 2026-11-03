@@ -216,7 +216,8 @@ void main() {
     await tester.pumpAndSettle(const Duration(milliseconds: 200));
     expect(account.loggedIn, isFalse);
     expect(saved.existsSync(), isFalse);
-    expect(player.vk, isNull);
+    // No account is left to stream through.
+    expect(player.routesFor(library.all.first), isEmpty);
     expect(sync.canSync, isFalse);
     expect(library.all, isNotEmpty);
     expect(logIn, findsOneWidget);

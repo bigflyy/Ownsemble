@@ -33,7 +33,7 @@ const shotsDir = String.fromEnvironment(
 /// A player showing a song without opening any audio.
 class _ShownPlayer extends PlayerService {
   _ShownPlayer(AudioStorage storage)
-    : super(vk: null, muted: true, dataDir: '.', storage: storage);
+    : super(muted: true, dataDir: '.', storage: storage);
 
   Track? _track;
 
@@ -147,7 +147,7 @@ void main() {
     final storage = AudioStorage(dataDir: '.', store: store);
     final player = saving
         ? _ShownPlayer(storage)
-        : PlayerService(vk: null, muted: true, dataDir: '.');
+        : PlayerService(muted: true, dataDir: '.');
     if (saving) {
       final tracks = library.visible;
       await player.play(tracks[0]);

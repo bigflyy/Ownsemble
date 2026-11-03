@@ -50,7 +50,7 @@ void main() {
         home: LibraryScreen(
           library: library,
           playback: PlaybackController(
-            player: PlayerService(vk: null, muted: true, dataDir: '.'),
+            player: PlayerService(muted: true, dataDir: '.'),
             recordPlay: (_) {},
           ),
         ),
