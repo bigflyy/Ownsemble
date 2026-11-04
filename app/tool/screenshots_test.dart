@@ -22,8 +22,14 @@ import 'package:ownsemble/ui/collections_controller.dart';
 import 'package:ownsemble/ui/library_controller.dart';
 import 'package:ownsemble/ui/library_screen.dart';
 import 'package:ownsemble/ui/shell_settings.dart';
+import 'package:ownsemble/ui/source_editor.dart';
 import 'package:ownsemble/ui/sources_scope.dart';
+import 'package:ownsemble/ui/sync_controller.dart';
 import 'package:ownsemble/ui/theme.dart';
+import 'package:ownsemble/ui/vk_accounts.dart';
+import 'package:ownsemble/vk/vk_client.dart';
+import 'package:ownsemble/vk/vk_login_window.dart';
+import 'package:ownsemble/vk/vk_session.dart';
 import 'package:path/path.dart' as p;
 
 const shotsDir = String.fromEnvironment(
@@ -56,6 +62,41 @@ class _ShownPlayer extends PlayerService {
     _track = track;
     return const PlayTiming(ok: true, cached: true, resolveMs: 0, toSoundMs: 1);
   }
+}
+
+/// A login window that never opens: the shots only show saved accounts.
+class _NoWindow implements LoginWindow {
+  @override
+  set onClosed(void Function() listener) {}
+
+  @override
+  Future<void> open() async {}
+
+  @override
+  Future<List<SessionCookie>> cookies() async => const [];
+
+  @override
+  Future<void> close() async {}
+}
+
+/// Saved sessions kept in memory, with made-up cookies that never reach VK.
+class _MemorySessions implements VkSessionVault {
+  final _saved = <String, SavedSession>{};
+
+  @override
+  List<SavedSession> load() => _saved.values.toList();
+
+  @override
+  String save(String account, List<SessionCookie> cookies) {
+    _saved[account] = SavedSession(account, account, cookies);
+    return account;
+  }
+
+  @override
+  String adopt(SavedSession session, String account) => session.id;
+
+  @override
+  void remove(String id) => _saved.remove(id);
 }
 
 Future<void> loadFont(String family, List<String> files) async {
@@ -100,6 +141,8 @@ void main() {
     LibraryView view = LibraryView.songs,
     bool twoAccounts = false,
     bool filtered = false,
+    bool accountsDialog = false,
+    bool secondLoggedOut = false,
   }) async {
     final store = LibraryStore.open(':memory:');
     addTearDown(store.close);
@@ -181,10 +224,46 @@ void main() {
       store.loadAll(),
       collections: collections,
     );
+    // The accounts dialog reads each account's last sync from the store.
+    // A fixed time of day, so the shots do not change from run to run.
+    final today = DateTime.now();
+    final syncedAt = DateTime(today.year, today.month, today.day, 9, 41);
+    if (accountsDialog) {
+      store.recordSync(vk, atMs: syncedAt.millisecondsSinceEpoch);
+      store.recordSync(second!, atMs: syncedAt.millisecondsSinceEpoch);
+    }
     final sources = ValueNotifier(store.sources());
     if (twoAccounts) library.watchSources(sources);
     library.showView(view);
     if (filtered) library.showSource(second);
+    // The sync bar and the accounts dialog, with saved sessions only: no
+    // runner, so nothing syncs and no request leaves the test.
+    SyncController? sync;
+    VkAccounts? accounts;
+    SourceEditor? editor;
+    if (accountsDialog) {
+      final vault = _MemorySessions()
+        ..save('1', const [SessionCookie('remixsid', 'a', '.vk.ru')]);
+      if (!secondLoggedOut) {
+        vault.save('2', const [SessionCookie('remixsid', 'b', '.vk.ru')]);
+      }
+      accounts = VkAccounts(
+        vault: vault,
+        window: _NoWindow(),
+        clientFor: (cookies) => VkClient(cookies),
+      );
+      sync = SyncController(
+        sources: store.sources(),
+        runner: null,
+        onLibraryChanged: (_) {},
+      );
+      editor = SourceEditor(
+        store: store,
+        sync: sync,
+        library: library,
+        dataDir: '.',
+      );
+    }
     final settings = ShellSettings.inMemory();
     if (!dark) settings.toggleTheme();
     if (rail) settings.toggleRail();
@@ -222,6 +301,9 @@ void main() {
               playback: PlaybackController(player: player, recordPlay: (_) {}),
               collections: collections,
               settings: settings,
+              sync: sync,
+              account: accounts,
+              sources: editor,
             ),
           ),
         ),
@@ -230,9 +312,24 @@ void main() {
     await tester.pumpAndSettle();
     jump.split('').forEach(library.jump.type);
     await tester.pump();
+    if (accountsDialog) {
+      await tester.tap(find.byKey(const ValueKey('vk-accounts')));
+      await tester.pumpAndSettle();
+    }
     if (shortcutsList) {
       await tester.tap(find.byKey(const ValueKey('keyboard-help')));
       await tester.pumpAndSettle();
+    }
+    // Text without the app's font shows here as solid boxes and in the real
+    // app in the system font; icons have their own font.
+    for (final paragraph
+        in tester.allRenderObjects.whereType<RenderParagraph>()) {
+      final family = paragraph.text.style?.fontFamily;
+      expect(
+        family == appFontFamily || family == 'MaterialIcons',
+        isTrue,
+        reason: '"${paragraph.text.toPlainText()}" is drawn in $family',
+      );
     }
     await tester.runAsync(() async {
       final render =
@@ -321,6 +418,28 @@ void main() {
       rail: true,
       dock: PlayerDock.bottom,
       size: const Size(480, 440),
+      pixelRatio: 2,
+    ),
+  );
+  testWidgets(
+    'dark, accounts dialog',
+    (t) => shoot(
+      t,
+      'dark-accounts-dialog',
+      dark: true,
+      twoAccounts: true,
+      accountsDialog: true,
+    ),
+  );
+  testWidgets(
+    'light, accounts dialog, second account logged out',
+    (t) => shoot(
+      t,
+      'light-accounts-logged-out',
+      dark: false,
+      twoAccounts: true,
+      accountsDialog: true,
+      secondLoggedOut: true,
       pixelRatio: 2,
     ),
   );
