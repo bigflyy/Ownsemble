@@ -408,6 +408,84 @@ void main() {
     )!;
     final missingCovers = await checkCovers(tester, covers);
 
+    // A click on a song's album name opens the album: the library's songs at
+    // once, then VK's whole album (read-only), Back returns to All songs. A
+    // song the library lacks streams with its listed length, and is neither
+    // saved to the cache nor put in the History.
+    final albumSong = library.all.firstWhere(
+      (t) => t.title == 'Люди' && t.album == 'Человеко-часы',
+    );
+    final albumRow = library.visible.indexWhere((t) => t.id == albumSong.id);
+    library.scroll.jumpTo(
+      (albumRow * rowHeight).clamp(0, library.scroll.position.maxScrollExtent),
+    );
+    await tester.pump();
+    final albumClock = Stopwatch()..start();
+    // The name itself, not the empty rest of its column, is the link.
+    await tester.tap(
+      find.descendant(
+        of: find.byKey(ValueKey('album-${albumSong.id}')),
+        matching: find.text('Человеко-часы'),
+      ),
+    );
+    await tester.pump();
+    expect(library.view.kind, ViewKind.album, reason: 'the album opened');
+    expect(player.current, isNot(albumSong), reason: 'no song started');
+    final albumAtOnce = library.visible.length;
+    expect(library.visible, contains(albumSong));
+    expect(library.albumStatus?.load, AlbumLoad.loading);
+    await waitUntil(
+      tester,
+      () => library.albumStatus?.load != AlbumLoad.loading,
+      timeout: const Duration(seconds: 30),
+      what: 'the whole album from VK',
+    );
+    final albumMs = albumClock.elapsedMilliseconds;
+    final albumStatus = library.albumStatus!;
+    expect(albumStatus.load, AlbumLoad.loaded, reason: albumStatus.reason);
+    final outsideSongs = library.visible.where((t) => !t.inLibrary).toList();
+    // ignore: avoid_print
+    print(
+      'album: "Человеко-часы" opened with $albumAtOnce of your songs at once; '
+      'whole album after $albumMs ms: ${library.visible.length} songs, '
+      '${outsideSongs.length} not in the library',
+    );
+    expect(outsideSongs, isNotEmpty);
+    expect(
+      library.visible.where((t) => t.inLibrary).length,
+      albumAtOnce,
+      reason: 'the library songs stay when the whole album comes',
+    );
+    expect(
+      tester.widget<Text>(find.byKey(const ValueKey('album-status'))).data,
+      contains('album from VK'),
+    );
+    final outsideSong = outsideSongs.first;
+    final outsideTiming = await playByTap(
+      tester,
+      outsideSong,
+      label: 'album song outside the library',
+    );
+    expect(outsideTiming.ok, isTrue, reason: outsideTiming.error);
+    final outsideLength = await loadedLength(tester);
+    expect(outsideLength, isNotNull);
+    expect(
+      (outsideLength! - outsideSong.durationSec).abs(),
+      lessThan(3),
+      reason: 'the album song plays, with its listed length',
+    );
+    expect(player.storage!.isSaving(outsideSong), isFalse);
+    expect(player.storage!.stateOf(outsideSong).path, isNull);
+    // ignore: avoid_print
+    print(
+      'album song outside the library: sound in '
+      '${outsideTiming.toSoundMs} ms, length ${outsideLength.round()} s '
+      'of ${outsideSong.durationSec} s, not saved',
+    );
+    await tester.tap(find.byKey(const ValueKey('album-back')));
+    await tester.pump();
+    expect(library.view, LibraryView.songs, reason: 'Back leaves the album');
+
     // Every song: a click starts sound and the loaded audio has the song's
     // listed length (so it is this song, not another one). Songs VK blocks
     // must fail quickly with a message.
@@ -947,7 +1025,10 @@ void main() {
       timeout: const Duration(seconds: 60),
     );
     final beforeKey = player.position;
-    await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+    final seeksBeforeKeys = player.relativeSeeksSent;
+    final rightHandled = await tester.sendKeyEvent(
+      LogicalKeyboardKey.arrowRight,
+    );
     await waitUntil(
       tester,
       () => player.position >= beforeKey + const Duration(seconds: 4),
@@ -955,7 +1036,8 @@ void main() {
       timeout: const Duration(seconds: 60),
     );
     final afterRight = player.position;
-    await tester.sendKeyEvent(LogicalKeyboardKey.arrowLeft);
+    final seeksAfterRight = player.relativeSeeksSent;
+    final leftHandled = await tester.sendKeyEvent(LogicalKeyboardKey.arrowLeft);
     try {
       await waitUntil(
         tester,
@@ -966,8 +1048,13 @@ void main() {
     } on TestFailure {
       // Says whether mpv is stuck in the seek, waiting for the network, or
       // somewhere else than the app believes.
+      // Whether a handler took each key, and the relative seeks the player
+      // sent to mpv for Right and since Left.
       final state = <String>[
         'app position ${player.position}, after Right $afterRight',
+        'Right handled $rightHandled, Left handled $leftHandled',
+        'seeks sent for Right ${seeksAfterRight - seeksBeforeKeys}, '
+            'since Left ${player.relativeSeeksSent - seeksAfterRight}',
       ];
       for (final name in const [
         'time-pos',
@@ -1557,9 +1644,11 @@ void main() {
       'repeat one, shuffle, time label, volume, mute, Space checked; '
       'stream seek: click to playing on ${seekResumeMs - 300} ms or less '
       '(${seekRanged() ? 'ranged request' : 'from buffer'}); '
-      'History entries added $historyAdded for $soundStarts sound starts',
+      'History entries added $historyAdded for $soundStarts sound starts '
+      '(1 of them an album song outside the library)',
     );
-    expect(historyAdded, soundStarts);
+    // The album song outside the library has no row for the History.
+    expect(historyAdded, soundStarts - 1);
     expect(history.first.trackId, player.current?.id);
 
     // Sync now right after the start sync finds nothing new and leaves the

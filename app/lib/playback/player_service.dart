@@ -499,8 +499,14 @@ class PlayerService {
     }
     if (!_loaded) return;
     final seconds = offset.inMilliseconds / 1000;
+    relativeSeeksSent++;
     await _mpv.command(['seek', seconds.toStringAsFixed(3), 'relative']);
   }
+
+  /// Relative seeks handed to mpv so far. The acceptance test reports it
+  /// when an arrow key seems to have done nothing: it tells a key that never
+  /// reached the player from a seek mpv did not carry out.
+  var relativeSeeksSent = 0;
 
   /// Sets the volume, 0 to 100.
   Future<void> setVolume(double volume) =>
