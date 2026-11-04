@@ -1026,6 +1026,20 @@ void main() {
     );
     final beforeKey = player.position;
     final seeksBeforeKeys = player.relativeSeeksSent;
+    // Where the arrows can go instead of a seek, for the failure line below:
+    // a key Flutter believes is held (Alt makes them Back and Forward), the
+    // focused widget (a text field or slider keeps them) and the view.
+    String keyState() {
+      final focus = FocusManager.instance.primaryFocus;
+      final context = focus?.context;
+      return 'keys held ${HardwareKeyboard.instance.logicalKeysPressed}, '
+          'focus ${focus?.debugLabel ?? focus?.runtimeType}, '
+          'in text field ${context?.findAncestorWidgetOfExactType<EditableText>() != null}, '
+          'on slider ${context?.findAncestorWidgetOfExactType<Slider>() != null}, '
+          'view ${library.view}, search "${library.searchText.text}"';
+    }
+
+    final arrowStateBefore = keyState();
     final rightHandled = await tester.sendKeyEvent(
       LogicalKeyboardKey.arrowRight,
     );
@@ -1055,6 +1069,8 @@ void main() {
         'Right handled $rightHandled, Left handled $leftHandled',
         'seeks sent for Right ${seeksAfterRight - seeksBeforeKeys}, '
             'since Left ${player.relativeSeeksSent - seeksAfterRight}',
+        'before Right: $arrowStateBefore',
+        'now: ${keyState()}',
       ];
       for (final name in const [
         'time-pos',
