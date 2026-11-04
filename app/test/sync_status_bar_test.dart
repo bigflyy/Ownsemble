@@ -347,6 +347,30 @@ void main() {
       expect(playback.queue.current?.title, 'Вторая (новое)');
     });
 
+    test(
+      'a finished sync keeps no copy of the library it handed over',
+      () async {
+        final first = sync.syncNow();
+        final fresh = [song(1, 'Первая'), song(3, 'Третья')];
+        finish.complete(
+          SyncOutcome(
+            sources: [vkSource(songs: 2, syncedAtMs: 1)],
+            results: [result(added: 1)],
+            library: LoadedLibrary(fresh, SearchIndex(fresh)),
+          ),
+        );
+        final outcome = await first;
+
+        expect(library.all, same(fresh));
+        // Once an account is removed the library is replaced again, and a kept
+        // copy would hold the older version in memory.
+        expect(outcome?.library, isNull);
+        expect(sync.lastOutcome?.library, isNull);
+        expect((await sync.idle)?.library, isNull);
+        expect(sync.lastOutcome?.result?.added, 1, reason: 'the rest stays');
+      },
+    );
+
     testWidgets('Sync now shows progress, then the new library', (
       tester,
     ) async {

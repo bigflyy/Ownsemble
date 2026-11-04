@@ -39,6 +39,13 @@ class SyncOutcome {
   /// The new library when the sync changed it; null when nothing changed.
   final LoadedLibrary? library;
 
+  /// This outcome without [library], to keep once the library was handed
+  /// over: a kept copy would hold that version of the library in memory
+  /// after the next one replaced it.
+  SyncOutcome withoutLibrary() => library == null
+      ? this
+      : SyncOutcome(sources: sources, results: results, errors: errors);
+
   /// The first account's result, for a library with one account.
   VkSyncResult? get result => results.firstOrNull;
 

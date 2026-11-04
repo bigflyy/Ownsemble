@@ -116,16 +116,17 @@ class SyncController extends ChangeNotifier {
     }
   }
 
-  /// One run of [runner], with its outcome taken over.
+  /// One run of [runner], with its outcome taken over. The outcome kept and
+  /// returned no longer holds the new library: [onLibraryChanged] has it.
   Future<SyncOutcome> _runOnce(SyncRunner runner) async {
     final outcome = await runner((progress) {
       _progress = progress;
       notifyListeners();
     });
-    _lastOutcome = outcome;
+    final kept = _lastOutcome = outcome.withoutLibrary();
     _sources = _sourceList.value = outcome.sources;
     final library = outcome.library;
     if (library != null) onLibraryChanged(library);
-    return outcome;
+    return kept;
   }
 }
