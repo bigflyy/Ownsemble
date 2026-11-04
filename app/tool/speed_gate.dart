@@ -140,18 +140,23 @@ Future<void> main(List<String> args) async {
   if (keysRuns != null) {
     final bench = p.join(dataDir, 'bench.json');
     var failed = 0;
+    final excused = <String, int>{};
     for (var run = 1; run <= keysRuns; run++) {
       final result = await _checkRealKeys(bench);
       final ok = result['ok'] == true;
       if (!ok) failed++;
+      final excuse = _keysExcuse(result);
+      if (excuse != null) excused[excuse] = (excused[excuse] ?? 0) + 1;
       // The first run whole too, to show what a good run receives.
       final whole = !ok || run == 1;
       print(
-        'keys run $run: ${ok ? 'ok' : 'FAILED'}'
+        'keys run $run: ${ok ? 'ok' : 'FAILED${excuse == null ? '' : ' ($excuse)'}'}'
         '${whole ? ' ${jsonEncode(result)}' : ''}',
       );
     }
-    print('keys runs: $keysRuns, failed: $failed');
+    print(
+      'keys runs: $keysRuns, failed: $failed, of them not the app: $excused',
+    );
     return;
   }
 
@@ -414,22 +419,51 @@ void _pressSideButton(int window, int button) {
   _postMessage(window, _wmXButtonUp, button << 16, point);
 }
 
-/// [_checkRealKeys], again when a letter was lost on the way. A letter is two
-/// posted messages here, and on a busy machine the engine can take the key
-/// before the text is in its queue; it then types the key's own Latin letter.
-/// With a real keyboard Windows makes the text on the app's own thread, so
-/// that cannot happen. Any other failure is reported as it is.
+/// Why a failed [_checkRealKeys] run is not the app's fault, or null.
+///
+/// 'lost letter': a letter is two posted messages here, and on a busy machine
+/// the engine can take the key before the text is in its queue; it then types
+/// the key's own Latin letter. With a real keyboard Windows makes the text on
+/// the app's own thread, so that cannot happen.
+///
+/// 'outside modifier': the engine matches Flutter's modifiers to Windows' key
+/// state on every key, and for posted keys that state can include a modifier
+/// held on the real keyboard at that moment (the user's Alt+Shift layout
+/// switch, Alt+Tab): Flutter then synthesizes it and the keys become
+/// shortcuts. Typed into the focused window, keys carry their own state.
+String? _keysExcuse(Map<String, Object?> result) {
+  if (result['ok'] == true) return null;
+  final received = ((result['keysReceived'] as List?) ?? const []).map(
+    (event) => '$event',
+  );
+  const modifiers = ['Alt', 'Shift', 'Control', 'Meta'];
+  // The check posts no modifier, so any modifier down, or held when a key
+  // came, was pressed outside it.
+  bool modifierIn(String text) => modifiers.any(text.contains);
+  if (received.any(
+    (event) =>
+        (event.startsWith('down ') &&
+            modifiers.any((name) => event.startsWith('down $name'))) ||
+        modifierIn(event.substring(event.indexOf(' held [') + 1)),
+  )) {
+    return 'outside modifier';
+  }
+  final seen = (result['jumpTextsSeen'] as List?) ?? const [];
+  if (seen.any((text) => '$text'.endsWith('a'))) return 'lost letter';
+  return null;
+}
+
+/// [_checkRealKeys], again (twice at most) when a run failed for a reason
+/// [_keysExcuse] names. Any other failure is reported as it is.
 Future<Map<String, Object?>> _checkRealKeysRetrying(String benchFile) async {
-  var lostLetters = 0;
+  final retries = <String>[];
   while (true) {
     final result = await _checkRealKeys(benchFile);
-    final seen = (result['jumpTextsSeen'] as List?) ?? const [];
-    final letterLost =
-        result['ok'] != true && seen.any((text) => '$text'.endsWith('a'));
-    if (!letterLost || lostLetters == 2) {
-      return {...result, 'lostLetterRetries': lostLetters};
+    final excuse = _keysExcuse(result);
+    if (excuse == null || retries.length == 2) {
+      return {...result, 'retriedFor': retries};
     }
-    lostLetters++;
+    retries.add(excuse);
   }
 }
 

@@ -184,6 +184,9 @@ class SpeedBench {
     await playback.playOrPause();
     await Future<void>.delayed(const Duration(milliseconds: 300));
     final position = player.position;
+    // The volume is saved, and Up raises it each run: from the top it could
+    // not rise, and the check failed with every key received. Start halfway.
+    await playback.setVolume(50);
     final volumeBefore = playback.volume;
     final cyrillic = RegExp('^[а-яА-Я]{3}');
     final jumpTrack = list.firstWhere((t) => cyrillic.hasMatch(t.title));
@@ -208,9 +211,12 @@ class SpeedBench {
           .map((key) => key.keyLabel)
           .join('+');
       final text = event.character == null ? '' : ' "${event.character}"';
+      // A synthesized event is the engine matching Windows' key state; say
+      // where Windows had that key down, to tell the user's keyboard apart.
+      final windows = event.synthesized ? ' windows ${windowsKeyState()}' : '';
       keysReceived.add(
         '$kind ${event.logicalKey.keyLabel}$text'
-        '${event.synthesized ? ' synthesized' : ''} held [$held]',
+        '${event.synthesized ? ' synthesized' : ''} held [$held]$windows',
       );
       return false;
     }
