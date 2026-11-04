@@ -298,6 +298,19 @@ void main() {
     });
   });
 
+  test('a removed stored file is gone, downloaded or not', () {
+    final cached = cache(0, 100);
+    final downloaded = cache(1, 100, pinned: true);
+    storage.removeStored(songs[0]);
+    storage.removeStored(songs[1]);
+    for (final (i, path) in [(0, cached), (1, downloaded)]) {
+      expect(storage.stateOf(songs[i]), (path: null, pinned: false));
+      expect(storage.fileAt(path).existsSync(), isFalse);
+      expect(store.audioPathUsers(path), 0);
+    }
+    storage.removeStored(songs[2]); // not stored: nothing happens
+  });
+
   test('removing a download makes the song plain cache again', () {
     store.writeSetting(AudioStorage.limitSetting, '50');
     cache(0, 100, pinned: true);

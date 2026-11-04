@@ -186,6 +186,20 @@ class VkClient {
     }
   }
 
+  /// A link to VK's official release of the song [sourceKey], or null when VK
+  /// names none. Only for the check of saved songs (stored_check.dart), to
+  /// recognize files the old switch saved from the release: never played or
+  /// saved, since the release can be another recording.
+  Future<Uri?> releaseLinkForCheck(String sourceKey, String? accessKey) async {
+    final id = accessKey == null ? sourceKey : '${sourceKey}_$accessKey';
+    final reply = await call('audio.getById', {'audios': id}) as List;
+    if (reply.isEmpty) return null;
+    final audio = reply.first as Map<String, dynamic>;
+    final releaseKey = audio['release_audio_id'] as String?;
+    if (releaseKey == null || releaseKey.isEmpty) return null;
+    return (await resolveStream(releaseKey, null)).link;
+  }
+
   /// Whether [link] leads to an HLS playlist; its path says so, with no need
   /// to ask the audio server.
   static bool _isPlaylistLink(Uri link) =>

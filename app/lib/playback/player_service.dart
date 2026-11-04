@@ -181,6 +181,10 @@ class PlayerService {
   /// other song.
   Duration? get resumeAt => _resumeAt;
 
+  /// Whether [current] is only shown, restored from the last run, and
+  /// nothing of it was loaded or asked for yet.
+  bool get restoredOnly => _restored;
+
   /// Shows [track] as the current song, paused at [position], without loading
   /// it. May run before [init], so the first frame already shows it.
   void restore(Track track, Duration position) {

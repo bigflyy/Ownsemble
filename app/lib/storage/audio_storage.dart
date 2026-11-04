@@ -193,6 +193,23 @@ class AudioStorage extends ChangeNotifier {
 
   /// Makes a downloaded song plain cache again: it stays stored until the
   /// cache limit needs the space. [keep] is the song playing now.
+  /// Forgets [track]'s stored audio, downloaded or cached, and deletes the
+  /// file unless another song still points at it. The song streams again.
+  void removeStored(Track track) {
+    final path = stateOf(track).path;
+    if (path == null) return;
+    _store.removeAudioFile(track.id);
+    _changed[track.id] = (path: null, pinned: false);
+    if (_store.audioPathUsers(path) == 0) {
+      try {
+        fileAt(path).deleteSync();
+      } on FileSystemException {
+        // Already gone, or open in mpv: the row is gone, so it is not used.
+      }
+    }
+    notifyListeners();
+  }
+
   void removeDownload(Track track, {Set<int> keep = const {}}) {
     final state = stateOf(track);
     if (state.path == null || !state.pinned) return;

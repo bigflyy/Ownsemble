@@ -59,8 +59,7 @@ List<StreamRoute> streamRoutes(Track track, StreamAccounts accounts) {
 class RoutedStream {
   const RoutedStream(this.route, this.stream, {this.skipped = 0});
 
-  /// The account whose client gave [stream]; its release link must be asked
-  /// through the same client.
+  /// The account whose client gave [stream].
   final StreamRoute route;
   final VkStream stream;
 

@@ -14,6 +14,7 @@ import 'platform/end_process.dart';
 import 'playback/player_service.dart';
 import 'storage/audio_storage.dart';
 import 'storage/cover_store.dart';
+import 'storage/stored_check.dart';
 import 'sync/background_sync.dart';
 import 'ui/albums.dart';
 import 'ui/collections_controller.dart';
@@ -266,6 +267,8 @@ Future<void> main(List<String> args) async {
         sync: sync,
         covers: covers,
         collections: collections,
+        storage: storage,
+        store: store,
       ),
     );
   });
@@ -296,6 +299,8 @@ Future<void> _afterFirstFrame({
   required SyncController sync,
   required CoverStore covers,
   required CollectionsController collections,
+  required AudioStorage storage,
+  required LibraryStore store,
 }) async {
   final firstFrameAt = DateTime.now();
   if (options.metricsFile != null) {
@@ -315,6 +320,22 @@ Future<void> _afterFirstFrame({
   _logPlayTimings(player, File(p.join(options.dataDir, 'perf.log')));
   await account.identify();
 
+  // Not in the speed gate's runs, which keep their data unchanged.
+  if (options.benchFile == null && options.cacheWhileStreaming) {
+    unawaited(
+      startSync.then(
+        (_) => _checkStoredOnce(
+          library: library,
+          player: player,
+          playback: playback,
+          storage: storage,
+          store: store,
+          log: File(p.join(options.dataDir, 'perf.log')),
+        ),
+      ),
+    );
+  }
+
   if (options.benchFile != null) {
     // Measure the library as it is after the start sync, not while the
     // sync may swap it out.
@@ -332,6 +353,76 @@ Future<void> _afterFirstFrame({
     File(options.benchFile!)
         .writeAsStringSync(const JsonEncoder.withIndent('  ').convert(result));
     exit(0);
+  }
+}
+
+/// Runs [StoredCheck] until it has judged every saved song once: removes
+/// saved files that are not the song's own file (see stored_check.dart).
+/// Runs after the start sync, so the accounts and the library are current.
+Future<void> _checkStoredOnce({
+  required LibraryController library,
+  required PlayerService player,
+  required PlaybackController playback,
+  required AudioStorage storage,
+  required LibraryStore store,
+  required File log,
+}) async {
+  if (store.readSetting(storedCheckDoneSetting) != null) return;
+  void write(String line) => log.writeAsStringSync(
+    '${DateTime.now().toIso8601String()} $line\n',
+    mode: FileMode.append,
+  );
+  final http = HttpClient()..connectionTimeout = const Duration(seconds: 10);
+  final clock = Stopwatch()..start();
+  try {
+    final check = StoredCheck(
+      songs: [
+        for (final track in library.all)
+          if (track.source == TrackSource.vk)
+            if (storage.stateOf(track) case (path: _?, :final pinned))
+              (track: track, pinned: pinned),
+      ],
+      savedBytes: (track) {
+        final path = storage.stateOf(track).path;
+        if (path == null) return null;
+        final file = storage.fileAt(path);
+        return file.existsSync() ? file.lengthSync() : null;
+      },
+      linksOf: (track) async {
+        if (player.routesFor(track).isEmpty) {
+          throw const NotNow('no logged-in account has the song');
+        }
+        final routed = await player.resolveStream(track);
+        if (routed == null) return null;
+        final route = routed.route;
+        return (
+          own: routed.stream.link,
+          release: () => route.client.releaseLinkForCheck(
+            route.sourceKey,
+            route.accessKey,
+          ),
+        );
+      },
+      sizeOf: (link) => remoteAudioSize(link, http),
+      remove: storage.removeStored,
+      redownload: playback.download,
+      // A song restored from the last run is not loaded: its file is free.
+      isBusy: (track) =>
+          (player.current?.id == track.id && !player.restoredOnly) ||
+          storage.isSaving(track) ||
+          storage.isDownloading(track),
+      log: write,
+    );
+    final summary = await check.run();
+    write(
+      'stored check: $summary in ${clock.elapsed.inSeconds} s'
+      '${summary.complete ? ', done' : ', runs again at the next start'}',
+    );
+    if (summary.complete) store.writeSetting(storedCheckDoneSetting, '1');
+  } on Object catch (error) {
+    write('stored check stopped: ${error.runtimeType}');
+  } finally {
+    http.close(force: true);
   }
 }
 
