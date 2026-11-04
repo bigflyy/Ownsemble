@@ -6,6 +6,8 @@ import 'dart:math';
 import 'dart:ui' show FramePhase, FrameTiming;
 
 import 'package:flutter/scheduler.dart';
+import 'package:flutter/services.dart'
+    show HardwareKeyboard, KeyEvent, KeyDownEvent, KeyUpEvent, KeyRepeatEvent;
 import 'package:flutter/widgets.dart';
 import 'package:media_kit/media_kit.dart' show NativePlayer;
 
@@ -19,6 +21,7 @@ import '../ui/collections_controller.dart';
 import '../ui/cover_tile.dart';
 import '../ui/library_controller.dart';
 import '../vk/vk_client.dart';
+import 'key_state.dart';
 
 /// Measures the speed targets inside the running release app, driving the
 /// same controller and player the UI uses. Playback must be muted.
@@ -190,6 +193,29 @@ class SpeedBench {
     await Future<void>.delayed(const Duration(milliseconds: 100));
     library.showView(LibraryView.songs);
     await Future<void>.delayed(const Duration(milliseconds: 100));
+    // What reached the app, for a failure: each key event with the keys
+    // Flutter believed held at that moment, and Windows' own modifier state.
+    final keyStateAtReady = windowsKeyState();
+    final keysReceived = <String>[];
+    bool recordKey(KeyEvent event) {
+      final kind = switch (event) {
+        KeyDownEvent() => 'down',
+        KeyUpEvent() => 'up',
+        KeyRepeatEvent() => 'repeat',
+        _ => '?',
+      };
+      final held = HardwareKeyboard.instance.logicalKeysPressed
+          .map((key) => key.keyLabel)
+          .join('+');
+      final text = event.character == null ? '' : ' "${event.character}"';
+      keysReceived.add(
+        '$kind ${event.logicalKey.keyLabel}$text'
+        '${event.synthesized ? ' synthesized' : ''} held [$held]',
+      );
+      return false;
+    }
+
+    HardwareKeyboard.instance.addHandler(recordKey);
     File('${resultFile!}.ready').writeAsStringSync(jumpText);
     final clock = Stopwatch()..start();
     // The text is forgotten after 2 s, sooner than the song gets 4 s on.
@@ -214,6 +240,7 @@ class SpeedBench {
       if (library.view.kind == ViewKind.history) wentBack = true;
       if (wentBack && library.view == LibraryView.songs) wentForward = true;
     }
+    HardwareKeyboard.instance.removeHandler(recordKey);
     final wanted = normalizeForSearch(jumpText);
     return {
       'ok':
@@ -232,6 +259,12 @@ class SpeedBench {
       'volumeAfter': playback.volume,
       'playing': player.playing.value,
       'tookMs': clock.elapsedMilliseconds,
+      'keysReceived': keysReceived,
+      'windowsKeysAtReady': keyStateAtReady,
+      'windowsKeysAtEnd': windowsKeyState(),
+      'focus':
+          FocusManager.instance.primaryFocus?.debugLabel ??
+          '${FocusManager.instance.primaryFocus?.runtimeType}',
     };
   }
 

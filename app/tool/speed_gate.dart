@@ -134,6 +134,27 @@ Future<void> main(List<String> args) async {
   ];
   final starts = int.parse(valueOf('--starts') ?? '6');
 
+  // Only the real keys check, N times in a row without retries, to catch a
+  // rare failure: each failed run is printed whole, then the count.
+  final keysRuns = int.tryParse(valueOf('--only-keys') ?? '');
+  if (keysRuns != null) {
+    final bench = p.join(dataDir, 'bench.json');
+    var failed = 0;
+    for (var run = 1; run <= keysRuns; run++) {
+      final result = await _checkRealKeys(bench);
+      final ok = result['ok'] == true;
+      if (!ok) failed++;
+      // The first run whole too, to show what a good run receives.
+      final whole = !ok || run == 1;
+      print(
+        'keys run $run: ${ok ? 'ok' : 'FAILED'}'
+        '${whole ? ' ${jsonEncode(result)}' : ''}',
+      );
+    }
+    print('keys runs: $keysRuns, failed: $failed');
+    return;
+  }
+
   // Only the restart check: quick to repeat while working on it.
   if (args.contains('--only-restart')) {
     final bench = p.join(dataDir, 'bench.json');
