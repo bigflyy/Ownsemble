@@ -95,6 +95,11 @@ typedef KnownTrack = ({
   int? goneAtMs,
 });
 
+/// A VK album as a song's row links to it: the account (source) whose reply
+/// named it, its "ownerId_albumId" key and the access key VK needs to list
+/// its songs.
+typedef VkAlbumLink = ({int sourceId, String key, String? accessKey});
+
 /// What [LibraryStore.mergeSameSongs] did.
 class MergeResult {
   const MergeResult(this.merged, this.unusedFiles);

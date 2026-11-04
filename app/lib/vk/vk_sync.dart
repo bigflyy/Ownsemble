@@ -421,6 +421,9 @@ String vkAlbumKey(Map<String, dynamic> album) =>
 /// generic gradient placeholders as `thumb` (all 18 such songs of the test
 /// library, 3 of them with an album whose title is empty), and the song's
 /// stand-in tile says more than that.
+///
+/// The album's link (its key and access key) is kept whenever VK names the
+/// album's owner and id, whatever its title: it is how the album is opened.
 NewTrack vkItemToTrack(
   Map<String, dynamic> item, {
   Map<String, String> albumTitles = const {},
@@ -429,6 +432,12 @@ NewTrack vkItemToTrack(
   final albumTitle = album is Map<String, dynamic>
       ? (album['title'] as String?)?.trim() ?? ''
       : '';
+  final albumLink =
+      album is Map<String, dynamic> &&
+          album['owner_id'] is int &&
+          album['id'] is int
+      ? album
+      : null;
   final thumb = albumTitle.isNotEmpty
       ? _mapOrNull(item['thumb']) ?? _mapOrNull(album['thumb'])
       : null;
@@ -453,6 +462,8 @@ NewTrack vkItemToTrack(
       final int id when id != 0 => id,
       _ => null,
     },
+    vkAlbumKey: albumLink == null ? null : vkAlbumKey(albumLink),
+    vkAlbumAccessKey: albumLink?['access_key'] as String?,
   );
 }
 

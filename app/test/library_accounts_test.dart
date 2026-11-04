@@ -296,6 +296,9 @@ void main() {
     old.close();
 
     final db = sqlite3.open(path);
+    db.execute('DROP INDEX tracks_by_album');
+    db.execute('ALTER TABLE tracks DROP COLUMN vk_album_key');
+    db.execute('ALTER TABLE tracks DROP COLUMN vk_album_access_key');
     db.execute('DROP INDEX tracks_copies');
     db.execute('ALTER TABLE tracks DROP COLUMN same_as');
     db.execute('ALTER TABLE tracks DROP COLUMN vk_track_id');

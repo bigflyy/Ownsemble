@@ -7,9 +7,18 @@ import 'package:ownsemble/library/track.dart';
 import 'package:path/path.dart' as p;
 import 'package:sqlite3/sqlite3.dart';
 
-/// Takes back what version 4 added, for tests that rebuild an older library
+/// Takes back what version 5 added, for tests that rebuild an older library
 /// from a new one.
+void dropVersion5(Database db) {
+  db.execute('DROP INDEX tracks_by_album');
+  db.execute('ALTER TABLE tracks DROP COLUMN vk_album_key');
+  db.execute('ALTER TABLE tracks DROP COLUMN vk_album_access_key');
+}
+
+/// Takes back what versions 4 and 5 added, for tests that rebuild an older
+/// library from a new one.
 void dropVersion4(Database db) {
+  dropVersion5(db);
   db.execute('DROP INDEX tracks_copies');
   db.execute('ALTER TABLE tracks DROP COLUMN same_as');
   db.execute('ALTER TABLE tracks DROP COLUMN vk_track_id');

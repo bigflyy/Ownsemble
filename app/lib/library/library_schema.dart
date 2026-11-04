@@ -6,7 +6,7 @@ import 'package:sqlite3/sqlite3.dart';
 /// Schema version this build reads and writes (`PRAGMA user_version`).
 ///
 /// 0 is the speed-gate build's single `tracks` table (or an empty file).
-const librarySchemaVersion = 4;
+const librarySchemaVersion = 5;
 
 /// How many colors sources can have; the theme has one per slot, from 1.
 const sourceColorCount = 6;
@@ -44,6 +44,7 @@ void migrateLibrary(Database db, {String? dataDir}) {
     if (version < 2) _addCoverSizes(db);
     if (version < 3) _addVkAlbumTitles(db);
     if (version < 4) _addAccounts(db);
+    if (version < 5) _addVkAlbumLinks(db);
     db.execute('PRAGMA user_version = $librarySchemaVersion');
     db.execute('COMMIT');
   } catch (_) {
@@ -113,6 +114,19 @@ void _addAccounts(Database db) {
       source['id'],
     ]);
   }
+}
+
+/// Version 5: which VK album a song is from, so the album can be opened:
+/// the album's "ownerId_albumId" and the access key VK needs to list it.
+/// Kept on every row, copies too, since each account's reply carries it. The
+/// next sync fills them in, without counting the songs as changed.
+void _addVkAlbumLinks(Database db) {
+  db.execute('ALTER TABLE tracks ADD COLUMN vk_album_key TEXT');
+  db.execute('ALTER TABLE tracks ADD COLUMN vk_album_access_key TEXT');
+  db.execute(
+    'CREATE INDEX tracks_by_album ON tracks (vk_album_key) '
+    'WHERE vk_album_key IS NOT NULL',
+  );
 }
 
 void _createVersion1(Database db) {

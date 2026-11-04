@@ -26,6 +26,8 @@ class NewTrack {
     this.coverFullUrl,
     this.tint,
     this.vkTrackId,
+    this.vkAlbumKey,
+    this.vkAlbumAccessKey,
   });
 
   final String artist;
@@ -48,6 +50,11 @@ class NewTrack {
   /// VK's id of the recording, for finding the song in other accounts.
   final int? vkTrackId;
 
+  /// The VK album the song is from, "ownerId_albumId", and the key VK needs
+  /// to list that album's songs.
+  final String? vkAlbumKey;
+  final String? vkAlbumAccessKey;
+
   /// This song with other cover links.
   NewTrack withCovers({
     required String? coverUrl,
@@ -68,6 +75,8 @@ class NewTrack {
     coverFullUrl: coverFullUrl,
     tint: tint,
     vkTrackId: vkTrackId,
+    vkAlbumKey: vkAlbumKey,
+    vkAlbumAccessKey: vkAlbumAccessKey,
   );
 }
 
@@ -378,8 +387,8 @@ class LibraryStore {
       INSERT INTO tracks (source_id, source_key, access_key, artist, title,
                           album, duration_sec, added_at, cover_url,
                           cover_large_url, cover_mid_url, cover_full_url, tint,
-                          vk_track_id)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                          vk_track_id, vk_album_key, vk_album_access_key)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT (source_id, source_key) DO UPDATE SET
         access_key = excluded.access_key,
         artist = excluded.artist,
@@ -392,6 +401,8 @@ class LibraryStore {
         cover_mid_url = excluded.cover_mid_url,
         cover_full_url = excluded.cover_full_url,
         tint = excluded.tint,
+        vk_album_key = excluded.vk_album_key,
+        vk_album_access_key = excluded.vk_album_access_key,
         gone_at_ms = NULL
       WHERE tracks.access_key IS NOT excluded.access_key
          OR tracks.artist IS NOT excluded.artist
@@ -430,6 +441,8 @@ class LibraryStore {
             track.coverFullUrl,
             track.tint,
             track.vkTrackId,
+            track.vkAlbumKey,
+            track.vkAlbumAccessKey,
           ]);
           if (written.isNotEmpty) {
             final id = written.first['id'] as int;
@@ -449,14 +462,16 @@ class LibraryStore {
     }
   }
 
-  /// Stores the cover links and VK track ids of [tracks], for songs that
-  /// exist already. No change the UI has to know about: a new host of the same
-  /// image only matters the next time the library loads, and a track id only
-  /// to [mergeSameSongs].
+  /// Stores the cover links, VK track ids and album links of [tracks], for
+  /// songs that exist already. No change the UI has to know about: a new host
+  /// of the same image only matters the next time the library loads, a track
+  /// id only to [mergeSameSongs], and an album link only when the album is
+  /// opened, which reads it from here.
   void updateQuietDetails(int sourceId, Iterable<NewTrack> tracks) {
     final update = _db.prepare('''
       UPDATE tracks SET cover_url = ?, cover_large_url = ?, cover_mid_url = ?,
-                        cover_full_url = ?, vk_track_id = ?
+                        cover_full_url = ?, vk_track_id = ?, vk_album_key = ?,
+                        vk_album_access_key = ?
       WHERE source_id = ? AND source_key = ?
     ''');
     try {
@@ -468,6 +483,8 @@ class LibraryStore {
             track.coverMidUrl,
             track.coverFullUrl,
             track.vkTrackId,
+            track.vkAlbumKey,
+            track.vkAlbumAccessKey,
             sourceId,
             track.sourceKey,
           ]);
@@ -496,6 +513,69 @@ class LibraryStore {
         goneAtMs: row['gone_at_ms'] as int?,
       ),
   };
+
+  /// The VK album the listed song [trackId] is from, as one of its rows
+  /// knows it: the row itself first, then a copy another account still has.
+  /// Null when no row has an album link (not synced since version 5, or VK
+  /// names no album).
+  VkAlbumLink? vkAlbumOf(int trackId) {
+    final rows = _db.select(
+      '''
+      SELECT source_id, vk_album_key, vk_album_access_key FROM tracks
+      WHERE (id = ? OR same_as = ?) AND vk_album_key IS NOT NULL
+      ORDER BY id = ? DESC, gone_at_ms IS NOT NULL, id
+      LIMIT 1
+      ''',
+      [trackId, trackId, trackId],
+    );
+    if (rows.isEmpty) return null;
+    final row = rows.first;
+    return (
+      sourceId: row['source_id'] as int,
+      key: row['vk_album_key'] as String,
+      accessKey: row['vk_album_access_key'] as String?,
+    );
+  }
+
+  /// Ids of the listed songs that some row (the song's own or a copy's) puts
+  /// in the VK album [albumKey], in library order.
+  List<int> listedIdsInVkAlbum(String albumKey) => [
+    for (final row in _db.select(
+      '''
+      SELECT l.id FROM tracks l
+      WHERE l.same_as IS NULL AND l.id IN (
+        SELECT coalesce(same_as, id) FROM tracks WHERE vk_album_key = ?)
+      ORDER BY l.added_at DESC, l.id DESC
+      ''',
+      [albumKey],
+    ))
+      row['id'] as int,
+  ];
+
+  /// The listed song of each of [vkTrackIds] the library has, by VK track
+  /// id: the row itself, or the row a copy with that id belongs to.
+  Map<int, int> listedIdsByVkTrackId(Iterable<int> vkTrackIds) {
+    final wanted = vkTrackIds.toSet();
+    if (wanted.isEmpty) return const {};
+    final found = <int, int>{};
+    // In chunks: SQLite allows a limited number of parameters per statement.
+    final ids = wanted.toList();
+    for (var at = 0; at < ids.length; at += 500) {
+      final chunk = ids.sublist(at, (at + 500).clamp(0, ids.length));
+      for (final row in _db.select(
+        'SELECT vk_track_id, coalesce(same_as, id) AS listed FROM tracks '
+        'WHERE vk_track_id IN (${List.filled(chunk.length, '?').join(', ')}) '
+        'ORDER BY same_as IS NOT NULL, id',
+        chunk,
+      )) {
+        found.putIfAbsent(
+          row['vk_track_id'] as int,
+          () => row['listed'] as int,
+        );
+      }
+    }
+    return found;
+  }
 
   /// The album titles VK gave so far, by "ownerId_albumId".
   Map<String, String> vkAlbumTitles() => {
