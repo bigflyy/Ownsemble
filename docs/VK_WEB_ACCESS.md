@@ -86,6 +86,22 @@ no `album` object at all: user uploads with nothing to show.
   calls failed, all with errors 100 and 15 (refused, not limited): among the 88
   albums of the test library a few cannot be read at all.
 
+## An album's songs (both test accounts, 2026-11-04)
+
+Measured with `tool/probe_album_songs.dart` (read-only, counts only).
+
+- **One call lists an album.** `audio.get` with `owner_id` = the album's owner,
+  `album_id` = its id and the album object's `access_key` returns the album's
+  songs in order: 10 albums, 3-15 songs each, 360-541 ms per call. Every song
+  had a link and its own `access_key`, so it streams like a library song.
+- **The songs belong to the album's owner, not the account.** None of them has
+  the account's `owner_id`; a library song is the account's own copy. They match
+  by `track_id` (and `release_audio_id` gives the same matches). Not every
+  library song of an album matches: in "На вырост" 2 of 3 did, so a library song
+  that names the album but matches no album song is still shown with it.
+- The app keeps each song's album key and access key (schema 5) and asks VK
+  only when an album is opened.
+
 ## Answers that are not the song (test account, 2026-10-30)
 
 `206` for `Range: bytes=0-` is normal: 305 of 738 whole-file answers were 206 with
