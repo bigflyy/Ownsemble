@@ -386,6 +386,24 @@ void main() {
       expect(seen.first.$1, lessThan(audio.length));
     });
 
+    test(
+      'a speed limit for checks slows the save, and it stays whole',
+      () async {
+        // 100,000 bytes at 200,000 bytes a second: at least half a second.
+        proxy.saveRateLimit = 200000;
+        final clock = Stopwatch()..start();
+        final stream = proxy.add(
+          Uri.parse('http://127.0.0.1:${upstream.port}/a'),
+          cacheTo: target(),
+        );
+        final (_, body) = await get(stream.localUri);
+        expect(await stream.stored, audio.length);
+        expect(clock.elapsedMilliseconds, greaterThanOrEqualTo(450));
+        expect(body, audio);
+        expect(target().readAsBytesSync(), audio);
+      },
+    );
+
     test('a "bytes=0-" request is saved too', () async {
       final stream = proxy.add(
         Uri.parse('http://127.0.0.1:${upstream.port}/a'),

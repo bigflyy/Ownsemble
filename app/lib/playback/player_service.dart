@@ -202,6 +202,10 @@ class PlayerService {
   /// Every streamed song that was not saved whole, and why.
   Stream<LostSave> get lostSaves => _proxy.lostSaves;
 
+  /// For checks only, see [StreamProxy.saveRateLimit].
+  set saveRateLimit(int? bytesPerSecond) =>
+      _proxy.saveRateLimit = bytesPerSecond;
+
   /// Fires when the current song plays to its end.
   Stream<void> get ended => _endedController.stream;
 

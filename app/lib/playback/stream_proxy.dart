@@ -361,6 +361,12 @@ class StreamProxy {
     if (!_lostSaves.isClosed) _lostSaves.add(lost);
   }
 
+  /// For checks only: the most bytes a second a save reads from the audio
+  /// server (null: no limit). On a fast line a song is saved in 2-4 s, before
+  /// a check can skip it after [keepSavingAfter]; slowed down, the save is
+  /// still running then, as it is on a slow day.
+  int? saveRateLimit;
+
   /// A skipped song goes on saving once it played this long.
   static const keepSavingAfter = Duration(seconds: 5);
 
@@ -579,7 +585,11 @@ class StreamProxy {
     );
     _caching.add(stream);
     final done = stream._teeDone = Completer<bool>();
-    final subscription = upstream.listen(
+    // For [saveRateLimit]: time since the first byte, and the pending resume.
+    final rateClock = Stopwatch()..start();
+    Timer? resumeLater;
+    late final StreamSubscription<List<int>> subscription;
+    subscription = upstream.listen(
       (chunk) {
         if (!stream._firstChunk.isCompleted) {
           stream._firstChunk.complete(clock.elapsedMilliseconds);
@@ -603,6 +613,19 @@ class StreamProxy {
         if (stream._cachingCanceled && mpvGone && !done.isCompleted) {
           done.complete(false);
         }
+        // Slowed for a check: wait until the bytes so far fit the limit.
+        final limit = saveRateLimit;
+        if (limit != null && limit > 0 && !done.isCompleted) {
+          final dueMs = written * 1000 ~/ limit;
+          final aheadMs = dueMs - rateClock.elapsedMilliseconds;
+          if (aheadMs > 0) {
+            subscription.pause();
+            resumeLater = Timer(
+              Duration(milliseconds: aheadMs),
+              subscription.resume,
+            );
+          }
+        }
       },
       onError: (Object _) {
         if (!done.isCompleted) done.complete(false);
@@ -620,6 +643,7 @@ class StreamProxy {
     });
     final complete = await done.future;
     watchdog.cancel();
+    resumeLater?.cancel();
     final stalled = !complete && written == lastWritten;
     if (!complete) await subscription.cancel();
     _caching.remove(stream);
