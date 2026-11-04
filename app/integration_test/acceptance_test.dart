@@ -1262,10 +1262,13 @@ void main() {
 
     // Saves that go on (Stage I): a seek keeps the save of the song playing;
     // a song skipped after 5 s of play goes on saving in the background; a
-    // song skipped sooner stops saving, and the lost save says why. The
-    // longest songs, so their saves are most likely still running when the
-    // seek and the skips come; whether they were is printed, because on a
-    // fast line a save may finish first and then that path was not tried.
+    // song skipped sooner stops saving, and the lost save says why. On a fast
+    // line VK sends a whole song in 2-4 s, before the skips come, so saves are
+    // slowed here to 300 KB a second (still 7 times what a 320 kbit/s song
+    // needs): a long song then takes half a minute, as on a slow day, and
+    // every save below must still be running when its seek or skip comes.
+    const saveRate = 300 * 1024;
+    player.saveRateLimit = saveRate;
     final lostSaves = <LostSave>[];
     final lostWatch = player.lostSaves.listen(lostSaves.add);
     final unsaved = [
@@ -1298,6 +1301,10 @@ void main() {
       isTrue,
     );
     final savingAtQuickSkip = storage.isSaving(quickSkipped);
+    // Slowed, so each path below is really taken, not skipped by a fast save.
+    expect(savingAtSeek, isTrue, reason: 'save running at the seek');
+    expect(savingAtLateSkip, isTrue, reason: 'save running at the late skip');
+    expect(savingAtQuickSkip, isTrue, reason: 'save running at the quick skip');
     expect(
       (await playByTap(tester, afterSkips, label: 'song after the skips')).ok,
       isTrue,
@@ -1329,14 +1336,28 @@ void main() {
       expect(lost.reason, startsWith('skipped after '));
     }
     await lostWatch.cancel();
+    player.saveRateLimit = null;
+    // The song saved in the background after its late skip now plays from
+    // disk.
+    final keptPlay = await playByTap(
+      tester,
+      seekedSong,
+      label: 'song saved after its late skip',
+    );
+    expect(keptPlay.ok, isTrue);
+    expect(keptPlay.cached, isTrue, reason: 'plays from the kept save');
     // ignore: avoid_print
     print(
-      'saves that go on: seek with the save running: $savingAtSeek, skip '
+      'saves that go on (slowed to ${saveRate ~/ 1024} KB/s): seek with the '
+      'save running: $savingAtSeek, skip '
       'after 6 s with the save running: $savingAtLateSkip, that song saved '
       'whole ${keptFile.lengthSync() ~/ 1024} KB after $keptMs ms; quick skip '
       'with the save running: $savingAtQuickSkip'
       '${savingAtQuickSkip ? ', stopped: ${lostSaves.firstWhere((l) => l.label == 'song ${quickSkipped.id}')}' : ''}; '
-      'lost saves seen: ${lostSaves.length}',
+      // Every lost save by name: one that the step accepts must be explained.
+      'lost saves seen: ${lostSaves.length} (${lostSaves.join(' | ')}); '
+      'played again from disk in '
+      '${keptPlay.toSoundMs} ms',
     );
 
     final streamable = [
