@@ -552,6 +552,18 @@ class LibraryStore {
       row['id'] as int,
   ];
 
+  /// Ids of the listed songs with album title [album] and artist [artist], in
+  /// library order: an album for songs without an album link.
+  List<int> listedIdsWithAlbum(String album, String artist) => [
+    for (final row in _db.select(
+      'SELECT id FROM tracks '
+      'WHERE same_as IS NULL AND album = ? AND artist = ? '
+      'ORDER BY added_at DESC, id DESC',
+      [album, artist],
+    ))
+      row['id'] as int,
+  ];
+
   /// The listed song of each of [vkTrackIds] the library has, by VK track
   /// id: the row itself, or the row a copy with that id belongs to.
   Map<int, int> listedIdsByVkTrackId(Iterable<int> vkTrackIds) {

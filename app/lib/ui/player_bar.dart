@@ -4,6 +4,7 @@ import '../library/track.dart';
 import '../playback/play_queue.dart';
 import '../playback/playback_controller.dart';
 import '../storage/audio_storage.dart';
+import 'album_link.dart';
 import 'collections_controller.dart';
 import 'cover_tile.dart';
 import 'cover_viewer.dart';
@@ -24,6 +25,7 @@ class NowPlayingPanel extends StatelessWidget {
     required this.thumbnails,
     required this.onDockBottom,
     required this.onGoToSong,
+    this.onOpenAlbum,
   });
 
   final PlaybackController playback;
@@ -33,6 +35,9 @@ class NowPlayingPanel extends StatelessWidget {
 
   /// A click on the title: shows the song in its list.
   final VoidCallback onGoToSong;
+
+  /// A click on the album name: opens the song's album.
+  final void Function(Track track)? onOpenAlbum;
 
   @override
   Widget build(BuildContext context) {
@@ -93,14 +98,19 @@ class NowPlayingPanel extends StatelessWidget {
                           large: true,
                           storage: player.storage,
                           onGoToSong: onGoToSong,
+                          onOpenAlbum: onOpenAlbum == null
+                              ? null
+                              : () => onOpenAlbum!(track),
                         ),
                       ),
-                      if (collections != null)
+                      // A song of an album that the library lacks has no row
+                      // for a Stack or a download to point at.
+                      if (collections != null && track.inLibrary)
                         StackMenuButton(
                           track: track,
                           collections: collections!,
                         ),
-                      if (player.storage != null)
+                      if (player.storage != null && track.inLibrary)
                         DownloadButton(playback: playback, track: track),
                     ],
                   ),
@@ -138,6 +148,7 @@ class DockBar extends StatelessWidget {
     required this.onDockSide,
     required this.onGoToSong,
     required this.compact,
+    this.onOpenAlbum,
   });
 
   final PlaybackController playback;
@@ -148,6 +159,9 @@ class DockBar extends StatelessWidget {
 
   /// A click on the title: shows the song in its list.
   final VoidCallback onGoToSong;
+
+  /// A click on the album name: opens the song's album.
+  final void Function(Track track)? onOpenAlbum;
 
   /// Very narrow window: the right column (volume and menus) is left out.
   final bool compact;
@@ -195,6 +209,9 @@ class DockBar extends StatelessWidget {
                               child: SongTitle(
                                 track: track,
                                 onGoToSong: onGoToSong,
+                                onOpenAlbum: onOpenAlbum == null
+                                    ? null
+                                    : () => onOpenAlbum!(track),
                               ),
                             ),
                             UpNextButton(
@@ -222,12 +239,18 @@ class DockBar extends StatelessWidget {
                     child: Row(
                       mainAxisAlignment: MainAxisAlignment.end,
                       children: [
-                        if (track != null && collections != null)
+                        // A song of an album that the library lacks has no
+                        // row for a Stack or a download to point at.
+                        if (track != null &&
+                            track.inLibrary &&
+                            collections != null)
                           StackMenuButton(
                             track: track,
                             collections: collections!,
                           ),
-                        if (track != null && player.storage != null)
+                        if (track != null &&
+                            track.inLibrary &&
+                            player.storage != null)
                           DownloadButton(playback: playback, track: track),
                         Flexible(
                           child: SizedBox(
@@ -285,6 +308,7 @@ class SongTitle extends StatelessWidget {
     this.large = false,
     this.storage,
     this.onGoToSong,
+    this.onOpenAlbum,
   });
 
   final Track track;
@@ -293,6 +317,9 @@ class SongTitle extends StatelessWidget {
 
   /// What a click on the title does.
   final VoidCallback? onGoToSong;
+
+  /// What a click on the album name does.
+  final VoidCallback? onOpenAlbum;
 
   @override
   Widget build(BuildContext context) {
@@ -316,7 +343,9 @@ class SongTitle extends StatelessWidget {
         ? 'cached'
         : track.isGone
         ? 'gone from VK'
-        : 'streams';
+        : track.inLibrary
+        ? 'streams'
+        : 'streams, not in your library';
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       mainAxisSize: MainAxisSize.min,
@@ -336,16 +365,20 @@ class SongTitle extends StatelessWidget {
             ),
           ),
         const SizedBox(height: 4),
-        Text(
-          track.source == TrackSource.generated
+        // The album shares the artist's line: the panel must not grow, or
+        // the smallest window loses its controls.
+        ArtistAlbumLine(
+          key: const ValueKey('player-artist'),
+          artist: track.source == TrackSource.generated
               ? '${track.artist}  (test filler: plays a sample song)'
               : track.artist,
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
+          album: track.album ?? '',
           style: TextStyle(
             fontSize: large ? 15 : 13,
             color: large ? colors.text : colors.dim,
           ),
+          albumStyle: TextStyle(fontSize: large ? 15 : 13, color: colors.dim),
+          onOpenAlbum: onOpenAlbum,
         ),
         if (large) ...[
           const SizedBox(height: 6),

@@ -7,12 +7,7 @@ import 'track.dart';
 /// every song is a few milliseconds at 10,000 songs and needs no index upkeep.
 class SearchIndex {
   SearchIndex(this._tracks)
-    : _texts = [
-        for (final track in _tracks)
-          normalizeForSearch(
-            '${track.artist}\n${track.title}\n${track.album ?? ''}',
-          ),
-      ];
+    : _texts = [for (final track in _tracks) searchTextOf(track)];
 
   final List<Track> _tracks;
   final List<String> _texts;
@@ -27,3 +22,8 @@ class SearchIndex {
     ];
   }
 }
+
+/// The normalized text a search looks in for [track]: artist, title and
+/// album.
+String searchTextOf(Track track) =>
+    normalizeForSearch('${track.artist}\n${track.title}\n${track.album ?? ''}');

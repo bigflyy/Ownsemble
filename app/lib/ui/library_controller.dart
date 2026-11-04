@@ -3,8 +3,10 @@ import 'package:flutter/widgets.dart';
 
 import '../library/library_records.dart';
 import '../library/search_index.dart';
+import '../library/search_text.dart';
 import '../library/track.dart';
 import '../storage/audio_storage.dart';
+import 'albums.dart';
 import 'collections_controller.dart';
 import 'place_history.dart';
 import 'type_jump.dart';
@@ -16,7 +18,8 @@ const rowHeight = 58.0;
 /// after the MVP and show a "later" page.
 ///
 /// Downloads holds the songs kept for good; stored holds everything that
-/// plays without the network, cached songs too ("On this computer").
+/// plays without the network, cached songs too ("On this computer"). An
+/// album is not in the sidebar: it opens from a song's album name.
 enum ViewKind {
   songs,
   artists,
@@ -26,17 +29,19 @@ enum ViewKind {
   playlists,
   history,
   charts,
+  album,
 }
 
-/// One view: its kind and, for a Stack, which one.
+/// One view: its kind and, for a Stack or an album, which one.
 @immutable
 class LibraryView {
-  const LibraryView(this.kind, {this.stackId});
+  const LibraryView(this.kind, {this.stackId, this.album});
 
   static const songs = LibraryView(ViewKind.songs);
 
   final ViewKind kind;
   final int? stackId;
+  final AlbumRef? album;
 
   /// Whether this view is a page planned for later, without songs yet.
   bool get isLater => switch (kind) {
@@ -53,11 +58,31 @@ class LibraryView {
 
   @override
   bool operator ==(Object other) =>
-      other is LibraryView && other.kind == kind && other.stackId == stackId;
+      other is LibraryView &&
+      other.kind == kind &&
+      other.stackId == stackId &&
+      other.album == album;
 
   @override
-  int get hashCode => Object.hash(kind, stackId);
+  int get hashCode => Object.hash(kind, stackId, album);
 }
+
+/// How far an open album's song list got.
+enum AlbumLoad {
+  /// The library's songs show; the source's full list is on its way.
+  loading,
+
+  /// The source's full list is in.
+  loaded,
+
+  /// Only the library's songs: the source could not list the album.
+  failed,
+}
+
+/// What the album heading says about the open album: how far its list got,
+/// why the full list is missing when it failed, and how many of its songs
+/// the library has.
+typedef AlbumStatus = ({AlbumLoad load, String? reason, int inLibrary});
 
 /// State of the song list: all songs, the view chosen in the sidebar, the
 /// source filter, the search text and what is shown.
@@ -72,6 +97,7 @@ class LibraryController extends ChangeNotifier {
     this._all, {
     this.collections,
     this.storage,
+    this.albums,
     String? Function(String key)? readSetting,
     this._writeSetting,
   }) : _index = SearchIndex(_all),
@@ -105,17 +131,19 @@ class LibraryController extends ChangeNotifier {
   final void Function(String key, String? value)? _writeSetting;
 
   /// A view as stored in [viewSetting]: its kind, plus the id for a Stack.
+  /// An album is stored as its kind alone, which reads back as no view.
   static String _encodeView(LibraryView view) => view.stackId == null
       ? view.kind.name
       : '${view.kind.name}:${view.stackId}';
 
   /// The view stored as [text], or null when there is none to go back to,
-  /// for example a Stack that no longer exists.
+  /// for example a Stack that no longer exists. An album is not reopened in
+  /// the next run: its full list would need VK before the first frame.
   LibraryView? _decodeView(String? text) {
     if (text == null) return null;
     final parts = text.split(':');
     final kind = ViewKind.values.asNameMap()[parts.first];
-    if (kind == null) return null;
+    if (kind == null || kind == ViewKind.album) return null;
     if (kind != ViewKind.stack || parts.length < 2) return LibraryView(kind);
     final stackId = int.tryParse(parts[1]);
     final exists = collections?.stacks.any((s) => s.id == stackId) ?? false;
@@ -182,6 +210,20 @@ class LibraryController extends ChangeNotifier {
   /// Stored audio, for the Downloads and On this computer views.
   final AudioStorage? storage;
 
+  /// Albums' songs; without it no album opens.
+  final AlbumCatalog? albums;
+
+  /// The full lists of albums opened in this run, oldest first, so that
+  /// going back to one does not ask VK again. A few are kept: each holds its
+  /// songs.
+  final _albumLists = <AlbumRef, List<AlbumSong>>{};
+  static const _albumListsKept = 8;
+
+  /// Albums whose full list is being asked for, and why the last ask of an
+  /// album failed.
+  final _albumsLoading = <AlbumRef>{};
+  final _albumFailures = <AlbumRef, String>{};
+
   SearchIndex _index;
   List<Track> _all;
   late Map<int, Track> _byId;
@@ -239,6 +281,115 @@ class LibraryController extends ChangeNotifier {
   /// a song can appear more than once; null otherwise.
   int? entryIdAt(int index) => _visibleEntryIds?[index];
 
+  /// The album [track] is from, if it can be opened.
+  AlbumRef? albumOf(Track track) => albums?.albumOf(track);
+
+  /// Opens the album [track] is from, as a new place: its songs in the
+  /// library at once, and the rest once its source lists them. The search
+  /// and the source filter stay with the place that is left.
+  void openAlbum(Track track) {
+    final album = albumOf(track);
+    if (album == null) return;
+    final view = LibraryView(ViewKind.album, album: album);
+    if (view == _view && _appliedQuery.isEmpty && _source == null) return;
+    // Opening an album whose list failed asks again; Back and Forward to it
+    // do not.
+    _albumFailures.remove(album);
+    _places.leave(_here);
+    _showList(view, '', null);
+    if (scroll.hasClients) scroll.jumpTo(0);
+  }
+
+  /// What the open album's heading says; null when no album is shown.
+  AlbumStatus? get albumStatus {
+    final album = _view.album;
+    if (_view.kind != ViewKind.album || album == null) return null;
+    final base = _base ?? const <Track>[];
+    final inLibrary = base.where((track) => track.inLibrary).length;
+    if (_albumLists.containsKey(album)) {
+      return (load: AlbumLoad.loaded, reason: null, inLibrary: inLibrary);
+    }
+    if (_albumsLoading.contains(album)) {
+      return (load: AlbumLoad.loading, reason: null, inLibrary: inLibrary);
+    }
+    return (
+      load: AlbumLoad.failed,
+      reason: _albumFailures[album],
+      inLibrary: inLibrary,
+    );
+  }
+
+  /// The songs of [album]. Once its full list is in: in the album's order,
+  /// the library's own song in place of each one it has, then the library's
+  /// songs the list does not name (another version, a copy VK put in the
+  /// album). Until then: the library's songs, and the full list is asked for
+  /// unless the last ask failed: the rebuild after a failure lands here too,
+  /// and must not ask VK again and again.
+  List<Track> _albumSongs(AlbumRef album) {
+    final catalog = albums;
+    if (catalog == null) return const [];
+    final libraryIds = catalog.libraryIds(album);
+    final listed = _albumLists[album];
+    if (listed == null) {
+      if (!_albumFailures.containsKey(album)) _fetchAlbum(album);
+      return [for (final id in libraryIds) ?_byId[id]];
+    }
+    final owned = catalog.libraryIdsByVkTrackId([
+      for (final song in listed) ?song.vkTrackId,
+    ]);
+    final shown = <int>{};
+    final tracks = <Track>[];
+    for (final song in listed) {
+      final own = _byId[owned[song.vkTrackId]];
+      final track = own ?? song.track;
+      if (shown.add(track.id)) tracks.add(track);
+    }
+    for (final id in libraryIds) {
+      final track = _byId[id];
+      if (track != null && shown.add(id)) tracks.add(track);
+    }
+    return tracks;
+  }
+
+  /// Asks the album's source for its full list, unless it is on its way or
+  /// there is nothing to ask. The list shows when it arrives, if the album
+  /// is still on screen.
+  void _fetchAlbum(AlbumRef album) {
+    final catalog = albums;
+    if (catalog == null || _albumsLoading.contains(album)) return;
+    if (!catalog.canFetch(album)) {
+      _albumFailures[album] = album.link == null
+          ? 'only your songs: the next sync links this album to VK'
+          : 'only your songs: log in to the account it came from';
+      return;
+    }
+    _albumsLoading.add(album);
+    _albumFailures.remove(album);
+    catalog
+        .fetch(album)
+        .then(
+          (songs) {
+            _albumLists[album] = songs;
+            if (_albumLists.length > _albumListsKept) {
+              _albumLists.remove(_albumLists.keys.first);
+            }
+          },
+          onError: (Object error) {
+            _albumFailures[album] = error is AlbumNotListed
+                ? error.reason
+                : 'VK did not list the album';
+          },
+        )
+        .whenComplete(() {
+          _albumsLoading.remove(album);
+          if (_disposed || _view.album != album) return;
+          _rebuildBase();
+          _applySearch();
+          jump.clear();
+          notifyListeners();
+        });
+  }
+
   /// Switches the list to [view] and scrolls to its top.
   void showView(LibraryView view) {
     if (view != _view) _places.leave(_here);
@@ -288,14 +439,17 @@ class LibraryController extends ChangeNotifier {
   /// Goes to [track]'s row in the list it was played from and outlines it;
   /// when that list no longer has it, in All songs. With a song repeated in
   /// the list, [listRow] (its row when it started) tells which one it is.
+  ///
+  /// A song outside the library (from an album) is only in the album's list.
   void goToSong(Track track, {int? listRow}) {
-    if (byId(track.id) == null) return;
-    final here = _here;
     final from =
         _playedFrom ?? const Place(view: LibraryView.songs, search: '');
+    final inLibrary = byId(track.id) != null;
+    if (!inLibrary && from.view.kind != ViewKind.album) return;
+    final here = _here;
     _showList(from.view, from.search, from.source);
     var row = _rowOf(track, listRow);
-    if (row == null) {
+    if (row == null && inLibrary) {
       _showList(LibraryView.songs, '', null);
       row = _rowOf(track, listRow);
     }
@@ -501,6 +655,9 @@ class LibraryController extends ChangeNotifier {
         }
         _base = tracks;
         _baseEntryIds = ids;
+      case ViewKind.album:
+        final album = _view.album;
+        _base = album == null ? const [] : _albumSongs(album);
       case ViewKind.artists || ViewKind.playlists || ViewKind.charts:
         _base = const [];
     }
@@ -526,8 +683,21 @@ class LibraryController extends ChangeNotifier {
   }
 
   void _applySearch() {
-    final matches = _index.search(_appliedQuery);
     final base = _base;
+    // An album's songs outside the library are not in the index; an album
+    // is short, so its rows are matched one by one.
+    if (_view.kind == ViewKind.album && base != null) {
+      final words = searchWords(_appliedQuery);
+      _visible = words.isEmpty
+          ? base
+          : [
+              for (final track in base)
+                if (matchesAllWords(searchTextOf(track), words)) track,
+            ];
+      _visibleEntryIds = null;
+      return;
+    }
+    final matches = _index.search(_appliedQuery);
     if (base == null) {
       _visible = matches ?? _all;
       _visibleEntryIds = null;
@@ -564,8 +734,12 @@ class LibraryController extends ChangeNotifier {
     onTracksReplaced?.call(byId);
   }
 
+  /// Set by [dispose]: an album list that arrives later is dropped.
+  var _disposed = false;
+
   @override
   void dispose() {
+    _disposed = true;
     _sources?.removeListener(_onSourcesChanged);
     collections?.removeListener(_onSourceChanged);
     storage?.removeListener(_onStorageChanged);

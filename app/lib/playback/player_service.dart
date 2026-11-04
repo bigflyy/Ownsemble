@@ -297,7 +297,10 @@ class PlayerService {
           );
         }
         final storage = this.storage;
-        final cachePath = storage != null && cacheWhileStreaming
+        // Stored audio points at a library row: an album's song outside the
+        // library streams without being kept.
+        final cachePath =
+            storage != null && cacheWhileStreaming && track.inLibrary
             ? storage.streamSavePath(track)
             : null;
         proxied = _proxy.add(

@@ -8,6 +8,7 @@ import '../library/track.dart';
 import '../playback/playback_controller.dart';
 import '../playback/player_service.dart';
 import '../storage/audio_storage.dart';
+import 'album_link.dart';
 import 'collections_controller.dart';
 import 'cover_tile.dart';
 import 'cover_viewer.dart';
@@ -386,6 +387,12 @@ class _LibraryScreenState extends State<LibraryScreen> {
     final collections = widget.collections;
     final downloaded = storage?.stateOf(track).pinned ?? false;
     final inStack = library.view.kind == ViewKind.stack && entryId != null;
+    // A song of an album that the library lacks only plays: it has no row
+    // that stored audio or a Stack could point at.
+    final inLibrary = track.inLibrary;
+    final album = library.albumOf(track);
+    final showsAlbum =
+        library.view.kind == ViewKind.album && library.view.album == album;
     final choice = await showMenu<Object>(
       context: context,
       position: RelativeRect.fromLTRB(
@@ -405,7 +412,13 @@ class _LibraryScreenState extends State<LibraryScreen> {
           value: 'add-to-queue',
           child: Text('Add to queue'),
         ),
-        if (track.hasCover || storage != null || inStack)
+        if (album != null && !showsAlbum)
+          const PopupMenuItem(
+            key: ValueKey('menu-open-album'),
+            value: 'open-album',
+            child: Text('Open the album'),
+          ),
+        if (track.hasCover || (storage != null && inLibrary) || inStack)
           const PopupMenuDivider(),
         if (track.hasCover)
           const PopupMenuItem(
@@ -413,13 +426,13 @@ class _LibraryScreenState extends State<LibraryScreen> {
             value: 'view-cover',
             child: Text('View cover'),
           ),
-        if (storage != null && !downloaded)
+        if (storage != null && inLibrary && !downloaded)
           const PopupMenuItem(
             key: ValueKey('menu-download'),
             value: 'download',
             child: Text('Download'),
           ),
-        if (storage != null && downloaded)
+        if (storage != null && inLibrary && downloaded)
           const PopupMenuItem(
             key: ValueKey('menu-remove-download'),
             value: 'remove',
@@ -431,7 +444,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
             value: 'unstack',
             child: Text('Remove from this Stack'),
           ),
-        if (collections != null) ...[
+        if (collections != null && inLibrary) ...[
           const PopupMenuDivider(),
           ...stackMenuItems(collections),
         ],
@@ -439,6 +452,8 @@ class _LibraryScreenState extends State<LibraryScreen> {
     );
     if (!mounted || choice == null) return;
     switch (choice) {
+      case 'open-album':
+        library.openAlbum(track);
       case 'play-next':
         await widget.playback.playNext(track);
       case 'add-to-queue':
@@ -512,6 +527,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
                         canDockSide: roomForPanel,
                         onDockSide: () => _settings.dockTo(PlayerDock.side),
                         onGoToSong: _goToPlayingSong,
+                        onOpenAlbum: library.openAlbum,
                         compact: !roomForSidebar,
                       ),
                     if (widget.sync case final sync?)
@@ -562,6 +578,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
                               onDockBottom: () =>
                                   _settings.dockTo(PlayerDock.bottom),
                               onGoToSong: _goToPlayingSong,
+                              onOpenAlbum: library.openAlbum,
                             ),
                         ],
                       ),
@@ -675,6 +692,8 @@ class _LibraryScreenState extends State<LibraryScreen> {
                     count: view.isLater ? null : _countLabel(),
                     jump: library.jump,
                     tight: tight,
+                    onBack: view.kind == ViewKind.album ? library.goBack : null,
+                    detail: _albumDetail(view),
                     filter: view.isLater || library.filterSources.length < 2
                         ? null
                         : _SourceFilter(library: library, tight: tight),
@@ -706,6 +725,24 @@ class _LibraryScreenState extends State<LibraryScreen> {
     return shown == all ? songs : '$shown of $songs';
   }
 
+  /// The line under an album's title: its artist and how far its list got.
+  String? _albumDetail(LibraryView view) {
+    final status = library.albumStatus;
+    final album = view.album;
+    if (status == null || album == null) return null;
+    final artist = album.artist == null || album.artist!.isEmpty
+        ? ''
+        : '${album.artist}  -  ';
+    final yours = status.inLibrary == 1
+        ? '1 song in your library'
+        : '${status.inLibrary} songs in your library';
+    return switch (status.load) {
+      AlbumLoad.loading => '$artist$yours, loading the rest from VK...',
+      AlbumLoad.loaded => '${artist}album from VK, $yours',
+      AlbumLoad.failed => '$artist${status.reason ?? yours}',
+    };
+  }
+
   String _viewTitle(LibraryView view) => switch (view.kind) {
     ViewKind.songs => 'All songs',
     ViewKind.artists => 'Artists',
@@ -720,6 +757,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
     ViewKind.playlists => 'Playlists',
     ViewKind.history => 'History',
     ViewKind.charts => 'Charts',
+    ViewKind.album => view.album?.title ?? 'Album',
   };
 
   Widget _songList(OwnColors colors, {required bool showAlbum}) {
@@ -745,6 +783,10 @@ class _LibraryScreenState extends State<LibraryScreen> {
               ViewKind.stack =>
                 'Put songs on top of a Stack from the player or a song\'s '
                     'right-click menu.',
+              ViewKind.album => switch (library.albumStatus?.load) {
+                AlbumLoad.loading => 'Loading the album from VK...',
+                _ => 'No songs of this album to show.',
+              },
               _ => 'No songs yet.',
             };
       final message = Text(
@@ -817,6 +859,10 @@ class _LibraryScreenState extends State<LibraryScreen> {
                   _play(index);
                 },
                 onMenu: (position) => _showSongMenu(index, position),
+                onOpenAlbum: () {
+                  library.jump.clear();
+                  library.openAlbum(track);
+                },
               );
             },
           ),
@@ -902,11 +948,19 @@ class _ViewHeading extends StatelessWidget {
     required this.jump,
     required this.tight,
     this.filter,
+    this.onBack,
+    this.detail,
   });
 
   final String title;
   final String? count;
   final TypeJump jump;
+
+  /// Goes back to the place before (an album shows a Back button).
+  final VoidCallback? onBack;
+
+  /// A line under the title (an album's artist and loading state).
+  final String? detail;
 
   /// A short window: a smaller title, so that the list keeps its rows.
   final bool tight;
@@ -917,10 +971,25 @@ class _ViewHeading extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = OwnColors.of(context);
-    return Padding(
-      padding: EdgeInsets.fromLTRB(24, 0, 24, tight ? 4 : 10),
+    final heading = Padding(
+      padding: EdgeInsets.fromLTRB(
+        onBack == null ? 24 : 12,
+        0,
+        24,
+        tight || detail != null ? 4 : 10,
+      ),
       child: Row(
         children: [
+          if (onBack != null) ...[
+            IconButton(
+              key: const ValueKey('album-back'),
+              tooltip: 'Back (Alt+Left)',
+              visualDensity: tight ? VisualDensity.compact : null,
+              onPressed: onBack,
+              icon: const Icon(Icons.arrow_back),
+            ),
+            const SizedBox(width: 4),
+          ],
           Expanded(
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.baseline,
@@ -961,6 +1030,25 @@ class _ViewHeading extends StatelessWidget {
           ],
         ],
       ),
+    );
+    final detailLine = detail;
+    if (detailLine == null) return heading;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        heading,
+        Padding(
+          padding: EdgeInsets.fromLTRB(24, 0, 24, tight ? 4 : 10),
+          child: Text(
+            detailLine,
+            key: const ValueKey('album-status'),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(fontSize: 13, color: colors.dim),
+          ),
+        ),
+      ],
     );
   }
 }
@@ -1234,6 +1322,7 @@ class _SongRow extends StatelessWidget {
     required this.playing,
     required this.onTap,
     required this.onMenu,
+    this.onOpenAlbum,
   });
 
   /// Position in the list, shown when thumbnails are off.
@@ -1264,6 +1353,9 @@ class _SongRow extends StatelessWidget {
 
   /// Opens the song's menu at a position on screen (right click).
   final void Function(Offset position) onMenu;
+
+  /// Opens the song's album (a click on its name).
+  final VoidCallback? onOpenAlbum;
 
   @override
   Widget build(BuildContext context) {
@@ -1421,11 +1513,13 @@ class _SongRow extends StatelessWidget {
                         builder: (context, box) => Row(
                           children: [
                             Expanded(
-                              child: Text(
-                                track.album ?? '',
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
+                              child: AlbumLink(
+                                key: ValueKey('album-${track.id}'),
+                                album: track.album ?? '',
                                 style: dimStyle,
+                                onOpen: (track.album ?? '').isEmpty
+                                    ? null
+                                    : onOpenAlbum,
                               ),
                             ),
                             ...tags(compact: box.maxWidth < 150),

@@ -131,6 +131,11 @@ class Track {
   /// Whether the song is downloaded (pinned in storage).
   bool get isDownloaded => localPath != null && pinned;
 
+  /// Whether the song is a library row. A song of an opened album that the
+  /// library lacks gets a negative id instead: it streams like any other,
+  /// but has no row for History, Stacks or stored audio to point at.
+  bool get inLibrary => id >= 0;
+
   /// Whether no account has this song any more; it plays only if stored.
   bool get isGone =>
       goneAtMs != null && copies.every((copy) => copy.goneAtMs != null);

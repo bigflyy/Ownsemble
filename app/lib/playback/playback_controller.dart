@@ -220,6 +220,7 @@ class PlaybackController extends ChangeNotifier {
   Future<String?> download(Track track) async {
     final storage = player.storage;
     if (storage == null) return 'no storage';
+    if (!track.inLibrary) return 'not in your library';
     try {
       // The account that gave the link also gives the release link.
       RoutedStream? routed;
@@ -407,7 +408,9 @@ class PlaybackController extends ChangeNotifier {
     final timing = await player.play(track, from: from);
     if (request == _request) {
       if (timing.ok) {
-        if (record) recordPlay(track);
+        // History points at library rows; an album's song outside the
+        // library has none.
+        if (record && track.inLibrary) recordPlay(track);
         saveSession();
       } else {
         _idle = true;

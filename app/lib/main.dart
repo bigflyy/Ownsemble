@@ -15,6 +15,7 @@ import 'playback/player_service.dart';
 import 'storage/audio_storage.dart';
 import 'storage/cover_store.dart';
 import 'sync/background_sync.dart';
+import 'ui/albums.dart';
 import 'ui/collections_controller.dart';
 import 'ui/cover_tile.dart';
 import 'ui/library_controller.dart';
@@ -182,6 +183,10 @@ Future<void> main(List<String> args) async {
     tracks,
     collections: collections,
     storage: storage,
+    albums: LibraryAlbums(
+      store: store,
+      apiOfSource: (sourceId) => clientOfSource(sourceId)?.call,
+    ),
     readSetting: store.readSetting,
     writeSetting: store.writeSetting,
   );
