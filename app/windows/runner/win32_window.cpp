@@ -198,6 +198,13 @@ bool Win32Window::Show() {
   // outside every monitor and is never activated, so automated runs neither
   // cover the user's screen nor take their keyboard focus.
   if (GetEnvironmentVariableW(L"OWNSEMBLE_BACKGROUND_WINDOW", nullptr, 0) > 0) {
+    // SW_SHOWNA alone is not enough: when another window closes, Windows can
+    // still hand the focus to this one, and the user's typing then lands in
+    // the check (seen 2026-11-05). WS_EX_NOACTIVATE rules that out; posted
+    // key messages still reach the window.
+    SetWindowLongPtr(window_handle_, GWL_EXSTYLE,
+                     GetWindowLongPtr(window_handle_, GWL_EXSTYLE) |
+                         WS_EX_NOACTIVATE);
     SetWindowPos(window_handle_, HWND_BOTTOM, -20000, -20000, 0, 0,
                  SWP_NOSIZE | SWP_NOACTIVATE);
     return ShowWindow(window_handle_, SW_SHOWNA);
