@@ -10,6 +10,7 @@
 //
 // Run from app/ after `flutter build windows --release`:
 //   dart run tool/speed_gate.dart --data-dir DIR --vk-session FILE --out FILE
+//   (--vk-session again for a second account)
 
 // ignore_for_file: avoid_print
 
@@ -112,7 +113,12 @@ Future<void> main(List<String> args) async {
   }
 
   final dataDir = p.absolute(valueOf('--data-dir')!);
-  final session = valueOf('--vk-session');
+  // One --vk-session per test account; the stream checks need the first.
+  final sessions = [
+    for (var i = 0; i + 1 < args.length; i++)
+      if (args[i] == '--vk-session') p.absolute(args[i + 1]),
+  ];
+  final session = sessions.firstOrNull;
   final outFile = valueOf('--out') ?? p.join(dataDir, 'speed-gate.json');
   exe = p.absolute(
     valueOf('--exe') ?? 'build/windows/x64/runner/Release/ownsemble.exe',
@@ -120,7 +126,7 @@ Future<void> main(List<String> args) async {
   appArgs = [
     '--data-dir',
     dataDir,
-    if (session != null) ...['--vk-session', p.absolute(session)],
+    for (final file in sessions) ...['--vk-session', file],
     '--muted',
     // Streamed songs are not cached, so every run measures the same songs
     // streaming and the gate data does not grow.
