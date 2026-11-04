@@ -65,8 +65,9 @@ class SpeedBench {
   /// Two parts run only when named, since they are not speed measurements:
   /// saveVolume saves [savedVolumeProbe] the way the volume slider does, and
   /// savedVolume reports what mpv holds before any sound in a later run.
-  /// The same goes for playToClose and savedSong, see [_playToClose], and
-  /// for keysProbe, see [_keysProbe].
+  /// The same goes for playToClose and savedSong, see [_playToClose], for
+  /// keysProbe, see [_keysProbe], and for playEachSource, see
+  /// [_playEachSource].
   Future<Map<String, Object?>> run({List<String>? parts}) async {
     SchedulerBinding.instance.addTimingsCallback(_frames.addAll);
     FocusManager.instance.primaryFocus?.unfocus();
@@ -108,6 +109,9 @@ class SpeedBench {
     }
     if (parts?.contains('keysProbe') ?? false) {
       result['keysProbe'] = await _keysProbe();
+    }
+    if (parts?.contains('playEachSource') ?? false) {
+      result['playEachSource'] = await _playEachSource();
     }
     await player.setVolume(volume);
     result['volume'] = volume;
@@ -573,6 +577,49 @@ class SpeedBench {
       'networkFirstChunkMs': _stats(values('networkFirstChunkMs')),
       'overheadMs': _stats(values('overheadMs')),
     };
+  }
+
+  /// Streams, muted, up to [perSource] songs that only one VK account has,
+  /// for every VK source, so each stream can only go through that account.
+  /// The restart check of two accounts reads which source each one used.
+  /// Row and source ids only: a second account's titles stay out of the file.
+  Future<Map<String, Object?>> _playEachSource({int perSource = 3}) async {
+    final bySource = <int, List<Track>>{};
+    for (final track in library.all) {
+      if (track.source != TrackSource.vk) continue;
+      if (track.isCached || track.isGone || track.copies.isNotEmpty) continue;
+      bySource.putIfAbsent(track.sourceId, () => []).add(track);
+    }
+    final result = <String, Object?>{};
+    for (final MapEntry(key: sourceId, value: tracks) in bySource.entries) {
+      tracks.shuffle(Random(11));
+      final samples = <Map<String, Object?>>[];
+      var ok = 0;
+      // A few spare tries: VK withholds some songs from streaming.
+      for (final track in tracks.take(perSource + 3)) {
+        final timing = await player.play(track);
+        final playing = timing.ok && await _keepsPlaying();
+        samples.add({
+          'row': track.id,
+          'ok': timing.ok,
+          'sourceId': timing.sourceId,
+          'skippedAccounts': timing.skippedAccounts,
+          'sampleRate': timing.sampleRate,
+          'toSoundMs': timing.toSoundMs,
+          'stillPlayingAfter1s': playing,
+          if (timing.error != null) 'error': timing.error,
+        });
+        await player.stop();
+        await Future<void>.delayed(const Duration(milliseconds: 300));
+        if (timing.ok && playing && ++ok == perSource) break;
+      }
+      result['$sourceId'] = {
+        'onlyHere': tracks.length,
+        'played': ok,
+        'samples': samples,
+      };
+    }
+    return result;
   }
 
   /// Seeks streamed songs to three quarters as soon as their sound starts,
