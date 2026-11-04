@@ -563,17 +563,6 @@ void main() {
         );
         continue;
       }
-      // That song's own file is broken: a seek must reach the official
-      // release too.
-      if (track.title == 'Вуаля') {
-        await playback.seek(const Duration(seconds: 150));
-        await waitUntil(
-          tester,
-          () => player.position >= const Duration(seconds: 151),
-          timeout: const Duration(seconds: 20),
-          what: 'seek in the song playing from its release',
-        );
-      }
       played++;
       playedOk.add(track.id);
     }
@@ -590,11 +579,14 @@ void main() {
     print('not played: ${notPlayed.isEmpty ? 'none' : notPlayed.join('; ')}');
     expect(problems, isEmpty);
     if (!quick) expect(goneNotStored, 1);
-    // This copy's file is broken on VK's audio server (always 504): it plays
-    // from the official release, which is the same recording.
+    // This copy's file is broken on VK's audio server (always 504). It must
+    // say so: VK's "official release" is never played instead, since VK
+    // gives other recordings the same track_id (a live version came in for
+    // a studio one, user, 2026-11-04).
     if (!quick) {
       final voila = library.all.firstWhere((t) => t.title == 'Вуаля');
-      expect(playedOk, contains(voila.id), reason: 'plays from its release');
+      expect(playedOk, isNot(contains(voila.id)), reason: 'own file broken');
+      expect(notPlayed, contains('VK server error: ${songName(voila)}'));
     }
 
     // Clicking the playing song pauses it; clicking it again resumes.
@@ -1580,20 +1572,16 @@ void main() {
     );
     library.showView(LibraryView.songs);
     await tester.pump();
-    // Download of the song whose own file is broken: the audio comes from
-    // the official release, and from disk it is the whole song. Last here:
-    // it applies the 1-byte limit again, removing the song cached above.
+    // Download of the song whose own file is broken: it fails with a
+    // message and keeps nothing, never another copy's file.
     if (!quick) {
       final voila = library.all.firstWhere((t) => t.title == 'Вуаля');
       expect(storedNow(voila), isFalse);
-      expect(await playback.download(voila), isNull);
-      final saved = await playByTap(tester, voila, label: 'downloaded Вуаля');
-      expect(saved.ok && saved.cached, isTrue);
-      expect(
-        (await loadedLength(tester))! - voila.durationSec,
-        inInclusiveRange(-3, 3),
-        reason: 'the downloaded file is the whole song',
-      );
+      final error = await playback.download(voila);
+      // ignore: avoid_print
+      print('Download of Вуаля (own file broken on VK): $error');
+      expect(error, isNotNull);
+      expect(storedNow(voila), isFalse);
     }
 
     // Every song that started playing is in the History, newest first.
