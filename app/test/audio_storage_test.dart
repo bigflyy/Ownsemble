@@ -132,6 +132,16 @@ void main() {
     expect(storage.streamSavePath(songs[3]), storage.relativePathFor(songs[3]));
   });
 
+  test('a song still saving in the background is not saved a second time '
+      'when it plays again: both would write the same .part file', () async {
+    final save = Completer<int?>();
+    storage.noteSaving(songs[3], save.future);
+    expect(storage.streamSavePath(songs[3]), isNull);
+    save.complete(null);
+    await pumpEventQueue();
+    expect(storage.streamSavePath(songs[3]), storage.relativePathFor(songs[3]));
+  });
+
   test('a canceled streaming save makes the download fetch the song', () async {
     final save = Completer<int?>();
     storage.noteSaving(songs[2], save.future);

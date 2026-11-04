@@ -335,12 +335,19 @@ Future<void> _afterFirstFrame({
   }
 }
 
-/// Appends every play's timing and every proxied stream request's timing
-/// to perf.log (no titles, links or tokens).
+/// Appends every play's timing, every proxied stream request's timing and
+/// every streamed song not saved whole to perf.log (no titles, links or
+/// tokens).
 void _logPlayTimings(PlayerService player, File log) {
   player.proxyRequests.listen((request) {
     log.writeAsStringSync(
       '${DateTime.now().toIso8601String()} $request\n',
+      mode: FileMode.append,
+    );
+  });
+  player.lostSaves.listen((lost) {
+    log.writeAsStringSync(
+      '${DateTime.now().toIso8601String()} $lost\n',
       mode: FileMode.append,
     );
   });

@@ -10,7 +10,11 @@ class ProxiedStream {
     this._cacheTo,
     this._alternative,
     this._onSaved,
+    this.label,
   );
+
+  /// Names the song in perf.log (such as "song 123"), never a title.
+  final String? label;
 
   /// Loopback address mpv opens instead of the real link.
   final Uri localUri;
@@ -52,16 +56,44 @@ class ProxiedStream {
   /// file, or with null when it is not (no cache file, canceled, failed).
   Future<int?> get stored => _stored.future;
 
-  /// Stops saving this stream (another song started). The part already
-  /// fetched is thrown away; what mpv is playing is not affected.
-  void cancelCaching() {
+  /// Stops saving this stream, for [reason] (named in perf.log). The part
+  /// already fetched is thrown away; what mpv is playing is not affected.
+  void cancelCaching([String reason = 'canceled']) {
+    if (_cachingCanceled || _stored.isCompleted) return;
     _cachingCanceled = true;
-    if (!_teeStarted) _finishStored(null);
+    _cancelReason = reason;
+    if (!_teeStarted) _finishStored(null, reason);
   }
 
-  void _finishStored(int? bytes) {
-    if (!_stored.isCompleted) _stored.complete(bytes);
+  /// Why saving was canceled, once it was.
+  String? _cancelReason;
+
+  /// Bytes saved so far and the whole size (negative: not known yet).
+  int _written = 0;
+  int _total = -1;
+
+  /// Told about a save that ended without a whole file; set by the proxy.
+  void Function(LostSave lost)? _onLost;
+
+  /// Ends the save with [bytes] saved, or with null for [reason] when it
+  /// was lost; a lost save is reported once, if there was a file to save.
+  void _finishStored(int? bytes, [String? reason]) {
+    if (_stored.isCompleted) return;
+    _stored.complete(bytes);
+    if (bytes == null && _cacheTo != null) {
+      _onLost?.call(
+        LostSave(
+          label: label,
+          written: _written,
+          total: _total,
+          reason: reason ?? 'canceled',
+        ),
+      );
+    }
   }
+
+  /// The audio server's status when it failed; null while it has not.
+  int? _failedWith;
 
   /// Milliseconds from sending the first upstream request to receiving its
   /// first body bytes: the network's share of the start time.
@@ -72,8 +104,38 @@ class ProxiedStream {
   Future<int> get upstreamFailure => _failure.future;
 
   void _fail(int status) {
+    _failedWith ??= status;
     if (!_failure.isCompleted) _failure.complete(status);
   }
+}
+
+/// A song that streamed with a cache file but was not saved whole, and why:
+/// for perf.log. Holds no titles or links.
+class LostSave {
+  const LostSave({
+    required this.label,
+    required this.written,
+    required this.total,
+    required this.reason,
+  });
+
+  /// The song, as given to [StreamProxy.add] (such as "song 123").
+  final String? label;
+
+  /// Bytes saved before the save stopped.
+  final int written;
+
+  /// The whole size; negative when the audio server never said.
+  final int total;
+
+  /// Why it stopped, such as "skipped after 1.2 s of play".
+  final String reason;
+
+  /// One perf.log line.
+  @override
+  String toString() =>
+      'save lost: ${label ?? 'a song'}, $written of '
+      '${total < 0 ? '?' : total} bytes, $reason';
 }
 
 /// What happened to one request mpv made through [StreamProxy]: for
@@ -162,7 +224,8 @@ class ProxyRequestLog {
 /// The first request for the whole file is also saved to the stream's cache
 /// file while mpv plays it. If mpv drops that connection (a seek), saving
 /// goes on in the background until the file is complete or caching is
-/// canceled, so a song played once plays from disk afterwards.
+/// canceled, so a song played once plays from disk afterwards. When the
+/// song changes, [songChanged] decides which saves go on.
 class StreamProxy {
   StreamProxy._(this._server) {
     _server.listen(_handle);
@@ -178,6 +241,11 @@ class StreamProxy {
 
   /// Every finished request from mpv, with its timing.
   Stream<ProxyRequestLog> get requests => _requests.stream;
+
+  final _lostSaves = StreamController<LostSave>.broadcast(sync: true);
+
+  /// Every save that ended without a whole file, and why.
+  Stream<LostSave> get lostSaves => _lostSaves.stream;
   final HttpClient _http = HttpClient()
     ..connectionTimeout = const Duration(seconds: 6)
     ..idleTimeout = const Duration(seconds: 30);
@@ -280,6 +348,7 @@ class StreamProxy {
     File? cacheTo,
     Future<Uri?> Function()? alternative,
     void Function(int written, int total)? onSaved,
+    String? label,
   }) {
     final id = List.generate(
       16,
@@ -291,23 +360,82 @@ class StreamProxy {
       cacheTo,
       alternative,
       onSaved,
-    );
+      label,
+    ).._onLost = _reportLost;
     _streams[id] = stream;
     while (_streams.length > 4) {
-      _streams.remove(_streams.keys.first)?.cancelCaching();
+      final old = _streams.remove(_streams.keys.first);
+      // A skipped song's save may go on: it needs no more requests from mpv.
+      if (old != null && !_kept.contains(old)) {
+        _stop(old, 'another song started');
+      }
     }
     return stream;
   }
 
+  void _reportLost(LostSave lost) {
+    if (!_lostSaves.isClosed) _lostSaves.add(lost);
+  }
+
+  /// A skipped song goes on saving once it played this long.
+  static const keepSavingAfter = Duration(seconds: 5);
+
+  /// How many skipped songs go on saving at once, the most recent ones.
+  static const keptSaves = 2;
+
+  /// Skipped songs whose saves go on, oldest first.
+  final _kept = <ProxiedStream>[];
+
+  /// Stops [stream]'s save for [reason], at once if mpv no longer reads it.
+  void _stop(ProxiedStream stream, String reason) {
+    _kept.remove(stream);
+    stream.cancelCaching(reason);
+    final done = stream._teeDone;
+    if (done != null && !done.isCompleted) done.complete(false);
+  }
+
+  /// A new song is about to play instead of [skipped] (null: the last song
+  /// was not streamed), which played for [heard]. Its save goes on in the
+  /// background if it played at least [keepSavingAfter] or is [playedAgain]
+  /// (the new song is the same one, which then saves nothing itself); only
+  /// the [keptSaves] most recently skipped songs go on. Every other save
+  /// stops, so it does not take bandwidth from the new song.
+  void songChanged(
+    ProxiedStream? skipped, {
+    required Duration heard,
+    bool playedAgain = false,
+  }) {
+    if (skipped != null && !skipped._stored.isCompleted) {
+      final failed = skipped._failedWith;
+      if (failed != null) {
+        _stop(skipped, 'audio server failed (status $failed)');
+      } else if (!playedAgain && heard < keepSavingAfter) {
+        final seconds = (heard.inMilliseconds / 1000).toStringAsFixed(1);
+        _stop(skipped, 'skipped after $seconds s of play');
+      } else if (!skipped._teeStarted) {
+        _stop(skipped, 'the player never asked for the whole file');
+      } else {
+        _kept
+          ..remove(skipped)
+          ..add(skipped);
+        skipped.stored.whenComplete(() => _kept.remove(skipped));
+        while (_kept.length > keptSaves) {
+          _stop(_kept.first, 'pushed out by $keptSaves later skipped songs');
+        }
+      }
+    }
+    for (final stream in {..._streams.values, ..._caching}) {
+      if (identical(stream, skipped) || _kept.contains(stream)) continue;
+      _stop(stream, 'another song started');
+    }
+  }
+
   /// Cancels saving every stream except [keep], so downloads of songs no
   /// longer playing do not take bandwidth from the new one.
-  void cancelCachingExcept(ProxiedStream? keep) {
+  void cancelCachingExcept(ProxiedStream? keep, [String reason = 'canceled']) {
     for (final stream in {..._streams.values, ..._caching}) {
       if (identical(stream, keep)) continue;
-      stream.cancelCaching();
-      // A save whose mpv connection is gone stops at once.
-      final done = stream._teeDone;
-      if (done != null && !done.isCompleted) done.complete(false);
+      _stop(stream, reason);
     }
   }
 
@@ -331,14 +459,8 @@ class StreamProxy {
               RegExp(r'bytes=(\d+)-').firstMatch(range)?.group(1) ?? '',
             ),
     );
-    // A seek: the save still fetching from the start would share the line
-    // with it and make it slow, so saving stops; the song is saved the next
-    // time it plays through.
-    final saving = stream._teeDone;
-    if (!wholeFile && saving != null && !saving.isCompleted) {
-      stream.cancelCaching();
-      saving.complete(false);
-    }
+    // A seek leaves a running save alone: the two share the line, and the
+    // song is kept for its next play (user's pick, 2026-11-04).
     final clock = Stopwatch()..start();
     var upstream = await _connectUpstream(stream._upstream, range, trace.tries);
     // Not the song. Nothing has reached mpv, so the other link can take over
@@ -464,6 +586,7 @@ class StreamProxy {
     final total = contentRange == null
         ? upstream.contentLength
         : int.tryParse(contentRange.split('/').last) ?? -1;
+    stream._total = total;
     final part = File('${cacheTo.path}.part');
     IOSink? file;
     try {
@@ -490,6 +613,7 @@ class StreamProxy {
         trace.firstByteMs ??= trace.clock.elapsedMilliseconds;
         file?.add(chunk);
         written += chunk.length;
+        stream._written = written;
         if (file != null && !stream._cachingCanceled) {
           stream._onSaved?.call(written, total);
         }
@@ -555,7 +679,20 @@ class StreamProxy {
         }
       }
     }
-    stream._finishStored(saved ? written : null);
+    stream._finishStored(
+      saved ? written : null,
+      file == null
+          ? 'cache file could not be opened'
+          : stalled
+          ? 'stalled'
+          : stream._cachingCanceled
+          ? stream._cancelReason
+          : !complete
+          ? 'upstream error'
+          : total >= 0 && written != total
+          ? 'cut short'
+          : 'cache file could not be written',
+    );
     _report(
       trace,
       stalled
@@ -568,8 +705,20 @@ class StreamProxy {
     );
   }
 
+  bool _closed = false;
+
   Future<void> close() async {
-    cancelCachingExcept(null);
+    if (_closed) return;
+    _closed = true;
+    final running = [
+      for (final stream in {..._streams.values, ..._caching}) stream.stored,
+    ];
+    _kept.clear();
+    cancelCachingExcept(null, 'app closed');
+    // Lets the stopped saves report themselves before the log stream ends.
+    await Future.wait(running)
+        .timeout(const Duration(seconds: 1), onTimeout: () => const []);
+    await _lostSaves.close();
     await _requests.close();
     _http.close(force: true);
     await _server.close(force: true);

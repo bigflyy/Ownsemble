@@ -138,6 +138,15 @@ class PlayerService {
   Track? _current;
   bool _loaded = false;
 
+  /// The stream of the song playing now and that song's id; null when it
+  /// plays from disk. Its save may go on after a skip, see [play].
+  ProxiedStream? _currentStream;
+  int? _currentStreamTrackId;
+
+  /// How long the song playing now has made sound: runs only while it is
+  /// loaded and not paused.
+  final _heard = Stopwatch();
+
   /// Where the current song goes on from when it was restored from the last
   /// run, until its sound starts. The song is not in mpv until then, so a
   /// start costs no network and no failed link.
@@ -186,6 +195,9 @@ class PlayerService {
   /// Every finished request mpv made for a stream, with its timing.
   Stream<ProxyRequestLog> get proxyRequests => _proxy.requests;
 
+  /// Every streamed song that was not saved whole, and why.
+  Stream<LostSave> get lostSaves => _proxy.lostSaves;
+
   /// Fires when the current song plays to its end.
   Stream<void> get ended => _endedController.stream;
 
@@ -227,6 +239,7 @@ class PlayerService {
     await _mpv.observeProperty('pause', (value) async {
       playing.value = value == 'no' && _current != null && !_restored;
     });
+    playing.addListener(_countHeard);
     // mpv reports properties in order and media_kit reads the value when it
     // handles the event: once 'path' shows the file being loaded, every later
     // position belongs to that file, not to the previous song.
@@ -248,6 +261,12 @@ class PlayerService {
   Future<PlayTiming> play(Track track, {Duration? from}) async {
     final generation = ++_generation;
     final clock = Stopwatch()..start();
+    // The last song's play time ends here, before anything is awaited.
+    _heard.stop();
+    final skipped = _currentStream;
+    final playedAgain = _currentStreamTrackId == track.id;
+    _currentStream = null;
+    _currentStreamTrackId = null;
     _current = track;
     _loaded = false;
     _resumeAt = from;
@@ -267,8 +286,14 @@ class PlayerService {
       // Silence the previous song at once: otherwise it keeps playing under
       // the new title while the VK link loads, and forever if loading fails.
       await _mpv.setProperty('pause', 'yes');
-      // Saves of songs no longer playing stop, so they do not slow this one.
-      _proxy.cancelCachingExcept(null);
+      // The last song's save goes on if it played long enough or plays
+      // again; other saves stop, so they do not slow this one.
+      _proxy.songChanged(
+        skipped,
+        heard: _heard.elapsed,
+        playedAgain: playedAgain,
+      );
+      _heard.reset();
       String uri;
       final storedPath = storage?.stateOf(track).path ?? track.localPath;
       final localFile = storedPath == null
@@ -309,7 +334,12 @@ class PlayerService {
           alternative: () => route.client.releaseLink(stream),
           onSaved: (written, total) =>
               storage?.noteProgress(track, written, total),
+          label: 'song ${track.id}',
         );
+        if (generation == _generation) {
+          _currentStream = proxied;
+          _currentStreamTrackId = track.id;
+        }
         if (cachePath != null) {
           storage!.noteSaving(track, proxied.stored);
           proxied.stored.then((bytes) {
@@ -329,6 +359,8 @@ class PlayerService {
         throw StateError('song has no audio source');
       }
       if (generation != _generation) {
+        // Another play started meanwhile, so mpv never opens this stream.
+        proxied?.cancelCaching('another song started first');
         return const PlayTiming(
           ok: false,
           cached: false,
@@ -399,6 +431,7 @@ class PlayerService {
       if (generation == _generation) {
         _loaded = true;
         _resumeAt = null;
+        _countHeard();
       }
       return finish(
         PlayTiming(
@@ -434,6 +467,15 @@ class PlayerService {
           skippedAccounts: routed?.skipped ?? 0,
         ),
       );
+    }
+  }
+
+  /// Runs [_heard] while the current song is loaded and playing.
+  void _countHeard() {
+    if (_loaded && playing.value) {
+      _heard.start();
+    } else {
+      _heard.stop();
     }
   }
 

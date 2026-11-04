@@ -83,9 +83,10 @@ class AudioStorage extends ChangeNotifier {
       p.join('cache', '${track.source.name}_${track.sourceKey}.mp3');
 
   /// Where to save [track] while it streams; null while a Download fetches
-  /// it, because both would write the same `.part` file.
+  /// it or an earlier play still saves it in the background, because both
+  /// would write the same `.part` file.
   String? streamSavePath(Track track) =>
-      isDownloading(track) ? null : relativePathFor(track);
+      isDownloading(track) || isSaving(track) ? null : relativePathFor(track);
 
   /// The file at a stored [path].
   File fileAt(String path) => File(resolveAudioPath(dataDir, path));

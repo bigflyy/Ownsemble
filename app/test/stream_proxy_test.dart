@@ -35,6 +35,21 @@ void main() {
         await request.response.close();
         return;
       }
+      if (request.uri.path == '/crawl' &&
+          request.headers.value(HttpHeaders.rangeHeader) == null) {
+        // Sends the audio in ten parts, 150 ms apart: still saving while a
+        // test skips several songs.
+        request.response
+          ..headers.contentType = ContentType('audio', 'mpeg')
+          ..contentLength = audio.length;
+        for (var i = 0; i < 10; i++) {
+          request.response.add(audio.sublist(i * 10000, (i + 1) * 10000));
+          await request.response.flush();
+          await Future<void>.delayed(const Duration(milliseconds: 150));
+        }
+        await request.response.close();
+        return;
+      }
       if (request.uri.path == '/short') {
         // Announces the whole song, sends half and drops the connection.
         final socket = await request.response.detachSocket(writeHeaders: false);
@@ -472,7 +487,7 @@ void main() {
       expect(await keep.stored, audio.length);
     });
 
-    test('a seek stops a running save, so the seek gets the line', () async {
+    test('a seek does not stop a running save', () async {
       final stream = proxy.add(
         Uri.parse('http://127.0.0.1:${upstream.port}/slow'),
         cacheTo: target(),
@@ -480,8 +495,8 @@ void main() {
       await readAndHangUp(stream.localUri, 100);
       final (_, body) = await get(stream.localUri, range: 'bytes=99000-');
       expect(body, audio.sublist(99000));
-      expect(await stream.stored, isNull);
-      expect(target().existsSync(), isFalse);
+      expect(await stream.stored, audio.length);
+      expect(target().readAsBytesSync(), audio);
       expect(part().existsSync(), isFalse);
     });
 
@@ -510,6 +525,135 @@ void main() {
       expect(await stream.stored, isNull);
       expect(target().existsSync(), isFalse);
       expect(part().existsSync(), isFalse);
+    });
+
+    test('a body cut short is named as a lost save', () async {
+      final lost = proxy.lostSaves.first;
+      final stream = proxy.add(
+        Uri.parse('http://127.0.0.1:${upstream.port}/short'),
+        cacheTo: target(),
+        label: 'song 7',
+      );
+      try {
+        await get(stream.localUri);
+      } on HttpException {
+        // The player sees the cut too.
+      }
+      expect(await stream.stored, isNull);
+      final line = (await lost).toString();
+      expect(line, contains('song 7'));
+      expect(line, contains('upstream error'));
+    });
+  });
+
+  group('when the song changes', () {
+    late Directory dir;
+    setUp(() => dir = Directory.systemTemp.createTempSync('ownsemble_skip'));
+    tearDown(() => dir.deleteSync(recursive: true));
+
+    File target(String name) => File('${dir.path}/$name.mp3');
+
+    /// Starts a whole-file request for [stream] and hangs up after the
+    /// first bytes, as mpv does when the next song replaces it.
+    Future<void> startAndHangUp(ProxiedStream stream) async {
+      final uri = stream.localUri;
+      final socket = await Socket.connect(uri.host, uri.port);
+      socket.write('GET ${uri.path} HTTP/1.1\r\nHost: ${uri.host}\r\n\r\n');
+      final first = Completer<void>();
+      socket.listen((_) {
+        if (!first.isCompleted) first.complete();
+      }, onError: (_) {});
+      await first.future;
+      socket.destroy();
+    }
+
+    ProxiedStream add(String name) => proxy.add(
+      Uri.parse('http://127.0.0.1:${upstream.port}/crawl'),
+      cacheTo: target(name),
+      label: name,
+    );
+
+    test('a song skipped after 5 s of play goes on saving', () async {
+      final skipped = add('a');
+      await startAndHangUp(skipped);
+      proxy.songChanged(skipped, heard: const Duration(seconds: 6));
+      expect(await skipped.stored, audio.length);
+      expect(target('a').readAsBytesSync(), audio);
+    });
+
+    test('a song skipped sooner stops saving, and the log says why', () async {
+      final lost = <LostSave>[];
+      proxy.lostSaves.listen(lost.add);
+      final skipped = add('a');
+      await startAndHangUp(skipped);
+      proxy.songChanged(skipped, heard: const Duration(milliseconds: 1200));
+      expect(await skipped.stored, isNull);
+      expect(target('a').existsSync(), isFalse);
+      await pumpEventQueue();
+      expect(lost, hasLength(1));
+      expect(lost.single.label, 'a');
+      expect(lost.single.reason, 'skipped after 1.2 s of play');
+      expect(lost.single.toString(), contains('of 100000 bytes'));
+    });
+
+    test('only the last two skipped songs go on saving', () async {
+      final lost = <LostSave>[];
+      proxy.lostSaves.listen(lost.add);
+      final songs = <ProxiedStream>[];
+      // As the player does: each song is added once the last one changed.
+      for (final name in ['a', 'b', 'c']) {
+        final song = add(name);
+        songs.add(song);
+        await startAndHangUp(song);
+        proxy.songChanged(song, heard: const Duration(seconds: 30));
+      }
+      expect(await songs[0].stored, isNull);
+      expect(await songs[1].stored, audio.length);
+      expect(await songs[2].stored, audio.length);
+      await pumpEventQueue();
+      expect(lost.map((save) => (save.label, save.reason)), [
+        ('a', 'pushed out by 2 later skipped songs'),
+      ]);
+    });
+
+    test('a song played again goes on saving, however short', () async {
+      final skipped = add('a');
+      await startAndHangUp(skipped);
+      proxy.songChanged(skipped, heard: Duration.zero, playedAgain: true);
+      expect(await skipped.stored, audio.length);
+    });
+
+    test('other streams stop saving', () async {
+      final lost = <LostSave>[];
+      proxy.lostSaves.listen(lost.add);
+      final older = add('a');
+      final skipped = add('b');
+      await startAndHangUp(older);
+      await startAndHangUp(skipped);
+      proxy.songChanged(skipped, heard: const Duration(seconds: 6));
+      expect(await older.stored, isNull);
+      expect(await skipped.stored, audio.length);
+      await pumpEventQueue();
+      expect(lost.single.reason, 'another song started');
+    });
+
+    test('a stream that never asked for the whole file is named too', () async {
+      final lost = <LostSave>[];
+      proxy.lostSaves.listen(lost.add);
+      final skipped = add('a');
+      proxy.songChanged(skipped, heard: const Duration(seconds: 6));
+      await pumpEventQueue();
+      expect(lost.single.reason, 'the player never asked for the whole file');
+    });
+
+    test('closing the app names the saves it stops', () async {
+      final lost = <LostSave>[];
+      proxy.lostSaves.listen(lost.add);
+      final skipped = add('a');
+      await startAndHangUp(skipped);
+      proxy.songChanged(skipped, heard: const Duration(seconds: 6));
+      await proxy.close();
+      expect(lost.single.reason, 'app closed');
     });
   });
 }
