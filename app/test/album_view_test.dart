@@ -66,8 +66,7 @@ class FakeCatalog implements AlbumCatalog {
 
   @override
   Map<int, int> libraryIdsByVkTrackId(Iterable<int> vkTrackIds) => {
-    for (final id in vkTrackIds)
-      id: ?owned[id],
+    for (final id in vkTrackIds) id: ?owned[id],
   };
 
   @override
