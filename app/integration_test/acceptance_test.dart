@@ -31,7 +31,8 @@ import 'package:ownsemble/main.dart' as app;
 import 'package:ownsemble/playback/play_queue.dart';
 import 'package:ownsemble/playback/playback_controller.dart';
 import 'package:ownsemble/playback/player_service.dart';
-import 'package:ownsemble/playback/stream_proxy.dart' show ProxyRequestLog;
+import 'package:ownsemble/playback/stream_proxy.dart'
+    show LostSave, ProxyRequestLog;
 import 'package:ownsemble/storage/audio_storage.dart';
 import 'package:ownsemble/storage/cover_store.dart';
 import 'package:ownsemble/ui/cover_tile.dart';
@@ -1260,6 +1261,86 @@ void main() {
     // songs but never downloaded ones.
     final storage = player.storage!;
     bool storedNow(Track t) => storage.stateOf(t).path != null;
+
+    // Saves that go on (Stage I): a seek keeps the save of the song playing;
+    // a song skipped after 5 s of play goes on saving in the background; a
+    // song skipped sooner stops saving, and the lost save says why. The
+    // longest songs, so their saves are most likely still running when the
+    // seek and the skips come; whether they were is printed, because on a
+    // fast line a save may finish first and then that path was not tried.
+    final lostSaves = <LostSave>[];
+    final lostWatch = player.lostSaves.listen(lostSaves.add);
+    final unsaved = [
+      for (final t in list)
+        if (playedOk.contains(t.id) &&
+            !storedNow(t) &&
+            t.id != player.current?.id)
+          t,
+    ]..sort((a, b) => b.durationSec.compareTo(a.durationSec));
+    final seekedSong = unsaved[0];
+    final quickSkipped = unsaved[1];
+    final afterSkips = unsaved[2];
+    final keptClock = Stopwatch()..start();
+    expect(
+      (await playByTap(tester, seekedSong, label: 'song to seek in')).ok,
+      isTrue,
+    );
+    final savingAtSeek = storage.isSaving(seekedSong);
+    final seekTo = Duration(seconds: seekedSong.durationSec ~/ 2);
+    await playback.seek(seekTo);
+    await waitUntil(
+      tester,
+      () => player.position >= seekTo + const Duration(seconds: 6),
+      timeout: const Duration(seconds: 60),
+      what: 'six seconds of play after the seek',
+    );
+    final savingAtLateSkip = storage.isSaving(seekedSong);
+    expect(
+      (await playByTap(tester, quickSkipped, label: 'song skipped at once')).ok,
+      isTrue,
+    );
+    final savingAtQuickSkip = storage.isSaving(quickSkipped);
+    expect(
+      (await playByTap(tester, afterSkips, label: 'song after the skips')).ok,
+      isTrue,
+    );
+    await waitUntil(
+      tester,
+      () => storedNow(seekedSong),
+      timeout: const Duration(minutes: 5),
+      what: 'the seeked, then skipped song saved',
+    );
+    final keptMs = keptClock.elapsedMilliseconds;
+    final keptFile = storage.fileAt(storage.stateOf(seekedSong).path!);
+    expect(keptFile.lengthSync(), greaterThan(100000));
+    expect(File('${keptFile.path}.part').existsSync(), isFalse);
+    expect(
+      lostSaves.where((lost) => lost.label == 'song ${seekedSong.id}'),
+      isEmpty,
+    );
+    if (savingAtQuickSkip) {
+      await waitUntil(
+        tester,
+        () => !storage.isSaving(quickSkipped),
+        what: 'the quickly skipped song stops saving',
+      );
+      expect(storedNow(quickSkipped), isFalse);
+      final lost = lostSaves.singleWhere(
+        (lost) => lost.label == 'song ${quickSkipped.id}',
+      );
+      expect(lost.reason, startsWith('skipped after '));
+    }
+    await lostWatch.cancel();
+    // ignore: avoid_print
+    print(
+      'saves that go on: seek with the save running: $savingAtSeek, skip '
+      'after 6 s with the save running: $savingAtLateSkip, that song saved '
+      'whole ${keptFile.lengthSync() ~/ 1024} KB after $keptMs ms; quick skip '
+      'with the save running: $savingAtQuickSkip'
+      '${savingAtQuickSkip ? ', stopped: ${lostSaves.firstWhere((l) => l.label == 'song ${quickSkipped.id}')}' : ''}; '
+      'lost saves seen: ${lostSaves.length}',
+    );
+
     final streamable = [
       for (final t in list)
         if (playedOk.contains(t.id) &&
