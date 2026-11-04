@@ -6,6 +6,7 @@
 //       --dart-define=OWNSEMBLE_SHOTS=<folder>
 
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 import 'dart:ui' as ui;
 
@@ -18,6 +19,7 @@ import 'package:ownsemble/library/track.dart';
 import 'package:ownsemble/playback/playback_controller.dart';
 import 'package:ownsemble/playback/player_service.dart';
 import 'package:ownsemble/storage/audio_storage.dart';
+import 'package:ownsemble/ui/albums.dart';
 import 'package:ownsemble/ui/collections_controller.dart';
 import 'package:ownsemble/ui/library_controller.dart';
 import 'package:ownsemble/ui/library_screen.dart';
@@ -143,6 +145,9 @@ void main() {
     bool filtered = false,
     bool accountsDialog = false,
     bool secondLoggedOut = false,
+    // Opens the album of "Выхода нет": null leaves it closed, false shows it
+    // while VK's list is on its way, true with the list in.
+    bool? albumListed,
   }) async {
     final store = LibraryStore.open(':memory:');
     addTearDown(store.close);
@@ -175,6 +180,7 @@ void main() {
           durationSec: 180 + i * 17,
           addedAt: 1000 - i,
           vkTrackId: 500 + i,
+          vkAlbumKey: i == 2 ? '-9_1' : null,
         ),
     ]);
     // A second, made-up account: two songs of the first one merge into its
@@ -220,9 +226,42 @@ void main() {
     final stack = collections.createStack('Вечер у моря');
     collections.addToStack(stack, store.loadAll().first);
     collections.createStack('Run');
+    // The album's VK list, made up: "Выхода нет" (VK track 502) and three
+    // songs the library lacks. Nothing leaves the test.
+    final albumList = Completer<Object?>();
+    if (albumListed ?? false) {
+      albumList.complete(
+        jsonDecode(
+          jsonEncode({
+            'count': 4,
+            'items': [
+              for (final (i, (title, seconds, track)) in [
+                ('Гранатовый альбом', 225, 0),
+                ('Выхода нет', 214, 502),
+                ('Новые люди', 247, 0),
+                ('Иди через лес', 233, 0),
+              ].indexed)
+                {
+                  'owner_id': -9,
+                  'id': i + 1,
+                  'artist': 'Сплин',
+                  'title': title,
+                  'duration': seconds,
+                  if (track != 0) 'track_id': track,
+                },
+            ],
+          }),
+        ),
+      );
+    }
     final library = LibraryController(
       store.loadAll(),
       collections: collections,
+      albums: LibraryAlbums(
+        store: store,
+        apiOfSource: (_) =>
+            (method, params) => albumList.future,
+      ),
     );
     // The accounts dialog reads each account's last sync from the store.
     // A fixed time of day, so the shots do not change from run to run.
@@ -320,6 +359,11 @@ void main() {
       await tester.tap(find.byKey(const ValueKey('keyboard-help')));
       await tester.pumpAndSettle();
     }
+    if (albumListed != null) {
+      await tester.tap(find.text('Гранатовый альбом'));
+      await tester.pump();
+      await tester.pump();
+    }
     // Text without the app's font shows here as solid boxes and in the real
     // app in the system font; icons have their own font.
     for (final paragraph
@@ -344,6 +388,14 @@ void main() {
   }
 
   testWidgets('dark, side panel', (t) => shoot(t, 'dark-side', dark: true));
+  testWidgets(
+    'dark, an album loading',
+    (t) => shoot(t, 'dark-album-loading', dark: true, albumListed: false),
+  );
+  testWidgets(
+    'light, an album from VK',
+    (t) => shoot(t, 'light-album', dark: false, albumListed: true),
+  );
   testWidgets('light, side panel', (t) => shoot(t, 'light-side', dark: false));
   testWidgets(
     'dark, bottom bar, rail',
