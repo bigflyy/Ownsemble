@@ -299,6 +299,17 @@ class PlaybackController extends ChangeNotifier {
     await player.setMuted(_mutedByUser);
   }
 
+  /// Takes over a new version of the library after a sync: the play list and
+  /// the queue get [find]'s songs, so the old version can be freed. The ids
+  /// stay the same, so a list already saved is not written again.
+  void refreshTracks(Track? Function(int id) find) {
+    final listSaved = identical(queue.context, _savedList);
+    queue.refreshTracks(find);
+    // The saved list was the old one: holding it would keep the old songs.
+    _savedList = listSaved ? queue.context : null;
+    notifyListeners();
+  }
+
   /// Saves the current song and its place, so the next run can go on from
   /// there. A song that failed is left out: the last one that played stays.
   void saveSession() {

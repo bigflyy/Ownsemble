@@ -215,6 +215,11 @@ class LibraryController extends ChangeNotifier {
   /// since it holds a row number.
   late final jump = TypeJump(rows: () => _visible, reveal: _revealRow);
 
+  /// Called after [replaceTracks] with the new version's lookup, so lists
+  /// kept elsewhere (the play list) can take over its songs and the old
+  /// version can be freed.
+  void Function(Track? Function(int id) find)? onTracksReplaced;
+
   List<Track> get all => _all;
   LibraryView get view => _view;
 
@@ -556,6 +561,7 @@ class LibraryController extends ChangeNotifier {
     _applySearch();
     jump.clear();
     notifyListeners();
+    onTracksReplaced?.call(byId);
   }
 
   @override

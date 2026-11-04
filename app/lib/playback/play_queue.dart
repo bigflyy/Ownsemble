@@ -78,6 +78,21 @@ class PlayQueue {
     return current!;
   }
 
+  /// Takes over a new version of the library: each song is swapped for
+  /// [find]'s song with the same id, so the list keeps its songs, order and
+  /// place but no longer holds the old version alive. The play list can be
+  /// the whole library, so without this a sync that reloads it kept every old
+  /// song in memory. A song [find] does not know (gone in the sync) stays.
+  void refreshTracks(Track? Function(int id) find) {
+    Track fresh(Track track) => find(track.id) ?? track;
+    _context = List.unmodifiable(_context.map(fresh));
+    for (final songs in [_queued, _played]) {
+      for (var i = 0; i < songs.length; i++) {
+        songs[i] = fresh(songs[i]);
+      }
+    }
+  }
+
   /// Puts [track] right after the current song, ahead of the queue.
   void playNext(Track track) => _queued.insert(0, track);
 

@@ -303,4 +303,45 @@ void main() {
       expect(queue.current?.id, 101);
     });
   });
+
+  group('a new version of the library', () {
+    test('swaps in its songs, keeping the order and the place', () {
+      final old = songs(5);
+      queue
+        ..start(old, 1)
+        ..addToQueue(old[4]);
+      // The queued song starts, so it is a played one now.
+      queue.next(auto: false);
+      queue.addToQueue(old[0]);
+      // Song 3 left the library in the sync.
+      final fresh = {
+        for (final track in songs(5))
+          if (track.id != 3) track.id: track,
+      };
+
+      queue.refreshTracks((id) => fresh[id]);
+
+      expect(ids(queue.context), [0, 1, 2, 3, 4]);
+      for (final id in [0, 1, 2, 4]) {
+        expect(queue.context[id], same(fresh[id]), reason: 'song $id');
+      }
+      expect(
+        queue.context[3],
+        same(old[3]),
+        reason: 'a song gone from the library stays as it was',
+      );
+      expect(queue.current, same(fresh[4]), reason: 'the played queued song');
+      expect(queue.queued.single, same(fresh[0]));
+      expect(queue.contextIndex, 1);
+      expect(ids([queue.next(auto: false)]), [0], reason: 'the queue first');
+      expect(ids([queue.next(auto: false)]), [2], reason: 'then the list');
+      expect(queue.current, same(fresh[2]));
+    });
+
+    test('with nothing started there is nothing to swap', () {
+      queue.refreshTracks((id) => null);
+      expect(queue.context, isEmpty);
+      expect(queue.current, isNull);
+    });
+  });
 }

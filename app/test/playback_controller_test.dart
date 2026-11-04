@@ -740,5 +740,35 @@ void main() {
         hasLength(2),
       );
     });
+
+    test('a new library version takes the songs over and keeps the old '
+        'list saved', () async {
+      final writes = <String>[];
+      final controller = PlaybackController(
+        player: FakePlayer(),
+        recordPlay: (_) {},
+        writeSetting: (key, value) => writes.add(key),
+      );
+      addTearDown(controller.dispose);
+      await controller.playFrom(list, 1);
+      controller.saveSession();
+      final fresh = songs(5);
+
+      // A sync reloaded the library: the old songs must not stay alive
+      // through the play list, which can hold the whole library.
+      controller.refreshTracks((id) => fresh[id]);
+
+      for (final (i, track) in controller.queue.context.indexed) {
+        expect(track, same(fresh[i]), reason: 'song $i');
+      }
+      controller.saveSession();
+      expect(
+        writes.where((key) => key == PlaybackController.listSetting),
+        hasLength(1),
+        reason: 'the same ids in the same order are not written again',
+      );
+      await controller.next();
+      expect(controller.queue.current, same(fresh[2]));
+    });
   });
 }

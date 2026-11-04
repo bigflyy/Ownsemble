@@ -193,6 +193,9 @@ Future<void> main(List<String> args) async {
   );
   // Before the first frame, which then already shows the song.
   playback.restoreSession(library.byId);
+  // A sync or a removed account reloads the library; the play list then
+  // takes over the new songs, or it would keep the old library in memory.
+  library.onTracksReplaced = playback.refreshTracks;
   // The periodic save is up to 5 s old: a normal close saves the exact place,
   // then ends the process, because the engine's own shutdown crashes or hangs
   // with mpv running (see endProcessNow).

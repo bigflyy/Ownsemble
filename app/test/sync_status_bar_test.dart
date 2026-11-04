@@ -323,6 +323,30 @@ void main() {
       await tester.pump();
     }
 
+    test('the play list takes over the songs of a reloaded library', () async {
+      final playback = PlaybackController(
+        player: PlayerService(muted: true, dataDir: '.'),
+        recordPlay: (_) {},
+      );
+      addTearDown(playback.dispose);
+      library.onTracksReplaced = playback.refreshTracks;
+      // The play list as a restored session leaves it, nothing loaded.
+      playback.queue.start(library.all, 1);
+      final first = sync.syncNow();
+      final fresh = [song(1, 'Первая'), song(2, 'Вторая (новое)')];
+      finish.complete(
+        SyncOutcome(
+          sources: [vkSource(songs: 2, syncedAtMs: 1)],
+          library: LoadedLibrary(fresh, SearchIndex(fresh)),
+        ),
+      );
+      await first;
+
+      expect(playback.queue.context[0], same(fresh[0]));
+      expect(playback.queue.current, same(fresh[1]));
+      expect(playback.queue.current?.title, 'Вторая (новое)');
+    });
+
     testWidgets('Sync now shows progress, then the new library', (
       tester,
     ) async {
