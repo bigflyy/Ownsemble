@@ -133,7 +133,10 @@ class SyncStatusBar extends StatelessWidget {
                         side: BorderSide(color: own.line),
                         minimumSize: const Size(0, 30),
                         padding: const EdgeInsets.symmetric(horizontal: 12),
-                        textStyle: const TextStyle(fontSize: 13),
+                        textStyle: const TextStyle(
+                          fontFamily: appFontFamily,
+                          fontSize: 13,
+                        ),
                       ),
                       key: const ValueKey('sync-now'),
                       onPressed: sync.canSync && !sync.running
@@ -218,7 +221,7 @@ class LogInButton extends StatelessWidget {
       style: FilledButton.styleFrom(
         minimumSize: const Size(0, 30),
         padding: const EdgeInsets.symmetric(horizontal: 12),
-        textStyle: const TextStyle(fontSize: 13),
+        textStyle: const TextStyle(fontFamily: appFontFamily, fontSize: 13),
       ),
       onPressed: () => _logIn(context),
       icon: const Icon(Icons.login, size: 16),

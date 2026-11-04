@@ -128,6 +128,11 @@ class OwnColors extends ThemeExtension<OwnColors> {
       t < 0.5 || other == null ? this : other;
 }
 
+/// The app's font. A `textStyle` given to a button or a theme replaces the
+/// label style instead of adding to it, so it must name this family too, or
+/// that text falls back to the system font.
+const appFontFamily = 'Golos Text';
+
 /// The app's theme for [colors]: Golos Text, the design's colors, and
 /// Material widgets (sliders, menus, tooltips) dressed to match.
 ThemeData buildTheme(OwnColors colors) {
@@ -149,7 +154,7 @@ ThemeData buildTheme(OwnColors colors) {
       );
   final base = ThemeData(
     colorScheme: scheme,
-    fontFamily: 'Golos Text',
+    fontFamily: appFontFamily,
     scaffoldBackgroundColor: colors.bg,
     extensions: [colors],
     visualDensity: VisualDensity.standard,
@@ -167,7 +172,11 @@ ThemeData buildTheme(OwnColors colors) {
         color: colors.text,
         borderRadius: BorderRadius.circular(6),
       ),
-      textStyle: TextStyle(color: colors.bg, fontSize: 12),
+      textStyle: TextStyle(
+        fontFamily: appFontFamily,
+        color: colors.bg,
+        fontSize: 12,
+      ),
     ),
     popupMenuTheme: PopupMenuThemeData(
       color: colors.raised,
@@ -176,7 +185,11 @@ ThemeData buildTheme(OwnColors colors) {
         borderRadius: BorderRadius.circular(12),
         side: BorderSide(color: colors.line),
       ),
-      textStyle: TextStyle(color: colors.text, fontSize: 14),
+      textStyle: TextStyle(
+        fontFamily: appFontFamily,
+        color: colors.text,
+        fontSize: 14,
+      ),
     ),
     sliderTheme: SliderThemeData(
       trackHeight: 6,
