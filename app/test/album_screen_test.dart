@@ -172,6 +172,13 @@ void main() {
       await tester.pumpAndSettle();
     }
 
+    // The row says the song is not in the library.
+    final outside = library.visible.firstWhere((t) => !t.inLibrary);
+    expect(
+      find.byKey(ValueKey('mark-${outside.id}-${Icons.public.codePoint}')),
+      findsOneWidget,
+    );
+
     await openMenu('Альтернатива');
     expect(find.byKey(const ValueKey('menu-play-next')), findsOneWidget);
     expect(find.byKey(const ValueKey('menu-download')), findsNothing);

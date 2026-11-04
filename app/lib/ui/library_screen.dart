@@ -1373,6 +1373,10 @@ class _SongRow extends StatelessWidget {
         Icons.cloud_done_outlined,
         'Cached: plays without the network',
       ),
+      _ when !track.inLibrary => (
+        Icons.public,
+        'Not in your library: streams from the album on VK',
+      ),
       _ when track.source == TrackSource.vk => (
         Icons.cloud_outlined,
         'Streams from VK',
