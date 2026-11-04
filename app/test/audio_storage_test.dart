@@ -271,27 +271,13 @@ void main() {
       expect(cacheDir.existsSync() ? cacheDir.listSync() : [], isEmpty);
     });
 
-    test(
-      'a file the server cannot deliver comes from the alternative',
-      () async {
-        await storage.download(
-          songs[4],
-          () async => Uri.parse('http://127.0.0.1:${server.port}/broken'),
-          alternative: () async =>
-              Uri.parse('http://127.0.0.1:${server.port}/a.mp3'),
-        );
-        final state = storage.stateOf(songs[4]);
-        expect(state.pinned, isTrue);
-        expect(storage.fileAt(state.path!).readAsBytesSync(), audio);
-      },
-    );
-
-    test('with no alternative the server failure is reported', () async {
+    // No other copy's file is ever kept instead (user, 2026-11-04: a live
+    // recording came in for a studio one).
+    test('a file the server cannot deliver is reported', () async {
       await expectLater(
         storage.download(
           songs[4],
           () async => Uri.parse('http://127.0.0.1:${server.port}/broken'),
-          alternative: () async => null,
         ),
         throwsA(
           isA<AudioServerException>().having(

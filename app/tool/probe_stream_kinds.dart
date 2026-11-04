@@ -163,8 +163,7 @@ Future<void> main(List<String> args) async {
         playlistSongs[name] = (playlistSongs[name] ?? 0) + 1;
         print(
           'PLAYLIST round $round: $name, '
-          'link path ends .m3u8: $saysPlaylist, ${reply.length} bytes, '
-          'has release: ${stream.releaseKey != null}',
+          'link path ends .m3u8: $saysPlaylist, ${reply.length} bytes',
         );
         final body = reply.body;
         if (body != null) {
@@ -185,15 +184,6 @@ Future<void> main(List<String> args) async {
             'path ends .m3u8: ${linkSaysPlaylist(fresh.link!)}',
           );
           await Future<void>.delayed(const Duration(milliseconds: 400));
-        }
-        final release = await vk.releaseLink(stream);
-        if (release != null) {
-          final next = await fetchStart(http, release);
-          print(
-            '    release link: status ${next.status}, ${next.type}, '
-            '${next.length} bytes, '
-            '${next.isPlaylist ? 'PLAYLIST' : 'audio'}',
-          );
         }
       } catch (error) {
         // The error's type only: messages may carry the server's address.

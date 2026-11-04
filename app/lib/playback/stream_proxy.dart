@@ -8,7 +8,6 @@ class ProxiedStream {
     this.localUri,
     this._upstream,
     this._cacheTo,
-    this._alternative,
     this._onSaved,
     this.label,
   );
@@ -18,30 +17,18 @@ class ProxiedStream {
 
   /// Loopback address mpv opens instead of the real link.
   final Uri localUri;
-  Uri _upstream;
+
+  /// The link of this copy of the song. Never swapped for another link: a
+  /// different file can be another recording (VK gives a live version the
+  /// same track_id as the studio one), and a wrong song is worse than a song
+  /// that says it cannot play (user, 2026-11-04).
+  final Uri _upstream;
 
   /// Where the whole audio is saved while it streams; null: not saved.
   final File? _cacheTo;
 
-  /// Gets another link to the same audio; null: there is no other.
-  final Future<Uri?> Function()? _alternative;
-
   /// Told how much is saved so far and the whole size.
   final void Function(int written, int total)? _onSaved;
-  Future<Uri?>? _switching;
-
-  /// Moves this stream to its alternative link, asked for only once, so
-  /// later requests (seeks) use it too. Null when there is none. If asking
-  /// fails the audio server's own failure is the one to report.
-  Future<Uri?> _switchLink() => _switching ??= () async {
-    try {
-      final other = await _alternative?.call();
-      if (other != null) _upstream = other;
-      return other;
-    } catch (_) {
-      return null;
-    }
-  }();
 
   final _firstChunk = Completer<int>();
   final _failure = Completer<int>();
@@ -339,14 +326,12 @@ class StreamProxy {
   final _caching = <ProxiedStream>{};
 
   /// Registers [upstream] and returns the stream mpv should open; the whole
-  /// audio is also saved to [cacheTo] when given. [alternative] gets another
-  /// link to the same audio for when the audio server answers [upstream]
-  /// with an error. [onSaved] is told how far the save has got. Only the
+  /// audio is also saved to [cacheTo] when given. [onSaved] is told how far
+  /// the save has got. Only the
   /// most recent streams stay registered.
   ProxiedStream add(
     Uri upstream, {
     File? cacheTo,
-    Future<Uri?> Function()? alternative,
     void Function(int written, int total)? onSaved,
     String? label,
   }) {
@@ -358,7 +343,6 @@ class StreamProxy {
       Uri.parse('http://127.0.0.1:${_server.port}/s/$id.mp3'),
       upstream,
       cacheTo,
-      alternative,
       onSaved,
       label,
     ).._onLost = _reportLost;
@@ -463,25 +447,15 @@ class StreamProxy {
     // song is kept for its next play (user's pick, 2026-11-04).
     final clock = Stopwatch()..start();
     var upstream = await _connectUpstream(stream._upstream, range, trace.tries);
-    // Not the song. Nothing has reached mpv, so the other link can take over
-    // without mpv noticing; a song without one is asked again, because most
-    // of these go away by themselves (a broken file answers 504 every time).
+    // Not the song. It is asked again, because most of these go away by
+    // themselves (a broken file answers 504 every time, and then the song
+    // says it cannot play; no other file is ever used instead).
     if (upstream != null && _isNotAudio(upstream, wholeFile)) {
-      final other = await stream._switchLink();
-      if (other != null) {
-        trace.tries.add('${await _describe(upstream)}, trying the other link');
-        upstream = await _connectUpstream(other, range, trace.tries);
-      } else {
-        for (var again = 0; again < _sameLinkRetries; again++) {
-          trace.tries.add('${await _describe(upstream!)}, asking again');
-          await Future<void>.delayed(_sameLinkPause);
-          upstream = await _connectUpstream(
-            stream._upstream,
-            range,
-            trace.tries,
-          );
-          if (upstream == null || !_isNotAudio(upstream, wholeFile)) break;
-        }
+      for (var again = 0; again < _sameLinkRetries; again++) {
+        trace.tries.add('${await _describe(upstream!)}, asking again');
+        await Future<void>.delayed(_sameLinkPause);
+        upstream = await _connectUpstream(stream._upstream, range, trace.tries);
+        if (upstream == null || !_isNotAudio(upstream, wholeFile)) break;
       }
     }
     if (upstream == null) {

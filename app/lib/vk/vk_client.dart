@@ -60,13 +60,7 @@ class VkException implements Exception {
 
 /// What VK offers for one song. Never logged: [link] is a private link.
 class VkStream {
-  const VkStream({
-    this.link,
-    this.restricted = false,
-    this.trackId,
-    this.releaseKey,
-    this.playlistLinks = 0,
-  });
+  const VkStream({this.link, this.restricted = false, this.playlistLinks = 0});
 
   /// Fresh link to the audio; null when VK gives none.
   final Uri? link;
@@ -79,14 +73,6 @@ class VkStream {
   /// musician or their representative decided the song is unavailable.
   /// Other codes were never seen, so nothing is claimed about them.
   final bool restricted;
-
-  /// VK's id of the recording, the same for every copy of it.
-  final int? trackId;
-
-  /// `audio.getById` key of the official release of this recording. Copies
-  /// in a library are separate files, and a copy's file can be broken on
-  /// VK's audio server while the release plays.
-  final String? releaseKey;
 }
 
 /// Calls one VK web API method and returns its `response` value.
@@ -195,8 +181,6 @@ class VkClient {
       return VkStream(
         link: link,
         restricted: audio['content_restricted'] == 1,
-        trackId: audio['track_id'] as int?,
-        releaseKey: audio['release_audio_id'] as String?,
         playlistLinks: playlistLinks,
       );
     }
@@ -206,16 +190,6 @@ class VkClient {
   /// to ask the audio server.
   static bool _isPlaylistLink(Uri link) =>
       link.path.toLowerCase().endsWith('.m3u8');
-
-  /// A link to the official release of [stream]'s recording, or null when it
-  /// has none. Another recording is never accepted: a wrong song is worse
-  /// than a message saying this one cannot play.
-  Future<Uri?> releaseLink(VkStream stream) async {
-    final (releaseKey, trackId) = (stream.releaseKey, stream.trackId);
-    if (releaseKey == null || trackId == null) return null;
-    final release = await resolveStream(releaseKey, null);
-    return release.trackId == trackId ? release.link : null;
-  }
 
   /// POSTs a form with the session cookies and decodes the JSON reply.
   Future<Map<String, dynamic>> _postForm(Uri uri, Map<String, String> form) {

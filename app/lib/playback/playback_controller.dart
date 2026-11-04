@@ -6,7 +6,6 @@ import 'package:flutter/foundation.dart';
 import '../library/track.dart';
 import 'play_queue.dart';
 import 'player_service.dart';
-import 'stream_route.dart';
 
 /// What the player controls do: playing from a list, previous and next,
 /// shuffle, repeat, auto-advance, seeking and volume. Records every song
@@ -222,22 +221,14 @@ class PlaybackController extends ChangeNotifier {
     if (storage == null) return 'no storage';
     if (!track.inLibrary) return 'not in your library';
     try {
-      // The account that gave the link also gives the release link.
-      RoutedStream? routed;
-      await storage.download(
-        track,
-        () async {
-          final resolved = await player.resolveStream(track);
-          if (resolved == null) return null;
-          if (resolved.stream.link == null) {
-            throw StateError(noStreamReason(resolved.stream));
-          }
-          routed = resolved;
-          return resolved.stream.link;
-        },
-        alternative: () async =>
-            routed?.route.client.releaseLink(routed!.stream),
-      );
+      await storage.download(track, () async {
+        final resolved = await player.resolveStream(track);
+        if (resolved == null) return null;
+        if (resolved.stream.link == null) {
+          throw StateError(noStreamReason(resolved.stream));
+        }
+        return resolved.stream.link;
+      });
       return null;
     } catch (error) {
       return describePlayError(error);

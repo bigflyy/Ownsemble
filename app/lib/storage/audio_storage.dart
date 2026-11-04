@@ -150,13 +150,9 @@ class AudioStorage extends ChangeNotifier {
 
   /// Downloads [track]: keeps its audio until the user removes it. A song
   /// already cached is just marked downloaded; otherwise its audio is
-  /// fetched from the link [resolveUrl] gives, or from the one [alternative]
-  /// gives if the audio server fails on the first. Throws when that fails.
-  Future<void> download(
-    Track track,
-    Future<Uri?> Function() resolveUrl, {
-    Future<Uri?> Function()? alternative,
-  }) async {
+  /// fetched from the link [resolveUrl] gives, and only from it: no other
+  /// copy's file is ever kept instead. Throws when that fails.
+  Future<void> download(Track track, Future<Uri?> Function() resolveUrl) async {
     final state = stateOf(track);
     if (state.path != null && fileAt(state.path!).existsSync()) {
       _store.setPinned(track.id, true);
@@ -182,14 +178,11 @@ class AudioStorage extends ChangeNotifier {
       final path = relativePathFor(track);
       void onProgress(int bytes, int total) =>
           noteProgress(track, bytes, total);
-      int bytes;
-      try {
-        bytes = await fetchToFile(url, fileAt(path), onProgress: onProgress);
-      } on AudioServerException {
-        final other = await alternative?.call();
-        if (other == null) rethrow;
-        bytes = await fetchToFile(other, fileAt(path), onProgress: onProgress);
-      }
+      final bytes = await fetchToFile(
+        url,
+        fileAt(path),
+        onProgress: onProgress,
+      );
       recordStored(track, path, bytes, pinned: true);
     } finally {
       _downloading.remove(track.id);

@@ -331,7 +331,6 @@ class PlayerService {
         proxied = _proxy.add(
           link,
           cacheTo: cachePath == null ? null : storage!.fileAt(cachePath),
-          alternative: () => route.client.releaseLink(stream),
           onSaved: (written, total) =>
               storage?.noteProgress(track, written, total),
           label: 'song ${track.id}',
