@@ -241,13 +241,19 @@ Future<FileFacts?> measureRemote(
   Duration timeout = const Duration(seconds: 10),
 }) async {
   if (link.path.toLowerCase().endsWith('.m3u8')) return null;
-  final (head, total) = await _readRange(http, link, 0, framesWindow, timeout);
+  final (head, total) = await readRemoteRange(
+    http,
+    link,
+    0,
+    framesWindow,
+    timeout,
+  );
   if (head == null || total == null) return null;
   final reading = readHead(head, total);
   if (!reading.needMore) return reading.facts;
   final start = audioStartOf(head);
   if (start == null || start >= total) return null;
-  final (frames, _) = await _readRange(
+  final (frames, _) = await readRemoteRange(
     http,
     link,
     start,
@@ -264,8 +270,9 @@ Future<FileFacts?> measureRemote(
 }
 
 /// Reads [count] bytes of [link] from [start]; returns them and the whole
-/// file's size, or nulls when the answer is not audio.
-Future<(Uint8List?, int?)> _readRange(
+/// file's size, or nulls when the answer is not audio, or when a server
+/// that ignores the range would hand over the file's start instead.
+Future<(Uint8List?, int?)> readRemoteRange(
   HttpClient http,
   Uri link,
   int start,
@@ -283,7 +290,9 @@ Future<(Uint8List?, int?)> _readRange(
       type == null ||
       type.primaryType == 'audio' ||
       type.mimeType == 'application/octet-stream';
-  if (!isAudio || response.statusCode >= 300) {
+  final wrongPlace =
+      start > 0 && response.statusCode != HttpStatus.partialContent;
+  if (!isAudio || response.statusCode >= 300 || wrongPlace) {
     await response.listen(null).cancel();
     return (null, null);
   }
