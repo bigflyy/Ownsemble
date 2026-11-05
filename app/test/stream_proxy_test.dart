@@ -725,6 +725,82 @@ void main() {
       expect(lost.single.reason, startsWith('another recording'));
     });
 
+    test('a checked file is saved whole after mpv hangs up', () async {
+      final target = File('${dir.path}/vk_1_5.mp3');
+      final stream = proxy.add(
+        at('/listed'),
+        cacheTo: target,
+        expectSeconds: 219,
+      );
+      final uri = stream.localUri;
+      final socket = await Socket.connect(uri.host, uri.port);
+      socket.write('GET ${uri.path} HTTP/1.1\r\nHost: ${uri.host}\r\n\r\n');
+      var received = 0;
+      final some = Completer<void>();
+      socket.listen((data) {
+        received += data.length;
+        if (received > 50000 && !some.isCompleted) some.complete();
+      }, onError: (_) {});
+      await some.future;
+      socket.destroy();
+      expect(
+        await stream.stored.timeout(const Duration(seconds: 10)),
+        listed.length,
+      );
+      expect(target.lengthSync(), listed.length);
+    });
+
+    test('a save ends when the file is in, while mpv still reads', () async {
+      // mpv's buffer (8 MB) is smaller than a long song at 320 kbit/s: it
+      // stops reading and reads on as it plays, minutes later. The save must
+      // not wait for that.
+      final target = File('${dir.path}/vk_1_6.mp3');
+      final stream = proxy.add(
+        at('/listed'),
+        cacheTo: target,
+        expectSeconds: 219,
+      );
+      final uri = stream.localUri;
+      final socket = await Socket.connect(uri.host, uri.port);
+      socket.write('GET ${uri.path} HTTP/1.1\r\nHost: ${uri.host}\r\n\r\n');
+      final some = Completer<void>();
+      late final StreamSubscription<List<int>> reading;
+      reading = socket.listen((data) {
+        if (!some.isCompleted) {
+          some.complete();
+          reading.pause();
+        }
+      }, onError: (_) {});
+      await some.future;
+      expect(
+        await stream.stored.timeout(const Duration(seconds: 10)),
+        listed.length,
+      );
+      expect(target.lengthSync(), listed.length);
+      socket.destroy();
+    });
+
+    test('letting a held stream go ends its save at once', () async {
+      final target = File('${dir.path}/vk_1_4.mp3');
+      final stream = proxy.add(
+        at('/swapped'),
+        cacheTo: target,
+        expectSeconds: 219,
+      );
+      final uri = stream.localUri;
+      final socket = await Socket.connect(uri.host, uri.port);
+      socket.write('GET ${uri.path} HTTP/1.1\r\nHost: ${uri.host}\r\n\r\n');
+      socket.listen((_) {}, onError: (_) {});
+      await stream.otherRecording;
+      proxy.letGo(stream, 'another recording');
+      // Before the next round of the same song starts its own save.
+      expect(
+        await stream.stored.timeout(const Duration(milliseconds: 500)),
+        isNull,
+      );
+      socket.destroy();
+    });
+
     test(
       'a song played without a check is still measured as unknown',
       () async {

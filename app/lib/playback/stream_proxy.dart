@@ -454,6 +454,11 @@ class StreamProxy {
     }
   }
 
+  /// Lets [stream] go at once for [reason]: its save stops and a request
+  /// held back as another recording ends. Its [ProxiedStream.stored] then
+  /// completes shortly, so a new save of the same song can start.
+  void letGo(ProxiedStream stream, String reason) => _stop(stream, reason);
+
   /// Cancels saving every stream except [keep], so downloads of songs no
   /// longer playing do not take bandwidth from the new one.
   void cancelCachingExcept(ProxiedStream? keep, [String reason = 'canceled']) {
@@ -784,13 +789,6 @@ class StreamProxy {
     final stalled = !complete && written == lastWritten;
     if (!complete) await subscription.cancel();
     _caching.remove(stream);
-    if (!mpvGone) {
-      try {
-        await response.close();
-      } catch (_) {
-        // mpv hung up meanwhile.
-      }
-    }
     var saved = false;
     if (file != null) {
       try {
@@ -828,6 +826,16 @@ class StreamProxy {
           ? 'cut short'
           : 'cache file could not be written',
     );
+    // Only now wait for mpv: a song longer than mpv's buffer is read to its
+    // end only as it plays, minutes later, and the save must not wait that
+    // long (found on real VK, 2026-11-05: an 8.8 MB file stayed a .part).
+    if (!mpvGone) {
+      try {
+        await response.close();
+      } catch (_) {
+        // mpv hung up meanwhile.
+      }
+    }
     _report(
       trace,
       stalled
