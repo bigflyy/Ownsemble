@@ -224,7 +224,9 @@ class PlaybackController extends ChangeNotifier {
     try {
       // A Download does not go through the player's check of the file:
       // a song whose VK file was swapped keeps its chosen version instead.
-      await player.checkVersion(track);
+      // A file already on disk was measured when it played, so it is only
+      // marked kept, at once and without asking VK.
+      if (!storage.hasFile(track)) await player.checkVersion(track);
       await storage.download(track, () async {
         final resolved = await player.resolveStream(track);
         if (resolved == null) return null;

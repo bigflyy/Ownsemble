@@ -1,12 +1,15 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:fake_async/fake_async.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:ownsemble/library/library_store.dart';
 import 'package:ownsemble/library/track.dart';
 import 'package:ownsemble/playback/play_queue.dart';
 import 'package:ownsemble/playback/playback_controller.dart';
 import 'package:ownsemble/playback/player_service.dart';
+import 'package:ownsemble/storage/audio_storage.dart';
 
 /// Player stand-in: records requests; songs in [failing] cannot play.
 class FakePlayer implements PlayerService {
@@ -89,6 +92,21 @@ class FakePlayer implements PlayerService {
   Future<void> setVolume(double volume) async => lastVolume = volume;
   @override
   Future<void> setMuted(bool mute) async => lastMuted = mute;
+
+  @override
+  AudioStorage? storage;
+
+  /// Songs whose VK file was checked before a Download.
+  final versionChecks = <int>[];
+
+  /// When set, a version check waits for this (a slow line).
+  Completer<void>? holdVersionCheck;
+
+  @override
+  Future<void> checkVersion(Track track) async {
+    versionChecks.add(track.id);
+    await holdVersionCheck?.future;
+  }
 
   @override
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
@@ -769,6 +787,47 @@ void main() {
       );
       await controller.next();
       expect(controller.queue.current, same(fresh[2]));
+    });
+  });
+
+  group('download', () {
+    late LibraryStore store;
+    late Directory dir;
+    late Track song;
+    setUp(() {
+      dir = Directory.systemTemp.createTempSync('ownsemble_download_');
+      store = LibraryStore.open(':memory:');
+      final vk = store.ensureSource(TrackSource.vk, account: '1', name: 'VK');
+      store.upsertAll(vk, [
+        const NewTrack(
+          sourceKey: '1_1',
+          artist: 'Операция Пластилин',
+          title: 'Ты и я',
+          durationSec: 219,
+          addedAt: 1,
+        ),
+      ]);
+      song = store.loadAll().single;
+      player.storage = AudioStorage(dataDir: dir.path, store: store);
+    });
+    tearDown(() {
+      store.close();
+      dir.deleteSync(recursive: true);
+    });
+
+    test('a cached song is kept at once, without asking VK', () async {
+      final storage = player.storage!;
+      final path = storage.relativePathFor(song);
+      storage.fileAt(path)
+        ..parent.createSync(recursive: true)
+        ..writeAsBytesSync(List.filled(1000, 1));
+      storage.recordStored(song, path, 1000);
+      // A version check on a slow line never answers here.
+      player.holdVersionCheck = Completer<void>();
+      unawaited(playback.download(song));
+      await settle();
+      expect(storage.stateOf(song).pinned, isTrue);
+      expect(player.versionChecks, isEmpty);
     });
   });
 }

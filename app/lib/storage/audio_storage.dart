@@ -56,6 +56,12 @@ class AudioStorage extends ChangeNotifier {
   /// Whether [track] is being saved while it streams.
   bool isSaving(Track track) => _saving.containsKey(track.id);
 
+  /// Whether [track]'s audio is on disk now, so a Download only marks it.
+  bool hasFile(Track track) {
+    final path = stateOf(track).path;
+    return path != null && fileAt(path).existsSync();
+  }
+
   /// How much of [track]'s audio is stored, 0 to 1: the part saved so far
   /// during a save or download, else all or nothing.
   double savedShare(Track track) {
@@ -153,10 +159,10 @@ class AudioStorage extends ChangeNotifier {
   /// fetched from the link [resolveUrl] gives, and only from it: no other
   /// copy's file is ever kept instead. Throws when that fails.
   Future<void> download(Track track, Future<Uri?> Function() resolveUrl) async {
-    final state = stateOf(track);
-    if (state.path != null && fileAt(state.path!).existsSync()) {
+    if (hasFile(track)) {
+      final path = stateOf(track).path;
       _store.setPinned(track.id, true);
-      _changed[track.id] = (path: state.path, pinned: true);
+      _changed[track.id] = (path: path, pinned: true);
       notifyListeners();
       return;
     }
