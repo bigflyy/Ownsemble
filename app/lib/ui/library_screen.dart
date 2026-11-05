@@ -24,6 +24,7 @@ import 'sync_controller.dart';
 import 'sync_status_bar.dart';
 import 'theme.dart';
 import 'type_jump.dart';
+import 'versions_dialog.dart';
 import 'vk_accounts.dart';
 
 /// Narrower than this, the side panel gives way to the bottom bar.
@@ -102,6 +103,14 @@ class _LibraryScreenState extends State<LibraryScreen> {
     // A song that cannot play says why at the bottom of the window.
     _subscriptions.add(
       widget.player.timings.listen((timing) {
+        // A song whose VK file was found swapped says what plays instead.
+        final news = timing.versionNews;
+        if (timing.ok && news != null && mounted) {
+          ScaffoldMessenger.of(context)
+            ..hideCurrentSnackBar()
+            ..showSnackBar(SnackBar(content: Text(news)));
+          return;
+        }
         final error = timing.error;
         if (timing.ok || error == null || error == 'superseded' || !mounted) {
           return;
@@ -391,6 +400,8 @@ class _LibraryScreenState extends State<LibraryScreen> {
     // that stored audio or a Stack could point at.
     final inLibrary = track.inLibrary;
     final album = library.albumOf(track);
+    final hasVersions =
+        widget.player.versions?.choiceFor(track) != null && inLibrary;
     final showsAlbum =
         library.view.kind == ViewKind.album && library.view.album == album;
     final choice = await showMenu<Object>(
@@ -417,6 +428,12 @@ class _LibraryScreenState extends State<LibraryScreen> {
             key: ValueKey('menu-open-album'),
             value: 'open-album',
             child: Text('Open the album'),
+          ),
+        if (hasVersions)
+          const PopupMenuItem(
+            key: ValueKey('menu-versions'),
+            value: 'versions',
+            child: Text('Choose version...'),
           ),
         if (track.hasCover || (storage != null && inLibrary) || inStack)
           const PopupMenuDivider(),
@@ -454,6 +471,8 @@ class _LibraryScreenState extends State<LibraryScreen> {
     switch (choice) {
       case 'open-album':
         library.openAlbum(track);
+      case 'versions':
+        await showVersionsDialog(context, widget.playback, track);
       case 'play-next':
         await widget.playback.playNext(track);
       case 'add-to-queue':
@@ -681,6 +700,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
               library.jump,
               ?_storage,
               ?widget.collections,
+              ?widget.player.versions,
             ]),
             builder: (context, _) {
               final view = library.view;
@@ -859,6 +879,11 @@ class _LibraryScreenState extends State<LibraryScreen> {
                   _play(index);
                 },
                 onMenu: (position) => _showSongMenu(index, position),
+                versionTag: (compact) => VersionTag(
+                  playback: widget.playback,
+                  track: track,
+                  compact: compact,
+                ),
                 onOpenAlbum: () {
                   library.jump.clear();
                   library.openAlbum(track);
@@ -1322,8 +1347,13 @@ class _SongRow extends StatelessWidget {
     required this.playing,
     required this.onTap,
     required this.onMenu,
+    required this.versionTag,
     this.onOpenAlbum,
   });
+
+  /// The mark of a song whose VK file was swapped (Stage K), as an icon when
+  /// compact; empty for every other song.
+  final Widget Function(bool compact) versionTag;
 
   /// Position in the list, shown when thumbnails are off.
   final int number;
@@ -1385,6 +1415,7 @@ class _SongRow extends StatelessWidget {
     };
     final dimStyle = TextStyle(fontSize: 13, color: colors.dim);
     List<Widget> tags({required bool compact}) => [
+      versionTag(compact),
       if (track.isGone) ...[
         const SizedBox(width: 8),
         _Tag(

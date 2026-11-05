@@ -11,6 +11,7 @@ import 'cover_viewer.dart';
 import 'filling_icon.dart';
 import 'sources_scope.dart';
 import 'theme.dart';
+import 'versions_dialog.dart';
 
 /// Width of the side panel.
 const sidePanelWidth = 380.0;
@@ -50,7 +51,11 @@ class NowPlayingPanel extends StatelessWidget {
         border: Border(left: BorderSide(color: colors.line)),
       ),
       child: ListenableBuilder(
-        listenable: Listenable.merge([playback, ?player.storage]),
+        listenable: Listenable.merge([
+          playback,
+          ?player.storage,
+          ?player.versions,
+        ]),
         builder: (context, _) => StreamBuilder<Track?>(
           stream: player.currentStream,
           initialData: player.current,
@@ -97,6 +102,7 @@ class NowPlayingPanel extends StatelessWidget {
                           track: track,
                           large: true,
                           storage: player.storage,
+                          mark: VersionTag(playback: playback, track: track),
                           onGoToSong: onGoToSong,
                           onOpenAlbum: onOpenAlbum == null
                               ? null
@@ -177,7 +183,11 @@ class DockBar extends StatelessWidget {
       ),
       padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
       child: ListenableBuilder(
-        listenable: Listenable.merge([playback, ?player.storage]),
+        listenable: Listenable.merge([
+          playback,
+          ?player.storage,
+          ?player.versions,
+        ]),
         builder: (context, _) => StreamBuilder<Track?>(
           stream: player.currentStream,
           initialData: player.current,
@@ -208,6 +218,10 @@ class DockBar extends StatelessWidget {
                             Expanded(
                               child: SongTitle(
                                 track: track,
+                                mark: VersionTag(
+                                  playback: playback,
+                                  track: track,
+                                ),
                                 onGoToSong: onGoToSong,
                                 onOpenAlbum: onOpenAlbum == null
                                     ? null
@@ -309,11 +323,16 @@ class SongTitle extends StatelessWidget {
     this.storage,
     this.onGoToSong,
     this.onOpenAlbum,
+    this.mark,
   });
 
   final Track track;
   final bool large;
   final AudioStorage? storage;
+
+  /// The mark of a song whose VK file was swapped (Stage K), after the
+  /// title; it shows nothing for other songs.
+  final Widget? mark;
 
   /// What a click on the title does.
   final VoidCallback? onGoToSong;
@@ -350,20 +369,26 @@ class SongTitle extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       mainAxisSize: MainAxisSize.min,
       children: [
-        if (onGoToSong == null)
-          title
-        else
-          MouseRegion(
-            cursor: SystemMouseCursors.click,
-            child: GestureDetector(
-              key: const ValueKey('go-to-song'),
-              onTap: onGoToSong,
-              child: Tooltip(
-                message: 'Show this song in its list (Ctrl+L)',
-                child: title,
-              ),
+        Row(
+          children: [
+            Flexible(
+              child: onGoToSong == null
+                  ? title
+                  : MouseRegion(
+                      cursor: SystemMouseCursors.click,
+                      child: GestureDetector(
+                        key: const ValueKey('go-to-song'),
+                        onTap: onGoToSong,
+                        child: Tooltip(
+                          message: 'Show this song in its list (Ctrl+L)',
+                          child: title,
+                        ),
+                      ),
+                    ),
             ),
-          ),
+            if (mark case final mark?) ...[const SizedBox(width: 8), mark],
+          ],
+        ),
         const SizedBox(height: 4),
         // The album shares the artist's line: the panel must not grow, or
         // the smallest window loses its controls.
