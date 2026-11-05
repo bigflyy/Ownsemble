@@ -8,6 +8,7 @@ import 'package:path/path.dart' as p;
 import 'package:sqlite3/sqlite3.dart';
 
 import 'library_migration_test.dart' show dropVersion5;
+import 'merge_support.dart';
 
 /// A VK song of album [albumKey] ("ownerId_albumId"), as a sync stores it.
 NewTrack albumSong(
@@ -116,7 +117,7 @@ void main() {
           albumAccess: 'b',
         ),
       ]);
-      expect(store.mergeSameSongs().merged, 1);
+      expect(mergeSameFiles(store).merged, 1);
 
       expect(store.vkAlbumOf(listed), (
         sourceId: second,
@@ -146,7 +147,7 @@ void main() {
           albumAccess: 'copy',
         ),
       ]);
-      store.mergeSameSongs();
+      mergeSameFiles(store);
       expect(store.vkAlbumOf(listed)?.accessKey, 'own');
       expect(store.vkAlbumOf(listed)?.sourceId, first);
     });

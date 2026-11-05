@@ -102,14 +102,37 @@ typedef VkAlbumLink = ({int sourceId, String key, String? accessKey});
 
 /// What [LibraryStore.mergeSameSongs] did.
 class MergeResult {
-  const MergeResult(this.merged, this.unusedFiles);
+  const MergeResult(
+    this.merged,
+    this.unusedFiles, {
+    this.unmerged = 0,
+    this.marked = 0,
+  });
 
   /// Rows that became copies of another row.
   final int merged;
 
+  /// Copies listed on their own again: their rule no longer holds.
+  final int unmerged;
+
+  /// Copies that only moved between the certain and the likely rule.
+  final int marked;
+
   /// Stored audio no row points at any more; the caller deletes the files.
   final List<String> unusedFiles;
+
+  /// Whether the listed library changed, so it has to be loaded again.
+  bool get changed => merged > 0 || unmerged > 0 || marked > 0;
 }
+
+/// A row whose VK file the sync prints (Stage L): its id, its account, and
+/// the song's key and access key in that account.
+typedef PrintRequest = ({
+  int trackId,
+  int sourceId,
+  String sourceKey,
+  String? accessKey,
+});
 
 /// A cached song's stored file, as the cache limit sees it.
 class CachedAudio {

@@ -1,10 +1,13 @@
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:ownsemble/library/file_print.dart';
 import 'package:ownsemble/library/library_store.dart';
 import 'package:ownsemble/library/track.dart';
 import 'package:path/path.dart' as p;
 import 'package:sqlite3/sqlite3.dart';
+
+import 'merge_support.dart';
 
 NewTrack song(
   String key,
@@ -47,7 +50,7 @@ void main() {
     final b = store.upsertAll(second, [
       song('2_1', 'Хочешь?', trackId: secondTrackId, accessKey: 'key-2'),
     ]).single;
-    if (merge) store.mergeSameSongs();
+    if (merge) mergeSameFiles(store);
     return (a, b);
   }
 
@@ -127,13 +130,13 @@ void main() {
         song('1_1', 'А', trackId: 7),
         song('1_2', 'А', trackId: 7),
       ]);
-      expect(store.mergeSameSongs().merged, 0);
+      expect(mergeSameFiles(store).merged, 0);
       expect(store.loadAll(), hasLength(2));
     });
 
     test('running it again changes nothing', () {
       sharedSong();
-      expect(store.mergeSameSongs().merged, 0);
+      expect(mergeSameFiles(store).merged, 0);
     });
 
     test('a removed account does not take part', () {
@@ -141,7 +144,105 @@ void main() {
       store.addPlay(a);
       store.removeSource(first);
       store.upsertAll(second, [song('2_2', 'Другая', trackId: 9)]);
-      expect(store.mergeSameSongs().merged, 0);
+      expect(mergeSameFiles(store).merged, 0);
+    });
+  });
+
+  group('merging by file (Stage L)', () {
+    const fileA = FilePrint(bytes: 8770917, sample: 11, seconds: 200.2);
+    const fileB = FilePrint(bytes: 8774052, sample: 22, seconds: 200.4);
+    const live = FilePrint(bytes: 9062443, sample: 33, seconds: 207.5);
+
+    test('prints are read only for rows that may be one song', () {
+      final (a, b) = sharedSong(merge: false);
+      store.upsertAll(first, [song('1_2', 'Другая', trackId: 9)]);
+      final wanted = store.printsToRead();
+      expect(wanted.map((row) => row.trackId), [a, b]);
+      expect(wanted.map((row) => row.accessKey), ['key-1', 'key-2']);
+      expect(wanted.map((row) => row.sourceId), [first, second]);
+    });
+
+    test('one file in two accounts is one row; two files are two', () {
+      final (a, b) = sharedSong(merge: false);
+      store.savePrints({a: fileA, b: fileB});
+      expect(store.mergeSameSongs().changed, isFalse);
+      expect(store.loadAll(), hasLength(2));
+      store.savePrints({b: fileA});
+      expect(store.mergeSameSongs().merged, 1);
+      expect(store.loadAll().single.mergedLikely, isFalse);
+    });
+
+    test('a merge whose files differ is undone; History stays', () {
+      final (a, b) = sharedSong();
+      store.addPlay(a);
+      store.savePrints({b: live});
+      final undone = store.mergeSameSongs();
+      expect(undone.unmerged, 1);
+      expect(undone.changed, isTrue);
+      expect(store.loadAll(), hasLength(2));
+      expect(store.history().single.trackId, a);
+      expect(store.loadAll().every((track) => track.copies.isEmpty), isTrue);
+    });
+
+    test('a copy VK gives no file for is its own row', () {
+      final (a, b) = sharedSong(merge: false);
+      store.savePrints({a: fileA, b: const FilePrint.noFile()});
+      store.mergeSameSongs();
+      expect(store.loadAll(), hasLength(2));
+    });
+
+    test('the likely setting merges close files, marked, and back', () {
+      final (a, b) = sharedSong(merge: false);
+      store.savePrints({a: fileA, b: fileB});
+      store.writeSetting(LibraryStore.mergeLikelySetting, 'on');
+      expect(store.mergeSameSongs().merged, 1);
+      final merged = store.loadAll().single;
+      expect(merged.mergedLikely, isTrue);
+      expect(merged.copies.single.likely, isTrue);
+
+      store.writeSetting(LibraryStore.mergeLikelySetting, null);
+      expect(store.mergeSameSongs().unmerged, 1);
+      expect(store.loadAll(), hasLength(2));
+    });
+
+    test('the likely setting never merges another recording', () {
+      final (a, b) = sharedSong(merge: false);
+      store.savePrints({a: fileA, b: live});
+      store.writeSetting(LibraryStore.mergeLikelySetting, 'on');
+      store.mergeSameSongs();
+      expect(store.loadAll(), hasLength(2));
+    });
+
+    test('a likely merge that turns out certain loses its mark', () {
+      final (a, b) = sharedSong(merge: false);
+      store.savePrints({a: fileA, b: fileB});
+      store.writeSetting(LibraryStore.mergeLikelySetting, 'on');
+      store.mergeSameSongs();
+      store.savePrints({b: fileA});
+      expect(store.mergeSameSongs().marked, 1);
+      expect(store.loadAll().single.mergedLikely, isFalse);
+    });
+
+    test('a print of another listed length is read again; the merge waits', () {
+      final (_, b) = sharedSong();
+      expect(store.printsToRead(), isEmpty);
+      store.upsertAll(second, [
+        song('2_1', 'Хочешь?', trackId: 7, seconds: 201, accessKey: 'key-2'),
+      ]);
+      expect(store.printsToRead().single.trackId, b);
+      expect(store.mergeSameSongs().changed, isFalse);
+      expect(store.loadAll(), hasLength(1));
+    });
+
+    test('old prints are read again, a missing file sooner', () {
+      final (a, b) = sharedSong(merge: false);
+      final now = DateTime.now().millisecondsSinceEpoch;
+      store.savePrints({a: fileA}, atMs: now);
+      store.savePrints({b: const FilePrint.noFile()}, atMs: now);
+      const day = 24 * 3600 * 1000;
+      expect(store.printsToRead(nowMs: now + 1000), isEmpty);
+      expect(store.printsToRead(nowMs: now + 2 * day).single.trackId, b);
+      expect(store.printsToRead(nowMs: now + 8 * day), hasLength(2));
     });
   });
 
@@ -170,7 +271,7 @@ void main() {
       store.addToStack(stack, b);
       store.saveAudioFile(b, 'cache/vk_2_1.mp3', 10, pinned: true);
 
-      expect(store.mergeSameSongs().unusedFiles, isEmpty);
+      expect(mergeSameFiles(store).unusedFiles, isEmpty);
 
       expect(store.history().single.trackId, a);
       expect(store.stackEntries(stack).single.trackId, a);
@@ -184,7 +285,7 @@ void main() {
       store.saveAudioFile(a, 'cache/vk_1_1.mp3', 10);
       store.saveAudioFile(b, 'cache/vk_2_1.mp3', 10, pinned: true);
 
-      expect(store.mergeSameSongs().unusedFiles, ['cache/vk_2_1.mp3']);
+      expect(mergeSameFiles(store).unusedFiles, ['cache/vk_2_1.mp3']);
 
       final track = store.loadAll().single;
       expect(track.localPath, 'cache/vk_1_1.mp3');
@@ -249,7 +350,7 @@ void main() {
       final c = store.upsertAll(third, [
         song('3_1', 'Хочешь?', trackId: 7),
       ]).single;
-      store.mergeSameSongs();
+      mergeSameFiles(store);
 
       store.removeSource(first);
 
@@ -296,6 +397,8 @@ void main() {
     old.close();
 
     final db = sqlite3.open(path);
+    db.execute('DROP TABLE vk_file_prints');
+    db.execute('ALTER TABLE tracks DROP COLUMN same_likely');
     db.execute('DROP TABLE song_versions');
     db.execute('DROP INDEX tracks_by_album');
     db.execute('ALTER TABLE tracks DROP COLUMN vk_album_key');

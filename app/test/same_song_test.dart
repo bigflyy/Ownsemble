@@ -1,5 +1,14 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:ownsemble/library/file_print.dart';
+import 'package:ownsemble/library/merge_plan.dart';
 import 'package:ownsemble/library/same_song.dart';
+
+/// Which rows are copies when VK gives every row the same file: then the
+/// candidate rule ([isSameSong]) alone decides.
+Map<int, int> findSameSongs(List<SongRow> rows) => planMerges([
+  for (final row in rows)
+    MergeRow(row, print: const FilePrint(bytes: 1, sample: 1, seconds: 200)),
+], mergeLikely: false).copies;
 
 /// A row with the fields the duplicate key reads. [id] also orders the rows:
 /// a lower id has been in the library for longer.
@@ -136,47 +145,51 @@ void main() {
         row(2, 2, 'b', trackId: 5, seconds: 202, sameAs: 1),
         row(3, 3, 'b', seconds: 202),
       ]);
-      expect(found, {3: 1});
+      expect(found, {2: 1, 3: 1});
     });
   });
 
   group('what is merged already', () {
-    test('stays merged and is not reported again', () {
+    test('stays merged', () {
       expect(
         findSameSongs([
           row(1, 1, 'a', trackId: 5),
           row(2, 2, 'a', trackId: 5, sameAs: 1),
         ]),
-        isEmpty,
+        {2: 1},
       );
     });
 
-    test('keeps its merge even when VK changes its details', () {
+    test('stays merged when VK changes its details but not its file', () {
       expect(
         findSameSongs([
           row(1, 1, 'a'),
           row(2, 2, 'renamed', seconds: 300, sameAs: 1),
         ]),
-        isEmpty,
+        {2: 1},
       );
     });
 
-    test('a group joining an older group moves whole', () {
-      final found = findSameSongs([
-        row(1, 1, 'a', trackId: 5),
-        row(2, 2, 'x', trackId: 8),
-        row(3, 3, 'a', trackId: 5, sameAs: 2),
-      ]);
-      expect(found, {2: 1, 3: 1});
+    test('a copy joins the oldest row it is one song with', () {
+      expect(
+        findSameSongs([
+          row(1, 1, 'a', trackId: 5),
+          row(2, 2, 'x', trackId: 8),
+          row(3, 3, 'a', trackId: 5, sameAs: 2),
+        ]),
+        {3: 1},
+      );
     });
 
-    test('groups sharing an account stay apart', () {
-      final found = findSameSongs([
-        row(1, 1, 'a', trackId: 5),
-        row(2, 2, 'a', trackId: 5, sameAs: 1),
-        row(3, 2, 'a', trackId: 5),
-      ]);
-      expect(found, isEmpty);
+    test('one row per account in a group', () {
+      expect(
+        findSameSongs([
+          row(1, 1, 'a', trackId: 5),
+          row(2, 2, 'a', trackId: 5, sameAs: 1),
+          row(3, 2, 'a', trackId: 5),
+        ]),
+        {2: 1},
+      );
     });
   });
 }

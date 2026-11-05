@@ -3,10 +3,12 @@ import 'dart:isolate';
 
 import 'package:path/path.dart' as p;
 
+import '../library/file_print.dart';
 import '../library/library_store.dart';
 import '../library/search_index.dart';
 import '../library/track.dart';
 import '../vk/vk_client.dart';
+import '../vk/vk_file_print.dart';
 import '../vk/vk_sync.dart';
 
 /// The library read back after a sync changed it, with its search index
@@ -25,6 +27,9 @@ class SyncOutcome {
     this.results = const [],
     this.errors = const [],
     this.library,
+    this.merge,
+    this.printed = 0,
+    this.printMs = 0,
   });
 
   /// All sources with their song counts and last sync, as stored now.
@@ -39,12 +44,26 @@ class SyncOutcome {
   /// The new library when the sync changed it; null when nothing changed.
   final LoadedLibrary? library;
 
+  /// What merging the accounts' songs changed (Stage L).
+  final MergeResult? merge;
+
+  /// How many files were printed for the merge, and in how long.
+  final int printed;
+  final int printMs;
+
   /// This outcome without [library], to keep once the library was handed
   /// over: a kept copy would hold that version of the library in memory
   /// after the next one replaced it.
   SyncOutcome withoutLibrary() => library == null
       ? this
-      : SyncOutcome(sources: sources, results: results, errors: errors);
+      : SyncOutcome(
+          sources: sources,
+          results: results,
+          errors: errors,
+          merge: merge,
+          printed: printed,
+          printMs: printMs,
+        );
 
   /// The first account's result, for a library with one account.
   VkSyncResult? get result => results.firstOrNull;
@@ -152,10 +171,13 @@ Future<SyncOutcome> _syncAll(
       }
     }
     await _nameAccounts(store, clients);
+    final printing = Stopwatch()..start();
+    final printed = await _readPrints(store, clients);
+    printing.stop();
     final merge = store.mergeSameSongs();
     _deleteUnused(store, merge.unusedFiles, p.dirname(dbPath));
     LoadedLibrary? library;
-    if (merge.merged > 0 || results.any((result) => result.changedLibrary)) {
+    if (merge.changed || results.any((result) => result.changedLibrary)) {
       final tracks = store.loadAll();
       library = LoadedLibrary(tracks, SearchIndex(tracks));
     }
@@ -164,6 +186,9 @@ Future<SyncOutcome> _syncAll(
       results: results,
       errors: errors,
       library: library,
+      merge: merge,
+      printed: printed,
+      printMs: printing.elapsedMilliseconds,
     );
   } finally {
     for (final client in clients) {
@@ -171,6 +196,43 @@ Future<SyncOutcome> _syncAll(
     }
     store.close();
   }
+}
+
+/// Reads the prints of VK's files that the merge needs (Stage L), each
+/// through its own row's account; returns how many were read. Rows of an
+/// account that did not connect, and files the line failed on, wait for the
+/// next sync: until then a stored merge stays as it is.
+Future<int> _readPrints(LibraryStore store, List<VkClient> clients) async {
+  final wanted = store.printsToRead();
+  if (wanted.isEmpty) return 0;
+  final clientOf = <int, VkClient>{
+    for (final source in store.sources())
+      for (final client in clients)
+        if (client.userId != 0 && source.account == '${client.userId}')
+          source.id: client,
+  };
+  final http = HttpClient()..connectionTimeout = const Duration(seconds: 8);
+  var read = 0;
+  try {
+    for (final MapEntry(key: sourceId, value: client) in clientOf.entries) {
+      final rows = [
+        for (final row in wanted)
+          if (row.sourceId == sourceId) row,
+      ];
+      if (rows.isEmpty) continue;
+      final byKey = await printVkFiles(client, [
+        for (final row in rows) (key: row.sourceKey, accessKey: row.accessKey),
+      ], http: http);
+      final prints = <int, FilePrint>{
+        for (final row in rows) row.trackId: ?byKey[row.sourceKey],
+      };
+      store.savePrints(prints);
+      read += prints.length;
+    }
+  } finally {
+    http.close(force: true);
+  }
+  return read;
 }
 
 /// With several accounts "VK" says nothing, so each that still has that name

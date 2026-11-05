@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:ownsemble/library/file_print.dart';
 import 'package:ownsemble/library/library_schema.dart';
 import 'package:ownsemble/library/library_store.dart';
 import 'package:ownsemble/library/song_version.dart';
@@ -10,7 +11,16 @@ import 'package:sqlite3/sqlite3.dart';
 
 /// Takes back what version 6 added, for tests that rebuild an older library
 /// from a new one.
-void dropVersion6(Database db) => db.execute('DROP TABLE song_versions');
+void dropVersion6(Database db) {
+  dropVersion7(db);
+  db.execute('DROP TABLE song_versions');
+}
+
+/// Takes back what version 7 added (file prints, Stage L).
+void dropVersion7(Database db) {
+  db.execute('DROP TABLE vk_file_prints');
+  db.execute('ALTER TABLE tracks DROP COLUMN same_likely');
+}
 
 /// Takes back what versions 5 and 6 added, for tests that rebuild an older
 /// library from a new one.
@@ -261,6 +271,43 @@ void main() {
     expect(choice.ownBytes, 9062443);
     migrated.removeVersionChoice(id);
     expect(migrated.versionChoices(), isEmpty);
+  });
+
+  test('version 6 gains file prints and keeps its merges', () {
+    final store = LibraryStore.open(dbPath);
+    final first = store.ensureSource(TrackSource.vk, account: '1', name: 'A');
+    final second = store.ensureSource(TrackSource.vk, account: '2', name: 'B');
+    NewTrack song(String key) => NewTrack(
+      sourceKey: key,
+      artist: 'Земфира',
+      title: 'Хочешь?',
+      durationSec: 200,
+      addedAt: 5,
+      vkTrackId: 7,
+    );
+    final a = store.upsertAll(first, [song('1_1')]).single;
+    final b = store.upsertAll(second, [song('2_1')]).single;
+    store.close();
+    final db = sqlite3.open(dbPath);
+    dropVersion7(db);
+    db.execute('PRAGMA user_version = 6');
+    // A merge made by the old rule (track_id and length only).
+    db.execute('UPDATE tracks SET same_as = ? WHERE id = ?', [a, b]);
+    db.close();
+
+    final migrated = LibraryStore.open(dbPath);
+    addTearDown(migrated.close);
+    expect(versionOf(dbPath), librarySchemaVersion);
+    // The old merge stays until the next sync has read both files.
+    expect(migrated.loadAll().single.copies.single.likely, isFalse);
+    expect(migrated.mergeSameSongs().changed, isFalse);
+    expect(migrated.printsToRead().map((row) => row.trackId), [a, b]);
+    migrated.savePrints({
+      a: const FilePrint(bytes: 10, sample: 1, seconds: 200),
+      b: const FilePrint(bytes: 12, sample: 2, seconds: 200),
+    });
+    expect(migrated.mergeSameSongs().unmerged, 1);
+    expect(migrated.loadAll(), hasLength(2));
   });
 
   test('a library from a newer build is refused and left alone', () {

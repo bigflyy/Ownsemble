@@ -9,6 +9,8 @@ import 'package:ownsemble/ui/library_screen.dart';
 import 'package:ownsemble/ui/sources_scope.dart';
 import 'package:ownsemble/ui/theme.dart';
 
+import 'merge_support.dart';
+
 /// A VK song of account [source], with the other accounts' copies [alsoIn].
 Track song(
   int id,
@@ -206,7 +208,7 @@ void screenTests() {
         vkSong('2_1', 'Общая', trackId: 7),
         vkSong('2_2', 'Только вторая'),
       ]);
-      store.mergeSameSongs();
+      mergeSameFiles(store);
       sources = ValueNotifier(store.sources());
       library = LibraryController(store.loadAll())..watchSources(sources);
     });

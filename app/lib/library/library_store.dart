@@ -1,8 +1,10 @@
 import 'package:path/path.dart' as p;
 import 'package:sqlite3/sqlite3.dart';
 
+import 'file_print.dart';
 import 'library_records.dart';
 import 'library_schema.dart';
+import 'merge_plan.dart';
 import 'same_song.dart';
 import 'song_version.dart';
 import 'track.dart';
@@ -326,42 +328,176 @@ class LibraryStore {
   void _forgetVersion(int from) =>
       _db.execute('DELETE FROM song_versions WHERE track_id = ?', [from]);
 
-  /// Merges the songs that several accounts share into one listed row (see
-  /// [findSameSongs]). Does nothing with fewer than two accounts.
-  MergeResult mergeSameSongs() {
-    final rows = _db.select('''
-      SELECT t.id, t.source_id, t.source_key, t.artist, t.title,
-             t.duration_sec, t.vk_track_id, t.same_as
-      FROM tracks t JOIN sources s ON s.id = t.source_id
+  // Merging songs of several accounts (Stage L).
+
+  /// The setting that also merges likely copies, "on" or unset.
+  static const mergeLikelySetting = 'library.mergeLikely';
+
+  /// Whether copies are also merged by the likely rule (see [planMerges]).
+  /// Off by default: only the same file makes one row.
+  bool get mergeLikely => readSetting(mergeLikelySetting) == 'on';
+
+  /// How long the print of a file is trusted: VK can swap a song's file
+  /// (Stage K). A song VK gave no file for is asked about again sooner.
+  static const printLifetime = Duration(days: 7);
+  static const noFilePrintLifetime = Duration(days: 1);
+
+  /// The VK rows of the accounts in the library, in id order, as the merge
+  /// sees them, each with its access key. A print read for another listed
+  /// length counts as not read.
+  List<(MergeRow, String?)> _mergeRows() => [
+    for (final row in _db.select('''
+      SELECT t.id, t.source_id, t.source_key, t.access_key, t.artist, t.title,
+             t.duration_sec, t.vk_track_id, t.same_as, t.same_likely,
+             p.listed_sec, p.bytes, p.sample, p.seconds
+      FROM tracks t
+      JOIN sources s ON s.id = t.source_id
+      LEFT JOIN vk_file_prints p ON p.track_id = t.id
       WHERE s.kind = 'vk' AND s.removed_at_ms IS NULL
       ORDER BY t.id
-    ''');
-    final accounts = {for (final row in rows) row['source_id'] as int};
-    if (accounts.length < 2) return const MergeResult(0, []);
-    final copies = findSameSongs([
-      for (final row in rows)
-        SongRow(
-          id: row['id'] as int,
-          sourceId: row['source_id'] as int,
-          sourceKey: row['source_key'] as String,
-          text: songMatchText(row['artist'] as String, row['title'] as String),
-          seconds: row['duration_sec'] as int,
-          vkTrackId: row['vk_track_id'] as int?,
-          sameAs: row['same_as'] as int?,
+    '''))
+      (
+        MergeRow(
+          SongRow(
+            id: row['id'] as int,
+            sourceId: row['source_id'] as int,
+            sourceKey: row['source_key'] as String,
+            text: songMatchText(
+              row['artist'] as String,
+              row['title'] as String,
+            ),
+            seconds: row['duration_sec'] as int,
+            vkTrackId: row['vk_track_id'] as int?,
+            sameAs: row['same_as'] as int?,
+          ),
+          print: _printOf(row),
+          likely: row['same_likely'] == 1,
         ),
-    ]);
-    if (copies.isEmpty) return const MergeResult(0, []);
+        row['access_key'] as String?,
+      ),
+  ];
+
+  /// The stored print in [row] of [_mergeRows]; null when there is none or
+  /// it was read when VK listed another length.
+  static FilePrint? _printOf(Row row) {
+    if (row['listed_sec'] != row['duration_sec']) return null;
+    final (bytes, sample) = (row['bytes'] as int?, row['sample'] as int?);
+    if (bytes == null || sample == null) return const FilePrint.noFile();
+    return FilePrint(
+      bytes: bytes,
+      sample: sample,
+      seconds: (row['seconds'] as num?)?.toDouble(),
+    );
+  }
+
+  /// The rows whose VK file the sync should print now: rows that may be
+  /// one song with a row of another account (see [rowsToPrint]) and have no
+  /// print, or an old one, or one read for another listed length.
+  List<PrintRequest> printsToRead({int? nowMs}) {
+    final rows = _mergeRows();
+    if ({for (final (row, _) in rows) row.song.sourceId}.length < 2) {
+      return const [];
+    }
+    final wanted = rowsToPrint([for (final (row, _) in rows) row.song]);
+    final now = nowMs ?? _now();
+    final fresh = {
+      for (final row in _db.select(
+        'SELECT track_id, bytes, checked_at_ms FROM vk_file_prints',
+      ))
+        row['track_id'] as int:
+            now - (row['checked_at_ms'] as int) <
+            (row['bytes'] == null ? noFilePrintLifetime : printLifetime)
+                .inMilliseconds,
+    };
+    return [
+      for (final (row, accessKey) in rows)
+        if (wanted.contains(row.id) &&
+            (row.print == null || fresh[row.id] != true))
+          (
+            trackId: row.id,
+            sourceId: row.song.sourceId,
+            sourceKey: row.song.sourceKey,
+            accessKey: accessKey,
+          ),
+    ];
+  }
+
+  /// Stores the prints read for rows, by row id, each with the length its
+  /// row lists now.
+  void savePrints(Map<int, FilePrint> prints, {int? atMs}) {
+    if (prints.isEmpty) return;
+    final at = atMs ?? _now();
+    final save = _db.prepare('''
+      INSERT INTO vk_file_prints
+        (track_id, listed_sec, bytes, sample, seconds, checked_at_ms)
+      SELECT id, duration_sec, ?, ?, ?, ? FROM tracks WHERE id = ?
+      ON CONFLICT (track_id) DO UPDATE SET
+        listed_sec = excluded.listed_sec,
+        bytes = excluded.bytes,
+        sample = excluded.sample,
+        seconds = excluded.seconds,
+        checked_at_ms = excluded.checked_at_ms
+    ''');
+    try {
+      _transaction(() {
+        for (final MapEntry(key: id, value: print) in prints.entries) {
+          save.execute([print.bytes, print.sample, print.seconds, at, id]);
+        }
+      });
+    } finally {
+      save.close();
+    }
+  }
+
+  /// Makes the stored merges of songs that several accounts share what
+  /// [planMerges] decides now: new copies join their listed row, and copies
+  /// whose rule no longer holds are listed on their own again (what had
+  /// moved to their listed row stays there). Does nothing with fewer than
+  /// two accounts. Needs no network: it reads the stored prints.
+  MergeResult mergeSameSongs() {
+    final rows = [for (final (row, _) in _mergeRows()) row];
+    if ({for (final row in rows) row.song.sourceId}.length < 2) {
+      return const MergeResult(0, []);
+    }
+    final plan = planMerges(rows, mergeLikely: mergeLikely);
+    final changed = [
+      for (final row in rows)
+        if (plan.copies[row.id] != row.song.sameAs ||
+            plan.likely.contains(row.id) != row.likely)
+          row,
+    ];
+    if (changed.isEmpty) return const MergeResult(0, []);
     return _transaction(() {
       final unused = <String>[];
-      for (final MapEntry(key: copy, value: listed) in copies.entries) {
-        _db.execute('UPDATE tracks SET same_as = ? WHERE id = ?', [
-          listed,
-          copy,
-        ]);
-        final file = _moveReferences(copy, listed);
-        if (file != null) unused.add(file);
+      var merged = 0;
+      var unmerged = 0;
+      for (final row in changed) {
+        final listed = plan.copies[row.id];
+        _db.execute(
+          'UPDATE tracks SET same_as = ?, same_likely = ? WHERE id = ?',
+          [listed, plan.likely.contains(row.id) ? 1 : 0, row.id],
+        );
+        if (listed == null) {
+          unmerged++;
+        } else if (listed != row.song.sameAs) {
+          merged++;
+          final file = _moveReferences(row.id, listed);
+          if (file != null) unused.add(file);
+        }
       }
-      return MergeResult(copies.length, unused);
+      // A copy kept from a removed account points at its listed row, which
+      // may have become a copy itself just now.
+      _db.execute('''
+        UPDATE tracks SET same_as =
+          (SELECT h.same_as FROM tracks h WHERE h.id = tracks.same_as)
+        WHERE same_as IN (SELECT id FROM tracks WHERE same_as IS NOT NULL)
+      ''');
+      return MergeResult(
+        merged,
+        unused,
+        unmerged: unmerged,
+        marked: changed.length - merged - unmerged,
+      );
     });
   }
 
@@ -640,7 +776,8 @@ class LibraryStore {
   List<Track> loadAll() {
     final copies = <int, List<TrackCopy>>{};
     for (final row in _db.select('''
-      SELECT same_as, source_id, source_key, access_key, gone_at_ms
+      SELECT same_as, source_id, source_key, access_key, gone_at_ms,
+             same_likely
       FROM tracks WHERE same_as IS NOT NULL ORDER BY id
     ''')) {
       (copies[row['same_as'] as int] ??= []).add(
@@ -649,6 +786,7 @@ class LibraryStore {
           sourceKey: row['source_key'] as String,
           accessKey: row['access_key'] as String?,
           goneAtMs: row['gone_at_ms'] as int?,
+          likely: row['same_likely'] == 1,
         ),
       );
     }

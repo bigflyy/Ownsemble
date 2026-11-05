@@ -6,7 +6,7 @@ import 'package:sqlite3/sqlite3.dart';
 /// Schema version this build reads and writes (`PRAGMA user_version`).
 ///
 /// 0 is the speed-gate build's single `tracks` table (or an empty file).
-const librarySchemaVersion = 6;
+const librarySchemaVersion = 7;
 
 /// How many colors sources can have; the theme has one per slot, from 1.
 const sourceColorCount = 6;
@@ -46,6 +46,7 @@ void migrateLibrary(Database db, {String? dataDir}) {
     if (version < 4) _addAccounts(db);
     if (version < 5) _addVkAlbumLinks(db);
     if (version < 6) _addSongVersions(db);
+    if (version < 7) _addFilePrints(db);
     db.execute('PRAGMA user_version = $librarySchemaVersion');
     db.execute('COMMIT');
   } catch (_) {
@@ -156,6 +157,30 @@ void _addSongVersions(Database db) {
       decided_at_ms INTEGER NOT NULL
     )
   ''');
+}
+
+/// Version 7: merging songs of several accounts only when they are one file
+/// (Stage L). `vk_file_prints` holds a print of VK's file for each row worth
+/// comparing (see `file_print.dart`): its size, a hash of a few samples and
+/// how long it plays; size and hash are null when VK gave no file.
+/// `listed_sec` is the length listed when it was read: another one means
+/// the print is old. `tracks.same_likely` is 1 on a copy merged only by the
+/// likely rule, which the user can switch off. Old merges stay until the
+/// next sync has read both files.
+void _addFilePrints(Database db) {
+  db.execute('''
+    CREATE TABLE vk_file_prints (
+      track_id INTEGER PRIMARY KEY REFERENCES tracks (id) ON DELETE CASCADE,
+      listed_sec INTEGER NOT NULL,
+      bytes INTEGER,
+      sample INTEGER,
+      seconds REAL,
+      checked_at_ms INTEGER NOT NULL
+    )
+  ''');
+  db.execute(
+    'ALTER TABLE tracks ADD COLUMN same_likely INTEGER NOT NULL DEFAULT 0',
+  );
 }
 
 void _createVersion1(Database db) {

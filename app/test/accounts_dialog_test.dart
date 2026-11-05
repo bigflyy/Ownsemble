@@ -15,6 +15,8 @@ import 'package:ownsemble/vk/vk_client.dart';
 import 'package:ownsemble/vk/vk_login_window.dart';
 import 'package:ownsemble/vk/vk_session.dart';
 
+import 'merge_support.dart';
+
 class NoWindow implements LoginWindow {
   @override
   set onClosed(void Function() listener) {}
@@ -76,7 +78,7 @@ void main() {
       song('2_1', 'Общая', trackId: 7),
       song('2_2', 'Только вторая'),
     ]);
-    store.mergeSameSongs();
+    mergeSameFiles(store);
     sessions = Sessions()
       ..save('1', const [SessionCookie('remixsid', 'a', '.vk.ru')])
       ..save('2', const [SessionCookie('remixsid', 'b', '.vk.ru')]);

@@ -8,13 +8,14 @@ enum TrackSource {
 }
 
 /// One account's copy of a song: another account's row merged into the one
-/// that is listed. See `findSameSongs`.
+/// that is listed. See `planMerges`.
 class TrackCopy {
   const TrackCopy({
     required this.sourceId,
     required this.sourceKey,
     this.accessKey,
     this.goneAtMs,
+    this.likely = false,
   });
 
   final int sourceId;
@@ -23,6 +24,10 @@ class TrackCopy {
 
   /// When this account lost the song, Unix milliseconds.
   final int? goneAtMs;
+
+  /// Merged by the likely rule only: probably, not certainly, the same file
+  /// (Stage L).
+  final bool likely;
 }
 
 /// One song in the library, as the list and the player need it.
@@ -113,6 +118,10 @@ class Track {
     ),
     ...copies,
   ];
+
+  /// Whether another account's copy was merged in only by the likely rule
+  /// (the setting "also merge likely copies"), so the row is marked.
+  bool get mergedLikely => copies.any((copy) => copy.likely);
 
   /// Whether [source] has this song, gone or not.
   bool isFrom(int source) =>

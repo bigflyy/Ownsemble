@@ -14,6 +14,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:ownsemble/library/file_print.dart';
 import 'package:ownsemble/library/library_store.dart';
 import 'package:ownsemble/library/track.dart';
 import 'package:ownsemble/playback/playback_controller.dart';
@@ -217,6 +218,11 @@ void main() {
           addedAt: 899,
         ),
       ]);
+      // As if VK gave both accounts the same file (Stage L).
+      store.savePrints({
+        for (final row in store.printsToRead())
+          row.trackId: const FilePrint(bytes: 1, sample: 1, seconds: 200),
+      });
       store.mergeSameSongs();
     }
     store.saveAudioFile(ids[1], 'cache/a.mp3', 10, pinned: true);
