@@ -4,6 +4,7 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:ownsemble/library/file_print.dart';
 import 'package:ownsemble/library/library_store.dart';
 import 'package:ownsemble/library/track.dart';
 import 'package:ownsemble/playback/playback_controller.dart';
@@ -1309,6 +1310,46 @@ void main() {
         ),
         findsOneWidget,
       );
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('a song merged by the likely rule is marked, wide or narrow', (
+      tester,
+    ) async {
+      // Two accounts' copies of Песня 1: one VK song id, files 0.4 s apart.
+      final first = store.sources().single.id;
+      NewTrack copy(String key) => NewTrack(
+        sourceKey: key,
+        artist: 'Исполнитель 1',
+        title: 'Песня 1',
+        durationSec: 200,
+        addedAt: 99,
+        vkTrackId: 41,
+      );
+      store.updateQuietDetails(first, [copy('1_1')]);
+      final other = store.ensureSource(TrackSource.vk, account: '2', name: 'B');
+      final theirs = store.upsertAll(other, [copy('2_1')]).single;
+      store.savePrints({
+        ids[1]: const FilePrint(bytes: 10, sample: 1, seconds: 200),
+        theirs: const FilePrint(bytes: 12, sample: 2, seconds: 200.4),
+      });
+      store.writeSetting(LibraryStore.mergeLikelySetting, 'on');
+      expect(store.mergeSameSongs().merged, 1);
+      library = LibraryController(store.loadAll(), collections: collections);
+      Finder mark() => find.descendant(
+        of: find.byKey(ValueKey('song-${ids[1]}')),
+        matching: find.byKey(ValueKey('likely-tag-${ids[1]}')),
+      );
+
+      await pumpShell(tester, size: const Size(1400, 800));
+      expect(mark(), findsOneWidget);
+      expect(find.text('likely same'), findsOneWidget);
+      await pumpShell(
+        tester,
+        size: const Size(railWidth + albumColumnMinWidth - 1, 800),
+      );
+      expect(mark(), findsOneWidget);
+      expect(find.byKey(ValueKey('likely-tag-${ids[0]}')), findsNothing);
       expect(tester.takeException(), isNull);
     });
 

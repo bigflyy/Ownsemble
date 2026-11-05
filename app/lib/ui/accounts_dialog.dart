@@ -56,7 +56,7 @@ class _AccountList extends StatelessWidget {
           const SizedBox(height: 4),
           Text(
             'Each account syncs into one library. A song in several accounts '
-            'shows once.',
+            'shows once when VK gives them the very same file.',
             style: TextStyle(fontSize: 13, color: colors.dim),
           ),
           const SizedBox(height: 12),
@@ -86,6 +86,10 @@ class _AccountList extends StatelessWidget {
                 ],
               ),
             ),
+          if (known.length > 1 && sources != null) ...[
+            const SizedBox(height: 8),
+            _MergeLikelySwitch(sources: sources!),
+          ],
           const SizedBox(height: 12),
           Row(
             children: [
@@ -103,6 +107,54 @@ class _AccountList extends StatelessWidget {
             ],
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// The setting "also merge likely copies" (Stage L, user 2026-11-04: merge
+/// only when certain, the closest rule as a choice in settings).
+class _MergeLikelySwitch extends StatefulWidget {
+  const _MergeLikelySwitch({required this.sources});
+
+  final SourceEditor sources;
+
+  @override
+  State<_MergeLikelySwitch> createState() => _MergeLikelySwitchState();
+}
+
+class _MergeLikelySwitchState extends State<_MergeLikelySwitch> {
+  late bool _on = widget.sources.mergeLikely;
+  bool _busy = false;
+
+  Future<void> _set(bool on) async {
+    setState(() {
+      _on = on;
+      _busy = true;
+    });
+    await widget.sources.setMergeLikely(on);
+    if (mounted) setState(() => _busy = false);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = OwnColors.of(context);
+    return CheckboxListTile(
+      key: const ValueKey('merge-likely'),
+      contentPadding: EdgeInsets.zero,
+      controlAffinity: ListTileControlAffinity.leading,
+      dense: true,
+      value: _on,
+      onChanged: _busy ? null : (value) => _set(value ?? false),
+      title: const Text(
+        'Also merge likely copies',
+        style: TextStyle(fontSize: 14),
+      ),
+      subtitle: Text(
+        'Show a song once when the accounts have two files with one VK '
+        'song id that play within 1 s of each other. Probably the same '
+        'recording, not certainly: such songs are marked "likely same".',
+        style: TextStyle(fontSize: 12, color: colors.dim),
       ),
     );
   }

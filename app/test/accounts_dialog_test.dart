@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:ownsemble/library/file_print.dart';
 import 'package:ownsemble/library/library_store.dart';
+import 'package:ownsemble/library/search_index.dart';
 import 'package:ownsemble/library/track.dart';
 import 'package:ownsemble/sync/background_sync.dart';
 import 'package:ownsemble/ui/library_controller.dart';
@@ -168,6 +170,40 @@ void main() {
     expect(find.textContaining('not logged in'), findsWidgets);
     await tapKey(tester, 'account-menu-$second');
     expect(find.byKey(const ValueKey('vk-log-out')), findsNothing);
+  });
+
+  testWidgets('the likely switch merges close files at once, and back', (
+    tester,
+  ) async {
+    // VK gives the two accounts' "Общая" two files that play 0.4 s apart.
+    final ids = [for (final row in store.printsToRead(nowMs: 1 << 50)) row];
+    store.savePrints({
+      ids.first.trackId: const FilePrint(bytes: 10, sample: 1, seconds: 200),
+      ids.last.trackId: const FilePrint(bytes: 12, sample: 2, seconds: 200.4),
+    });
+    store.mergeSameSongs();
+    final tracks = store.loadAll();
+    library.replaceTracks(tracks, SearchIndex(tracks));
+    expect(library.all, hasLength(3));
+
+    await openDialog(tester);
+    await tapKey(tester, 'merge-likely');
+    expect(store.mergeLikely, isTrue);
+    expect(library.all, hasLength(2));
+    expect(library.all.where((t) => t.mergedLikely), hasLength(1));
+
+    await tapKey(tester, 'merge-likely');
+    expect(store.mergeLikely, isFalse);
+    expect(library.all, hasLength(3));
+  });
+
+  testWidgets('with one account the likely switch is not shown', (
+    tester,
+  ) async {
+    store.removeSource(second);
+    sync.updateSources(store.sources());
+    await openDialog(tester);
+    expect(find.byKey(const ValueKey('merge-likely')), findsNothing);
   });
 
   testWidgets('removing asks first', (tester) async {

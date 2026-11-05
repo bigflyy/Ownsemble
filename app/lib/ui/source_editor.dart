@@ -38,7 +38,32 @@ class SourceEditor {
   /// See [LibraryStore.removeSource] for what stays. Nothing changes on VK.
   Future<void> remove(int sourceId) async {
     await sync.idle;
-    for (final path in store.removeSource(sourceId)) {
+    _deleteUnused(store.removeSource(sourceId));
+    final tracks = store.loadAll();
+    library.replaceTracks(tracks, SearchIndex(tracks));
+    sync.updateSources(store.sources());
+  }
+
+  /// Whether songs of several accounts are also merged by the likely rule
+  /// (Stage L); off by default.
+  bool get mergeLikely => store.mergeLikely;
+
+  /// Switches the likely rule and merges again at once from the stored
+  /// prints of the files, with no network, once no sync is writing.
+  Future<void> setMergeLikely(bool on) async {
+    await sync.idle;
+    store.writeSetting(LibraryStore.mergeLikelySetting, on ? 'on' : null);
+    final merge = store.mergeSameSongs();
+    _deleteUnused(merge.unusedFiles);
+    if (!merge.changed) return;
+    final tracks = store.loadAll();
+    library.replaceTracks(tracks, SearchIndex(tracks));
+    sync.updateSources(store.sources());
+  }
+
+  /// Deletes stored audio that no row points at any more.
+  void _deleteUnused(List<String> paths) {
+    for (final path in paths) {
       if (store.audioPathUsers(path) > 0) continue;
       try {
         File(resolveAudioPath(dataDir, path)).deleteSync();
@@ -46,8 +71,5 @@ class SourceEditor {
         // Open or already gone: a leftover file is only wasted space.
       }
     }
-    final tracks = store.loadAll();
-    library.replaceTracks(tracks, SearchIndex(tracks));
-    sync.updateSources(store.sources());
   }
 }

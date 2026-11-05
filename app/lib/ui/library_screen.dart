@@ -1416,6 +1416,20 @@ class _SongRow extends StatelessWidget {
     final dimStyle = TextStyle(fontSize: 13, color: colors.dim);
     List<Widget> tags({required bool compact}) => [
       versionTag(compact),
+      if (track.mergedLikely) ...[
+        const SizedBox(width: 8),
+        _Tag(
+          key: ValueKey('likely-tag-${track.id}'),
+          label: 'likely same',
+          icon: Icons.join_inner,
+          compact: compact,
+          explanation:
+              'Your accounts have this song as two different files that '
+              'are probably the same recording: one VK song id, and both '
+              'play within 1 s of each other. Shown once because "Also '
+              'merge likely copies" is on in VK accounts.',
+        ),
+      ],
       if (track.isGone) ...[
         const SizedBox(width: 8),
         _Tag(
