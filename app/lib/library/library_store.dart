@@ -4,6 +4,7 @@ import 'package:sqlite3/sqlite3.dart';
 import 'library_records.dart';
 import 'library_schema.dart';
 import 'same_song.dart';
+import 'song_version.dart';
 import 'track.dart';
 
 export 'library_records.dart';
@@ -286,6 +287,7 @@ class LibraryStore {
   /// When both have stored audio, [to]'s stays, kept if either was a download,
   /// and the path of [from]'s file is returned.
   String? _moveReferences(int from, int to) {
+    _forgetVersion(from);
     _db.execute('UPDATE history SET track_id = ? WHERE track_id = ?', [
       to,
       from,
@@ -318,6 +320,11 @@ class LibraryStore {
     final path = audio.first['path'] as String;
     return path == theirs.first['path'] ? null : path;
   }
+
+  /// Forgets the version chosen for row [from] when it hands over to another
+  /// row: that row has its own file, checked again when it plays.
+  void _forgetVersion(int from) =>
+      _db.execute('DELETE FROM song_versions WHERE track_id = ?', [from]);
 
   /// Merges the songs that several accounts share into one listed row (see
   /// [findSameSongs]). Does nothing with fewer than two accounts.
@@ -838,6 +845,55 @@ class LibraryStore {
         row['added_at_ms'] as int,
       ),
   ];
+
+  // Song versions (Stage K).
+
+  /// The version chosen for each song whose VK file was swapped.
+  Map<int, VersionChoice> versionChoices() => {
+    for (final row in _db.select('SELECT * FROM song_versions'))
+      row['track_id'] as int: VersionChoice(
+        trackId: row['track_id'] as int,
+        state: VersionState.values.byName(row['state'] as String),
+        fileKey: row['file_key'] as String?,
+        fileAccessKey: row['file_access_key'] as String?,
+        fileSeconds: (row['file_seconds'] as num?)?.toDouble(),
+        ownSeconds: (row['own_seconds'] as num).toDouble(),
+        ownBytes: row['own_bytes'] as int?,
+        listedSec: row['listed_sec'] as int,
+        decidedAtMs: row['decided_at_ms'] as int,
+      ),
+  };
+
+  /// Stores [choice], replacing the song's earlier one.
+  void saveVersionChoice(VersionChoice choice) => _db.execute(
+    '''
+    INSERT OR REPLACE INTO song_versions (track_id, state, file_key,
+      file_access_key, file_seconds, own_seconds, own_bytes, listed_sec,
+      decided_at_ms)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ''',
+    [
+      choice.trackId,
+      choice.state.name,
+      choice.fileKey,
+      choice.fileAccessKey,
+      choice.fileSeconds,
+      choice.ownSeconds,
+      choice.ownBytes,
+      choice.listedSec,
+      choice.decidedAtMs,
+    ],
+  );
+
+  /// Forgets the version chosen for [trackId]: its own file plays again.
+  void removeVersionChoice(int trackId) => _forgetVersion(trackId);
+
+  /// VK's `track_id` of row [trackId]; null when VK gave none.
+  int? vkTrackIdOf(int trackId) =>
+      _db.select('SELECT vk_track_id FROM tracks WHERE id = ?', [
+            trackId,
+          ]).firstOrNull?['vk_track_id']
+          as int?;
 
   // Settings.
 

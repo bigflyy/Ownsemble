@@ -3,13 +3,19 @@ import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ownsemble/library/library_schema.dart';
 import 'package:ownsemble/library/library_store.dart';
+import 'package:ownsemble/library/song_version.dart';
 import 'package:ownsemble/library/track.dart';
 import 'package:path/path.dart' as p;
 import 'package:sqlite3/sqlite3.dart';
 
-/// Takes back what version 5 added, for tests that rebuild an older library
+/// Takes back what version 6 added, for tests that rebuild an older library
 /// from a new one.
+void dropVersion6(Database db) => db.execute('DROP TABLE song_versions');
+
+/// Takes back what versions 5 and 6 added, for tests that rebuild an older
+/// library from a new one.
 void dropVersion5(Database db) {
+  dropVersion6(db);
   db.execute('DROP INDEX tracks_by_album');
   db.execute('ALTER TABLE tracks DROP COLUMN vk_album_key');
   db.execute('ALTER TABLE tracks DROP COLUMN vk_album_access_key');
@@ -210,6 +216,51 @@ void main() {
 
     migrated.saveVkAlbumTitle('-2_7', 'Молодость и панк-рок');
     expect(migrated.vkAlbumTitles(), {'-2_7': 'Молодость и панк-рок'});
+  });
+
+  test('version 5 gains the song versions and keeps its songs', () {
+    final store = LibraryStore.open(dbPath);
+    final vk = store.ensureSource(TrackSource.vk, account: '1', name: 'VK');
+    final id = store.upsertAll(vk, [
+      const NewTrack(
+        sourceKey: '1_10788',
+        artist: 'Операция Пластилин',
+        title: 'Ты и я',
+        durationSec: 219,
+        addedAt: 5,
+      ),
+    ]).single;
+    store.close();
+    final db = sqlite3.open(dbPath);
+    dropVersion6(db);
+    db.execute('PRAGMA user_version = 5');
+    db.close();
+
+    final migrated = LibraryStore.open(dbPath);
+    addTearDown(migrated.close);
+    expect(versionOf(dbPath), librarySchemaVersion);
+    expect(migrated.loadAll().single.title, 'Ты и я');
+    expect(migrated.versionChoices(), isEmpty);
+    migrated.saveVersionChoice(
+      VersionChoice(
+        trackId: id,
+        state: VersionState.suggested,
+        fileKey: '-2001_42',
+        fileAccessKey: 'k',
+        fileSeconds: 219.2,
+        ownSeconds: 226.5,
+        ownBytes: 9062443,
+        listedSec: 219,
+        decidedAtMs: 7,
+      ),
+    );
+    final choice = migrated.versionChoices()[id]!;
+    expect(choice.state, VersionState.suggested);
+    expect(choice.fileKey, '-2001_42');
+    expect(choice.fileSeconds, 219.2);
+    expect(choice.ownBytes, 9062443);
+    migrated.removeVersionChoice(id);
+    expect(migrated.versionChoices(), isEmpty);
   });
 
   test('a library from a newer build is refused and left alone', () {

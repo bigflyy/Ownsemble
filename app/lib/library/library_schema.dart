@@ -6,7 +6,7 @@ import 'package:sqlite3/sqlite3.dart';
 /// Schema version this build reads and writes (`PRAGMA user_version`).
 ///
 /// 0 is the speed-gate build's single `tracks` table (or an empty file).
-const librarySchemaVersion = 5;
+const librarySchemaVersion = 6;
 
 /// How many colors sources can have; the theme has one per slot, from 1.
 const sourceColorCount = 6;
@@ -45,6 +45,7 @@ void migrateLibrary(Database db, {String? dataDir}) {
     if (version < 3) _addVkAlbumTitles(db);
     if (version < 4) _addAccounts(db);
     if (version < 5) _addVkAlbumLinks(db);
+    if (version < 6) _addSongVersions(db);
     db.execute('PRAGMA user_version = $librarySchemaVersion');
     db.execute('COMMIT');
   } catch (_) {
@@ -127,6 +128,34 @@ void _addVkAlbumLinks(Database db) {
     'CREATE INDEX tracks_by_album ON tracks (vk_album_key) '
     'WHERE vk_album_key IS NOT NULL',
   );
+}
+
+/// Version 6: which file plays for a song whose VK file was swapped for
+/// another recording (Stage K): VK kept the length it listed for the old
+/// one, and the file plays more than 3 s longer or shorter.
+///
+/// `state` is how the file was chosen: "suggested" (found by the app, an
+/// upload within 1 s of the listed length), "picked" (by the user) or
+/// "none" (nothing matches: VK's file plays, marked as another recording).
+/// `file_key` and `file_access_key` name the upload that plays ("ownerId_
+/// audioId"; null for "none") and `file_seconds` how long its file plays;
+/// `own_seconds` and `own_bytes` describe VK's file for the song when the
+/// swap was found, and `listed_sec` the length listed then: when a sync
+/// brings another listed length, the choice no longer applies.
+void _addSongVersions(Database db) {
+  db.execute('''
+    CREATE TABLE song_versions (
+      track_id INTEGER PRIMARY KEY REFERENCES tracks (id) ON DELETE CASCADE,
+      state TEXT NOT NULL,
+      file_key TEXT,
+      file_access_key TEXT,
+      file_seconds REAL,
+      own_seconds REAL NOT NULL,
+      own_bytes INTEGER,
+      listed_sec INTEGER NOT NULL,
+      decided_at_ms INTEGER NOT NULL
+    )
+  ''');
 }
 
 void _createVersion1(Database db) {
