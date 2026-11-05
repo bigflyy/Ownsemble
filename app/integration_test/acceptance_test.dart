@@ -577,6 +577,21 @@ void main() {
     );
     // ignore: avoid_print
     print('not played: ${notPlayed.isEmpty ? 'none' : notPlayed.join('; ')}');
+    // Stage K: songs whose VK file was another recording, each named with
+    // what plays instead, so a swap the length check above accepts (3%)
+    // is still traced to its song.
+    final swapped = [
+      for (final track in library.all)
+        if (player.versions?.choiceFor(track) case final choice?)
+          '${songName(track)}: listed ${track.durationSec} s, VK file '
+              '${choice.ownSeconds.toStringAsFixed(1)} s, ${choice.state.name}'
+              '${choice.fileSeconds == null ? '' : ', plays ${choice.fileSeconds!.toStringAsFixed(1)} s'}',
+    ];
+    // ignore: avoid_print
+    print(
+      'VK file swapped for another recording: '
+      '${swapped.isEmpty ? 'none' : swapped.join('; ')}',
+    );
     expect(problems, isEmpty);
     if (!quick) expect(goneNotStored, 1);
     // This copy's file was broken on VK's audio server (always 504 until
