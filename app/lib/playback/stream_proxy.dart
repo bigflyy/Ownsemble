@@ -1,6 +1,9 @@
 import 'dart:async';
 import 'dart:io';
 import 'dart:math';
+import 'dart:typed_data';
+
+import 'mp3_length.dart';
 
 /// One upstream stream made reachable for mpv through [StreamProxy].
 class ProxiedStream {
@@ -10,6 +13,7 @@ class ProxiedStream {
     this._cacheTo,
     this._onSaved,
     this.label,
+    this._expectSeconds,
   );
 
   /// Names the song in perf.log (such as "song 123"), never a title.
@@ -29,6 +33,29 @@ class ProxiedStream {
 
   /// Told how much is saved so far and the whole size.
   final void Function(int written, int total)? _onSaved;
+
+  /// How long the file should play, in seconds; null: not checked. A file
+  /// more than [otherRecordingSeconds] off is held back from mpv and
+  /// reported through [otherRecording] instead (Stage K).
+  final double? _expectSeconds;
+
+  final _measured = Completer<FileFacts?>();
+  final _other = Completer<FileFacts>();
+
+  /// The file's size and length, measured from its first bytes when mpv
+  /// asks for the whole file; null when it could not be measured or is not
+  /// checked. Never completes while mpv has not asked for the file.
+  Future<FileFacts?> get measured => _measured.future;
+
+  /// Completes when the file is another recording than expected. mpv then
+  /// gets none of it: its request waits until the stream is let go.
+  Future<FileFacts> get otherRecording => _other.future;
+
+  /// Set once [otherRecording] completed, to read without waiting.
+  FileFacts? otherRecordingFacts;
+
+  /// Ends mpv's held request of a file that is another recording.
+  void Function()? _releaseHeld;
 
   final _firstChunk = Completer<int>();
   final _failure = Completer<int>();
@@ -329,11 +356,15 @@ class StreamProxy {
   /// audio is also saved to [cacheTo] when given. [onSaved] is told how far
   /// the save has got. Only the
   /// most recent streams stay registered.
+  ///
+  /// With [expectSeconds] the file's length is checked from its first
+  /// bytes before mpv gets any (see [ProxiedStream.otherRecording]).
   ProxiedStream add(
     Uri upstream, {
     File? cacheTo,
     void Function(int written, int total)? onSaved,
     String? label,
+    double? expectSeconds,
   }) {
     final id = List.generate(
       16,
@@ -345,6 +376,7 @@ class StreamProxy {
       cacheTo,
       onSaved,
       label,
+      expectSeconds,
     ).._onLost = _reportLost;
     _streams[id] = stream;
     while (_streams.length > 4) {
@@ -377,8 +409,10 @@ class StreamProxy {
   final _kept = <ProxiedStream>[];
 
   /// Stops [stream]'s save for [reason], at once if mpv no longer reads it.
+  /// A request held back as another recording ends here too.
   void _stop(ProxiedStream stream, String reason) {
     _kept.remove(stream);
+    stream._releaseHeld?.call();
     stream.cancelCaching(reason);
     final done = stream._teeDone;
     if (done != null && !done.isCompleted) done.complete(false);
@@ -510,6 +544,30 @@ class StreamProxy {
     }
     response.bufferOutput = false;
 
+    // The whole size: from Content-Range for "bytes=0-", else the length.
+    final contentRange = upstream.headers.value(HttpHeaders.contentRangeHeader);
+    final total = contentRange == null
+        ? upstream.contentLength
+        : int.tryParse(contentRange.split('/').last) ?? -1;
+    void noteFirstChunk() {
+      if (!stream._firstChunk.isCompleted) {
+        stream._firstChunk.complete(clock.elapsedMilliseconds);
+      }
+    }
+
+    final Stream<List<int>> source;
+    if (wholeFile &&
+        stream._expectSeconds != null &&
+        !stream._measured.isCompleted &&
+        total > 0) {
+      source = _checked(stream, upstream, total, noteFirstChunk);
+    } else {
+      if (wholeFile && !stream._measured.isCompleted) {
+        stream._measured.complete(null);
+      }
+      source = upstream;
+    }
+
     final cacheTo = stream._cacheTo;
     if (cacheTo != null &&
         wholeFile &&
@@ -517,16 +575,22 @@ class StreamProxy {
         !stream._cachingCanceled &&
         upstream.statusCode < 300) {
       stream._teeStarted = true;
-      await _serveAndSave(stream, upstream, response, cacheTo, clock, trace);
+      await _serveAndSave(
+        stream,
+        source,
+        total,
+        response,
+        cacheTo,
+        noteFirstChunk,
+        trace,
+      );
       return;
     }
 
-    final body = upstream.transform<List<int>>(
+    final body = source.transform<List<int>>(
       StreamTransformer.fromHandlers(
         handleData: (chunk, sink) {
-          if (!stream._firstChunk.isCompleted) {
-            stream._firstChunk.complete(clock.elapsedMilliseconds);
-          }
+          noteFirstChunk();
           trace.firstByteMs ??= trace.clock.elapsedMilliseconds;
           trace.bytes += chunk.length;
           sink.add(chunk);
@@ -546,6 +610,85 @@ class StreamProxy {
     }
   }
 
+  /// [upstream], held back until its first bytes tell how long the file of
+  /// [total] bytes plays. A file within [otherRecordingSeconds] of what
+  /// [stream] expects then flows on unchanged; another recording reaches mpv
+  /// not at all: it is reported, its save canceled, and mpv's request waits
+  /// (an early end would look like the song's end and start the next song)
+  /// until the stream is let go. A file that cannot be measured flows on.
+  Stream<List<int>> _checked(
+    ProxiedStream stream,
+    Stream<List<int>> upstream,
+    int total,
+    void Function() onFirstChunk,
+  ) {
+    final controller = StreamController<List<int>>();
+    final held = BytesBuilder(copy: false);
+    final heldChunks = <List<int>>[];
+    var open = false;
+    StreamSubscription<List<int>>? subscription;
+    void letThrough() {
+      open = true;
+      heldChunks.forEach(controller.add);
+      heldChunks.clear();
+    }
+
+    controller.onListen = () {
+      subscription = upstream.listen(
+        (chunk) {
+          if (open) {
+            controller.add(chunk);
+            return;
+          }
+          onFirstChunk();
+          heldChunks.add(chunk);
+          held.add(chunk);
+          final reading = readHead(held.toBytes(), total);
+          if (reading.needMore) return;
+          final facts = reading.facts;
+          if (!stream._measured.isCompleted) stream._measured.complete(facts);
+          if (facts != null && facts.differsFrom(stream._expectSeconds!)) {
+            stream.otherRecordingFacts = facts;
+            stream.cancelCaching('another recording ($facts)');
+            stream._releaseHeld = () {
+              stream._releaseHeld = null;
+              if (!controller.isClosed) {
+                controller.addError(const HttpException('another recording'));
+                unawaited(controller.close());
+              }
+            };
+            unawaited(subscription?.cancel());
+            heldChunks.clear();
+            if (!stream._other.isCompleted) stream._other.complete(facts);
+            return;
+          }
+          letThrough();
+        },
+        onError: (Object error, StackTrace trace) {
+          if (!open && stream.otherRecordingFacts == null) letThrough();
+          controller.addError(error, trace);
+        },
+        onDone: () {
+          if (stream.otherRecordingFacts != null) return;
+          if (!open) {
+            // A file shorter than the bytes the check wanted.
+            final reading = readHead(held.toBytes(), total);
+            if (!stream._measured.isCompleted) {
+              stream._measured.complete(reading.facts);
+            }
+            letThrough();
+          }
+          unawaited(controller.close());
+        },
+      );
+    };
+    controller
+      ..onPause = (() => subscription?.pause())
+      ..onResume = (() => subscription?.resume())
+      ..onCancel = (() => subscription?.cancel());
+    return controller.stream;
+  }
+
   void _report(_Trace trace, String end) {
     if (!_requests.isClosed) _requests.add(trace.finish(end));
   }
@@ -555,17 +698,13 @@ class StreamProxy {
   /// is canceled.
   Future<void> _serveAndSave(
     ProxiedStream stream,
-    HttpClientResponse upstream,
+    Stream<List<int>> upstream,
+    int total,
     HttpResponse response,
     File cacheTo,
-    Stopwatch clock,
+    void Function() noteFirstChunk,
     _Trace trace,
   ) async {
-    // The total size: from Content-Range for "bytes=0-", else the length.
-    final contentRange = upstream.headers.value(HttpHeaders.contentRangeHeader);
-    final total = contentRange == null
-        ? upstream.contentLength
-        : int.tryParse(contentRange.split('/').last) ?? -1;
     stream._total = total;
     final part = File('${cacheTo.path}.part');
     IOSink? file;
@@ -591,9 +730,7 @@ class StreamProxy {
     late final StreamSubscription<List<int>> subscription;
     subscription = upstream.listen(
       (chunk) {
-        if (!stream._firstChunk.isCompleted) {
-          stream._firstChunk.complete(clock.elapsedMilliseconds);
-        }
+        noteFirstChunk();
         trace.firstByteMs ??= trace.clock.elapsedMilliseconds;
         file?.add(chunk);
         written += chunk.length;
@@ -713,6 +850,9 @@ class StreamProxy {
     ];
     _kept.clear();
     cancelCachingExcept(null, 'app closed');
+    for (final stream in _streams.values) {
+      stream._releaseHeld?.call();
+    }
     // Lets the stopped saves report themselves before the log stream ends.
     await Future.wait(running)
         .timeout(const Duration(seconds: 1), onTimeout: () => const []);

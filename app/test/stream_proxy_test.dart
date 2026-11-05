@@ -2,7 +2,10 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:ownsemble/playback/mp3_length.dart' show FileFacts;
 import 'package:ownsemble/playback/stream_proxy.dart';
+
+import 'mp3_samples.dart';
 
 void main() {
   late HttpServer upstream;
@@ -620,6 +623,123 @@ void main() {
       proxy.songChanged(skipped, heard: const Duration(seconds: 6));
       await proxy.close();
       expect(lost.single.reason, 'app closed');
+    });
+  });
+
+  group("checking the file's length (Stage K)", () {
+    // The song as listed (219 s) and the file VK swapped in (226.5 s, with
+    // a long tag, so the first frame comes only after many chunks).
+    final listed = songOf(219.2, tag: id3Tag('Ты и я'));
+    final swapped = songOf(
+      226.5,
+      tag: id3Tag('Операция Пластилин', padding: 200000),
+    );
+    late HttpServer songs;
+    late Directory dir;
+
+    setUp(() async {
+      dir = Directory.systemTemp.createTempSync('ownsemble_check');
+      songs = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      songs.listen((request) async {
+        final song = request.uri.path == '/swapped' ? swapped : listed;
+        request.response
+          ..headers.contentType = ContentType('audio', 'mpeg')
+          ..contentLength = song.length;
+        // In parts of 20 KB, as a line delivers them.
+        for (var at = 0; at < song.length; at += 20000) {
+          request.response.add(
+            song.sublist(at, (at + 20000).clamp(0, song.length)),
+          );
+          await request.response.flush();
+        }
+        await request.response.close();
+      });
+    });
+
+    tearDown(() async {
+      await songs.close(force: true);
+      dir.deleteSync(recursive: true);
+    });
+
+    Uri at(String path) => Uri.parse('http://127.0.0.1:${songs.port}$path');
+
+    test('a file of the listed length plays and is saved unchanged', () async {
+      final target = File('${dir.path}/vk_1_2.mp3');
+      final stream = proxy.add(
+        at('/listed'),
+        cacheTo: target,
+        expectSeconds: 219,
+      );
+      final (_, body) = await get(stream.localUri);
+      expect(body, listed);
+      final FileFacts? facts = await stream.measured;
+      expect(facts!.seconds, closeTo(219.2, 0.3));
+      expect(facts.bytes, listed.length);
+      expect(await stream.stored, listed.length);
+      expect(stream.otherRecordingFacts, isNull);
+    });
+
+    test('another recording never reaches mpv and is not saved', () async {
+      final target = File('${dir.path}/vk_1_3.mp3');
+      final lost = <LostSave>[];
+      proxy.lostSaves.listen(lost.add);
+      final stream = proxy.add(
+        at('/swapped'),
+        cacheTo: target,
+        expectSeconds: 219,
+        label: 'song 7',
+      );
+      // A raw socket, as mpv's request: it sees every byte that arrives.
+      final uri = stream.localUri;
+      final socket = await Socket.connect(uri.host, uri.port);
+      socket.write('GET ${uri.path} HTTP/1.1\r\nHost: ${uri.host}\r\n\r\n');
+      final received = <int>[];
+      final ended = Completer<void>();
+      socket.listen(
+        received.addAll,
+        onError: (_) {
+          if (!ended.isCompleted) ended.complete();
+        },
+        onDone: () {
+          if (!ended.isCompleted) ended.complete();
+        },
+      );
+      final facts = await stream.otherRecording;
+      expect(facts.seconds, closeTo(226.5, 0.3));
+      expect(stream.otherRecordingFacts, same(facts));
+      // The request waits, with not even the headers: an early end would
+      // look like the song's end and start the next song.
+      await Future<void>.delayed(const Duration(milliseconds: 300));
+      expect(ended.isCompleted, isFalse);
+      expect(received, isEmpty);
+      // The next song lets it go, with no audio.
+      proxy.songChanged(stream, heard: Duration.zero);
+      expect(await stream.stored, isNull);
+      await ended.future.timeout(const Duration(seconds: 5));
+      socket.destroy();
+      final text = String.fromCharCodes(received);
+      final bodyAt = text.indexOf('\r\n\r\n');
+      expect(bodyAt < 0 ? '' : text.substring(bodyAt + 4), isEmpty);
+      expect(target.existsSync(), isFalse);
+      expect(File('${target.path}.part').existsSync(), isFalse);
+      expect(lost.single.reason, startsWith('another recording'));
+    });
+
+    test(
+      'a song played without a check is still measured as unknown',
+      () async {
+        final stream = proxy.add(at('/swapped'));
+        final (_, body) = await get(stream.localUri);
+        expect(body, swapped);
+        expect(await stream.measured, isNull);
+      },
+    );
+
+    test('a range request alone is never held', () async {
+      final stream = proxy.add(at('/swapped'), expectSeconds: 219);
+      final (response, _) = await get(stream.localUri, range: 'bytes=100-');
+      expect(response.statusCode, HttpStatus.ok);
+      expect(stream.otherRecordingFacts, isNull);
     });
   });
 }
