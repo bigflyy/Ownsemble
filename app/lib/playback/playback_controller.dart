@@ -3,6 +3,7 @@ import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
 
+import '../library/song_version.dart';
 import '../library/track.dart';
 import 'play_queue.dart';
 import 'player_service.dart';
@@ -221,6 +222,9 @@ class PlaybackController extends ChangeNotifier {
     if (storage == null) return 'no storage';
     if (!track.inLibrary) return 'not in your library';
     try {
+      // A Download does not go through the player's check of the file:
+      // a song whose VK file was swapped keeps its chosen version instead.
+      await player.checkVersion(track);
       await storage.download(track, () async {
         final resolved = await player.resolveStream(track);
         if (resolved == null) return null;
@@ -232,6 +236,49 @@ class PlaybackController extends ChangeNotifier {
       return null;
     } catch (error) {
       return describePlayError(error);
+    }
+  }
+
+  /// Ids of version previews: songs outside the library, one per upload.
+  final _previewIds = <String, int>{};
+
+  /// Plays [version], an upload of [row]'s song, to listen to it from the
+  /// versions dialog: through [row]'s account, not saved, not in History,
+  /// and the play list stays as it is (Stage K).
+  Future<PlayTiming?> previewVersion(Track row, SongVersion version) async {
+    if (!player.isReady) return null;
+    final id = _previewIds.putIfAbsent(
+      version.key,
+      () => -1000000000 - _previewIds.length,
+    );
+    if (player.current?.id == id && player.currentLoaded) {
+      await playOrPause();
+      return null;
+    }
+    return _play(
+      Track(
+        id: id,
+        sourceId: row.sourceId,
+        source: row.source,
+        artist: version.artist,
+        title: version.title,
+        album: version.album,
+        durationSec: version.file?.seconds.round() ?? version.listedSec,
+        sourceKey: version.key,
+        accessKey: version.accessKey,
+      ),
+      record: false,
+    );
+  }
+
+  /// The version that plays for [track] changed: it starts again with the
+  /// new one when it is the song playing (or a preview of it is).
+  Future<void> versionChanged(Track track) async {
+    final current = player.current;
+    if (current == null) return;
+    final previewing = !current.inLibrary && queue.current?.id == track.id;
+    if (current.id == track.id || previewing) {
+      await _play(track, record: false);
     }
   }
 

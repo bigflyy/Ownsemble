@@ -12,6 +12,7 @@ import 'library/track.dart';
 import 'playback/playback_controller.dart';
 import 'platform/end_process.dart';
 import 'playback/player_service.dart';
+import 'playback/version_book.dart';
 import 'storage/audio_storage.dart';
 import 'storage/cover_store.dart';
 import 'storage/stored_check.dart';
@@ -179,7 +180,7 @@ Future<void> main(List<String> args) async {
     mpvLog: options.mpvLog ? File(p.join(options.dataDir, 'mpv.log')) : null,
     storage: storage,
     cacheWhileStreaming: options.cacheWhileStreaming,
-  );
+  )..versions = VersionBook.vk(store, persist: options.cacheWhileStreaming);
   final library = LibraryController(
     tracks,
     collections: collections,
@@ -454,9 +455,18 @@ void _logPlayTimings(PlayerService player, File log) {
     final skipped = timing.playlistLinks == 0
         ? ''
         : ', ${timing.playlistLinks} HLS links from VK';
+    // Stage K: how long the file plays, and which version it is when VK
+    // swapped the song's own file.
+    final file = [
+      if (timing.fileSeconds case final seconds?)
+        ', file ${seconds.toStringAsFixed(1)} s',
+      if (timing.version case final version?) ', version ${version.name}',
+      if (timing.versionNews != null) ', own file found swapped',
+    ].join();
     final line = timing.ok
         ? '$kind sound ${timing.toSoundMs} ms'
               '${timing.cached ? '' : ' (VK link ${timing.resolveMs} ms$skipped$via)'}'
+              '$file'
         : '$kind failed after ${timing.toSoundMs} ms$skipped$via: ${timing.error}';
     log.writeAsStringSync(
       '${DateTime.now().toIso8601String()} $line\n',

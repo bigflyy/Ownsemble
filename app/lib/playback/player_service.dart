@@ -5,11 +5,14 @@ import 'package:flutter/foundation.dart';
 import 'package:media_kit/media_kit.dart' hide Track;
 
 import '../library/library_schema.dart' show resolveAudioPath;
+import '../library/song_version.dart';
 import '../library/track.dart';
 import '../storage/audio_storage.dart';
 import '../vk/vk_client.dart';
+import 'mp3_length.dart';
 import 'stream_proxy.dart';
 import 'stream_route.dart';
+import 'version_book.dart';
 
 /// Timing of one play request, from the click to audible output.
 class PlayTiming {
@@ -24,9 +27,24 @@ class PlayTiming {
     this.playlistLinks = 0,
     this.sourceId,
     this.skippedAccounts = 0,
+    this.fileSeconds,
+    this.version,
+    this.versionNews,
   });
 
   final bool ok;
+
+  /// How long the file that played lasts, measured from its first bytes;
+  /// null when it was not checked (Stage K).
+  final double? fileSeconds;
+
+  /// How the file that played was chosen, for a song whose VK file was
+  /// swapped for another recording; null for a song's own file.
+  final VersionState? version;
+
+  /// Set when this play found the song's VK file swapped: what to tell the
+  /// user about the version that plays instead.
+  final String? versionNews;
   final bool cached;
 
   /// HLS playlist links VK gave before the link that was used, for perf.log.
@@ -120,6 +138,12 @@ class PlayerService {
   /// The logged-in client of each source's account, read at every play, so
   /// logging in or out needs no update here; null when there is no VK at all.
   StreamAccounts? accounts;
+
+  /// The versions that play for songs whose VK file was swapped for another
+  /// recording. With it every library song's file is checked against the
+  /// length it should have before mpv gets it (Stage K); without it nothing
+  /// is checked.
+  VersionBook? versions;
   final bool muted;
 
   /// Extra mpv options (name to value), applied on top of [defaultMpvOptions].
@@ -266,9 +290,25 @@ class PlayerService {
   /// Starts [track] and completes once sound is playing (or it failed). With
   /// [from] it starts at that position instead of the beginning; a failed
   /// start keeps it as [resumeAt], so the next try goes on from there too.
-  Future<PlayTiming> play(Track track, {Duration? from}) async {
+  Future<PlayTiming> play(Track track, {Duration? from}) =>
+      _play(track, from: from, round: 0, clock: Stopwatch()..start());
+
+  /// How often one play may switch to another file of the song: its own file
+  /// found swapped, then a chosen upload gone or changed as well.
+  static const _maxRounds = 3;
+
+  /// One try at playing [track]; [clock] runs from the click, over every
+  /// round. A file that turns out to be another recording than the song's
+  /// starts the next [round] with the version chosen for it, carrying the
+  /// [news] to tell the user.
+  Future<PlayTiming> _play(
+    Track track, {
+    Duration? from,
+    required int round,
+    required Stopwatch clock,
+    String? news,
+  }) async {
     final generation = ++_generation;
-    final clock = Stopwatch()..start();
     // The last song's play time ends here, before anything is awaited.
     _heard.stop();
     final skipped = _currentStream;
@@ -290,6 +330,17 @@ class PlayerService {
 
     ProxiedStream? proxied;
     var cached = false;
+    // Library songs from VK are checked: their file must play about as long
+    // as the chosen version's, or the listed length (Stage K).
+    final versions = this.versions;
+    final checked =
+        versions != null && track.inLibrary && track.source == TrackSource.vk;
+    final choice = checked ? versions.choiceFor(track) : null;
+    final expectSeconds = checked
+        ? choice?.expectSeconds ?? track.durationSec.toDouble()
+        : null;
+    double? fileSeconds;
+    var downloadAgain = false;
     try {
       // Silence the previous song at once: otherwise it keeps playing under
       // the new title while the VK link loads, and forever if loading fails.
@@ -307,10 +358,26 @@ class PlayerService {
       final localFile = storedPath == null
           ? null
           : resolveAudioPath(dataDir, storedPath);
-      final hasFile = localFile != null && File(localFile).existsSync();
+      var hasFile = localFile != null && File(localFile).existsSync();
+      if (hasFile && expectSeconds != null) {
+        // A stored file of another recording (saved after VK swapped the
+        // song's file) is thrown away, and the song streams the right one.
+        final facts = measureFile(File(localFile));
+        if (facts != null && facts.differsFrom(expectSeconds)) {
+          downloadAgain = storage?.stateOf(track).pinned ?? false;
+          storage?.removeStored(track);
+          hasFile = false;
+          _log?.writeln(
+            '${_logClock.elapsedMilliseconds} stored file of song ${track.id} '
+            'is another recording ($facts), streaming instead',
+          );
+        } else {
+          fileSeconds = facts?.seconds;
+        }
+      }
       if (hasFile) {
         cached = true;
-        uri = localFile;
+        uri = localFile!;
       } else if (track.source == TrackSource.vk && accounts != null) {
         // Not cached, or the cached file is gone: stream it, through an
         // account that has the song.
@@ -322,6 +389,9 @@ class PlayerService {
         final RoutedStream(:stream, :route) = routed;
         playlistLinks = stream.playlistLinks;
         final link = stream.link;
+        if (link == null && choice != null && !choice.playsOwnFile) {
+          throw const _ChosenFileGone();
+        }
         if (link == null) {
           throw StateError(
             track.isGone
@@ -342,6 +412,7 @@ class PlayerService {
           onSaved: (written, total) =>
               storage?.noteProgress(track, written, total),
           label: 'song ${track.id}',
+          expectSeconds: expectSeconds,
         );
         if (generation == _generation) {
           _currentStream = proxied;
@@ -368,13 +439,7 @@ class PlayerService {
       if (generation != _generation) {
         // Another play started meanwhile, so mpv never opens this stream.
         proxied?.cancelCaching('another song started first');
-        return const PlayTiming(
-          ok: false,
-          cached: false,
-          resolveMs: 0,
-          toSoundMs: 0,
-          error: 'superseded',
-        );
+        return _superseded;
       }
 
       // Errors from the previous song may still arrive until the new file is
@@ -408,6 +473,10 @@ class PlayerService {
           sound.completeError(AudioServerException(status));
         }
       });
+      // The file is another recording than the song: mpv gets none of it.
+      proxied?.otherRecording.then((facts) {
+        if (!sound.isCompleted) sound.completeError(_OtherRecording(facts));
+      });
       try {
         _log?.writeln(
           '${_logClock.elapsedMilliseconds} === play '
@@ -440,20 +509,71 @@ class PlayerService {
         _resumeAt = null;
         _countHeard();
       }
+      final toSoundMs = clock.elapsedMilliseconds;
+      final measured = proxied == null
+          ? null
+          : await proxied.measured.timeout(
+              const Duration(milliseconds: 20),
+              onTimeout: () => null,
+            );
+      if (downloadAgain) unawaited(_downloadAgain(track));
       return finish(
         PlayTiming(
           ok: true,
           cached: cached,
           resolveMs: resolveMs,
-          toSoundMs: clock.elapsedMilliseconds,
+          toSoundMs: toSoundMs,
           networkFirstChunkMs: await proxied?.networkFirstChunkMs,
           sampleRate: _player.state.audioParams.sampleRate,
           playlistLinks: playlistLinks,
           sourceId: routed?.route.sourceId,
           skippedAccounts: routed?.skipped ?? 0,
+          fileSeconds: measured?.seconds ?? fileSeconds,
+          version: choice?.state,
+          versionNews: news,
         ),
       );
     } catch (error) {
+      // The file is not the song: play the version chosen for it instead.
+      final switches = error is _OtherRecording || error is _ChosenFileGone;
+      if (switches && versions != null && round < _maxRounds) {
+        if (generation == _generation) {
+          await _mpv.command(['stop']);
+          playing.value = false;
+          _currentStream = null;
+          _currentStreamTrackId = null;
+        }
+        // The held stream still counts as saving the song: it ends first,
+        // or the next round would find the song "saving" and save nothing.
+        if (proxied != null) {
+          _proxy.letGo(proxied, 'another recording');
+          await proxied.stored.timeout(
+            const Duration(seconds: 2),
+            onTimeout: () => null,
+          );
+        }
+        var next = news;
+        if (choice != null && !choice.playsOwnFile) {
+          // The chosen upload is gone or changed too: the song's own file
+          // is checked again, and a new choice made if needed.
+          versions.forget(track);
+        } else if (error is _OtherRecording && routed != null) {
+          final decided = await versions.decide(
+            track,
+            routed.route,
+            error.facts,
+          );
+          next = _newsOf(decided);
+        }
+        if (generation != _generation) return _superseded;
+        return _play(
+          track,
+          from: from,
+          round: round + 1,
+          clock: clock,
+          news: next,
+        );
+      }
       if (generation == _generation) {
         // Unload whatever is left, so resuming cannot bring back the
         // previous song under this song's title.
@@ -477,6 +597,67 @@ class PlayerService {
     }
   }
 
+  /// What a play that another play replaced returns.
+  static const _superseded = PlayTiming(
+    ok: false,
+    cached: false,
+    resolveMs: 0,
+    toSoundMs: 0,
+    error: 'superseded',
+  );
+
+  /// What to tell the user when a play found the song's VK file swapped.
+  static String _newsOf(VersionChoice choice) => switch (choice.state) {
+    VersionState.none =>
+      "VK changed this song's file to another recording, and no upload "
+          'matches your library: this is a different recording than in your '
+          'library.',
+    _ =>
+      "VK changed this song's file to another recording. Playing the "
+          'suggested match instead; the mark on the song lets you choose.',
+  };
+
+  /// Downloads [track] again after its downloaded file turned out to be
+  /// another recording; the save of the play that found it is taken over.
+  Future<void> _downloadAgain(Track track) async {
+    try {
+      await storage?.download(track, () async {
+        final resolved = await resolveStream(track);
+        return resolved?.stream.link;
+      });
+    } on Object catch (error) {
+      _log?.writeln(
+        '${_logClock.elapsedMilliseconds} downloading song ${track.id} '
+        'again failed: ${error.runtimeType}',
+      );
+    }
+  }
+
+  /// Before a Download of [track], which does not go through the player's
+  /// check: measures the song's own file once, and when it is another
+  /// recording, chooses the version to keep (Stage K).
+  Future<void> checkVersion(Track track) async {
+    final versions = this.versions;
+    if (versions == null ||
+        !track.inLibrary ||
+        track.source != TrackSource.vk ||
+        versions.choiceFor(track) != null) {
+      return;
+    }
+    final routed = await resolveRouted(ownRoutesFor(track));
+    final link = routed?.stream.link;
+    if (routed == null || link == null) return;
+    final http = HttpClient()..connectionTimeout = const Duration(seconds: 8);
+    try {
+      final facts = await measureRemote(http, link);
+      if (facts != null && facts.differsFrom(track.durationSec.toDouble())) {
+        await versions.decide(track, routed.route, facts);
+      }
+    } finally {
+      http.close(force: true);
+    }
+  }
+
   /// Runs [_heard] while the current song is loaded and playing.
   void _countHeard() {
     if (_loaded && playing.value) {
@@ -487,7 +668,26 @@ class PlayerService {
   }
 
   /// The accounts that would be asked for a link to [track], best first.
+  /// When another upload was chosen for the song (its VK file was swapped),
+  /// that upload is asked for instead, through the first account.
   List<StreamRoute> routesFor(Track track) {
+    final routes = ownRoutesFor(track);
+    final choice = versions?.choiceFor(track);
+    final fileKey = choice?.fileKey;
+    if (fileKey == null || routes.isEmpty) return routes;
+    final first = routes.first;
+    return [
+      StreamRoute(
+        sourceId: first.sourceId,
+        client: first.client,
+        sourceKey: fileKey,
+        accessKey: choice!.fileAccessKey,
+      ),
+    ];
+  }
+
+  /// The accounts that would be asked for [track]'s own file, best first.
+  List<StreamRoute> ownRoutesFor(Track track) {
     final accounts = this.accounts;
     return accounts == null ? const [] : streamRoutes(track, accounts);
   }
@@ -581,4 +781,15 @@ class PlayerService {
     await _endedController.close();
     playing.dispose();
   }
+}
+
+/// The file a play got is another recording than expected ([facts]).
+class _OtherRecording implements Exception {
+  const _OtherRecording(this.facts);
+  final FileFacts facts;
+}
+
+/// VK gives no link for the upload chosen for a swapped song.
+class _ChosenFileGone implements Exception {
+  const _ChosenFileGone();
 }

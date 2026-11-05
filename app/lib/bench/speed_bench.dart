@@ -564,6 +564,8 @@ class SpeedBench {
         'source': track.source.name,
         'ok': timing.ok,
         'toSoundMs': timing.toSoundMs,
+        // Stage K: this play found the song's VK file swapped and switched.
+        if (timing.versionNews != null) 'foundSwapped': true,
         'sampleRate': timing.sampleRate,
         'stillPlayingAfter1s': await _keepsPlaying(),
         if (timing.error != null) 'error': timing.error,
@@ -596,6 +598,8 @@ class SpeedBench {
         'ok': timing.ok,
         'resolveMs': timing.resolveMs,
         'toSoundMs': timing.toSoundMs,
+        // Stage K: this play found the song's VK file swapped and switched.
+        if (timing.versionNews != null) 'foundSwapped': true,
         'networkFirstChunkMs': timing.networkFirstChunkMs,
         'overheadMs': timing.appOverheadMs,
         'sampleRate': timing.sampleRate,
@@ -645,6 +649,8 @@ class SpeedBench {
           'skippedAccounts': timing.skippedAccounts,
           'sampleRate': timing.sampleRate,
           'toSoundMs': timing.toSoundMs,
+          // Stage K: this play found the song's VK file swapped and switched.
+          if (timing.versionNews != null) 'foundSwapped': true,
           'stillPlayingAfter1s': playing,
           if (timing.error != null) 'error': timing.error,
         });
