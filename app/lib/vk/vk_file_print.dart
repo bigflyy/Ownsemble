@@ -17,7 +17,7 @@ import 'vk_client.dart';
 const _songsPerCall = 50;
 
 /// How many files are read at once.
-const _readAtOnce = 8;
+const _readAtOnce = 12;
 
 /// One song of one account: its "ownerId_audioId" and VK's access key.
 typedef VkSongRef = ({String key, String? accessKey});
@@ -120,19 +120,14 @@ Future<FilePrint?> printRemote(
     timeout,
   );
   if (head == null || total == null || total <= 0) return null;
-  var seconds = readHead(head, total).facts?.seconds;
-  if (seconds == null) {
-    final measured = await measureRemote(http, link, timeout: timeout);
-    seconds = measured?.seconds;
-  }
-  final samples = <List<int>>[];
-  for (final offset in printOffsets(total)) {
+
+  /// One sample: from the head when it holds it, else its own range read.
+  Future<List<int>?> sampleAt(int offset) async {
     final count = printSampleBytes < total - offset
         ? printSampleBytes
         : total - offset;
     if (offset + count <= head.length) {
-      samples.add(Uint8List.sublistView(head, offset, offset + count));
-      continue;
+      return Uint8List.sublistView(head, offset, offset + count);
     }
     final (bytes, size) = await readRemoteRange(
       http,
@@ -141,8 +136,24 @@ Future<FilePrint?> printRemote(
       count,
       timeout,
     );
-    if (bytes == null || size != total || bytes.length != count) return null;
-    samples.add(bytes);
+    return bytes == null || size != total || bytes.length != count
+        ? null
+        : bytes;
   }
-  return FilePrint(bytes: total, sample: fnv1a64(samples), seconds: seconds);
+
+  // The quarters and, when a long ID3 tag hides the first frame, the
+  // length are read at once: on a slow line each read costs a second.
+  final seconds = readHead(head, total).facts?.seconds;
+  final (samples, measured) = await (
+    Future.wait([for (final offset in printOffsets(total)) sampleAt(offset)]),
+    seconds == null
+        ? measureRemote(http, link, timeout: timeout)
+        : Future<FileFacts?>.value(),
+  ).wait;
+  if (samples.any((sample) => sample == null)) return null;
+  return FilePrint(
+    bytes: total,
+    sample: fnv1a64([for (final sample in samples) sample!]),
+    seconds: seconds ?? measured?.seconds,
+  );
 }
