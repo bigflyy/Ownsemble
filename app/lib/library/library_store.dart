@@ -1181,8 +1181,9 @@ class LibraryStore implements PlayLog {
       final insert = _db.prepare('''
         INSERT OR IGNORE INTO found_versions (track_id, position, file_key,
           access_key, artist, title, album, cover_url, cover_large_url,
-          listed_sec, seconds, bytes, official, vk_track_id, found_at_ms)
-        SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+          listed_sec, seconds, bytes, official, vk_track_id, found_at_ms,
+          album_key, album_access_key)
+        SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
         WHERE EXISTS (SELECT 1 FROM tracks WHERE id = ?1)
       ''');
       try {
@@ -1205,6 +1206,8 @@ class LibraryStore implements PlayLog {
             version.official ? 1 : 0,
             version.vkTrackId,
             at,
+            version.albumKey,
+            version.albumAccessKey,
           ]);
         }
       } finally {
@@ -1230,6 +1233,8 @@ class LibraryStore implements PlayLog {
             artist: row['artist'] as String,
             title: row['title'] as String,
             album: row['album'] as String?,
+            albumKey: row['album_key'] as String?,
+            albumAccessKey: row['album_access_key'] as String?,
             coverUrl: row['cover_url'] as String?,
             coverLargeUrl: row['cover_large_url'] as String?,
             listedSec: row['listed_sec'] as int,

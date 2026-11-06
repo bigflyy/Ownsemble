@@ -40,6 +40,8 @@ void main() {
         artist: 'Операция Пластилин',
         title: 'Ты и я',
         album: 'Пластинки',
+        albumKey: '-77_5',
+        albumAccessKey: 'albumkey',
         coverUrl: 'https://example.invalid/135.jpg',
         coverLargeUrl: 'https://example.invalid/600.jpg',
         listedSec: 219,
@@ -62,6 +64,8 @@ void main() {
     final first = found.versions.first;
     expect(first.accessKey, 'ak');
     expect(first.album, 'Пластинки');
+    expect(first.albumKey, '-77_5');
+    expect(first.albumAccessKey, 'albumkey');
     expect(first.coverUrl, 'https://example.invalid/135.jpg');
     expect(first.coverLargeUrl, 'https://example.invalid/600.jpg');
     expect(first.file?.seconds, 219.2);

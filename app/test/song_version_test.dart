@@ -71,12 +71,20 @@ void main() {
         'duration': 219,
         'is_official': 1,
         'track_id': '74440157',
-        'album': {'title': 'Волна'},
+        'album': {
+          'title': 'Волна',
+          'owner_id': -77,
+          'id': 5,
+          'access_key': 'albumkey',
+        },
         'url': 'https://example.invalid/never-kept.mp3',
       });
       expect(version.key, '-2001_42');
       expect(version.accessKey, 'abc');
       expect(version.album, 'Волна');
+      // The album opens from the upload's row (user, 2026-11-06).
+      expect(version.albumKey, '-77_5');
+      expect(version.albumAccessKey, 'albumkey');
       expect(version.official, isTrue);
       expect(version.vkTrackId, 74440157);
       expect(version.listedSec, 219);

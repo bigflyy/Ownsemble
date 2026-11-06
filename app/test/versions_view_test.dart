@@ -10,6 +10,7 @@ import 'package:ownsemble/playback/mp3_length.dart';
 import 'package:ownsemble/playback/playback_controller.dart';
 import 'package:ownsemble/playback/player_service.dart';
 import 'package:ownsemble/playback/version_book.dart';
+import 'package:ownsemble/ui/albums.dart';
 import 'package:ownsemble/ui/library_controller.dart';
 import 'package:ownsemble/ui/library_screen.dart';
 import 'package:ownsemble/ui/player_bar.dart';
@@ -21,9 +22,32 @@ SongVersion upload(String key, double seconds, {int listed = 219}) =>
       artist: 'Операция Пластилин',
       title: 'Ты и я',
       album: 'Волна',
+      albumKey: '-77_$key',
+      albumAccessKey: 'albumkey',
       listedSec: listed,
       file: FileFacts(bytes: (seconds * 40000).round(), seconds: seconds),
     );
+
+/// Albums of library songs: each song's own VK album link, as the sync
+/// stores it.
+class _OwnAlbums implements AlbumCatalog {
+  @override
+  AlbumRef? albumOf(Track track) => track.album == null
+      ? null
+      : AlbumRef(
+          title: track.album!,
+          artist: track.artist,
+          link: (sourceId: track.sourceId, key: '-1_77', accessKey: 'own'),
+        );
+  @override
+  List<int> libraryIds(AlbumRef album) => const [];
+  @override
+  Map<int, int> libraryIdsByVkTrackId(Iterable<int> vkTrackIds) => const {};
+  @override
+  bool canFetch(AlbumRef album) => false;
+  @override
+  Future<List<AlbumSong>> fetch(AlbumRef album) async => const [];
+}
 
 /// A player showing [track] as loaded, without opening any audio.
 class _ShowingPlayer extends PlayerService {
@@ -89,12 +113,16 @@ void main() {
   Track swappedSong() => tracks.firstWhere((t) => t.sourceKey == '1_1');
   Track plainSong() => tracks.firstWhere((t) => t.sourceKey == '1_2');
 
-  Future<void> pumpScreen(WidgetTester tester) async {
+  Future<void> pumpScreen(WidgetTester tester, {AlbumCatalog? albums}) async {
     // Wide enough for the Album column, so row tags show their labels.
     tester.view.physicalSize = const Size(1600, 1000);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
-    library = LibraryController(tracks, versions: player.versions);
+    library = LibraryController(
+      tracks,
+      versions: player.versions,
+      albums: albums,
+    );
     await tester.pumpWidget(
       MaterialApp(
         home: LibraryScreen(
@@ -273,6 +301,54 @@ void main() {
     expect(find.byKey(const ValueKey('versions-refresh')), findsOneWidget);
     // Kept: the next time it opens at once.
     expect(store.foundVersions(song.id)?.versions.single.key, '7_1');
+  });
+
+  testWidgets("an upload's album opens from its row", (tester) async {
+    // User, 2026-11-06: "album is not clickable at Versions view".
+    final song = plainSong();
+    store.saveFoundVersions(song.id, [upload('8_1', 236, listed: 236)]);
+    await pumpScreen(tester);
+    library.openVersions(song, null);
+    await tester.pumpAndSettle();
+    final row = versionRow(song, '8_1');
+    await tester.tap(find.descendant(of: row, matching: find.text('Волна')));
+    await tester.pumpAndSettle();
+    expect(library.view.kind, ViewKind.album);
+    expect(library.view.album?.title, 'Волна');
+    expect(library.view.album?.link?.key, '-77_8_1');
+    expect(library.view.album?.link?.sourceId, song.sourceId);
+    expect(library.view.album?.link?.accessKey, 'albumkey');
+  });
+
+  testWidgets("VK's file row opens the song's own album", (tester) async {
+    // Its album title is the library's (VK's search often names none), and
+    // so is the link.
+    final vk = store.ensureSource(TrackSource.vk, account: '1', name: 'VK');
+    store.upsertAll(vk, [
+      const NewTrack(
+        sourceKey: '1_2',
+        artist: 'Сплин',
+        title: 'Выхода нет',
+        album: 'Гранатовый альбом',
+        durationSec: 236,
+        addedAt: 1,
+      ),
+    ]);
+    tracks = store.loadAll();
+    final song = plainSong();
+    store.saveFoundVersions(song.id, [upload('8_1', 236, listed: 236)]);
+    await pumpScreen(tester, albums: _OwnAlbums());
+    library.openVersions(song, null);
+    await tester.pumpAndSettle();
+    await tester.tap(
+      find.descendant(
+        of: versionRow(song, song.sourceKey!),
+        matching: find.text('Гранатовый альбом'),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(library.view.kind, ViewKind.album);
+    expect(library.view.album?.link?.key, '-1_77');
   });
 
   testWidgets('a list found before opens at once, without asking VK', (

@@ -16,8 +16,15 @@ void dropVersion6(Database db) {
   db.execute('DROP TABLE song_versions');
 }
 
+/// Takes back what version 10 added (album links of found uploads).
+void dropVersion10(Database db) {
+  db.execute('ALTER TABLE found_versions DROP COLUMN album_key');
+  db.execute('ALTER TABLE found_versions DROP COLUMN album_access_key');
+}
+
 /// Takes back what version 9 added (play details).
 void dropVersion9(Database db) {
+  dropVersion10(db);
   for (final column in ['listened_ms', 'started', 'shuffle', 'ended']) {
     db.execute('ALTER TABLE history DROP COLUMN $column');
   }
@@ -409,6 +416,42 @@ void main() {
     expect(plays.map((e) => e.playedAtMs), [200, 100]);
     expect(plays.map((e) => e.listenedMs), [null, null]);
     expect(plays.map((e) => e.ended), [null, null]);
+  });
+
+  test('version 9 gains album links for found uploads, keeping the lists', () {
+    final store = LibraryStore.open(dbPath);
+    final source = store.ensureSource(TrackSource.vk, account: '1', name: 'A');
+    final id = store.upsertAll(source, [
+      const NewTrack(
+        sourceKey: '1_1',
+        artist: 'Сплин',
+        title: 'Выхода нет',
+        durationSec: 230,
+        addedAt: 5,
+      ),
+    ]).single;
+    store
+      ..saveFoundVersions(id, [
+        const SongVersion(
+          key: '5_9',
+          artist: 'Сплин',
+          title: 'Выхода нет',
+          album: 'Гранатовый альбом',
+          listedSec: 230,
+        ),
+      ])
+      ..close();
+    final db = sqlite3.open(dbPath);
+    dropVersion10(db);
+    db.execute('PRAGMA user_version = 9');
+    db.close();
+
+    final migrated = LibraryStore.open(dbPath);
+    addTearDown(migrated.close);
+    expect(versionOf(dbPath), librarySchemaVersion);
+    final found = migrated.foundVersions(id)!.versions.single;
+    expect(found.album, 'Гранатовый альбом');
+    expect(found.albumKey, isNull);
   });
 
   test('a library from a newer build is refused and left alone', () {

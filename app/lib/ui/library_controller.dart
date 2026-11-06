@@ -436,8 +436,30 @@ class LibraryController extends ChangeNotifier {
   /// a song can appear more than once; null otherwise.
   int? entryIdAt(int index) => _visibleEntryIds?[index];
 
-  /// The album [track] is from, if it can be opened.
-  AlbumRef? albumOf(Track track) => albums?.albumOf(track);
+  /// The album [track] is from, if it can be opened. A row of the versions
+  /// place opens its upload's album, through the account of the song whose
+  /// versions are shown.
+  AlbumRef? albumOf(Track track) {
+    final version = versionOf(track);
+    if (version == null) return albums?.albumOf(track);
+    // VK's file for the song is the song's own: its album as the list shows.
+    final row = _versionsRow;
+    if (version.isCurrentFile && row != null) return albums?.albumOf(row);
+    final title = version.album;
+    if (title == null || title.isEmpty) return null;
+    final key = version.albumKey;
+    return AlbumRef(
+      title: title,
+      artist: version.artist,
+      link: key == null
+          ? null
+          : (
+              sourceId: track.sourceId,
+              key: key,
+              accessKey: version.albumAccessKey,
+            ),
+    );
+  }
 
   /// Opens the album [track] is from, as a new place: its songs in the
   /// library at once, and the rest once its source lists them. The search

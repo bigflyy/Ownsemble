@@ -52,6 +52,14 @@ SongVersion versionFromItem(
       {'title': final String title} when title != 'unnamed' => title,
       _ => null,
     },
+    albumKey: switch (album) {
+      {'owner_id': final int owner, 'id': final int id} => '${owner}_$id',
+      _ => null,
+    },
+    albumAccessKey: switch (album) {
+      {'access_key': final String key} when key.isNotEmpty => key,
+      _ => null,
+    },
     coverUrl: thumb?['photo_135'] as String?,
     coverLargeUrl: thumb?['photo_600'] as String?,
     listedSec: _intOf(item['duration']) ?? 0,

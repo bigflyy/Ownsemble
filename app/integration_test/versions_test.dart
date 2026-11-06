@@ -303,6 +303,43 @@ void main() {
     expect(again.version, VersionState.suggested);
     expect((againLength! - track.durationSec).abs(), lessThan(1.5));
     await player.stop();
+
+    // 6. The album opens from a row of the versions place (user,
+    // 2026-11-06: "album is not clickable at Versions view"), listed by VK
+    // through the song's account, read-only. VK's file row shows the song's
+    // own album; uploads found by the search mostly name none.
+    final withAlbum = shown.firstWhere((v) => (v.album ?? '').isNotEmpty);
+    say(
+      'album clicked on: ${withAlbum.isCurrentFile ? 'vk-file' : 'upload'} '
+      'row; uploads with a named album: '
+      '${shown.where((v) => !v.isCurrentFile && (v.album ?? '').isNotEmpty).length}'
+      ' of ${shown.length - 1}, with an album link: '
+      '${shown.where((v) => v.albumKey != null).length}',
+    );
+    await tester.tap(
+      find.descendant(
+        of: rowOf(withAlbum),
+        matching: find.text(withAlbum.album!),
+      ),
+    );
+    final albumClock = Stopwatch()..start();
+    await tester.pump();
+    expect(library.view.kind, ViewKind.album);
+    expect(library.view.album?.link, isNotNull);
+    await waitUntil(
+      tester,
+      () => library.albumStatus?.load != AlbumLoad.loading,
+      what: "the upload's album",
+    );
+    final albumStatus = library.albumStatus!;
+    say(
+      'album opened: ${albumStatus.load.name} after '
+      '${albumClock.elapsedMilliseconds} ms, ${library.visible.length} songs'
+      '${albumStatus.reason == null ? '' : ', ${albumStatus.reason}'}',
+    );
+    expect(albumStatus.load, AlbumLoad.loaded, reason: albumStatus.reason);
+    expect(library.visible, isNotEmpty);
+    await shot(tester, 'album');
     say('versions check passed');
   });
 }

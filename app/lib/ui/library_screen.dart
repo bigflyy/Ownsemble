@@ -1102,12 +1102,10 @@ class _LibraryScreenState extends State<LibraryScreen> {
                           'while you listen here'
                     : 'Another upload of the song on VK: streams, nothing '
                           'is saved while you listen here',
-                onOpenAlbum: version != null
-                    ? null
-                    : () {
-                        library.jump.clear();
-                        library.openAlbum(track);
-                      },
+                onOpenAlbum: () {
+                  library.jump.clear();
+                  library.openAlbum(track);
+                },
               );
             },
           ),

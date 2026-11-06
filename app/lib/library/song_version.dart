@@ -85,6 +85,8 @@ class SongVersion {
     required this.listedSec,
     this.accessKey,
     this.album,
+    this.albumKey,
+    this.albumAccessKey,
     this.coverUrl,
     this.coverLargeUrl,
     this.file,
@@ -99,6 +101,11 @@ class SongVersion {
   final String artist;
   final String title;
   final String? album;
+
+  /// The upload's album on VK, "ownerId_albumId", and its access key: how
+  /// the album opens from the upload's row. Null when VK names no album.
+  final String? albumKey;
+  final String? albumAccessKey;
 
   /// The upload's album cover, small (about 135 px, for rows) and large
   /// (about 600 px, for the player); null when VK gives none.
@@ -126,6 +133,8 @@ class SongVersion {
     artist: artist,
     title: title,
     album: album,
+    albumKey: albumKey,
+    albumAccessKey: albumAccessKey,
     coverUrl: coverUrl,
     coverLargeUrl: coverLargeUrl,
     listedSec: listedSec,
