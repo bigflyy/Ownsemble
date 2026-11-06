@@ -160,7 +160,16 @@ class VersionBook extends ChangeNotifier {
         coverUrl: track.coverUrl,
         coverLargeUrl: track.coverLargeUrl,
         listedSec: track.durationSec,
-        file: _store.printedFileOf(track.id),
+        // Its print, else what the play that found the swap measured.
+        file:
+            _store.printedFileOf(track.id) ??
+            switch (choiceFor(track)) {
+              VersionChoice(:final ownSeconds, :final ownBytes?) => FileFacts(
+                bytes: ownBytes,
+                seconds: ownSeconds,
+              ),
+              _ => null,
+            },
         isCurrentFile: true,
       );
       final stored = _store.foundVersions(track.id);

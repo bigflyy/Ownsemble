@@ -830,7 +830,11 @@ class _LibraryScreenState extends State<LibraryScreen> {
                     actions: [
                       if (view.kind == ViewKind.versions) _versionsSearch(),
                     ],
-                    filter: view.isLater || library.filterSources.length < 2
+                    // A song's versions are one song: nothing to filter.
+                    filter:
+                        view.isLater ||
+                            view.kind == ViewKind.versions ||
+                            library.filterSources.length < 2
                         ? null
                         : _SourceFilter(library: library, tight: tight),
                   ),
@@ -1287,7 +1291,7 @@ class _ViewHeading extends StatelessWidget {
           child: Text(
             detailLine,
             key: const ValueKey('album-status'),
-            maxLines: 1,
+            maxLines: 2,
             overflow: TextOverflow.ellipsis,
             style: TextStyle(fontSize: 13, color: colors.dim),
           ),
@@ -1958,7 +1962,9 @@ class _VersionTags extends StatelessWidget {
         ('no file', Icons.block, 'VK gives no audio for this upload now.'),
     ];
     if (tags.isEmpty) return const SizedBox.shrink();
+    // Most of the Album column: the tags say more here than the album.
     return Flexible(
+      flex: 3,
       child: LayoutBuilder(
         builder: (context, box) {
           final labelsWidth = tags.fold<double>(
