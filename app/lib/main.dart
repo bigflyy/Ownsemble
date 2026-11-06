@@ -186,6 +186,7 @@ Future<void> main(List<String> args) async {
     tracks,
     collections: collections,
     storage: storage,
+    versions: player.versions,
     albums: LibraryAlbums(
       store: store,
       apiOfSource: (sourceId) => clientOfSource(sourceId)?.call,

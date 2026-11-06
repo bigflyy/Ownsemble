@@ -17,6 +17,7 @@ class Sidebar extends StatelessWidget {
     required this.collections,
     required this.downloads,
     required this.stored,
+    this.changed = 0,
     required this.rail,
     required this.canExpand,
     required this.onToggleRail,
@@ -30,6 +31,9 @@ class Sidebar extends StatelessWidget {
 
   /// How many songs have a stored copy, for the On this computer count.
   final int stored;
+
+  /// How many songs VK swapped, for the Changed on VK count.
+  final int changed;
 
   /// Shown as an icon rail.
   final bool rail;
@@ -120,6 +124,12 @@ class Sidebar extends StatelessWidget {
                   Icons.computer_outlined,
                   const LibraryView(ViewKind.stored),
                   count: stored,
+                ),
+                item(
+                  'Changed on VK',
+                  Icons.swap_horiz,
+                  const LibraryView(ViewKind.changed),
+                  count: changed,
                 ),
                 if (!rail) const _Section('Collections'),
                 if (rail)

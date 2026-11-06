@@ -567,6 +567,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
                               library,
                               ?widget.collections,
                               ?_storage,
+                              ?widget.player.versions,
                             ]),
                             builder: (context, _) {
                               final counts = _storedCounts();
@@ -575,6 +576,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
                                 collections: widget.collections,
                                 downloads: counts.downloaded,
                                 stored: counts.stored,
+                                changed: library.changedCount,
                                 rail: rail,
                                 canExpand: roomForSidebar,
                                 onToggleRail: _settings.toggleRail,
@@ -767,6 +769,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
     ViewKind.artists => 'Artists',
     ViewKind.downloads => 'Downloads',
     ViewKind.stored => 'On this computer',
+    ViewKind.changed => 'Changed on VK',
     ViewKind.stack =>
       widget.collections?.stacks
               .where((s) => s.id == view.stackId)
@@ -798,6 +801,10 @@ class _LibraryScreenState extends State<LibraryScreen> {
               ViewKind.stored =>
                 'Nothing stored yet. Songs you play and songs you download '
                     'land here, and these play without the network.',
+              ViewKind.changed =>
+                "No song changed on VK. After each sync every song's file "
+                    'on VK is checked; a song whose recording VK swapped for '
+                    'another one shows here, with the version that plays.',
               ViewKind.history => 'Songs you play show up here.',
               ViewKind.stack =>
                 'Put songs on top of a Stack from the player or a song\'s '

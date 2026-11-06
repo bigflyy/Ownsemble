@@ -5,6 +5,7 @@ import '../library/library_records.dart';
 import '../library/search_index.dart';
 import '../library/search_text.dart';
 import '../library/track.dart';
+import '../playback/version_book.dart';
 import '../storage/audio_storage.dart';
 import 'albums.dart';
 import 'collections_controller.dart';
@@ -25,6 +26,9 @@ enum ViewKind {
   artists,
   downloads,
   stored,
+
+  /// Songs whose VK file was swapped for another recording (Stage M3).
+  changed,
   stack,
   playlists,
   history,
@@ -98,6 +102,7 @@ class LibraryController extends ChangeNotifier {
     this.collections,
     this.storage,
     this.albums,
+    this.versions,
     String? Function(String key)? readSetting,
     this._writeSetting,
   }) : _index = SearchIndex(_all),
@@ -107,6 +112,7 @@ class LibraryController extends ChangeNotifier {
     searchText.addListener(_onSearchChanged);
     collections?.addListener(_onSourceChanged);
     storage?.addListener(_onStorageChanged);
+    versions?.addListener(_onVersionsChanged);
     final saved = _decodeView(readSetting?.call(viewSetting));
     if (saved != null) _view = saved;
     _source = int.tryParse(readSetting?.call(sourceSetting) ?? '');
@@ -212,6 +218,42 @@ class LibraryController extends ChangeNotifier {
 
   /// Albums' songs; without it no album opens.
   final AlbumCatalog? albums;
+
+  /// The versions chosen for swapped songs, for the Changed on VK view.
+  final VersionBook? versions;
+
+  /// How many songs Changed on VK lists; null until counted again.
+  int? _changedCount;
+
+  /// How many library songs have a version choice: their VK file was
+  /// swapped (Stage M3).
+  int get changedCount =>
+      _changedCount ??= versions == null ? 0 : _changedSongs().length;
+
+  List<Track> _changedSongs() {
+    final versions = this.versions;
+    if (versions == null) return const [];
+    return [
+      for (final track in _all)
+        if (versions.choiceFor(track) != null) track,
+    ];
+  }
+
+  /// A choice was made, changed or dropped: the count and, when it is on
+  /// screen, the Changed on VK view follow.
+  void _onVersionsChanged() {
+    _changedCount = null;
+    if (_view.kind != ViewKind.changed) return;
+    final before = _base;
+    _rebuildBase();
+    if (_sameSongs(before, _base)) {
+      _base = before;
+      return;
+    }
+    _applySearch();
+    jump.clear();
+    notifyListeners();
+  }
 
   /// The full lists of albums opened in this run, oldest first, so that
   /// going back to one does not ask VK again. A few are kept: each holds its
@@ -630,6 +672,8 @@ class LibraryController extends ChangeNotifier {
         _base = _storedSongs((state) => state.path != null && state.pinned);
       case ViewKind.stored:
         _base = _storedSongs((state) => state.path != null);
+      case ViewKind.changed:
+        _base = _changedSongs();
       case ViewKind.history || ViewKind.stack:
         final collections = this.collections;
         final entries =
@@ -727,6 +771,7 @@ class LibraryController extends ChangeNotifier {
     _all = tracks;
     _index = index;
     _byId = {for (final track in _all) track.id: track};
+    _changedCount = null;
     _rebuildBase();
     _applySearch();
     jump.clear();
@@ -743,6 +788,7 @@ class LibraryController extends ChangeNotifier {
     _sources?.removeListener(_onSourcesChanged);
     collections?.removeListener(_onSourceChanged);
     storage?.removeListener(_onStorageChanged);
+    versions?.removeListener(_onVersionsChanged);
     jump.dispose();
     searchText.dispose();
     scroll.dispose();

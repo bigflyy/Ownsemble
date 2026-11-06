@@ -92,7 +92,7 @@ void main() {
     await tester.pumpWidget(
       MaterialApp(
         home: LibraryScreen(
-          library: LibraryController(tracks),
+          library: LibraryController(tracks, versions: player.versions),
           playback: PlaybackController(player: player, recordPlay: (_) {}),
         ),
       ),
@@ -273,4 +273,33 @@ void main() {
       expect(find.text('Versions of Выхода нет'), findsOneWidget);
     });
   }
+
+  testWidgets('Changed on VK lists the swapped songs', (tester) async {
+    // M3 (user, 2026-11-06): swapped songs must be findable.
+    await pumpScreen(tester);
+    final nav = find.byKey(const ValueKey('nav-changed'));
+    expect(nav, findsOneWidget);
+    await tester.tap(nav);
+    await tester.pumpAndSettle();
+    expect(find.textContaining('No song changed on VK'), findsOneWidget);
+
+    // The check after a sync finds Ты и я swapped: the view lists it.
+    final song = swappedSong();
+    await versions.decide(
+      song,
+      player.ownRoutesFor(song).single,
+      const FileFacts(bytes: 9062443, seconds: 226.5),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('Ты и я'), findsOneWidget);
+    expect(find.text('Выхода нет'), findsNothing);
+    expect(find.text('suggested version'), findsOneWidget);
+    expect(find.descendant(of: nav, matching: find.text('1')), findsOneWidget);
+
+    // Back to automatic: it leaves the view.
+    versions.reset(song);
+    await tester.pumpAndSettle();
+    expect(find.text('Ты и я'), findsNothing);
+    expect(find.textContaining('No song changed on VK'), findsOneWidget);
+  });
 }
