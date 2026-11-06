@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:fake_async/fake_async.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:ownsemble/playback/version_book.dart';
 import 'package:ownsemble/vk/vk_client.dart';
 import 'package:ownsemble/vk/vk_versions.dart';
 
@@ -114,5 +115,13 @@ void main() {
         expect(vk.searches, 3);
       });
     });
+  });
+
+  test('a captcha is named as VK asking to slow down, not a broken search', () {
+    final words = searchFailure(
+      VkException('audio.search error 14: Captcha needed', code: 14),
+    );
+    expect(words, contains('too many searches'));
+    expect(words, isNot(contains('error 14')));
   });
 }

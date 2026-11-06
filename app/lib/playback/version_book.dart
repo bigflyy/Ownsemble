@@ -344,6 +344,8 @@ class VersionBook extends ChangeNotifier {
 /// perf.log: VK's own words (no titles, keys or links in them), or the kind
 /// of network failure.
 String searchFailure(Object error) => switch (error) {
+  VkException(slowDown: true) =>
+    'VK asks for a captcha after too many searches; wait a few minutes',
   VkException(:final message) => message,
   SocketException() => 'no connection to VK',
   HandshakeException() => 'secure connection to VK failed',
