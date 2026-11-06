@@ -74,6 +74,12 @@ String prepareCopy(String from, String to) {
   );
   source.execute('VACUUM INTO ?', [p.join(to, 'library.db')]);
   source.close();
+  // Stage M2: as on a first run, no file checked and no version chosen, so
+  // the check after the start sync has to find the swapped songs itself.
+  final copy = sqlite3.open(p.join(to, 'library.db'));
+  copy.execute('DELETE FROM vk_file_prints');
+  copy.execute('DELETE FROM song_versions');
+  copy.close();
   final cache = Directory(p.join(from, 'cache'));
   if (cache.existsSync()) {
     Directory(p.join(to, 'cache')).createSync();
@@ -390,6 +396,35 @@ void main() {
       '${library.all.where((t) => t.album == null).map((t) => t.title).join(', ')}',
     );
 
+    // Stage M2/M3: after the sync every song's VK file is checked in the
+    // background; a swapped song gets its version before any play, and
+    // Changed on VK lists it.
+    await waitUntil(
+      tester,
+      () => sync.lastCheck != null,
+      timeout: const Duration(minutes: 5),
+      what: 'file check after the start sync',
+    );
+    await tester.pump();
+    final check = sync.lastCheck!;
+    final changedBeforePlay = [
+      for (final track in library.all)
+        if (player.versions?.choiceFor(track) case final choice?)
+          '${songName(track)}: listed ${track.durationSec} s, VK file '
+              '${choice.ownSeconds.toStringAsFixed(1)} s, ${choice.state.name}',
+    ];
+    // ignore: avoid_print
+    print(
+      'file check: ${check.checked} files in ${check.readMs} ms, '
+      '${check.swapped} swapped, ${check.decided} decided, '
+      '${check.failed} searches failed, search ${check.searchMs} ms; '
+      'changed on VK before any play: '
+      '${changedBeforePlay.isEmpty ? 'none' : changedBeforePlay.join('; ')}',
+    );
+    expect(check.checked, greaterThan(library.all.length ~/ 2));
+    expect(changedBeforePlay, hasLength(check.decided));
+    expect(library.changedCount, check.decided);
+
     // The column headers name what the rows show, on real rows.
     final listHeader = find.byKey(const ValueKey('list-header'));
     expect(listHeader, findsOneWidget);
@@ -498,6 +533,7 @@ void main() {
     final problems = <String>[];
     // Songs that did not play, named so a failure is never just a number.
     final notPlayed = <String>[];
+    final foundAtPlay = <String>[];
     var slowRetries = 0;
     for (final (index, track)
         in library.all.take(quick ? 15 : 1 << 30).indexed) {
@@ -508,6 +544,9 @@ void main() {
         slowRetries++;
         timing = await playByTap(tester, track, label: 'song #$index again');
       }
+      // Stage M2: a swap is found by the check after the sync, never by
+      // a play (except a song whose search failed there).
+      if (timing.versionNews != null) foundAtPlay.add(songName(track));
       if (track.id == fakeSong.id) {
         expect(
           find.descendant(
@@ -592,6 +631,12 @@ void main() {
       'VK file swapped for another recording: '
       '${swapped.isEmpty ? 'none' : swapped.join('; ')}',
     );
+    // ignore: avoid_print
+    print(
+      'swap found only at play: '
+      '${foundAtPlay.isEmpty ? 'none' : foundAtPlay.join('; ')}',
+    );
+    expect(foundAtPlay.length, lessThanOrEqualTo(check.failed));
     expect(problems, isEmpty);
     if (!quick) expect(goneNotStored, 1);
     // This copy's file was broken on VK's audio server (always 504 until
