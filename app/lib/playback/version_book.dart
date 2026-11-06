@@ -11,10 +11,12 @@ import '../vk/vk_versions.dart';
 import 'mp3_length.dart';
 import 'stream_route.dart';
 
-/// Finds the uploads of [track]'s song, asking VK as [route]'s account.
+/// Finds the uploads of [track]'s song, asking VK as [route]'s account;
+/// [progress] (when given) hears them as they come in.
 typedef FindVersions = Future<List<SongVersion>> Function(
   Track track,
   StreamRoute route,
+  VersionProgress? progress,
 );
 
 /// Measures the file VK gives for [route]'s key now; null: no audio.
@@ -41,7 +43,7 @@ class VersionBook extends ChangeNotifier {
       VersionBook(
         store: store,
         persist: persist,
-        find: (track, route) => findVkVersions(
+        find: (track, route, progress) => findVkVersions(
           route.client,
           VersionQuery(
             artist: track.artist,
@@ -49,6 +51,7 @@ class VersionBook extends ChangeNotifier {
             vkTrackId: store.vkTrackIdOf(track.id),
             ownKeys: {for (final copy in track.allCopies) ?copy.sourceKey},
           ),
+          progress: progress,
         ),
         measure: (route) =>
             measureVkFile(route.client, route.sourceKey, route.accessKey),
@@ -98,7 +101,7 @@ class VersionBook extends ChangeNotifier {
           listedSec: track.durationSec,
           ownSeconds: own.seconds,
           ownBytes: own.bytes,
-          found: await _find(track, ownRoute),
+          found: await _findAndKeep(track, ownRoute),
           nowMs: _now(),
         ),
       );
@@ -120,32 +123,135 @@ class VersionBook extends ChangeNotifier {
     }
   }
 
-  /// Every version of [track] for the dialog, best first: VK's current file
-  /// for the row (asked through [ownRoute]) and the uploads VK's search
-  /// finds. Throws as VK does when the search fails.
-  Future<List<SongVersion>> versionsOf(
+  /// Searches for [track]'s uploads and keeps them in the library, so its
+  /// versions open at once next time; [progress] hears them as they come.
+  Future<List<SongVersion>> _findAndKeep(
     Track track,
-    StreamRoute ownRoute,
-  ) async {
-    final (found, own) = await (
-      _find(track, ownRoute),
-      _measure(ownRoute)
-          .then<FileFacts?>((facts) => facts, onError: (_) => null),
-    ).wait;
-    return rankVersions(track.durationSec, [
-      SongVersion(
-        key: ownRoute.sourceKey,
-        accessKey: ownRoute.accessKey,
+    StreamRoute route, [
+    VersionProgress? progress,
+  ]) async {
+    final found = await _find(track, route, progress);
+    if (persist) _store.saveFoundVersions(track.id, found, atMs: _now());
+    return found;
+  }
+
+  /// The versions of each song opened lately, newest last.
+  final _lists = <int, VersionList>{};
+  static const _listsKept = 16;
+
+  /// The versions of [track]: what the last search found shows at once,
+  /// with VK's current file as its print measured it. A new search runs
+  /// through [route] when the stored one is older than
+  /// [LibraryStore.foundVersionsLifetime] (or missing) or when [refresh]
+  /// asks; its uploads show as VK answers, each with its length once its
+  /// file is measured. Called early (when the song's menu opens), so the
+  /// list is ready by the click. Without a [route] (no logged-in account)
+  /// only the stored list shows.
+  VersionList listOf(Track track, StreamRoute? route, {bool refresh = false}) {
+    var list = _lists.remove(track.id);
+    if (list == null || list.listedSec != track.durationSec) {
+      list = VersionList._(track.id, track.durationSec);
+      list._current = SongVersion(
+        key: route?.sourceKey ?? track.sourceKey ?? '',
+        accessKey: route?.accessKey ?? track.accessKey,
         artist: track.artist,
         title: track.title,
         album: track.album,
+        coverUrl: track.coverUrl,
+        coverLargeUrl: track.coverLargeUrl,
         listedSec: track.durationSec,
-        file: own,
+        file: _store.printedFileOf(track.id),
         isCurrentFile: true,
-      ),
-      ...found,
-    ]);
+      );
+      final stored = _store.foundVersions(track.id);
+      if (stored != null) {
+        list._uploads = stored.versions;
+        list._foundAtMs = stored.foundAtMs;
+      }
+    }
+    _lists[track.id] = list;
+    while (_lists.length > _listsKept) {
+      _lists.remove(_lists.keys.first);
+    }
+    if (route != null) {
+      if (list._current?.file == null && !list._measuringCurrent) {
+        _measureCurrent(list, route);
+      }
+      final foundAt = list._foundAtMs;
+      final old =
+          foundAt == null ||
+          _now() - foundAt > LibraryStore.foundVersionsLifetime.inMilliseconds;
+      if (!list._searching && (old || refresh)) _search(list, track, route);
+    }
+    return list;
   }
+
+  Future<void> _measureCurrent(VersionList list, StreamRoute route) async {
+    list._measuringCurrent = true;
+    list._changed();
+    try {
+      final facts = await _measure(route);
+      final current = list._current;
+      if (facts != null && current != null) {
+        list._current = current.withFile(facts);
+      }
+    } on Object {
+      // Listed without a length: VK gives no file now.
+    } finally {
+      list._measuringCurrent = false;
+      list._changed();
+    }
+  }
+
+  Future<void> _search(VersionList list, Track track, StreamRoute route) async {
+    list
+      .._searching = true
+      .._error = null
+      .._changed();
+    try {
+      final found = await _findAndKeep(track, route, (versions, measuring) {
+        list
+          .._uploads = versions
+          .._measuring = measuring
+          .._changed();
+      });
+      list
+        .._uploads = found
+        .._foundAtMs = _now();
+    } on Object catch (error) {
+      list._error = error;
+    } finally {
+      list
+        .._searching = false
+        .._measuring = const {}
+        .._changed();
+    }
+  }
+
+  /// A version as a song, to show and play like any other: the same
+  /// upload gets the same id every time (negative, as album songs outside
+  /// the library do), so the playing mark finds its row.
+  Track versionTrack(Track row, SongVersion version) {
+    final id = _versionIds.putIfAbsent(
+      version.key,
+      () => -1000000000 - _versionIds.length,
+    );
+    return Track(
+      id: id,
+      sourceId: row.sourceId,
+      source: row.source,
+      artist: version.artist,
+      title: version.title,
+      album: version.album,
+      durationSec: version.file?.seconds.round() ?? version.listedSec,
+      sourceKey: version.key,
+      accessKey: version.accessKey,
+      coverUrl: version.coverUrl,
+      coverLargeUrl: version.coverLargeUrl,
+    );
+  }
+
+  final _versionIds = <String, int>{};
 
   /// Takes over the choices stored in the library, which the background
   /// check after a sync decides (Stage M2), so swapped songs show their tag
@@ -249,4 +355,44 @@ class VersionBook extends ChangeNotifier {
           'recording than in your library. Click to see the versions.',
     ),
   };
+}
+
+/// The versions of one song as they come in (see [VersionBook.listOf]).
+class VersionList extends ChangeNotifier {
+  VersionList._(this.trackId, this.listedSec);
+
+  /// The library row and the length it listed when the list was made.
+  final int trackId;
+  final int listedSec;
+
+  SongVersion? _current;
+  List<SongVersion> _uploads = const [];
+  Set<String> _measuring = const {};
+  bool _searching = false;
+  bool _measuringCurrent = false;
+  Object? _error;
+  int? _foundAtMs;
+
+  /// VK's file for the row now; its [SongVersion.file] is null until it is
+  /// measured, or when VK gives no file.
+  SongVersion? get current => _current;
+
+  /// The other uploads VK's search found, in the order found.
+  List<SongVersion> get uploads => _uploads;
+
+  /// Whether VK's search runs now.
+  bool get searching => _searching;
+
+  /// Whether [version]'s file is being measured now.
+  bool isMeasuring(SongVersion version) => version.isCurrentFile
+      ? _measuringCurrent
+      : _measuring.contains(version.key);
+
+  /// Why the last search failed; null when it did not.
+  Object? get error => _error;
+
+  /// When the uploads shown were found; null before the first search ends.
+  int? get foundAtMs => _foundAtMs;
+
+  void _changed() => notifyListeners();
 }

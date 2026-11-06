@@ -4,7 +4,9 @@ import 'package:flutter/widgets.dart';
 import '../library/library_records.dart';
 import '../library/search_index.dart';
 import '../library/search_text.dart';
+import '../library/song_version.dart';
 import '../library/track.dart';
+import '../playback/stream_route.dart';
 import '../playback/version_book.dart';
 import '../storage/audio_storage.dart';
 import 'albums.dart';
@@ -34,18 +36,29 @@ enum ViewKind {
   history,
   charts,
   album,
+
+  /// The uploads of one song on VK, to listen to and choose from (plan 03).
+  versions,
 }
 
-/// One view: its kind and, for a Stack or an album, which one.
+/// One view: its kind and, for a Stack, an album or a song's versions,
+/// which one.
 @immutable
 class LibraryView {
-  const LibraryView(this.kind, {this.stackId, this.album});
+  const LibraryView(this.kind, {this.stackId, this.album, this.versionsOf});
 
   static const songs = LibraryView(ViewKind.songs);
 
   final ViewKind kind;
   final int? stackId;
   final AlbumRef? album;
+
+  /// The library row whose versions are shown.
+  final int? versionsOf;
+
+  /// Whether the view lists songs outside the library (an album's, a
+  /// song's versions), which the search index does not hold.
+  bool get listsOutside => kind == ViewKind.album || kind == ViewKind.versions;
 
   /// Whether this view is a page planned for later, without songs yet.
   bool get isLater => switch (kind) {
@@ -65,10 +78,11 @@ class LibraryView {
       other is LibraryView &&
       other.kind == kind &&
       other.stackId == stackId &&
-      other.album == album;
+      other.album == album &&
+      other.versionsOf == versionsOf;
 
   @override
-  int get hashCode => Object.hash(kind, stackId, album);
+  int get hashCode => Object.hash(kind, stackId, album, versionsOf);
 }
 
 /// How far an open album's song list got.
@@ -149,7 +163,9 @@ class LibraryController extends ChangeNotifier {
     if (text == null) return null;
     final parts = text.split(':');
     final kind = ViewKind.values.asNameMap()[parts.first];
-    if (kind == null || kind == ViewKind.album) return null;
+    if (kind == null || kind == ViewKind.album || kind == ViewKind.versions) {
+      return null;
+    }
     if (kind != ViewKind.stack || parts.length < 2) return LibraryView(kind);
     final stackId = int.tryParse(parts[1]);
     final exists = collections?.stacks.any((s) => s.id == stackId) ?? false;
@@ -243,6 +259,10 @@ class LibraryController extends ChangeNotifier {
   /// screen, the Changed on VK view follow.
   void _onVersionsChanged() {
     _changedCount = null;
+    if (_view.kind == ViewKind.versions) {
+      _onVersionListChanged();
+      return;
+    }
     if (_view.kind != ViewKind.changed) return;
     final before = _base;
     _rebuildBase();
@@ -253,6 +273,99 @@ class LibraryController extends ChangeNotifier {
     _applySearch();
     jump.clear();
     notifyListeners();
+  }
+
+  /// The versions of the song whose versions place is open, and the song.
+  VersionList? _versionList;
+  Track? _versionsRow;
+
+  /// The upload behind each row of the versions place, by the row's id.
+  final _versionOfRow = <int, SongVersion>{};
+
+  /// The library song whose versions are open; null in other views.
+  Track? get versionsRow =>
+      _view.kind == ViewKind.versions ? _versionsRow : null;
+
+  /// The versions of [versionsRow], as they come in.
+  VersionList? get versionList =>
+      _view.kind == ViewKind.versions ? _versionList : null;
+
+  /// The upload a row of the versions place plays; null for other rows.
+  SongVersion? versionOf(Track track) =>
+      _view.kind == ViewKind.versions ? _versionOfRow[track.id] : null;
+
+  /// Opens [track]'s versions as a new place, like an album: what the last
+  /// search found at once, VK's answer and the measured lengths as they
+  /// come in through [route] (null: only what is stored).
+  void openVersions(Track track, StreamRoute? route, {bool refresh = false}) {
+    final versions = this.versions;
+    if (versions == null || !track.inLibrary) return;
+    _watchVersions(track, versions.listOf(track, route, refresh: refresh));
+    final view = LibraryView(ViewKind.versions, versionsOf: track.id);
+    if (view == _view && _appliedQuery.isEmpty && _source == null) {
+      _onVersionListChanged();
+      return;
+    }
+    _places.leave(_here);
+    _showList(view, '', null);
+    if (scroll.hasClients) scroll.jumpTo(0);
+  }
+
+  void _watchVersions(Track row, VersionList list) {
+    _versionsRow = row;
+    if (identical(list, _versionList)) return;
+    _versionList?.removeListener(_onVersionListChanged);
+    _versionList = list..addListener(_onVersionListChanged);
+  }
+
+  /// New uploads or lengths came in: the place follows when on screen.
+  void _onVersionListChanged() {
+    if (_view.kind != ViewKind.versions) return;
+    _rebuildBase();
+    _applySearch();
+    notifyListeners();
+  }
+
+  /// The rows of the versions place: VK's file for the song first, then
+  /// the upload that plays instead of it, then the rest by how close their
+  /// listed length is to the song's. The order stays put while lengths are
+  /// measured, so rows do not jump under the pointer.
+  List<Track> _versionSongs() {
+    final versions = this.versions;
+    final rowId = _view.versionsOf;
+    final row = rowId == null ? null : _byId[rowId] ?? _versionsRow;
+    if (versions == null || row == null) return const [];
+    if (_versionList == null || _versionList!.trackId != row.id) {
+      _watchVersions(row, versions.listOf(row, null));
+    }
+    _versionsRow = row;
+    final list = _versionList!;
+    final chosen = versions.choiceFor(row)?.fileKey;
+    final others = [
+      for (final upload in list.uploads)
+        if (upload.key != chosen) upload,
+    ];
+    // Dart's sort is not stable: the found order breaks ties.
+    final order = {for (final (i, v) in others.indexed) v.key: i};
+    others.sort((a, b) {
+      final byLength = (a.listedSec - row.durationSec).abs().compareTo(
+        (b.listedSec - row.durationSec).abs(),
+      );
+      return byLength != 0 ? byLength : order[a.key]! - order[b.key]!;
+    });
+    final shown = [
+      ?list.current,
+      ...list.uploads.where((upload) => upload.key == chosen),
+      ...others,
+    ];
+    _versionOfRow.clear();
+    final tracks = <Track>[];
+    for (final version in shown) {
+      final track = versions.versionTrack(row, version);
+      _versionOfRow[track.id] = version;
+      tracks.add(track);
+    }
+    return tracks;
   }
 
   /// The full lists of albums opened in this run, oldest first, so that
@@ -487,7 +600,7 @@ class LibraryController extends ChangeNotifier {
     final from =
         _playedFrom ?? const Place(view: LibraryView.songs, search: '');
     final inLibrary = byId(track.id) != null;
-    if (!inLibrary && from.view.kind != ViewKind.album) return;
+    if (!inLibrary && !from.view.listsOutside) return;
     final here = _here;
     _showList(from.view, from.search, from.source);
     var row = _rowOf(track, listRow);
@@ -702,6 +815,8 @@ class LibraryController extends ChangeNotifier {
       case ViewKind.album:
         final album = _view.album;
         _base = album == null ? const [] : _albumSongs(album);
+      case ViewKind.versions:
+        _base = _versionSongs();
       case ViewKind.artists || ViewKind.playlists || ViewKind.charts:
         _base = const [];
     }
@@ -730,7 +845,7 @@ class LibraryController extends ChangeNotifier {
     final base = _base;
     // An album's songs outside the library are not in the index; an album
     // is short, so its rows are matched one by one.
-    if (_view.kind == ViewKind.album && base != null) {
+    if (_view.listsOutside && base != null) {
       final words = searchWords(_appliedQuery);
       _visible = words.isEmpty
           ? base
@@ -789,6 +904,7 @@ class LibraryController extends ChangeNotifier {
     collections?.removeListener(_onSourceChanged);
     storage?.removeListener(_onStorageChanged);
     versions?.removeListener(_onVersionsChanged);
+    _versionList?.removeListener(_onVersionListChanged);
     jump.dispose();
     searchText.dispose();
     scroll.dispose();

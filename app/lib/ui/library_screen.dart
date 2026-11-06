@@ -4,8 +4,10 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../library/song_version.dart';
 import '../library/track.dart';
 import '../playback/playback_controller.dart';
+import '../playback/version_book.dart';
 import '../playback/player_service.dart';
 import '../storage/audio_storage.dart';
 import 'album_link.dart';
@@ -24,7 +26,7 @@ import 'sync_controller.dart';
 import 'sync_status_bar.dart';
 import 'theme.dart';
 import 'type_jump.dart';
-import 'versions_dialog.dart';
+import 'version_marks.dart';
 import 'vk_accounts.dart';
 
 /// Narrower than this, the side panel gives way to the bottom bar.
@@ -386,11 +388,109 @@ class _LibraryScreenState extends State<LibraryScreen> {
     widget.playback.playFrom(library.visible, index);
   }
 
+  /// Opens [track]'s versions in the list, like an album (plan 03): what
+  /// the last search found at once, VK's answer as it comes in.
+  void _openVersions(Track track, {bool refresh = false}) =>
+      library.openVersions(
+        track,
+        widget.playback.player.ownRoutesFor(track).firstOrNull,
+        refresh: refresh,
+      );
+
+  /// The right-click menu of a row in a song's versions: use it for the
+  /// song, back to automatic, and what any song outside the library offers.
+  Future<void> _showVersionMenu(
+    Track track,
+    SongVersion version,
+    Offset position,
+  ) async {
+    final row = library.versionsRow;
+    final versions = widget.playback.player.versions;
+    if (row == null || versions == null) return;
+    final choice = versions.choiceFor(row);
+    final inUse = versionInUse(choice, version);
+    final picked = choice?.state == VersionState.picked;
+    final action = await showMenu<String>(
+      context: context,
+      position: RelativeRect.fromLTRB(
+        position.dx,
+        position.dy,
+        position.dx,
+        position.dy,
+      ),
+      items: [
+        if (!inUse)
+          const PopupMenuItem(
+            key: ValueKey('menu-use-version'),
+            value: 'use',
+            child: Text('Use this version'),
+          ),
+        if (picked)
+          const PopupMenuItem(
+            key: ValueKey('menu-versions-reset'),
+            value: 'reset',
+            child: Text('Back to automatic'),
+          ),
+        if (!inUse || picked) const PopupMenuDivider(),
+        const PopupMenuItem(
+          key: ValueKey('menu-play-next'),
+          value: 'play-next',
+          child: Text('Play next'),
+        ),
+        const PopupMenuItem(
+          key: ValueKey('menu-add-to-queue'),
+          value: 'add-to-queue',
+          child: Text('Add to queue'),
+        ),
+        if (track.hasCover)
+          const PopupMenuItem(
+            key: ValueKey('menu-view-cover'),
+            value: 'view-cover',
+            child: Text('View cover'),
+          ),
+      ],
+    );
+    if (!mounted || action == null) return;
+    final messenger = ScaffoldMessenger.of(context);
+    switch (action) {
+      case 'use':
+        versions.pick(row, version);
+        messenger.showSnackBar(
+          SnackBar(
+            content: Text(
+              '${row.title} now plays this version '
+              '(${lengthText(version.file?.seconds ?? version.listedSec.toDouble())}).',
+            ),
+          ),
+        );
+        await widget.playback.versionChanged(row);
+      case 'reset':
+        versions.reset(row);
+        messenger.showSnackBar(
+          SnackBar(
+            content: Text(
+              "${row.title} is back to automatic: its next play checks VK's "
+              'file again.',
+            ),
+          ),
+        );
+        await widget.playback.versionChanged(row);
+      case 'play-next':
+        await widget.playback.playNext(track);
+      case 'add-to-queue':
+        await widget.playback.addToQueue(track);
+      case 'view-cover':
+        await showCoverViewer(context, track);
+    }
+  }
+
   /// A song's right-click menu: Play next and Add to queue, View cover,
   /// Download or Remove download, put on top of a Stack, and in a Stack,
   /// remove this entry.
   Future<void> _showSongMenu(int index, Offset position) async {
     final track = library.visible[index];
+    final version = library.versionOf(track);
+    if (version != null) return _showVersionMenu(track, version, position);
     final entryId = library.entryIdAt(index);
     final storage = _storage;
     final collections = widget.collections;
@@ -401,6 +501,14 @@ class _LibraryScreenState extends State<LibraryScreen> {
     final inLibrary = track.inLibrary;
     final album = library.albumOf(track);
     final hasVersions = canChooseVersion(widget.playback, track);
+    // VK's search for the song's versions starts now, so they are in by
+    // the time "Versions" is clicked (plan 03).
+    if (hasVersions) {
+      widget.playback.player.versions!.listOf(
+        track,
+        widget.playback.player.ownRoutesFor(track).first,
+      );
+    }
     final showsAlbum =
         library.view.kind == ViewKind.album && library.view.album == album;
     final choice = await showMenu<Object>(
@@ -432,7 +540,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
           const PopupMenuItem(
             key: ValueKey('menu-versions'),
             value: 'versions',
-            child: Text('Choose version...'),
+            child: Text('Versions'),
           ),
         if (track.hasCover || (storage != null && inLibrary) || inStack)
           const PopupMenuDivider(),
@@ -471,7 +579,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
       case 'open-album':
         library.openAlbum(track);
       case 'versions':
-        await showVersionsDialog(context, widget.playback, track);
+        _openVersions(track);
       case 'play-next':
         await widget.playback.playNext(track);
       case 'add-to-queue':
@@ -546,6 +654,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
                         onDockSide: () => _settings.dockTo(PlayerDock.side),
                         onGoToSong: _goToPlayingSong,
                         onOpenAlbum: library.openAlbum,
+                        onOpenVersions: _openVersions,
                         compact: !roomForSidebar,
                       ),
                     if (widget.sync case final sync?)
@@ -599,6 +708,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
                                   _settings.dockTo(PlayerDock.bottom),
                               onGoToSong: _goToPlayingSong,
                               onOpenAlbum: library.openAlbum,
+                              onOpenVersions: _openVersions,
                             ),
                         ],
                       ),
@@ -713,8 +823,13 @@ class _LibraryScreenState extends State<LibraryScreen> {
                     count: view.isLater ? null : _countLabel(),
                     jump: library.jump,
                     tight: tight,
-                    onBack: view.kind == ViewKind.album ? library.goBack : null,
-                    detail: _albumDetail(view),
+                    onBack: view.listsOutside ? library.goBack : null,
+                    detail: view.kind == ViewKind.versions
+                        ? _versionsDetail()
+                        : _albumDetail(view),
+                    actions: [
+                      if (view.kind == ViewKind.versions) _versionsSearch(),
+                    ],
                     filter: view.isLater || library.filterSources.length < 2
                         ? null
                         : _SourceFilter(library: library, tight: tight),
@@ -738,10 +853,12 @@ class _LibraryScreenState extends State<LibraryScreen> {
     );
   }
 
-  /// "12 songs", "1 song", or "3 of 12 songs" while a search filters them.
+  /// "12 songs", "1 song", or "3 of 12 songs" while a search filters them
+  /// ("versions" for a song's versions).
   String _countLabel() {
     final all = library.viewCount;
-    final songs = all == 1 ? '1 song' : '$all songs';
+    final noun = library.view.kind == ViewKind.versions ? 'version' : 'song';
+    final songs = all == 1 ? '1 $noun' : '$all ${noun}s';
     final shown = library.visible.length;
     return shown == all ? songs : '$shown of $songs';
   }
@@ -764,6 +881,73 @@ class _LibraryScreenState extends State<LibraryScreen> {
     };
   }
 
+  /// The line under a song's versions: what the library lists, how VK's
+  /// file plays, which version plays, and how far VK's search got.
+  String? _versionsDetail() {
+    final row = library.versionsRow;
+    final list = library.versionList;
+    final versions = widget.playback.player.versions;
+    if (row == null || list == null || versions == null) return null;
+    final vkFile = list.current?.file?.seconds;
+    final choice = versions.choiceFor(row);
+    final lengths = [
+      '${row.artist}: your library lists '
+          '${lengthText(row.durationSec.toDouble())}',
+      if (vkFile != null) "VK's file now plays ${lengthText(vkFile)}",
+    ].join(', ');
+    final plays = switch (choice?.state) {
+      null => "Plays VK's file",
+      VersionState.none =>
+        "No upload matches: plays VK's file, another recording",
+      VersionState.suggested =>
+        'Plays the suggested ${lengthText(choice!.fileSeconds)} upload',
+      VersionState.picked =>
+        choice!.playsOwnFile
+            ? "Plays VK's file, your choice"
+            : 'Plays your choice, ${lengthText(choice.fileSeconds)}',
+    };
+    final measuring = list.uploads.where(list.isMeasuring).length;
+    final status = list.searching
+        ? list.uploads.isEmpty
+              ? 'Searching VK...'
+              : 'Measuring files: ${list.uploads.length - measuring} of '
+                    '${list.uploads.length}...'
+        : list.error != null
+        ? "VK's search failed; search again with the button on the right."
+        : null;
+    return '$lengths. $plays.${status == null ? '' : '  $status'}';
+  }
+
+  /// Searches VK again for the open song's versions; a small spinner while
+  /// a search runs.
+  Widget _versionsSearch() {
+    final row = library.versionsRow;
+    if (library.versionList?.searching ?? false) {
+      return const Tooltip(
+        message: 'Searching VK for versions...',
+        child: Padding(
+          padding: EdgeInsets.all(11),
+          child: SizedBox(
+            key: ValueKey('versions-searching'),
+            width: 18,
+            height: 18,
+            child: CircularProgressIndicator(strokeWidth: 2),
+          ),
+        ),
+      );
+    }
+    final canSearch =
+        row != null && widget.playback.player.ownRoutesFor(row).isNotEmpty;
+    return IconButton(
+      key: const ValueKey('versions-refresh'),
+      tooltip: canSearch
+          ? 'Search VK again'
+          : 'Log in to the account that has this song to search VK',
+      onPressed: canSearch ? () => _openVersions(row, refresh: true) : null,
+      icon: const Icon(Icons.refresh),
+    );
+  }
+
   String _viewTitle(LibraryView view) => switch (view.kind) {
     ViewKind.songs => 'All songs',
     ViewKind.artists => 'Artists',
@@ -780,6 +964,8 @@ class _LibraryScreenState extends State<LibraryScreen> {
     ViewKind.history => 'History',
     ViewKind.charts => 'Charts',
     ViewKind.album => view.album?.title ?? 'Album',
+    ViewKind.versions =>
+      'Versions of ${library.versionsRow?.title ?? 'a song'}',
   };
 
   Widget _songList(OwnColors colors, {required bool showAlbum}) {
@@ -813,6 +999,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
                 AlbumLoad.loading => 'Loading the album from VK...',
                 _ => 'No songs of this album to show.',
               },
+              ViewKind.versions => 'No versions of this song to show.',
               _ => 'No songs yet.',
             };
       final message = Text(
@@ -863,6 +1050,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
             itemBuilder: (context, index) {
               final track = library.visible[index];
               final entryId = library.entryIdAt(index);
+              final version = library.versionOf(track);
               return _SongRow(
                 key: ValueKey(
                   entryId == null ? 'song-${track.id}' : 'entry-$entryId',
@@ -885,15 +1073,35 @@ class _LibraryScreenState extends State<LibraryScreen> {
                   _play(index);
                 },
                 onMenu: (position) => _showSongMenu(index, position),
-                versionTag: (compact) => VersionTag(
-                  playback: widget.playback,
-                  track: track,
-                  compact: compact,
-                ),
-                onOpenAlbum: () {
-                  library.jump.clear();
-                  library.openAlbum(track);
-                },
+                versionTag: (compact) => version == null
+                    ? VersionTag(
+                        playback: widget.playback,
+                        track: track,
+                        compact: compact,
+                        onOpen: _openVersions,
+                      )
+                    : _VersionTags(
+                        version: version,
+                        row: library.versionsRow!,
+                        list: library.versionList,
+                        choice: widget.playback.player.versions?.choiceFor(
+                          library.versionsRow!,
+                        ),
+                        compact: compact,
+                      ),
+                outsideMeaning: version == null
+                    ? null
+                    : version.isCurrentFile
+                    ? "VK's file for your song: streams, nothing is saved "
+                          'while you listen here'
+                    : 'Another upload of the song on VK: streams, nothing '
+                          'is saved while you listen here',
+                onOpenAlbum: version != null
+                    ? null
+                    : () {
+                        library.jump.clear();
+                        library.openAlbum(track);
+                      },
               );
             },
           ),
@@ -981,7 +1189,11 @@ class _ViewHeading extends StatelessWidget {
     this.filter,
     this.onBack,
     this.detail,
+    this.actions = const [],
   });
+
+  /// Buttons at the end of the title row (a song's versions: search again).
+  final List<Widget> actions;
 
   final String title;
   final String? count;
@@ -1052,6 +1264,7 @@ class _ViewHeading extends StatelessWidget {
             // Up to half the row; more chips than fit scroll sideways.
             Flexible(child: filter!),
           ],
+          ...actions,
           if (jump.isTyping) ...[
             const SizedBox(width: 16),
             ConstrainedBox(
@@ -1355,11 +1568,17 @@ class _SongRow extends StatelessWidget {
     required this.onMenu,
     required this.versionTag,
     this.onOpenAlbum,
+    this.outsideMeaning,
   });
 
   /// The mark of a song whose VK file was swapped (Stage K), as an icon when
-  /// compact; empty for every other song.
+  /// compact; empty for every other song. On a song's versions, the
+  /// version's own tags.
   final Widget Function(bool compact) versionTag;
+
+  /// What the mark of a song outside the library says; null: a song of an
+  /// album.
+  final String? outsideMeaning;
 
   /// Position in the list, shown when thumbnails are off.
   final int number;
@@ -1411,7 +1630,7 @@ class _SongRow extends StatelessWidget {
       ),
       _ when !track.inLibrary => (
         Icons.public,
-        'Not in your library: streams from the album on VK',
+        outsideMeaning ?? 'Not in your library: streams from the album on VK',
       ),
       _ when track.source == TrackSource.vk => (
         Icons.cloud_outlined,
@@ -1668,6 +1887,113 @@ class _SourceMark extends StatelessWidget {
 }
 
 /// A small outlined label on a song row, explained on hover.
+/// The tags of one row of a song's versions: VK's file now, in use,
+/// suggested or the same length, official, and measuring or no file. They
+/// shrink to icons (same explanations) when the column is too narrow.
+class _VersionTags extends StatelessWidget {
+  const _VersionTags({
+    required this.version,
+    required this.row,
+    required this.list,
+    required this.choice,
+    required this.compact,
+  });
+
+  final SongVersion version;
+
+  /// The library song whose versions these are.
+  final Track row;
+  final VersionList? list;
+  final VersionChoice? choice;
+  final bool compact;
+
+  @override
+  Widget build(BuildContext context) {
+    final listed = lengthText(row.durationSec.toDouble());
+    final inUse = versionInUse(choice, version);
+    final suggested =
+        choice?.state == VersionState.suggested &&
+        choice?.fileKey == version.key;
+    final measuring = list?.isMeasuring(version) ?? false;
+    final tags = <(String, IconData, String)>[
+      if (version.isCurrentFile)
+        (
+          "VK's file now",
+          Icons.cloud_outlined,
+          'The file VK gives for this song in your library now.',
+        ),
+      if (inUse)
+        (
+          'in use',
+          Icons.check_circle_outline,
+          'Your library song plays this version.',
+        ),
+      if (suggested)
+        (
+          'suggested',
+          Icons.auto_awesome_outlined,
+          'Chosen automatically: it plays within 1 s of the $listed your '
+              'library lists.',
+        )
+      else if (!inUse && version.matches(row.durationSec))
+        (
+          'same length',
+          Icons.straighten,
+          'Plays within 1 s of the $listed your library lists: likely the '
+              'recording you added.',
+        ),
+      if (version.official)
+        (
+          'official',
+          Icons.verified_outlined,
+          "VK marks this upload as the artist's official release.",
+        ),
+      if (measuring)
+        (
+          'measuring',
+          Icons.hourglass_empty,
+          'Measuring how long its file plays...',
+        )
+      else if (version.file == null)
+        ('no file', Icons.block, 'VK gives no audio for this upload now.'),
+    ];
+    if (tags.isEmpty) return const SizedBox.shrink();
+    return Flexible(
+      child: LayoutBuilder(
+        builder: (context, box) {
+          final labelsWidth = tags.fold<double>(
+            0,
+            (sum, tag) => sum + tag.$1.length * 6.2 + 26,
+          );
+          final small = compact || box.maxWidth < labelsWidth;
+          // Clipped, never overflowing, when even the icons do not fit.
+          return SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            physics: const NeverScrollableScrollPhysics(),
+            child: Row(
+              key: ValueKey('version-tags-${version.key}'),
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                for (final (label, icon, explanation) in tags)
+                  Padding(
+                    padding: const EdgeInsets.only(left: 6),
+                    child: _Tag(
+                      key: ValueKey('version-tag-$label'),
+                      label: label,
+                      icon: icon,
+                      explanation: explanation,
+                      compact: small,
+                    ),
+                  ),
+              ],
+            ),
+          );
+        },
+      ),
+    );
+  }
+}
+
 class _Tag extends StatelessWidget {
   const _Tag({
     super.key,

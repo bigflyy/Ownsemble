@@ -11,7 +11,7 @@ import 'cover_viewer.dart';
 import 'filling_icon.dart';
 import 'sources_scope.dart';
 import 'theme.dart';
-import 'versions_dialog.dart';
+import 'version_marks.dart';
 
 /// Width of the side panel.
 const sidePanelWidth = 380.0;
@@ -27,6 +27,7 @@ class NowPlayingPanel extends StatelessWidget {
     required this.onDockBottom,
     required this.onGoToSong,
     this.onOpenAlbum,
+    this.onOpenVersions,
   });
 
   final PlaybackController playback;
@@ -39,6 +40,9 @@ class NowPlayingPanel extends StatelessWidget {
 
   /// A click on the album name: opens the song's album.
   final void Function(Track track)? onOpenAlbum;
+
+  /// The versions button and the version tag: open the song's versions.
+  final OpenVersions? onOpenVersions;
 
   @override
   Widget build(BuildContext context) {
@@ -102,7 +106,11 @@ class NowPlayingPanel extends StatelessWidget {
                           track: track,
                           large: true,
                           storage: player.storage,
-                          mark: VersionTag(playback: playback, track: track),
+                          mark: VersionTag(
+                            playback: playback,
+                            track: track,
+                            onOpen: onOpenVersions,
+                          ),
                           onGoToSong: onGoToSong,
                           onOpenAlbum: onOpenAlbum == null
                               ? null
@@ -116,7 +124,11 @@ class NowPlayingPanel extends StatelessWidget {
                           track: track,
                           collections: collections!,
                         ),
-                      VersionsButton(playback: playback, track: track),
+                      VersionsButton(
+                        playback: playback,
+                        track: track,
+                        onOpen: onOpenVersions,
+                      ),
                       if (player.storage != null && track.inLibrary)
                         DownloadButton(playback: playback, track: track),
                     ],
@@ -156,6 +168,7 @@ class DockBar extends StatelessWidget {
     required this.onGoToSong,
     required this.compact,
     this.onOpenAlbum,
+    this.onOpenVersions,
   });
 
   final PlaybackController playback;
@@ -169,6 +182,9 @@ class DockBar extends StatelessWidget {
 
   /// A click on the album name: opens the song's album.
   final void Function(Track track)? onOpenAlbum;
+
+  /// The versions button and the version tag: open the song's versions.
+  final OpenVersions? onOpenVersions;
 
   /// Very narrow window: the right column (volume and menus) is left out.
   final bool compact;
@@ -222,6 +238,7 @@ class DockBar extends StatelessWidget {
                                 mark: VersionTag(
                                   playback: playback,
                                   track: track,
+                                  onOpen: onOpenVersions,
                                 ),
                                 onGoToSong: onGoToSong,
                                 onOpenAlbum: onOpenAlbum == null
@@ -264,7 +281,11 @@ class DockBar extends StatelessWidget {
                             collections: collections!,
                           ),
                         if (track != null)
-                          VersionsButton(playback: playback, track: track),
+                          VersionsButton(
+                            playback: playback,
+                            track: track,
+                            onOpen: onOpenVersions,
+                          ),
                         if (track != null &&
                             track.inLibrary &&
                             player.storage != null)

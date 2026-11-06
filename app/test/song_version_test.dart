@@ -1,4 +1,7 @@
+import 'dart:async';
+
 import 'package:flutter_test/flutter_test.dart';
+import 'package:ownsemble/library/file_print.dart';
 import 'package:ownsemble/library/library_store.dart';
 import 'package:ownsemble/library/song_version.dart';
 import 'package:ownsemble/library/track.dart';
@@ -119,18 +122,51 @@ void main() {
     var found = <SongVersion>[];
     Object? searchFails;
     var searches = 0;
+    var measures = 0;
+    var now = 1000;
+
+    /// Holds the next search after it reported its uploads unmeasured,
+    /// until completed; null lets searches answer at once.
+    Completer<void>? holdSearch;
 
     VersionBook book({bool persist = true}) => VersionBook(
       store: store,
       persist: persist,
-      find: (track, route) async {
+      find: (track, route, progress) async {
         searches++;
         if (searchFails != null) throw searchFails!;
+        final hold = holdSearch;
+        if (hold != null) {
+          progress?.call(
+            [
+              for (final version in found)
+                SongVersion(
+                  key: version.key,
+                  artist: version.artist,
+                  title: version.title,
+                  listedSec: version.listedSec,
+                ),
+            ],
+            {for (final version in found) version.key},
+          );
+          await hold.future;
+        }
         return found;
       },
-      measure: (route) async => const FileFacts(bytes: 9062443, seconds: 226.5),
-      now: () => 1000,
+      measure: (route) async {
+        measures++;
+        return const FileFacts(bytes: 9062443, seconds: 226.5);
+      },
+      now: () => now,
     );
+
+    /// Lets [list]'s search and measuring finish.
+    Future<void> settle(VersionList list) async {
+      for (var i = 0; i < 20; i++) {
+        await Future<void>.delayed(Duration.zero);
+      }
+      expect(list.searching, isFalse);
+    }
 
     setUp(() {
       store = LibraryStore.open(':memory:');
@@ -157,6 +193,9 @@ void main() {
       found = realCase();
       searchFails = null;
       searches = 0;
+      measures = 0;
+      now = 1000;
+      holdSearch = null;
     });
 
     tearDown(() => store.close());
@@ -200,8 +239,9 @@ void main() {
     test('the user picks a version, can change it and reset', () async {
       final versions = book();
       await versions.decide(song, route, swapped);
-      final listed = await versions.versionsOf(song, route);
-      final current = listed.singleWhere((v) => v.isCurrentFile);
+      final list = versions.listOf(song, route);
+      await settle(list);
+      final current = list.current!;
       expect(current.file!.seconds, 226.5);
       versions.pick(song, current);
       expect(book().choiceFor(song)!.state, VersionState.picked);
@@ -265,6 +305,82 @@ void main() {
       await versions.decide(song, route, swapped);
       expect(versions.choiceFor(song), isNotNull);
       expect(book().choiceFor(song), isNull);
+    });
+
+    test('the uploads a check found open later without asking VK', () async {
+      await book().decide(song, route, swapped);
+      expect(searches, 1);
+      // A new run, no account logged in: the stored list shows.
+      final offline = book().listOf(song, null);
+      expect(offline.uploads.map((v) => v.key), realCase().map((v) => v.key));
+      expect(offline.uploads.first.file, isNotNull);
+      expect(offline.searching, isFalse);
+      // With an account, a list found today is not searched again.
+      final online = book().listOf(song, route);
+      await settle(online);
+      expect(searches, 1);
+      expect(online.uploads, hasLength(realCase().length));
+    });
+
+    test('an old list is searched again; a failed search keeps it', () async {
+      await book().decide(song, route, swapped);
+      now += LibraryStore.foundVersionsLifetime.inMilliseconds + 1;
+      searchFails = VkException('audio.search error 10', transient: true);
+      final list = book().listOf(song, route);
+      expect(list.uploads, hasLength(realCase().length));
+      await settle(list);
+      expect(searches, 2);
+      expect(list.error, isNotNull);
+      expect(list.uploads, hasLength(realCase().length));
+    });
+
+    test('uploads show as VK answers, lengths as they are measured', () async {
+      holdSearch = Completer<void>();
+      final versions = book();
+      final list = versions.listOf(song, route);
+      var changes = 0;
+      list.addListener(() => changes++);
+      await Future<void>.delayed(Duration.zero);
+      expect(list.searching, isTrue);
+      expect(list.uploads, hasLength(realCase().length));
+      expect(list.uploads.every(list.isMeasuring), isTrue);
+      expect(list.uploads.first.file, isNull);
+      holdSearch!.complete();
+      await settle(list);
+      expect(changes, greaterThan(1));
+      expect(list.uploads.any(list.isMeasuring), isFalse);
+      expect(list.uploads.first.file, isNotNull);
+      // Kept for the next time.
+      expect(
+        store.foundVersions(song.id)?.versions,
+        hasLength(realCase().length),
+      );
+      // The same list again does not search again.
+      expect(identical(versions.listOf(song, route), list), isTrue);
+      expect(searches, 1);
+    });
+
+    test("VK's current file takes its length from the print", () async {
+      store.savePrints({
+        song.id: const FilePrint(bytes: 9062443, sample: 1, seconds: 226.5),
+      });
+      final list = book().listOf(song, route);
+      expect(list.current!.file!.seconds, 226.5);
+      expect(list.current!.isCurrentFile, isTrue);
+      await settle(list);
+      expect(measures, 0);
+    });
+
+    test('a version plays as a song with the same id every time', () {
+      final versions = book();
+      final upload = realCase().first;
+      final first = versions.versionTrack(song, upload);
+      final again = versions.versionTrack(song, upload);
+      expect(first.id, again.id);
+      expect(first.inLibrary, isFalse);
+      expect(first.sourceKey, upload.key);
+      expect(first.sourceId, song.sourceId);
+      expect(versions.versionTrack(song, realCase().last).id, isNot(first.id));
     });
 
     test('a song outside the library is never checked', () {

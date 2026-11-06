@@ -136,11 +136,16 @@ void main() {
     expect(choice.fileKey, '5_1');
     expect(choice.ownSeconds, 226.5);
     expect(choice.listedSec, 219);
+    // The uploads found are kept, so the song's versions open at once.
+    expect(
+      store.foundVersions(song('Романс').id)?.versions.map((v) => v.key),
+      contains('5_1'),
+    );
 
     // The app's book reads it, so the row is tagged.
     final shared = VersionBook(
       store: store,
-      find: (track, route) async => const [],
+      find: (track, route, progress) async => const [],
       measure: (route) async => null,
     );
     expect(shared.choiceFor(song('Романс'))!.state, VersionState.suggested);
@@ -190,7 +195,7 @@ void main() {
       // The user also picked a version of Выхода нет.
       final book = VersionBook(
         store: store,
-        find: (track, route) async => const [],
+        find: (track, route, progress) async => const [],
         measure: (route) async => null,
       );
       book.pick(song('Выхода нет'), upload('7_1', 'Выхода нет', 236));
@@ -210,7 +215,7 @@ void main() {
     await check();
     final book = VersionBook(
       store: store,
-      find: (track, route) async => const [],
+      find: (track, route, progress) async => const [],
       measure: (route) async => null,
     );
     book.pick(song('Романс'), upload('6_1', 'Романс', 226.5));
