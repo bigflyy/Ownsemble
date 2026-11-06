@@ -16,8 +16,11 @@ import 'vk_client.dart';
 /// the top, and each one costs a range read.
 const versionSearchCount = 60;
 
-/// How many files are measured at once.
-const _measuredAtOnce = 12;
+/// How many files are measured at once. Each measure is two small range
+/// reads from VK's file servers (not the API, so not counted toward the
+/// search captcha) and takes about 1.5 s, so a list waits about 1.5 s per
+/// wave: 24 lets the usual long list (16-25 uploads) finish in one or two.
+const _measuredAtOnce = 24;
 
 /// [value] as an int, from an int or a numeric string.
 int? _intOf(Object? value) =>
