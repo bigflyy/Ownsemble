@@ -116,6 +116,7 @@ class NowPlayingPanel extends StatelessWidget {
                           track: track,
                           collections: collections!,
                         ),
+                      VersionsButton(playback: playback, track: track),
                       if (player.storage != null && track.inLibrary)
                         DownloadButton(playback: playback, track: track),
                     ],
@@ -262,6 +263,8 @@ class DockBar extends StatelessWidget {
                             track: track,
                             collections: collections!,
                           ),
+                        if (track != null)
+                          VersionsButton(playback: playback, track: track),
                         if (track != null &&
                             track.inLibrary &&
                             player.storage != null)

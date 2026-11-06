@@ -1,3 +1,6 @@
+import 'dart:async';
+
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ownsemble/library/library_store.dart';
@@ -9,6 +12,7 @@ import 'package:ownsemble/playback/player_service.dart';
 import 'package:ownsemble/playback/version_book.dart';
 import 'package:ownsemble/ui/library_controller.dart';
 import 'package:ownsemble/ui/library_screen.dart';
+import 'package:ownsemble/ui/player_bar.dart';
 import 'package:ownsemble/vk/vk_client.dart';
 
 SongVersion upload(String key, double seconds, {int listed = 219}) =>
@@ -20,6 +24,21 @@ SongVersion upload(String key, double seconds, {int listed = 219}) =>
       listedSec: listed,
       file: FileFacts(bytes: (seconds * 40000).round(), seconds: seconds),
     );
+
+/// A player showing [track] as loaded, without opening any audio.
+class _ShowingPlayer extends PlayerService {
+  _ShowingPlayer(this.track, {required super.accounts})
+    : super(muted: true, dataDir: '.');
+
+  final Track track;
+
+  @override
+  Track? get current => track;
+  @override
+  Stream<Track?> get currentStream => const Stream.empty();
+  @override
+  Stream<Duration> get positions => const Stream.empty();
+}
 
 void main() {
   late LibraryStore store;
@@ -138,4 +157,120 @@ void main() {
     await pumpScreen(tester);
     expect(find.text('different recording'), findsOneWidget);
   });
+
+  testWidgets('every VK song offers its versions, and the dialog searches '
+      'at once', (tester) async {
+    // M1 (user, 2026-11-06): the item must be there before any swap was
+    // found, or it cannot be discovered.
+    final searches = <int>[];
+    final search = Completer<List<SongVersion>>();
+    versions = VersionBook(
+      store: store,
+      find: (track, route) {
+        searches.add(track.id);
+        return search.future;
+      },
+      measure: (route) async => const FileFacts(bytes: 9440000, seconds: 236),
+    );
+    player.versions = versions;
+    final song = tracks.firstWhere((t) => t.sourceKey == '1_2');
+    expect(versions.choiceFor(song), isNull);
+    await pumpScreen(tester);
+
+    await tester.tap(find.text('Выхода нет'), buttons: kSecondaryButton);
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('menu-versions')));
+    await tester.pump();
+    expect(find.text('Versions of Выхода нет'), findsOneWidget);
+    expect(find.text('Looking for versions on VK...'), findsOneWidget);
+    expect(searches, [song.id]);
+
+    search.complete([
+      SongVersion(
+        key: '7_1',
+        artist: 'Сплин',
+        title: 'Выхода нет',
+        listedSec: 251,
+        file: const FileFacts(bytes: 10040000, seconds: 251),
+      ),
+    ]);
+    await tester.pumpAndSettle();
+    // VK's current file first; it plays the listed length, so it is the
+    // suggested match and in use.
+    final rows = find.byWidgetPredicate(
+      (w) =>
+          w.key is ValueKey<String> &&
+          (w.key! as ValueKey<String>).value.startsWith('version-') &&
+          !(w.key! as ValueKey<String>).value.startsWith('version-listen') &&
+          !(w.key! as ValueKey<String>).value.startsWith('version-use'),
+    );
+    expect(
+      [for (final w in tester.widgetList(rows)) (w.key! as ValueKey).value],
+      ['version-1_2', 'version-7_1'],
+    );
+    expect(find.text('In use'), findsOneWidget);
+    expect(find.textContaining("VK's current file"), findsOneWidget);
+  });
+
+  testWidgets('a song with no VK account to ask has no versions item', (
+    tester,
+  ) async {
+    player = PlayerService(
+      muted: true,
+      dataDir: '.',
+      accounts: (sourceId) => null,
+    )..versions = versions;
+    await pumpScreen(tester);
+    await tester.tap(find.text('Выхода нет'), buttons: kSecondaryButton);
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('menu-play-next')), findsOneWidget);
+    expect(find.byKey(const ValueKey('menu-versions')), findsNothing);
+  });
+
+  for (final side in [true, false]) {
+    testWidgets('the ${side ? 'side panel' : 'bottom bar'} player offers '
+        "the playing song's versions", (tester) async {
+      tester.view.physicalSize = const Size(1600, 1000);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      final song = tracks.firstWhere((t) => t.sourceKey == '1_2');
+      final showing = _ShowingPlayer(
+        song,
+        accounts: (sourceId) => VkClient(const []),
+      )..versions = versions;
+      final playback = PlaybackController(player: showing, recordPlay: (_) {});
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: side
+                ? NowPlayingPanel(
+                    playback: playback,
+                    collections: null,
+                    thumbnails: false,
+                    onDockBottom: () {},
+                    onGoToSong: () {},
+                  )
+                : Column(
+                    mainAxisAlignment: MainAxisAlignment.end,
+                    children: [
+                      DockBar(
+                        playback: playback,
+                        collections: null,
+                        thumbnails: false,
+                        canDockSide: true,
+                        onDockSide: () {},
+                        onGoToSong: () {},
+                        compact: false,
+                      ),
+                    ],
+                  ),
+          ),
+        ),
+      );
+      await tester.pump();
+      await tester.tap(find.byKey(const ValueKey('versions-button')));
+      await tester.pumpAndSettle();
+      expect(find.text('Versions of Выхода нет'), findsOneWidget);
+    });
+  }
 }

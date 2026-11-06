@@ -400,8 +400,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
     // that stored audio or a Stack could point at.
     final inLibrary = track.inLibrary;
     final album = library.albumOf(track);
-    final hasVersions =
-        widget.player.versions?.choiceFor(track) != null && inLibrary;
+    final hasVersions = canChooseVersion(widget.playback, track);
     final showsAlbum =
         library.view.kind == ViewKind.album && library.view.album == album;
     final choice = await showMenu<Object>(

@@ -75,6 +75,38 @@ class VersionTag extends StatelessWidget {
   }
 }
 
+/// Whether [track] offers "Choose version...": every library song that a
+/// logged-in VK account has, checked or not (Stage M1, user 2026-11-06: an
+/// item that shows only after a swap was found cannot be discovered).
+bool canChooseVersion(PlaybackController playback, Track track) =>
+    playback.player.versions != null &&
+    track.inLibrary &&
+    playback.player.ownRoutesFor(track).isNotEmpty;
+
+/// The player's button that opens the playing song's versions; nothing for
+/// a song without them (see [canChooseVersion]).
+class VersionsButton extends StatelessWidget {
+  const VersionsButton({
+    super.key,
+    required this.playback,
+    required this.track,
+  });
+
+  final PlaybackController playback;
+  final Track track;
+
+  @override
+  Widget build(BuildContext context) {
+    if (!canChooseVersion(playback, track)) return const SizedBox.shrink();
+    return IconButton(
+      key: const ValueKey('versions-button'),
+      tooltip: 'Choose version: other uploads of this song on VK',
+      onPressed: () => showVersionsDialog(context, playback, track),
+      icon: const Icon(Icons.swap_horiz),
+    );
+  }
+}
+
 /// Opens the list of [track]'s versions on VK.
 Future<void> showVersionsDialog(
   BuildContext context,
