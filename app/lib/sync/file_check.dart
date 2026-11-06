@@ -30,8 +30,11 @@ import 'background_sync.dart';
 /// a check cut short by closing the app keeps what it read.
 const _printBatch = 120;
 
-/// How many version searches run at once: each one reads up to 60 files.
-const _searchesAtOnce = 3;
+/// The pause between two version searches. Real VK 2026-11-06: after about
+/// 25 searches in quick succession VK wanted a captcha for every search, the
+/// user's own search from a song's Versions too. The check is in no hurry,
+/// so it searches one song at a time and leaves VK's allowance to the user.
+const fileCheckSearchGap = Duration(seconds: 4);
 
 /// How far the check is: files read, then versions searched.
 class FileCheckProgress {
@@ -110,6 +113,7 @@ Future<FileCheckOutcome> checkFiles({
   required ReadPrints readPrints,
   required FindSongVersions findVersions,
   void Function(FileCheckProgress)? onProgress,
+  Duration searchGap = fileCheckSearchGap,
   int Function()? now,
 }) async {
   final clock = now ?? () => DateTime.now().millisecondsSinceEpoch;
@@ -145,42 +149,44 @@ Future<FileCheckOutcome> checkFiles({
   ];
   var decided = 0;
   var failed = 0;
-  var next = 0;
   onProgress?.call(
     FileCheckProgress(done: 0, total: swapped.length, searching: true),
   );
-  Future<void> worker() async {
-    while (next < swapped.length) {
-      final song = swapped[next++];
-      try {
-        final found = await findVersions(song);
-        // Kept, so the song's versions open at once (plan 03).
-        store.saveFoundVersions(song.trackId, found, atMs: clock());
-        store.saveVersionChoice(
-          decideVersion(
-            trackId: song.trackId,
-            listedSec: song.listedSec,
-            ownSeconds: song.ownSeconds,
-            ownBytes: song.ownBytes,
-            found: found,
-            nowMs: clock(),
-          ),
-        );
-        decided++;
-      } on Object {
-        failed++;
-      }
-      onProgress?.call(
-        FileCheckProgress(
-          done: decided + failed,
-          total: swapped.length,
-          searching: true,
+  for (final (index, song) in swapped.indexed) {
+    if (index > 0) await Future<void>.delayed(searchGap);
+    try {
+      final found = await findVersions(song);
+      // Kept, so the song's versions open at once (plan 03).
+      store.saveFoundVersions(song.trackId, found, atMs: clock());
+      store.saveVersionChoice(
+        decideVersion(
+          trackId: song.trackId,
+          listedSec: song.listedSec,
+          ownSeconds: song.ownSeconds,
+          ownBytes: song.ownBytes,
+          found: found,
+          nowMs: clock(),
         ),
       );
+      decided++;
+    } on Object catch (error) {
+      if (error is VkException && error.slowDown) {
+        // VK wants a captcha: more searches only make it last. The rest
+        // wait for the next sync, and the user's own searches get
+        // through sooner.
+        failed += swapped.length - index;
+        break;
+      }
+      failed++;
     }
+    onProgress?.call(
+      FileCheckProgress(
+        done: decided + failed,
+        total: swapped.length,
+        searching: true,
+      ),
+    );
   }
-
-  await Future.wait([for (var i = 0; i < _searchesAtOnce; i++) worker()]);
   searching.stop();
   return FileCheckOutcome(
     checked: checked,

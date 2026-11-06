@@ -6,6 +6,7 @@ import 'package:ownsemble/library/track.dart';
 import 'package:ownsemble/playback/mp3_length.dart';
 import 'package:ownsemble/playback/version_book.dart';
 import 'package:ownsemble/sync/file_check.dart';
+import 'package:ownsemble/vk/vk_client.dart';
 
 /// Stage M2: the background check of every song's VK file after a sync.
 void main() {
@@ -22,6 +23,9 @@ void main() {
   late List<String> searched;
   late List<List<int>> readBatches;
   Object? searchFails;
+  late List<DateTime> searchStarts;
+  var searchesNow = 0;
+  var mostSearchesAtOnce = 0;
 
   FilePrint printOf(String key) {
     final seconds = files[key];
@@ -42,9 +46,18 @@ void main() {
     },
     findVersions: (song) async {
       searched.add(song.title);
-      if (searchFails != null) throw searchFails!;
-      return uploads[song.title] ?? const [];
+      searchStarts.add(DateTime.now());
+      searchesNow++;
+      if (searchesNow > mostSearchesAtOnce) mostSearchesAtOnce = searchesNow;
+      try {
+        await Future<void>.delayed(const Duration(milliseconds: 5));
+        if (searchFails != null) throw searchFails!;
+        return uploads[song.title] ?? const [];
+      } finally {
+        searchesNow--;
+      }
     },
+    searchGap: const Duration(milliseconds: 40),
     now: () => now,
   );
 
@@ -95,6 +108,9 @@ void main() {
     searched = [];
     readBatches = [];
     searchFails = null;
+    searchStarts = [];
+    searchesNow = 0;
+    mostSearchesAtOnce = 0;
   });
   tearDown(() => store.close());
 
@@ -326,5 +342,46 @@ void main() {
     expect(swapped.listedSec, 219);
     expect(swapped.ownSeconds, 226.5);
     expect(swapped.ownKeys, {'1_2', '2_7'});
+  });
+
+  // Real VK 2026-11-06 (tool/probe_search_pace.dart, test account): after
+  // about 25 searches in quick succession VK answered every audio.search
+  // with error 14 "Captcha needed" for a while. Three searches at once with
+  // no pause used up what VK allows, so the user's own search from a song's
+  // Versions failed too.
+  group('VK search limits', () {
+    setUp(() {
+      // Both Выхода нет and Романс now play another recording.
+      files['1_1'] = 250.0;
+    });
+
+    test('songs are searched one at a time, with a pause between', () async {
+      final outcome = await check();
+      expect(outcome.swapped, 2);
+      expect(searched, hasLength(2));
+      expect(mostSearchesAtOnce, 1);
+      expect(
+        searchStarts[1].difference(searchStarts[0]),
+        greaterThanOrEqualTo(const Duration(milliseconds: 40)),
+      );
+    });
+
+    test('a captcha stops the searches until the next sync', () async {
+      searchFails = VkException(
+        'audio.search error 14: Captcha needed',
+        code: 14,
+      );
+      final outcome = await check();
+      expect(searched, hasLength(1));
+      expect(outcome.decided, 0);
+      expect(outcome.failed, 2);
+      expect(store.versionChoices(), isEmpty);
+
+      searchFails = null;
+      searched.clear();
+      final again = await check();
+      expect(searched, hasLength(2));
+      expect(again.decided, 2);
+    });
   });
 }

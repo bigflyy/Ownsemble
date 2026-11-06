@@ -48,8 +48,15 @@ class SessionCookie {
 
 /// Raised when VK answers with an error. Never contains tokens or URLs.
 class VkException implements Exception {
-  VkException(this.message, {this.transient = false});
+  VkException(this.message, {this.transient = false, this.code});
   final String message;
+
+  /// VK's error code, when VK answered with one.
+  final int? code;
+
+  /// Whether VK refuses because of too many requests: error 14 (a captcha
+  /// is wanted) or 9 (flood control). Sending more only makes it last.
+  bool get slowDown => code == 14 || code == 9;
 
   /// Whether the same request may work when sent again: a stalled
   /// connection or an overloaded VK server, not a refusal.
@@ -150,6 +157,7 @@ class VkClient {
         '$method error $code: ${error['error_msg']}',
         // 6: too many requests per second, 10: VK internal server error.
         transient: code == 6 || code == 10,
+        code: code is int ? code : null,
       );
     }
     return reply['response'];
