@@ -86,33 +86,69 @@ typedef VersionProgress = void Function(
   Set<String> measuring,
 );
 
+/// How one search went, for perf.log: times and counts only.
+class VersionSearchStats {
+  /// Time until VK's search answered (or the search gave up).
+  int searchMs = 0;
+
+  /// Search requests sent (a stalled one is sent again, see
+  /// [hedgedVkRequest]).
+  int searchTries = 0;
+
+  /// Time spent measuring the uploads' files.
+  int measureMs = 0;
+
+  /// Uploads found, and how many of them gave a file length.
+  int found = 0;
+  int measured = 0;
+
+  @override
+  String toString() =>
+      'search $searchMs ms in $searchTries requests, $found uploads, '
+      '$measured measured in $measureMs ms';
+}
+
 /// Searches VK through [client] for uploads of the song [query] names and
 /// measures each file. Uploads VK gives no link for are listed without a
 /// file. Throws as VK does when the search itself fails. [progress] hears
-/// the uploads as soon as the search answers, then after each measured file.
+/// the uploads as soon as the search answers, then after each measured file;
+/// [stats] (when given) is filled in as it goes. A stalled search request
+/// is sent again after a few seconds ([hedgedVkRequest]).
 Future<List<SongVersion>> findVkVersions(
   VkClient client,
   VersionQuery query, {
   HttpClient? http,
   VersionProgress? progress,
+  VersionSearchStats? stats,
 }) async {
-  final items = await retryTransient(() async {
-    final reply = await client.call('audio.search', {
-      'q': '${query.artist} ${query.title}',
-      'count': '$versionSearchCount',
-    });
-    final items = reply is Map<String, dynamic> && reply['items'] is List
-        ? (reply['items'] as List).whereType<Map<String, dynamic>>().toList()
-        : const <Map<String, dynamic>>[];
-    // A search for a library song finds at least that song. No songs at
-    // all is VK not answering (seen 2026-11-06 while the first file check
-    // read thousands of files), not "no other uploads": asked again, and
-    // if it stays empty the choice lasts this run only.
-    if (items.isEmpty) {
-      throw VkException('audio.search answered with no songs', transient: true);
-    }
-    return items;
-  });
+  final searchClock = Stopwatch()..start();
+  final items = await hedgedVkRequest(
+    onDone: (tries) {
+      stats
+        ?..searchMs = searchClock.elapsedMilliseconds
+        ..searchTries = tries;
+    },
+    () async {
+      final reply = await client.call('audio.search', {
+        'q': '${query.artist} ${query.title}',
+        'count': '$versionSearchCount',
+      });
+      final items = reply is Map<String, dynamic> && reply['items'] is List
+          ? (reply['items'] as List).whereType<Map<String, dynamic>>().toList()
+          : const <Map<String, dynamic>>[];
+      // A search for a library song finds at least that song. No songs at
+      // all is VK not answering (seen 2026-11-06 while the first file check
+      // read thousands of files), not "no other uploads": asked again, and
+      // if it stays empty the choice lasts this run only.
+      if (items.isEmpty) {
+        throw VkException(
+          'audio.search answered with no songs',
+          transient: true,
+        );
+      }
+      return items;
+    },
+  );
   final seen = <String>{};
   final uploads = <Map<String, dynamic>>[];
   for (final item in items) {
@@ -149,7 +185,12 @@ Future<List<SongVersion>> findVkVersions(
       }
     }
 
+    final measureClock = Stopwatch()..start();
     await Future.wait([for (var i = 0; i < _measuredAtOnce; i++) worker()]);
+    stats
+      ?..measureMs = measureClock.elapsedMilliseconds
+      ..found = versions.length
+      ..measured = versions.where((version) => version.file != null).length;
     return versions;
   } finally {
     if (own) reader.close(force: true);

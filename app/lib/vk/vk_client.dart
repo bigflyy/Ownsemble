@@ -307,6 +307,78 @@ Future<T> retryTransient<T>(
   }
 }
 
+/// Runs [action] for a reply a person waits for: when it has not answered
+/// after [after], a second copy is sent while the first keeps waiting, and
+/// so on up to [attempts] copies; the first answer wins. A transient
+/// failure ([isTransientVkError]) sends the next copy after [pause]; any
+/// other failure ends it at once. With no answer within [deadline] it fails
+/// with a transient [VkException]. Only for requests that read: sending one
+/// twice is safe.
+///
+/// Real VK 2026-11-06: audio.search answered in 0.2-4 s, but about 1
+/// request in 40 sent nothing at all until the client's 15 s limit, while
+/// the same request sent again answered in about a second.
+Future<T> hedgedVkRequest<T>(
+  Future<T> Function() action, {
+  int attempts = 3,
+  Duration after = const Duration(seconds: 4),
+  Duration pause = const Duration(seconds: 1),
+  Duration deadline = const Duration(seconds: 15),
+  void Function(int tries)? onDone,
+}) {
+  final done = Completer<T>();
+  var started = 0;
+  var failed = 0;
+  Timer? next;
+  late final Timer giveUp;
+
+  void finish() {
+    next?.cancel();
+    giveUp.cancel();
+    onDone?.call(started);
+  }
+
+  void start() {
+    if (done.isCompleted || started >= attempts) return;
+    started++;
+    next = Timer(after, start);
+    action().then(
+      (answer) {
+        if (done.isCompleted) return;
+        finish();
+        done.complete(answer);
+      },
+      onError: (Object error, StackTrace stack) {
+        if (done.isCompleted) return;
+        failed++;
+        final last = failed >= started && started >= attempts;
+        if (!isTransientVkError(error) || last) {
+          finish();
+          done.completeError(error, stack);
+        } else if (started < attempts) {
+          // Sooner than the hedge timer: this copy has failed for sure.
+          next?.cancel();
+          next = Timer(pause, start);
+        }
+      },
+    );
+  }
+
+  giveUp = Timer(deadline, () {
+    if (done.isCompleted) return;
+    finish();
+    done.completeError(
+      VkException(
+        'VK did not answer in ${deadline.inSeconds} s '
+        '($started requests sent)',
+        transient: true,
+      ),
+    );
+  });
+  start();
+  return done.future;
+}
+
 /// [call] with every request sent again after a transient failure (see
 /// [retryTransient]). Only for calls that read: sending one twice is safe.
 VkApiCall retryingVkCall(VkApiCall call) =>

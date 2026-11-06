@@ -1,3 +1,6 @@
+import 'dart:async';
+
+import 'package:fake_async/fake_async.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ownsemble/vk/vk_client.dart';
 import 'package:ownsemble/vk/vk_versions.dart';
@@ -14,6 +17,24 @@ class SearchingVk extends VkClient {
     expect(method, 'audio.search');
     searches++;
     return {'count': items.length, 'items': items};
+  }
+}
+
+/// [VkClient] whose `audio.search` requests hang (never answer) for the
+/// first [hanging] calls, then answer with [items].
+class StallingVk extends VkClient {
+  StallingVk(this.items, {required this.hanging}) : super(const []);
+
+  final List<Map<String, dynamic>> items;
+  final int hanging;
+  int searches = 0;
+
+  @override
+  Future<Object?> call(String method, Map<String, String> params) {
+    expect(method, 'audio.search');
+    searches++;
+    if (searches <= hanging) return Completer<Object?>().future;
+    return Future.value({'count': items.length, 'items': items});
   }
 }
 
@@ -51,5 +72,47 @@ void main() {
     ]);
     expect(await findVkVersions(vk, query), isEmpty);
     expect(vk.searches, 1);
+  });
+
+  // Real VK 2026-11-06 (tool/probe_search_pace.dart, test account): the
+  // search answered in 0.2-4 s, but 1 request in about 40 sent nothing until
+  // the 15 s limit. Four tries of 15 s kept the versions place "searching"
+  // for about a minute before it said the search failed.
+  group('a stalled search request', () {
+    final song = {
+      'owner_id': 7,
+      'id': 3,
+      'artist': 'Операция Пластилин',
+      'title': 'Ты и я',
+      'duration': 219,
+    };
+
+    test('is sent again after a few seconds and the next answer wins', () {
+      fakeAsync((async) {
+        final vk = StallingVk([song], hanging: 1);
+        List<Object>? found;
+        findVkVersions(vk, query).then((versions) => found = versions);
+        async.elapse(const Duration(seconds: 5));
+        expect(found, hasLength(1));
+        expect(vk.searches, 2);
+      });
+    });
+
+    test('fails within 15 s when VK never answers', () {
+      fakeAsync((async) {
+        final vk = StallingVk([song], hanging: 99);
+        Object? failure;
+        findVkVersions(vk, query).catchError((Object e) {
+          failure = e;
+          return const <Never>[];
+        });
+        async.elapse(const Duration(seconds: 15));
+        expect(
+          failure,
+          isA<VkException>().having((e) => e.transient, 'transient', isTrue),
+        );
+        expect(vk.searches, 3);
+      });
+    });
   });
 }

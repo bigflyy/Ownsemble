@@ -246,4 +246,41 @@ void main() {
       expect(tries, 1);
     });
   });
+
+  group('hedgedVkRequest', () {
+    test('does not wait for a request that answers', () async {
+      var tries = 0;
+      final answer = await hedgedVkRequest(() async {
+        tries++;
+        return 'ok';
+      });
+      expect(answer, 'ok');
+      expect(tries, 1);
+    });
+
+    test('ends at once on a refusal such as an expired login', () async {
+      var tries = 0;
+      await expectLater(
+        hedgedVkRequest(() async {
+          tries++;
+          throw VkException('web_token refused: type=error');
+        }),
+        throwsA(isA<VkException>()),
+      );
+      expect(tries, 1);
+    });
+
+    test('sends the next copy soon after a transient failure', () async {
+      var tries = 0;
+      final clock = Stopwatch()..start();
+      final answer = await hedgedVkRequest(() async {
+        tries++;
+        if (tries == 1) throw const SocketException('connection reset');
+        return 'ok';
+      }, pause: const Duration(milliseconds: 10));
+      expect(answer, 'ok');
+      expect(tries, 2);
+      expect(clock.elapsed, lessThan(const Duration(seconds: 2)));
+    });
+  });
 }
