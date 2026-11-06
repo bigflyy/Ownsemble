@@ -76,6 +76,8 @@ String prepareCopy(String from, String to) {
   source.close();
   // Stage M2: as on a first run, no file checked and no version chosen, so
   // the check after the start sync has to find the swapped songs itself.
+  // Opening the store first brings an older library to the current schema.
+  LibraryStore.open(p.join(to, 'library.db')).close();
   final copy = sqlite3.open(p.join(to, 'library.db'));
   copy.execute('DELETE FROM vk_file_prints');
   copy.execute('DELETE FROM song_versions');
