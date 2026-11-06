@@ -2,11 +2,15 @@
 /// the player's length check, decided here, stored per song.
 library;
 
+import 'dart:async';
+import 'dart:io';
+
 import 'package:flutter/foundation.dart';
 
 import '../library/library_store.dart';
 import '../library/song_version.dart';
 import '../library/track.dart';
+import '../vk/vk_client.dart';
 import '../vk/vk_versions.dart';
 import 'mp3_length.dart';
 import 'stream_route.dart';
@@ -39,11 +43,18 @@ class VersionBook extends ChangeNotifier {
        _choices = store.versionChoices();
 
   /// The book for the app: VK's search through the song's own account.
-  factory VersionBook.vk(LibraryStore store, {bool persist = true}) =>
-      VersionBook(
-        store: store,
-        persist: persist,
-        find: (track, route, progress) => findVkVersions(
+  /// [log] (perf.log) hears how each search went: times and counts only.
+  factory VersionBook.vk(
+    LibraryStore store, {
+    bool persist = true,
+    void Function(String line)? log,
+  }) => VersionBook(
+    store: store,
+    persist: persist,
+    find: (track, route, progress) async {
+      final stats = VersionSearchStats();
+      try {
+        final found = await findVkVersions(
           route.client,
           VersionQuery(
             artist: track.artist,
@@ -52,10 +63,21 @@ class VersionBook extends ChangeNotifier {
             ownKeys: {for (final copy in track.allCopies) ?copy.sourceKey},
           ),
           progress: progress,
-        ),
-        measure: (route) =>
-            measureVkFile(route.client, route.sourceKey, route.accessKey),
-      );
+          stats: stats,
+        );
+        log?.call('versions of song ${track.id}: $stats');
+        return found;
+      } on Object catch (error) {
+        log?.call(
+          'versions of song ${track.id} failed after ${stats.searchMs} '
+          'ms in ${stats.searchTries} requests: ${searchFailure(error)}',
+        );
+        rethrow;
+      }
+    },
+    measure: (route) =>
+        measureVkFile(route.client, route.sourceKey, route.accessKey),
+  );
 
   final LibraryStore _store;
   final FindVersions _find;
@@ -317,6 +339,17 @@ class VersionBook extends ChangeNotifier {
     return choice;
   }
 }
+
+/// Why a version search failed, in words for the versions heading and
+/// perf.log: VK's own words (no titles, keys or links in them), or the kind
+/// of network failure.
+String searchFailure(Object error) => switch (error) {
+  VkException(:final message) => message,
+  SocketException() => 'no connection to VK',
+  HandshakeException() => 'secure connection to VK failed',
+  TimeoutException() => 'VK did not answer in time',
+  _ => error.runtimeType.toString(),
+};
 
 /// What a song's mark says, for the row tag and the player; null when the
 /// song has no mark.

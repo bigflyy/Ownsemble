@@ -917,7 +917,8 @@ class _LibraryScreenState extends State<LibraryScreen> {
               : 'Measuring files: ${list.uploads.length - measuring} of '
                     '${list.uploads.length}...'
         : list.error != null
-        ? "VK's search failed; search again with the button on the right."
+        ? "VK's search failed (${searchFailure(list.error!)}); search "
+              'again with the button on the right.'
         : null;
     return '$lengths. $plays.${status == null ? '' : '  $status'}';
   }

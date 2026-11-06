@@ -173,6 +173,18 @@ Future<void> main(List<String> args) async {
     return account.clientFor(source.account);
   }
 
+  // One line to perf.log: times and counts only, no titles, keys or links.
+  void logPerf(String line) => File(p.join(options.dataDir, 'perf.log'))
+      .writeAsStringSync(
+        '${DateTime.now().toIso8601String()} $line\n',
+        mode: FileMode.append,
+      );
+
+  final versions = VersionBook.vk(
+    store,
+    persist: options.cacheWhileStreaming,
+    log: logPerf,
+  );
   final player = PlayerService(
     accounts: clientOfSource,
     muted: options.muted,
@@ -181,7 +193,7 @@ Future<void> main(List<String> args) async {
     mpvLog: options.mpvLog ? File(p.join(options.dataDir, 'mpv.log')) : null,
     storage: storage,
     cacheWhileStreaming: options.cacheWhileStreaming,
-  )..versions = VersionBook.vk(store, persist: options.cacheWhileStreaming);
+  )..versions = versions;
   final library = LibraryController(
     tracks,
     collections: collections,
