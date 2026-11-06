@@ -134,6 +134,45 @@ typedef PrintRequest = ({
   String? accessKey,
 });
 
+/// A listed VK song whose file plays more than 3 s off its listed length
+/// and that has no version chosen for that length yet (Stage M2): what VK's
+/// search needs to find its uploads.
+class SwappedSong {
+  const SwappedSong({
+    required this.trackId,
+    required this.sourceId,
+    required this.sourceKey,
+    required this.artist,
+    required this.title,
+    required this.listedSec,
+    required this.ownSeconds,
+    required this.ownKeys,
+    this.accessKey,
+    this.ownBytes,
+    this.vkTrackId,
+  });
+
+  /// The listed row, its account and its key there.
+  final int trackId;
+  final int sourceId;
+  final String sourceKey;
+  final String? accessKey;
+  final String artist;
+  final String title;
+  final int listedSec;
+
+  /// How long VK's file for the row plays, and its size.
+  final double ownSeconds;
+  final int? ownBytes;
+
+  /// VK's `track_id` of the row; null when VK gives none.
+  final int? vkTrackId;
+
+  /// The keys of the row and of its merged copies in every account: VK's
+  /// current file, never offered as another upload.
+  final Set<String> ownKeys;
+}
+
 /// A cached song's stored file, as the cache limit sees it.
 class CachedAudio {
   const CachedAudio({

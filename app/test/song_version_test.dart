@@ -228,6 +228,38 @@ void main() {
       expect(book().choiceFor(relisted), isNull);
     });
 
+    test('reload takes over what the background check stored', () async {
+      final versions = book();
+      expect(versions.choiceFor(song), isNull);
+      var notified = 0;
+      versions.addListener(() => notified++);
+      // The check after a sync stores a choice through its own connection.
+      store.saveVersionChoice(
+        decideVersion(
+          trackId: song.id,
+          listedSec: 219,
+          ownSeconds: 226.5,
+          ownBytes: 9062443,
+          found: realCase(),
+          nowMs: 5,
+        ),
+      );
+      versions.reload();
+      expect(notified, 1);
+      expect(versions.choiceFor(song)!.state, VersionState.suggested);
+
+      // VK gave the file back: the check forgot it, and so does the book.
+      store.removeVersionChoice(song.id);
+      versions.reload();
+      expect(versions.choiceFor(song), isNull);
+
+      // A choice kept only for this run (the search failed) stays.
+      searchFails = VkException('audio.search error 10', transient: true);
+      await versions.decide(song, route, swapped);
+      versions.reload();
+      expect(versions.choiceFor(song), isNotNull);
+    });
+
     test('the speed gate keeps its data unchanged', () async {
       final versions = book(persist: false);
       await versions.decide(song, route, swapped);

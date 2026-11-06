@@ -175,3 +175,31 @@ SongVersion? suggestedVersion(int listedSec, List<SongVersion> ranked) {
   }
   return null;
 }
+
+/// The choice for a song listed at [listedSec] seconds whose VK file plays
+/// [ownSeconds] instead (more than 3 s off): the best upload of [found] within
+/// [matchSeconds] of the listed length as the suggested version; with none,
+/// VK's file plays, marked. The player decides this when a play finds the
+/// swap (Stage K), the background check after a sync before any play
+/// (Stage M2).
+VersionChoice decideVersion({
+  required int trackId,
+  required int listedSec,
+  required double ownSeconds,
+  required int? ownBytes,
+  required Iterable<SongVersion> found,
+  required int nowMs,
+}) {
+  final best = suggestedVersion(listedSec, rankVersions(listedSec, found));
+  return VersionChoice(
+    trackId: trackId,
+    state: best == null ? VersionState.none : VersionState.suggested,
+    fileKey: best?.key,
+    fileAccessKey: best?.accessKey,
+    fileSeconds: best?.file?.seconds,
+    ownSeconds: ownSeconds,
+    ownBytes: ownBytes,
+    listedSec: listedSec,
+    decidedAtMs: nowMs,
+  );
+}

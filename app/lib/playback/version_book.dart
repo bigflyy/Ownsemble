@@ -92,22 +92,14 @@ class VersionBook extends ChangeNotifier {
     _searching.add(track.id);
     notifyListeners();
     try {
-      final ranked = rankVersions(
-        track.durationSec,
-        await _find(track, ownRoute),
-      );
-      final best = suggestedVersion(track.durationSec, ranked);
       return _keep(
-        VersionChoice(
+        decideVersion(
           trackId: track.id,
-          state: best == null ? VersionState.none : VersionState.suggested,
-          fileKey: best?.key,
-          fileAccessKey: best?.accessKey,
-          fileSeconds: best?.file?.seconds,
+          listedSec: track.durationSec,
           ownSeconds: own.seconds,
           ownBytes: own.bytes,
-          listedSec: track.durationSec,
-          decidedAtMs: _now(),
+          found: await _find(track, ownRoute),
+          nowMs: _now(),
         ),
       );
     } on Object {
@@ -153,6 +145,21 @@ class VersionBook extends ChangeNotifier {
       ),
       ...found,
     ]);
+  }
+
+  /// Takes over the choices stored in the library, which the background
+  /// check after a sync decides (Stage M2), so swapped songs show their tag
+  /// before they are played. A stored choice wins over the one in memory; a
+  /// choice kept only in memory (VK's search failed) stays.
+  void reload() {
+    final stored = _store.versionChoices();
+    if (persist) {
+      _choices.removeWhere(
+        (id, choice) => choice.stored && !stored.containsKey(id),
+      );
+    }
+    _choices.addAll(stored);
+    notifyListeners();
   }
 
   /// The user picked [version] for [track]: it plays from now on, until

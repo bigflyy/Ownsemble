@@ -1,6 +1,8 @@
 import 'package:path/path.dart' as p;
 import 'package:sqlite3/sqlite3.dart';
 
+import '../playback/mp3_length.dart' show otherRecordingSeconds;
+
 import 'file_print.dart';
 import 'library_records.dart';
 import 'library_schema.dart';
@@ -447,6 +449,111 @@ class LibraryStore {
     } finally {
       save.close();
     }
+  }
+
+  // Checking every song's file (Stage M2).
+
+  /// The listed VK songs whose file the background check reads now: every
+  /// listed, not gone row of an account in the library with no print, an
+  /// old one (see [printLifetime]) or one read for another listed length.
+  /// Newest added first, as the songs most likely played soon.
+  List<PrintRequest> filesToCheck({int? nowMs}) {
+    final now = nowMs ?? _now();
+    return [
+      for (final row in _db.select(
+        '''
+        SELECT t.id, t.source_id, t.source_key, t.access_key
+        FROM tracks t
+        JOIN sources s ON s.id = t.source_id
+        LEFT JOIN vk_file_prints p ON p.track_id = t.id
+        WHERE s.kind = 'vk' AND s.removed_at_ms IS NULL
+          AND t.same_as IS NULL AND t.gone_at_ms IS NULL
+          AND (p.track_id IS NULL
+            OR p.listed_sec != t.duration_sec
+            OR p.checked_at_ms <= ? - CASE WHEN p.bytes IS NULL
+                                      THEN ? ELSE ? END)
+        ORDER BY t.added_at DESC, t.id
+        ''',
+        [now, noFilePrintLifetime.inMilliseconds, printLifetime.inMilliseconds],
+      ))
+        (
+          trackId: row['id'] as int,
+          sourceId: row['source_id'] as int,
+          sourceKey: row['source_key'] as String,
+          accessKey: row['access_key'] as String?,
+        ),
+    ];
+  }
+
+  /// The listed VK songs whose stored print plays more than 3 s off the
+  /// listed length and that have no version chosen for that length: the
+  /// background check searches VK for their uploads.
+  List<SwappedSong> swappedToDecide() {
+    final rows = _db.select(
+      '''
+      SELECT t.id, t.source_id, t.source_key, t.access_key, t.artist,
+             t.title, t.duration_sec, t.vk_track_id, p.seconds, p.bytes
+      FROM tracks t
+      JOIN sources s ON s.id = t.source_id
+      JOIN vk_file_prints p
+        ON p.track_id = t.id AND p.listed_sec = t.duration_sec
+      LEFT JOIN song_versions v
+        ON v.track_id = t.id AND v.listed_sec = t.duration_sec
+      WHERE s.kind = 'vk' AND s.removed_at_ms IS NULL
+        AND t.same_as IS NULL AND t.gone_at_ms IS NULL
+        AND p.seconds IS NOT NULL AND abs(p.seconds - t.duration_sec) > ?
+        AND v.track_id IS NULL
+      ORDER BY t.added_at DESC, t.id
+      ''',
+      [otherRecordingSeconds],
+    );
+    final copies = _db.prepare(
+      'SELECT source_key FROM tracks WHERE same_as = ?',
+    );
+    try {
+      return [
+        for (final row in rows)
+          SwappedSong(
+            trackId: row['id'] as int,
+            sourceId: row['source_id'] as int,
+            sourceKey: row['source_key'] as String,
+            accessKey: row['access_key'] as String?,
+            artist: row['artist'] as String,
+            title: row['title'] as String,
+            listedSec: row['duration_sec'] as int,
+            vkTrackId: row['vk_track_id'] as int?,
+            ownSeconds: (row['seconds'] as num).toDouble(),
+            ownBytes: row['bytes'] as int?,
+            ownKeys: {
+              row['source_key'] as String,
+              for (final copy in copies.select([row['id']]))
+                copy['source_key'] as String,
+            },
+          ),
+      ];
+    } finally {
+      copies.close();
+    }
+  }
+
+  /// Forgets the automatic choices (suggested or none) of songs whose
+  /// stored print now plays within 3 s of the listed length: VK gave the
+  /// listed recording back. A version the user picked stays. Returns how
+  /// many were forgotten.
+  int forgetFixedChoices() {
+    _db.execute(
+      '''
+      DELETE FROM song_versions
+      WHERE state != 'picked' AND track_id IN (
+        SELECT t.id FROM tracks t
+        JOIN vk_file_prints p
+          ON p.track_id = t.id AND p.listed_sec = t.duration_sec
+        WHERE p.seconds IS NOT NULL
+          AND abs(p.seconds - t.duration_sec) <= ?)
+      ''',
+      [otherRecordingSeconds],
+    );
+    return _db.updatedRows;
   }
 
   /// Makes the stored merges of songs that several accounts share what
@@ -1008,7 +1115,8 @@ class LibraryStore {
     INSERT OR REPLACE INTO song_versions (track_id, state, file_key,
       file_access_key, file_seconds, own_seconds, own_bytes, listed_sec,
       decided_at_ms)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    SELECT ?, ?, ?, ?, ?, ?, ?, ?, ? WHERE EXISTS (
+      SELECT 1 FROM tracks WHERE id = ?1)
     ''',
     [
       choice.trackId,
