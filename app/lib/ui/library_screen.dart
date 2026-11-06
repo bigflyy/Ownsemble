@@ -1093,6 +1093,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
                         ),
                         compact: compact,
                       ),
+                tagsUnderTitle: version != null,
                 outsideMeaning: version == null
                     ? null
                     : version.isCurrentFile
@@ -1573,7 +1574,12 @@ class _SongRow extends StatelessWidget {
     required this.versionTag,
     this.onOpenAlbum,
     this.outsideMeaning,
+    this.tagsUnderTitle = false,
   });
+
+  /// The tags go after the artist, on the title's second line, instead of
+  /// the Album column (a song's versions: the line has room for words).
+  final bool tagsUnderTitle;
 
   /// The mark of a song whose VK file was swapped (Stage K), as an icon when
   /// compact; empty for every other song. On a song's versions, the
@@ -1771,12 +1777,27 @@ class _SongRow extends StatelessWidget {
                             color: isCurrent ? colors.currentText : null,
                           ),
                         ),
-                        Text(
-                          track.artist,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: dimStyle,
-                        ),
+                        if (tagsUnderTitle)
+                          Row(
+                            children: [
+                              Flexible(
+                                child: Text(
+                                  track.artist,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: dimStyle,
+                                ),
+                              ),
+                              ...tags(compact: false),
+                            ],
+                          )
+                        else
+                          Text(
+                            track.artist,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: dimStyle,
+                          ),
                       ],
                     ),
                   ),
@@ -1800,12 +1821,13 @@ class _SongRow extends StatelessWidget {
                                     : onOpenAlbum,
                               ),
                             ),
-                            ...tags(compact: box.maxWidth < 150),
+                            if (!tagsUnderTitle)
+                              ...tags(compact: box.maxWidth < 150),
                           ],
                         ),
                       ),
                     ),
-                  ] else
+                  ] else if (!tagsUnderTitle)
                     ...tags(compact: true),
                   const SizedBox(width: 14),
                   _SourceMark(
