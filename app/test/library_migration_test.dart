@@ -454,6 +454,66 @@ void main() {
     expect(found.albumKey, isNull);
   });
 
+  test('version 10 expires found lists whose named albums have no link', () {
+    // User, 2026-11-06: an upload's album opened empty, since the list was
+    // found before version 10 kept album links. Searched again, it gets them.
+    final store = LibraryStore.open(dbPath);
+    final source = store.ensureSource(TrackSource.vk, account: '1', name: 'A');
+    final ids = store.upsertAll(source, [
+      const NewTrack(
+        sourceKey: '1_1',
+        artist: 'Аффинаж',
+        title: 'Отличник',
+        durationSec: 200,
+        addedAt: 5,
+      ),
+      const NewTrack(
+        sourceKey: '1_2',
+        artist: 'Сплин',
+        title: 'Выхода нет',
+        durationSec: 230,
+        addedAt: 4,
+      ),
+    ]);
+    store
+      ..saveFoundVersions(ids[0], [
+        const SongVersion(
+          key: '5_9',
+          artist: 'Аффинаж',
+          title: 'Отличник',
+          album: 'Снаружи мажор внутри минор',
+          listedSec: 200,
+        ),
+      ], atMs: 1000)
+      ..saveFoundVersions(ids[1], [
+        const SongVersion(
+          key: '6_9',
+          artist: 'Сплин',
+          title: 'Выхода нет',
+          album: 'Гранатовый альбом',
+          albumKey: '-7_1',
+          listedSec: 230,
+        ),
+        const SongVersion(
+          key: '6_8',
+          artist: 'Сплин',
+          title: 'Выхода нет',
+          listedSec: 230,
+        ),
+      ], atMs: 1000)
+      ..close();
+    final db = sqlite3.open(dbPath);
+    db.execute('PRAGMA user_version = 10');
+    db.close();
+
+    final migrated = LibraryStore.open(dbPath);
+    addTearDown(migrated.close);
+    expect(versionOf(dbPath), librarySchemaVersion);
+    expect(migrated.foundVersions(ids[0])?.foundAtMs, 0, reason: 'expired');
+    expect(migrated.foundVersions(ids[0])?.versions, hasLength(1));
+    expect(migrated.foundVersions(ids[1])?.foundAtMs, 1000, reason: 'kept');
+  });
+
   test('a library from a newer build is refused and left alone', () {
     final db = sqlite3.open(dbPath);
     db.execute('PRAGMA user_version = ${librarySchemaVersion + 1}');

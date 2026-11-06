@@ -10,6 +10,7 @@ import 'package:ownsemble/playback/mp3_length.dart';
 import 'package:ownsemble/playback/playback_controller.dart';
 import 'package:ownsemble/playback/player_service.dart';
 import 'package:ownsemble/playback/version_book.dart';
+import 'package:ownsemble/ui/album_link.dart';
 import 'package:ownsemble/ui/albums.dart';
 import 'package:ownsemble/ui/library_controller.dart';
 import 'package:ownsemble/ui/library_screen.dart';
@@ -318,6 +319,34 @@ void main() {
     expect(library.view.album?.link?.key, '-77_8_1');
     expect(library.view.album?.link?.sourceId, song.sourceId);
     expect(library.view.album?.link?.accessKey, 'albumkey');
+  });
+
+  testWidgets('an upload album without a link is not a link', (tester) async {
+    // It would open an album of only the library's songs: empty.
+    final song = plainSong();
+    store.saveFoundVersions(song.id, [
+      const SongVersion(
+        key: '8_1',
+        artist: 'Сплин',
+        title: 'Выхода нет',
+        album: 'Волна',
+        listedSec: 236,
+      ),
+    ]);
+    await pumpScreen(tester);
+    library.openVersions(song, null);
+    await tester.pumpAndSettle();
+    final upload = library.visible.firstWhere(
+      (track) => library.versionOf(track)?.key == '8_1',
+    );
+    expect(library.albumOf(upload), isNull);
+    final link = tester.widget<AlbumLink>(
+      find.descendant(
+        of: find.byKey(ValueKey('song-${upload.id}')),
+        matching: find.byType(AlbumLink),
+      ),
+    );
+    expect(link.onOpen, isNull, reason: 'shown as plain text');
   });
 
   testWidgets("VK's file row opens the song's own album", (tester) async {

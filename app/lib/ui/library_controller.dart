@@ -447,17 +447,18 @@ class LibraryController extends ChangeNotifier {
     if (version.isCurrentFile && row != null) return albums?.albumOf(row);
     final title = version.album;
     if (title == null || title.isEmpty) return null;
+    // Without VK's link only the library's songs of the album would show,
+    // and the library rarely has an upload's album: an empty place.
     final key = version.albumKey;
+    if (key == null) return null;
     return AlbumRef(
       title: title,
       artist: version.artist,
-      link: key == null
-          ? null
-          : (
-              sourceId: track.sourceId,
-              key: key,
-              accessKey: version.albumAccessKey,
-            ),
+      link: (
+        sourceId: track.sourceId,
+        key: key,
+        accessKey: version.albumAccessKey,
+      ),
     );
   }
 

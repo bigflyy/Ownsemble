@@ -1102,10 +1102,15 @@ class _LibraryScreenState extends State<LibraryScreen> {
                           'while you listen here'
                     : 'Another upload of the song on VK: streams, nothing '
                           'is saved while you listen here',
-                onOpenAlbum: () {
-                  library.jump.clear();
-                  library.openAlbum(track);
-                },
+                // An upload VK gives no album link for shows its album as
+                // plain text. Asked only for those rows: for a library song
+                // it costs a database read per row.
+                onOpenAlbum: version != null && library.albumOf(track) == null
+                    ? null
+                    : () {
+                        library.jump.clear();
+                        library.openAlbum(track);
+                      },
               );
             },
           ),

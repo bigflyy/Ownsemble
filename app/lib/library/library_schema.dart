@@ -6,7 +6,7 @@ import 'package:sqlite3/sqlite3.dart';
 /// Schema version this build reads and writes (`PRAGMA user_version`).
 ///
 /// 0 is the speed-gate build's single `tracks` table (or an empty file).
-const librarySchemaVersion = 10;
+const librarySchemaVersion = 11;
 
 /// How many colors sources can have; the theme has one per slot, from 1.
 const sourceColorCount = 6;
@@ -50,6 +50,7 @@ void migrateLibrary(Database db, {String? dataDir}) {
     if (version < 8) _addFoundVersions(db);
     if (version < 9) _addPlayDetails(db);
     if (version < 10) _addFoundVersionAlbums(db);
+    if (version < 11) _expireListsWithoutAlbumLinks(db);
     db.execute('PRAGMA user_version = $librarySchemaVersion');
     db.execute('COMMIT');
   } catch (_) {
@@ -235,6 +236,19 @@ void _addPlayDetails(Database db) {
 void _addFoundVersionAlbums(Database db) {
   db.execute('ALTER TABLE found_versions ADD COLUMN album_key TEXT');
   db.execute('ALTER TABLE found_versions ADD COLUMN album_access_key TEXT');
+}
+
+/// Version 11: lists found before version 10 name albums but have no link
+/// to them, so the albums opened empty (user, 2026-11-06). Expired, they
+/// are searched again the next time the song's versions open.
+void _expireListsWithoutAlbumLinks(Database db) {
+  db.execute('''
+    UPDATE found_versions SET found_at_ms = 0
+    WHERE track_id IN (
+      SELECT track_id FROM found_versions
+      WHERE album IS NOT NULL AND album != '' AND album_key IS NULL
+    )
+  ''');
 }
 
 void _createVersion1(Database db) {
