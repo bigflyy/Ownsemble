@@ -126,7 +126,7 @@ void main() {
   }) async {
     final playback = PlaybackController(
       player: player ?? PlayerService(muted: true, dataDir: '.'),
-      recordPlay: collections.recordPlay,
+      plays: collections,
     );
     tester.view.physicalSize = size;
     tester.view.devicePixelRatio = 1;
@@ -1537,7 +1537,7 @@ void main() {
     final songs = library.visible;
     final playback = PlaybackController(
       player: _StartedPlayer(),
-      recordPlay: collections.recordPlay,
+      plays: collections,
     );
     await playback.playFrom(songs, 0);
     await playback.addToQueue(songs[3]);

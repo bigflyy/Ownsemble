@@ -51,7 +51,6 @@ void main() {
           library: library,
           playback: PlaybackController(
             player: PlayerService(muted: true, dataDir: '.'),
-            recordPlay: (_) {},
           ),
         ),
       ),

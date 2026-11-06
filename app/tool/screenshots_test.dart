@@ -343,7 +343,7 @@ void main() {
             sources: sources,
             child: LibraryScreen(
               library: library,
-              playback: PlaybackController(player: player, recordPlay: (_) {}),
+              playback: PlaybackController(player: player),
               collections: collections,
               settings: settings,
               sync: sync,

@@ -16,8 +16,16 @@ void dropVersion6(Database db) {
   db.execute('DROP TABLE song_versions');
 }
 
+/// Takes back what version 9 added (play details).
+void dropVersion9(Database db) {
+  for (final column in ['listened_ms', 'started', 'shuffle', 'ended']) {
+    db.execute('ALTER TABLE history DROP COLUMN $column');
+  }
+}
+
 /// Takes back what version 8 added (found versions).
 void dropVersion8(Database db) {
+  dropVersion9(db);
   db.execute('DROP TABLE found_versions');
 }
 
@@ -371,6 +379,36 @@ void main() {
     expect(migrated.foundVersions(id), isNull);
     // Decided again by the next check.
     expect(migrated.versionChoices().containsKey(none), isFalse);
+  });
+
+  test('version 8 gains play details and keeps its plays', () {
+    final store = LibraryStore.open(dbPath);
+    final source = store.ensureSource(TrackSource.vk, account: '1', name: 'A');
+    final id = store.upsertAll(source, [
+      const NewTrack(
+        sourceKey: '1_1',
+        artist: 'Сплин',
+        title: 'Выхода нет',
+        durationSec: 230,
+        addedAt: 5,
+      ),
+    ]).single;
+    store
+      ..addPlay(id, atMs: 100)
+      ..addPlay(id, atMs: 200)
+      ..close();
+    final db = sqlite3.open(dbPath);
+    dropVersion9(db);
+    db.execute('PRAGMA user_version = 8');
+    db.close();
+
+    final migrated = LibraryStore.open(dbPath);
+    addTearDown(migrated.close);
+    expect(versionOf(dbPath), librarySchemaVersion);
+    final plays = migrated.history();
+    expect(plays.map((e) => e.playedAtMs), [200, 100]);
+    expect(plays.map((e) => e.listenedMs), [null, null]);
+    expect(plays.map((e) => e.ended), [null, null]);
   });
 
   test('a library from a newer build is refused and left alone', () {

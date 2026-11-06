@@ -99,7 +99,7 @@ void main() {
       MaterialApp(
         home: LibraryScreen(
           library: library,
-          playback: PlaybackController(player: player, recordPlay: (_) {}),
+          playback: PlaybackController(player: player),
         ),
       ),
     );
@@ -328,7 +328,7 @@ void main() {
         song,
         accounts: (sourceId) => VkClient(const []),
       )..versions = versions;
-      final playback = PlaybackController(player: showing, recordPlay: (_) {});
+      final playback = PlaybackController(player: showing);
       await tester.pumpWidget(
         MaterialApp(
           home: Scaffold(

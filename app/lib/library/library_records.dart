@@ -38,13 +38,85 @@ class SourceInfo {
   final int color;
 }
 
-/// One play in the History, newest first in lists.
+/// How a play started, stored by name in `history.started`.
+enum PlayStart {
+  /// The user picked the song: a click in a list, Up next or an album.
+  chosen,
+
+  /// The Next button.
+  next,
+
+  /// The Previous button.
+  previous,
+
+  /// The song before it ended and this one came next in the list (in shuffle
+  /// order when shuffle is on).
+  auto,
+
+  /// The song before it ended (or nothing played) and this one came from the
+  /// queue (Play next, Add to queue).
+  queued,
+}
+
+/// How a play ended, stored by name in `history.ended`.
+enum PlayEnd {
+  /// The song played to its end.
+  finished,
+
+  /// Another song started before this one ended.
+  skipped,
+
+  /// The app closed while the song was loaded. Played again in the next run,
+  /// the play goes on and this mark is taken off.
+  closed,
+}
+
+/// One play in the History, newest first in lists. The details after
+/// [playedAtMs] exist from schema 9 (2026-11-06); plays recorded before say
+/// nothing (null).
 class HistoryEntry {
-  const HistoryEntry(this.id, this.trackId, this.playedAtMs);
+  const HistoryEntry(
+    this.id,
+    this.trackId,
+    this.playedAtMs, {
+    this.started,
+    this.shuffle,
+    this.listenedMs,
+    this.ended,
+  });
 
   final int id;
   final int trackId;
+
+  /// When the song started to sound, Unix milliseconds.
   final int playedAtMs;
+
+  final PlayStart? started;
+
+  /// Whether shuffle was on when the song started.
+  final bool? shuffle;
+
+  /// How long the song was actually heard: paused time is left out, and a
+  /// seek neither adds nor takes away. Written as the song plays, so a crash
+  /// loses only the last few seconds.
+  final int? listenedMs;
+
+  /// Null while the play goes on, after a crash, or before schema 9.
+  final PlayEnd? ended;
+}
+
+/// Where the player writes its plays: the History table in the app, a
+/// stand-in in tests.
+abstract interface class PlayLog {
+  /// Records that [trackId] started to sound; returns the play's id.
+  int beginPlay(int trackId, {required PlayStart start, required bool shuffle});
+
+  /// Writes how long play [playId] was heard so far and how it ended (null:
+  /// it goes on).
+  void updatePlay(int playId, {required int listenedMs, PlayEnd? ended});
+
+  /// The newest play, or null when nothing ever played.
+  HistoryEntry? lastPlay();
 }
 
 /// A named Stack: a list that only grows on top.

@@ -208,7 +208,7 @@ Future<void> main(List<String> args) async {
   );
   final playback = PlaybackController(
     player: player,
-    recordPlay: collections.recordPlay,
+    plays: collections,
     readSetting: store.readSetting,
     writeSetting: store.writeSetting,
   );
@@ -222,7 +222,9 @@ Future<void> main(List<String> args) async {
   // with mpv running (see endProcessNow).
   AppLifecycleListener(
     onExitRequested: () async {
-      playback.saveSession();
+      playback
+        ..saveSession()
+        ..closePlay();
       endProcessNow();
       return AppExitResponse.exit;
     },

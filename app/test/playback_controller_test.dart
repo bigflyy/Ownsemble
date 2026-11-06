@@ -112,6 +112,51 @@ class FakePlayer implements PlayerService {
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }
 
+/// History stand-in: keeps each play as the app's History table would.
+class FakePlays implements PlayLog {
+  final rows = <HistoryEntry>[];
+
+  /// The songs played, oldest first.
+  List<int> get trackIds => [for (final row in rows) row.trackId];
+
+  @override
+  int beginPlay(
+    int trackId, {
+    required PlayStart start,
+    required bool shuffle,
+  }) {
+    rows.add(
+      HistoryEntry(
+        rows.length + 1,
+        trackId,
+        rows.length,
+        started: start,
+        shuffle: shuffle,
+        listenedMs: 0,
+      ),
+    );
+    return rows.length;
+  }
+
+  @override
+  void updatePlay(int playId, {required int listenedMs, PlayEnd? ended}) {
+    final index = rows.indexWhere((row) => row.id == playId);
+    final row = rows[index];
+    rows[index] = HistoryEntry(
+      row.id,
+      row.trackId,
+      row.playedAtMs,
+      started: row.started,
+      shuffle: row.shuffle,
+      listenedMs: listenedMs,
+      ended: ended,
+    );
+  }
+
+  @override
+  HistoryEntry? lastPlay() => rows.isEmpty ? null : rows.last;
+}
+
 List<Track> songs(int count) => [
   for (var i = 0; i < count; i++)
     Track(
@@ -126,15 +171,20 @@ List<Track> songs(int count) => [
 
 void main() {
   late FakePlayer player;
-  late List<int> history;
+  late FakePlays plays;
   late PlaybackController playback;
+
+  /// The clock the controller times listening with.
+  var nowMs = 0;
 
   setUp(() {
     player = FakePlayer();
-    history = [];
+    plays = FakePlays();
+    nowMs = 0;
     playback = PlaybackController(
       player: player,
-      recordPlay: (track) => history.add(track.id),
+      plays: plays,
+      clockMs: () => nowMs,
     );
   });
   tearDown(() => playback.dispose());
@@ -150,7 +200,7 @@ void main() {
       await playback.playFrom(list, 0);
       await playback.playFrom(list, 1);
       expect(player.played, [0, 1]);
-      expect(history, [0]);
+      expect(plays.trackIds, [0]);
     },
   );
 
@@ -170,7 +220,7 @@ void main() {
     player.endedController.add(null);
     await settle();
     expect(player.played, [1, 2]);
-    expect(history, [1, 2]);
+    expect(plays.trackIds, [1, 2]);
   });
 
   test('auto-advance skips songs that cannot play', () async {
@@ -180,7 +230,7 @@ void main() {
     player.endedController.add(null);
     await settle();
     expect(player.played, [0, 1, 2, 3]);
-    expect(history, [0, 3]);
+    expect(plays.trackIds, [0, 3]);
   });
 
   test('skipping gives up after a limit when nothing can play', () async {
@@ -247,12 +297,97 @@ void main() {
     expect(player.played.length, lessThan(10));
   });
 
+  group('play details', () {
+    test(
+      'a song heard to its end: picked, all of it heard, finished',
+      () async {
+        await playback.playFrom(songs(3), 0);
+        nowMs += 200000;
+        player.endedController.add(null);
+        await settle();
+        final first = plays.rows.first;
+        expect(first.started, PlayStart.chosen);
+        expect(first.shuffle, isFalse);
+        expect(first.listenedMs, 200000);
+        expect(first.ended, PlayEnd.finished);
+        expect(plays.rows[1].started, PlayStart.auto);
+        expect(plays.rows[1].ended, isNull, reason: 'still playing');
+      },
+    );
+
+    test('paused time is not heard time; Next skips the song', () async {
+      await playback.playFrom(songs(3), 0);
+      nowMs += 10000;
+      player.playing.value = false;
+      nowMs += 60000;
+      player.playing.value = true;
+      nowMs += 5000;
+      await playback.next();
+      expect(plays.rows.first.listenedMs, 15000);
+      expect(plays.rows.first.ended, PlayEnd.skipped);
+      expect(plays.rows[1].started, PlayStart.next);
+    });
+
+    test('a pause writes the heard time at once', () async {
+      await playback.playFrom(songs(3), 0);
+      nowMs += 7000;
+      player.playing.value = false;
+      expect(plays.rows.first.listenedMs, 7000);
+      expect(plays.rows.first.ended, isNull);
+    });
+
+    test('Previous, the queue and shuffle are told apart', () async {
+      final list = songs(3);
+      playback.toggleShuffle();
+      await playback.playFrom(list, 1);
+      player.position = Duration.zero;
+      await playback.previous();
+      await playback.addToQueue(list[2]);
+      player.endedController.add(null);
+      await settle();
+      expect(plays.rows.map((row) => row.started), [
+        PlayStart.chosen,
+        PlayStart.previous,
+        PlayStart.queued,
+      ]);
+      expect(plays.rows.map((row) => row.shuffle), [true, true, true]);
+    });
+
+    test('a song that fails to start ends the one before it', () async {
+      final list = songs(3);
+      player.failing.add(1);
+      await playback.playFrom(list, 0);
+      nowMs += 3000;
+      await playback.playFrom(list, 1);
+      expect(plays.rows.single.ended, PlayEnd.skipped);
+      expect(plays.rows.single.listenedMs, 3000);
+    });
+
+    test('closing the app ends the play as closed', () async {
+      await playback.playFrom(songs(3), 0);
+      nowMs += 42000;
+      playback.closePlay();
+      expect(plays.rows.single.listenedMs, 42000);
+      expect(plays.rows.single.ended, PlayEnd.closed);
+    });
+
+    test('a new version of the same song goes on in the same play', () async {
+      final list = songs(3);
+      await playback.playFrom(list, 0);
+      nowMs += 4000;
+      await playback.versionChanged(list[0]);
+      nowMs += 6000;
+      await playback.next();
+      expect(plays.rows.first.listenedMs, 10000);
+      expect(plays.rows, hasLength(2));
+    });
+  });
+
   group('saved volume', () {
     late Map<String, String?> saved;
 
     PlaybackController started() => PlaybackController(
       player: player,
-      recordPlay: (_) {},
       readSetting: (key) => saved[key],
       writeSetting: (key, value) => saved[key] = value,
     );
@@ -354,7 +489,7 @@ void main() {
       player.endedController.add(null);
       await settle();
       expect(player.played, [0, 50]);
-      expect(history, [0, 50]);
+      expect(plays.trackIds, [0, 50]);
     });
 
     test('with a song paused it still waits', () async {
@@ -478,7 +613,6 @@ void main() {
     PlaybackController restart() {
       final controller = PlaybackController(
         player: FakePlayer(),
-        recordPlay: (_) {},
         readSetting: (key) => saved[key],
         writeSetting: (key, value) => saved[key] = value,
       );
@@ -518,7 +652,7 @@ void main() {
     late List<Track> list;
     late FakePlayer firstPlayer;
     late FakePlayer restarted;
-    late List<int> recorded;
+    late FakePlays plays;
 
     Track? find(int id) => id < list.length ? list[id] : null;
 
@@ -526,7 +660,7 @@ void main() {
     PlaybackController run(FakePlayer onPlayer) {
       final controller = PlaybackController(
         player: onPlayer,
-        recordPlay: (track) => recorded.add(track.id),
+        plays: plays,
         readSetting: (key) => saved[key],
         writeSetting: (key, value) => saved[key] = value,
       );
@@ -542,7 +676,7 @@ void main() {
 
     setUp(() {
       saved = {};
-      recorded = [];
+      plays = FakePlays();
       list = songs(5);
     });
 
@@ -566,13 +700,25 @@ void main() {
 
     test('Play goes on from there; History gets no second entry', () async {
       await played(2, const Duration(seconds: 42));
-      recorded.clear();
       final second = restart();
       await second.playOrPause();
       expect(restarted.played, [2]);
       expect(restarted.startedFrom, [const Duration(seconds: 42)]);
-      expect(recorded, isEmpty);
+      expect(plays.trackIds, [2]);
       expect(restarted.pauseToggles, 0);
+    });
+
+    test('a play closed with the app goes on in the next run', () async {
+      final first = await played(2, const Duration(seconds: 42));
+      first.closePlay();
+      expect(plays.rows.single.ended, PlayEnd.closed);
+      final second = restart();
+      await second.playOrPause();
+      expect(plays.trackIds, [2]);
+      expect(plays.rows.single.ended, isNull);
+      await second.next();
+      expect(plays.rows.first.ended, PlayEnd.skipped);
+      expect(plays.trackIds, [2, 3]);
     });
 
     test('a second press while it starts does not start it again', () async {
@@ -734,7 +880,6 @@ void main() {
       final writes = <String>[];
       final controller = PlaybackController(
         player: FakePlayer(),
-        recordPlay: (_) {},
         writeSetting: (key, value) => writes.add(key),
       );
       addTearDown(controller.dispose);
@@ -764,7 +909,6 @@ void main() {
       final writes = <String>[];
       final controller = PlaybackController(
         player: FakePlayer(),
-        recordPlay: (_) {},
         writeSetting: (key, value) => writes.add(key),
       );
       addTearDown(controller.dispose);

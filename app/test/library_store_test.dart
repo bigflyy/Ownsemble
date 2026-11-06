@@ -287,6 +287,34 @@ void main() {
       expect(store.history(limit: 1).single.playedAtMs, 300);
     });
 
+    test('a play keeps how it started, how long it was heard and how it '
+        'ended', () {
+      final ids = store.upsertAll(vk, [song('1_1', 'A', 'один')]);
+      final old = store.addPlay(ids[0], atMs: 50);
+      final play = store.beginPlay(
+        ids[0],
+        start: PlayStart.next,
+        shuffle: true,
+        atMs: 100,
+      );
+      expect(store.lastPlay()?.id, play);
+      expect(store.lastPlay()?.ended, isNull);
+      store.updatePlay(play, listenedMs: 4000);
+      store.updatePlay(play, listenedMs: 61500, ended: PlayEnd.skipped);
+      final entry = store.history().first;
+      expect(entry.playedAtMs, 100);
+      expect(entry.started, PlayStart.next);
+      expect(entry.shuffle, isTrue);
+      expect(entry.listenedMs, 61500);
+      expect(entry.ended, PlayEnd.skipped);
+      // Plays recorded before schema 9 say nothing about these.
+      final before = store.history().firstWhere((e) => e.id == old);
+      expect(before.started, isNull);
+      expect(before.shuffle, isNull);
+      expect(before.listenedMs, isNull);
+      expect(before.ended, isNull);
+    });
+
     test('plays in the same millisecond keep their order', () {
       final ids = store.upsertAll(vk, [
         song('1_1', 'A', 'one'),

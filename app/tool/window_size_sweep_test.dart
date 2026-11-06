@@ -143,7 +143,7 @@ void main() {
         theme: buildTheme(OwnColors.dark),
         home: LibraryScreen(
           library: library,
-          playback: PlaybackController(player: player, recordPlay: (_) {}),
+          playback: PlaybackController(player: player),
           collections: collections,
           sync: sync,
           settings: settings,

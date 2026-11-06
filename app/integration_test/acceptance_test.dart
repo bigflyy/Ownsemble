@@ -123,6 +123,52 @@ int shownCovers(double size) => find
     .evaluate()
     .length;
 
+/// The plays this run recorded ([added], newest first, the newest still
+/// playing) each say how they started, how long they were heard and, all
+/// but the newest, how they ended (Stage A of plan 04).
+void checkPlayDetails(List<HistoryEntry> added, Stopwatch runClock) {
+  String count<T>(Iterable<T> values) {
+    final counts = <T, int>{};
+    for (final value in values) {
+      counts[value] = (counts[value] ?? 0) + 1;
+    }
+    return [for (final e in counts.entries) '${e.key}: ${e.value}'].join(', ');
+  }
+
+  final heard = [for (final play in added) play.listenedMs ?? -1];
+  final totalMs = heard.fold(0, (sum, ms) => sum + ms);
+  // ignore: avoid_print
+  print(
+    'play details: started (${count(added.map((e) => e.started?.name))}); '
+    'ended (${count(added.skip(1).map((e) => e.ended?.name))}); '
+    'heard ${(totalMs / 1000).toStringAsFixed(1)} s in all, longest '
+    '${(heard.reduce(max) / 1000).toStringAsFixed(1)} s, run '
+    '${runClock.elapsed.inSeconds} s',
+  );
+  expect(added.where((e) => e.started == null), isEmpty, reason: 'started');
+  expect(added.where((e) => e.listenedMs == null), isEmpty, reason: 'heard');
+  expect(added.skip(1).where((e) => e.ended == null), isEmpty);
+  expect(added.first.ended, isNull, reason: 'the newest still plays');
+  expect(totalMs, lessThanOrEqualTo(runClock.elapsedMilliseconds));
+  for (final kind in [
+    PlayStart.chosen,
+    PlayStart.next,
+    PlayStart.previous,
+    PlayStart.auto,
+  ]) {
+    expect(added.any((e) => e.started == kind), isTrue, reason: kind.name);
+  }
+  for (final end in [PlayEnd.finished, PlayEnd.skipped]) {
+    expect(added.any((e) => e.ended == end), isTrue, reason: end.name);
+  }
+  // Every finished song was heard for some time (the test seeks near the
+  // end, so not for its whole length).
+  expect(
+    added.where((e) => e.ended == PlayEnd.finished && e.listenedMs! <= 0),
+    isEmpty,
+  );
+}
+
 /// Number of History entries in the library of [dataDir].
 int _historyLength(String dataDir) {
   final store = LibraryStore.open(p.join(dataDir, 'library.db'));
@@ -313,6 +359,8 @@ void main() {
     // The copied library keeps the History of whoever used it before (the
     // user plays the same library), so only entries added now are counted.
     final historyBefore = _historyLength(copyDir);
+    // Heard time of every play this run records cannot add up to more.
+    final runClock = Stopwatch()..start();
     // The test's own layout, whatever the user last chose in that library.
     final copied = LibraryStore.open(p.join(copyDir, 'library.db'));
     ShellSettings(
@@ -1834,6 +1882,7 @@ void main() {
     // The album song outside the library has no row for the History.
     expect(historyAdded, soundStarts - 1);
     expect(history.first.trackId, player.current?.id);
+    checkPlayDetails(history.take(historyAdded).toList(), runClock);
 
     // Sync now right after the start sync finds nothing new and leaves the
     // library as it is.

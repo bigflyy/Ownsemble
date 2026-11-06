@@ -3,22 +3,26 @@ import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
 
+import '../library/library_records.dart';
 import '../library/track.dart';
 import 'play_queue.dart';
 import 'player_service.dart';
 
 /// What the player controls do: playing from a list, previous and next,
 /// shuffle, repeat, auto-advance, seeking and volume. Records every song
-/// that starts playing in the History.
+/// that starts playing in the History, with how it started, how long it was
+/// heard and how it ended.
 class PlaybackController extends ChangeNotifier {
   PlaybackController({
     required this.player,
-    required this.recordPlay,
+    this.plays,
+    int Function()? clockMs,
     PlayQueue? queue,
     String? Function(String key)? readSetting,
     this._writeSetting,
   }) : queue = queue ?? PlayQueue(),
-       _readSetting = readSetting {
+       _readSetting = readSetting,
+       _clockMs = clockMs ?? _sinceStartMs {
     final saved = double.tryParse(readSetting?.call(volumeSetting) ?? '');
     if (saved != null) _volume = saved.clamp(0, 100);
     _mutedByUser = readSetting?.call(muteSetting) == 'on';
@@ -63,7 +67,22 @@ class PlaybackController extends ChangeNotifier {
   final void Function(String key, String? value)? _writeSetting;
 
   /// Writes a History entry for a song that started playing.
-  final void Function(Track track) recordPlay;
+  /// Where plays are written; null records nothing.
+  final PlayLog? plays;
+
+  /// A clock that only moves forward, in milliseconds, for heard time.
+  final int Function() _clockMs;
+  static final _sinceStart = Stopwatch()..start();
+  static int _sinceStartMs() => _sinceStart.elapsedMilliseconds;
+
+  /// The play being heard now (or paused): its History id and song.
+  ({int id, int trackId})? _open;
+
+  /// Heard time of [_open] before the sound now playing started.
+  int _heardMs = 0;
+
+  /// When the sound now playing started, on [_clockMs]; null while silent.
+  int? _soundSinceMs;
 
   late final StreamSubscription<void> _ended;
 
@@ -113,7 +132,7 @@ class PlaybackController extends ChangeNotifier {
       await playOrPause();
       return null;
     }
-    return _play(queue.start(list, index));
+    return _play(queue.start(list, index), start: PlayStart.chosen);
   }
 
   /// Pauses or resumes. A song restored from the last run starts here, at
@@ -136,7 +155,7 @@ class PlaybackController extends ChangeNotifier {
   Future<PlayTiming?> next() async {
     if (!player.isReady) return null;
     final track = queue.next(auto: false);
-    return track == null ? null : _play(track);
+    return track == null ? null : _play(track, start: PlayStart.next);
   }
 
   /// The Previous button: back to the start of the song after 3 s of it,
@@ -148,7 +167,7 @@ class PlaybackController extends ChangeNotifier {
       await player.seek(Duration.zero);
       return null;
     }
-    return _play(track);
+    return _play(track, start: PlayStart.previous);
   }
 
   /// Moving back in a song that ended leaves it paused there, which is not
@@ -171,11 +190,17 @@ class PlaybackController extends ChangeNotifier {
   void _onPlayingChanged() {
     if (player.playing.value) {
       _idle = false;
-      _saveTimer ??= Timer.periodic(saveEvery, (_) => saveSession());
+      _startHearing();
+      _saveTimer ??= Timer.periodic(saveEvery, (_) {
+        saveSession();
+        _writePlay();
+      });
     } else {
       _saveTimer?.cancel();
       _saveTimer = null;
       saveSession();
+      _stopHearing();
+      _writePlay();
     }
   }
 
@@ -201,7 +226,7 @@ class PlaybackController extends ChangeNotifier {
   /// A click on a queued song in Up next: it plays now.
   Future<PlayTiming?> playQueued(int index) async {
     if (!player.isReady) return null;
-    return _play(queue.takeQueued(index));
+    return _play(queue.takeQueued(index), start: PlayStart.chosen);
   }
 
   /// With nothing playing a song just queued starts at once, since no song
@@ -211,7 +236,7 @@ class PlaybackController extends ChangeNotifier {
     saveSession();
     if (!_idle || !player.isReady) return;
     final track = queue.next(auto: false);
-    if (track != null) await _play(track);
+    if (track != null) await _play(track, start: PlayStart.queued);
   }
 
   /// Downloads [track] (keeps its audio for good). Returns why it failed,
@@ -400,20 +425,30 @@ class PlaybackController extends ChangeNotifier {
   }
 
   /// Plays [track] from [from] (the start when null). Once sound starts it
-  /// is saved for the next run and, when [record], added to the History.
+  /// is saved for the next run and, when [record], added to the History as
+  /// started by [start]. A recorded play ends the one before it (skipped,
+  /// unless it already finished), even when this song then fails: the old
+  /// one stops sounding either way. Not [record]: the same song goes on (a
+  /// resume after a restart, another version), in its own play.
   Future<PlayTiming> _play(
     Track track, {
     Duration? from,
     bool record = true,
+    PlayStart start = PlayStart.chosen,
   }) async {
     final request = ++_request;
     _idle = false;
+    if (record) _endPlay(PlayEnd.skipped);
     final timing = await player.play(track, from: from);
     if (request == _request) {
       if (timing.ok) {
         // History points at library rows; an album's song outside the
         // library has none.
-        if (record && track.inLibrary) recordPlay(track);
+        if (!record) {
+          _goOn(track);
+        } else if (track.inLibrary) {
+          _beginPlay(track, start);
+        }
         saveSession();
       } else {
         _idle = true;
@@ -426,7 +461,9 @@ class PlaybackController extends ChangeNotifier {
   /// A song played to its end: the next one per shuffle and repeat. Songs
   /// that cannot play are skipped, up to [maxSkips] in a row.
   Future<void> _onEnded() async {
+    _endPlay(PlayEnd.finished);
     for (var skips = 0; skips < maxSkips; skips++) {
+      final fromQueue = queue.queued.isNotEmpty;
       final track = queue.next(auto: true);
       if (track == null) {
         _idle = true;
@@ -434,12 +471,80 @@ class PlaybackController extends ChangeNotifier {
         return;
       }
       final request = _request + 1;
-      final timing = await _play(track);
+      final timing = await _play(
+        track,
+        start: fromQueue ? PlayStart.queued : PlayStart.auto,
+      );
       // Stop once a song plays, when the user picked another song meanwhile,
       // or when repeat one would retry the same failing song.
       if (timing.ok || request != _request) return;
       if (queue.repeat == Repeat.one && queue.queued.isEmpty) return;
     }
+  }
+
+  /// The app closes: the play now loaded ends as closed. Played again in the
+  /// next run, it goes on (see [_goOn]).
+  void closePlay() => _endPlay(PlayEnd.closed);
+
+  void _beginPlay(Track track, PlayStart start) {
+    final log = plays;
+    if (log == null) return;
+    _open = (
+      id: log.beginPlay(track.id, start: start, shuffle: queue.shuffle),
+      trackId: track.id,
+    );
+    _heardMs = 0;
+    _soundSinceMs = null;
+    if (player.playing.value) _startHearing();
+  }
+
+  /// [track] sounds again without a new play: the open play goes on, or the
+  /// newest one when it is this song's and the app closed (or crashed)
+  /// during it.
+  void _goOn(Track track) {
+    if (_open?.trackId != track.id) {
+      final last = plays?.lastPlay();
+      if (last == null ||
+          last.trackId != track.id ||
+          last.started == null ||
+          last.ended == PlayEnd.finished ||
+          last.ended == PlayEnd.skipped) {
+        return;
+      }
+      _open = (id: last.id, trackId: track.id);
+      _heardMs = last.listenedMs ?? 0;
+      _soundSinceMs = null;
+    }
+    if (player.playing.value) _startHearing();
+    _writePlay();
+  }
+
+  void _startHearing() {
+    if (_open != null) _soundSinceMs ??= _clockMs();
+  }
+
+  void _stopHearing() {
+    final since = _soundSinceMs;
+    if (since == null) return;
+    _heardMs += _clockMs() - since;
+    _soundSinceMs = null;
+  }
+
+  /// Writes the open play's heard time, and [ended] when it ends.
+  void _writePlay({PlayEnd? ended}) {
+    final open = _open;
+    if (open == null) return;
+    final since = _soundSinceMs;
+    final heard = _heardMs + (since == null ? 0 : _clockMs() - since);
+    plays?.updatePlay(open.id, listenedMs: heard, ended: ended);
+  }
+
+  void _endPlay(PlayEnd how) {
+    if (_open == null) return;
+    _stopHearing();
+    _writePlay(ended: how);
+    _open = null;
+    _heardMs = 0;
   }
 
   @override

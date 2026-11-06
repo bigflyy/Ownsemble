@@ -6,7 +6,7 @@ import 'package:sqlite3/sqlite3.dart';
 /// Schema version this build reads and writes (`PRAGMA user_version`).
 ///
 /// 0 is the speed-gate build's single `tracks` table (or an empty file).
-const librarySchemaVersion = 8;
+const librarySchemaVersion = 9;
 
 /// How many colors sources can have; the theme has one per slot, from 1.
 const sourceColorCount = 6;
@@ -48,6 +48,7 @@ void migrateLibrary(Database db, {String? dataDir}) {
     if (version < 6) _addSongVersions(db);
     if (version < 7) _addFilePrints(db);
     if (version < 8) _addFoundVersions(db);
+    if (version < 9) _addPlayDetails(db);
     db.execute('PRAGMA user_version = $librarySchemaVersion');
     db.execute('COMMIT');
   } catch (_) {
@@ -216,6 +217,16 @@ void _addFoundVersions(Database db) {
       PRIMARY KEY (track_id, file_key)
     )
   ''');
+}
+
+/// Version 9: how each play started, how long it was heard and how it
+/// ended (names of PlayStart / PlayEnd). Earlier plays keep nulls: nothing
+/// recorded them.
+void _addPlayDetails(Database db) {
+  db.execute('ALTER TABLE history ADD COLUMN started TEXT');
+  db.execute('ALTER TABLE history ADD COLUMN shuffle INTEGER');
+  db.execute('ALTER TABLE history ADD COLUMN listened_ms INTEGER');
+  db.execute('ALTER TABLE history ADD COLUMN ended TEXT');
 }
 
 void _createVersion1(Database db) {

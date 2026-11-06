@@ -6,7 +6,7 @@ import '../library/track.dart';
 /// History and Stacks as the UI shows them, read from and written to the
 /// library database on the UI thread (each call takes well under a
 /// millisecond at MVP sizes).
-class CollectionsController extends ChangeNotifier {
+class CollectionsController extends ChangeNotifier implements PlayLog {
   CollectionsController(this._store) {
     _reloadStacks();
   }
@@ -26,11 +26,30 @@ class CollectionsController extends ChangeNotifier {
   /// Entries of [stackId], top (newest) first.
   List<StackEntry> stackEntries(int stackId) => _store.stackEntries(stackId);
 
-  /// Records that [track] started playing.
+  /// Records that [track] started playing, with no details.
   void recordPlay(Track track) {
     _store.addPlay(track.id);
     notifyListeners();
   }
+
+  @override
+  int beginPlay(
+    int trackId, {
+    required PlayStart start,
+    required bool shuffle,
+  }) {
+    final id = _store.beginPlay(trackId, start: start, shuffle: shuffle);
+    notifyListeners();
+    return id;
+  }
+
+  /// Not shown anywhere yet, so nobody is told.
+  @override
+  void updatePlay(int playId, {required int listenedMs, PlayEnd? ended}) =>
+      _store.updatePlay(playId, listenedMs: listenedMs, ended: ended);
+
+  @override
+  HistoryEntry? lastPlay() => _store.lastPlay();
 
   /// Creates a Stack named [name] (trimmed); returns its id.
   int createStack(String name) {

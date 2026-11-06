@@ -108,7 +108,6 @@ void main() {
               dataDir: dir.path,
               storage: AudioStorage(dataDir: dir.path, store: store),
             ),
-            recordPlay: (_) {},
           ),
         ),
       ),

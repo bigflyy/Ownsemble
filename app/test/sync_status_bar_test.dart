@@ -315,7 +315,6 @@ void main() {
             library: library,
             playback: PlaybackController(
               player: PlayerService(muted: true, dataDir: '.'),
-              recordPlay: (_) {},
             ),
             sync: sync,
           ),
@@ -327,7 +326,6 @@ void main() {
     test('the play list takes over the songs of a reloaded library', () async {
       final playback = PlaybackController(
         player: PlayerService(muted: true, dataDir: '.'),
-        recordPlay: (_) {},
       );
       addTearDown(playback.dispose);
       library.onTracksReplaced = playback.refreshTracks;

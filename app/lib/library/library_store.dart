@@ -89,7 +89,7 @@ class NewTrack {
 ///
 /// SQLite calls are synchronous; at 10,000 songs every query here takes a few
 /// milliseconds, so the UI thread calls them directly.
-class LibraryStore {
+class LibraryStore implements PlayLog {
   LibraryStore._(this._db);
 
   /// Opens (and if needed creates or upgrades) the library at [path].
@@ -1024,17 +1024,49 @@ class LibraryStore {
     return _db.lastInsertRowId;
   }
 
+  @override
+  int beginPlay(
+    int trackId, {
+    required PlayStart start,
+    required bool shuffle,
+    int? atMs,
+  }) {
+    _db.execute(
+      'INSERT INTO history (track_id, played_at_ms, started, shuffle, '
+      'listened_ms) VALUES (?, ?, ?, ?, 0)',
+      [trackId, atMs ?? _now(), start.name, shuffle ? 1 : 0],
+    );
+    return _db.lastInsertRowId;
+  }
+
+  @override
+  void updatePlay(int playId, {required int listenedMs, PlayEnd? ended}) =>
+      _db.execute(
+        'UPDATE history SET listened_ms = ?, ended = ? WHERE id = ?',
+        [listenedMs, ended?.name, playId],
+      );
+
+  @override
+  HistoryEntry? lastPlay() => history(limit: 1).firstOrNull;
+
   /// Plays, newest first.
   List<HistoryEntry> history({int limit = 1000}) => [
     for (final row in _db.select(
-      'SELECT id, track_id, played_at_ms FROM history '
-      'ORDER BY played_at_ms DESC, id DESC LIMIT ?',
+      'SELECT id, track_id, played_at_ms, started, shuffle, listened_ms, '
+      'ended FROM history ORDER BY played_at_ms DESC, id DESC LIMIT ?',
       [limit],
     ))
       HistoryEntry(
         row['id'] as int,
         row['track_id'] as int,
         row['played_at_ms'] as int,
+        started: PlayStart.values.asNameMap()[row['started']],
+        shuffle: switch (row['shuffle']) {
+          final int value => value != 0,
+          _ => null,
+        },
+        listenedMs: row['listened_ms'] as int?,
+        ended: PlayEnd.values.asNameMap()[row['ended']],
       ),
   ];
 

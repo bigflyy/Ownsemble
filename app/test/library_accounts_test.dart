@@ -397,6 +397,9 @@ void main() {
     old.close();
 
     final db = sqlite3.open(path);
+    for (final column in ['listened_ms', 'started', 'shuffle', 'ended']) {
+      db.execute('ALTER TABLE history DROP COLUMN $column');
+    }
     db.execute('DROP TABLE found_versions');
     db.execute('DROP TABLE vk_file_prints');
     db.execute('ALTER TABLE tracks DROP COLUMN same_likely');
