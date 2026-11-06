@@ -154,6 +154,8 @@ Future<FileCheckOutcome> checkFiles({
       final song = swapped[next++];
       try {
         final found = await findVersions(song);
+        // Kept, so the song's versions open at once (plan 03).
+        store.saveFoundVersions(song.trackId, found, atMs: clock());
         store.saveVersionChoice(
           decideVersion(
             trackId: song.trackId,

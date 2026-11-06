@@ -6,7 +6,7 @@ import 'package:sqlite3/sqlite3.dart';
 /// Schema version this build reads and writes (`PRAGMA user_version`).
 ///
 /// 0 is the speed-gate build's single `tracks` table (or an empty file).
-const librarySchemaVersion = 7;
+const librarySchemaVersion = 8;
 
 /// How many colors sources can have; the theme has one per slot, from 1.
 const sourceColorCount = 6;
@@ -47,6 +47,7 @@ void migrateLibrary(Database db, {String? dataDir}) {
     if (version < 5) _addVkAlbumLinks(db);
     if (version < 6) _addSongVersions(db);
     if (version < 7) _addFilePrints(db);
+    if (version < 8) _addFoundVersions(db);
     db.execute('PRAGMA user_version = $librarySchemaVersion');
     db.execute('COMMIT');
   } catch (_) {
@@ -181,6 +182,35 @@ void _addFilePrints(Database db) {
   db.execute(
     'ALTER TABLE tracks ADD COLUMN same_likely INTEGER NOT NULL DEFAULT 0',
   );
+}
+
+/// Version 8: the uploads of a song that VK's search found, kept so that
+/// the song's versions open at once (user, 2026-11-06: "didnt you say you
+/// prefind them? why does it still load them?"). One row per upload,
+/// `position` in the order they were found; `seconds` and `bytes` describe
+/// its file as measured (null: VK gave no file or it could not be read).
+/// The whole list of a song is replaced at each search; no link is kept.
+void _addFoundVersions(Database db) {
+  db.execute('''
+    CREATE TABLE found_versions (
+      track_id INTEGER NOT NULL REFERENCES tracks (id) ON DELETE CASCADE,
+      position INTEGER NOT NULL,
+      file_key TEXT NOT NULL,
+      access_key TEXT,
+      artist TEXT NOT NULL,
+      title TEXT NOT NULL,
+      album TEXT,
+      cover_url TEXT,
+      cover_large_url TEXT,
+      listed_sec INTEGER NOT NULL,
+      seconds REAL,
+      bytes INTEGER,
+      official INTEGER NOT NULL DEFAULT 0,
+      vk_track_id INTEGER,
+      found_at_ms INTEGER NOT NULL,
+      PRIMARY KEY (track_id, file_key)
+    )
+  ''');
 }
 
 void _createVersion1(Database db) {

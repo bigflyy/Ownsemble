@@ -85,6 +85,8 @@ class SongVersion {
     required this.listedSec,
     this.accessKey,
     this.album,
+    this.coverUrl,
+    this.coverLargeUrl,
     this.file,
     this.official = false,
     this.vkTrackId,
@@ -97,6 +99,11 @@ class SongVersion {
   final String artist;
   final String title;
   final String? album;
+
+  /// The upload's album cover, small (about 135 px, for rows) and large
+  /// (about 600 px, for the player); null when VK gives none.
+  final String? coverUrl;
+  final String? coverLargeUrl;
 
   /// The length VK lists for this upload.
   final int listedSec;
@@ -111,6 +118,22 @@ class SongVersion {
 
   /// VK's file for the library row now (the swapped one, usually).
   final bool isCurrentFile;
+
+  /// This upload with its file measured as [facts].
+  SongVersion withFile(FileFacts facts) => SongVersion(
+    key: key,
+    accessKey: accessKey,
+    artist: artist,
+    title: title,
+    album: album,
+    coverUrl: coverUrl,
+    coverLargeUrl: coverLargeUrl,
+    listedSec: listedSec,
+    file: facts,
+    official: official,
+    vkTrackId: vkTrackId,
+    isCurrentFile: isCurrentFile,
+  );
 
   /// Whether the file plays within [matchSeconds] of [listedSec] seconds.
   bool matches(int listedSec) =>

@@ -16,8 +16,14 @@ void dropVersion6(Database db) {
   db.execute('DROP TABLE song_versions');
 }
 
+/// Takes back what version 8 added (found versions).
+void dropVersion8(Database db) {
+  db.execute('DROP TABLE found_versions');
+}
+
 /// Takes back what version 7 added (file prints, Stage L).
 void dropVersion7(Database db) {
+  dropVersion8(db);
   db.execute('DROP TABLE vk_file_prints');
   db.execute('ALTER TABLE tracks DROP COLUMN same_likely');
 }
@@ -308,6 +314,42 @@ void main() {
     });
     expect(migrated.mergeSameSongs().unmerged, 1);
     expect(migrated.loadAll(), hasLength(2));
+  });
+
+  test('version 7 gains the found versions and keeps its choices', () {
+    final store = LibraryStore.open(dbPath);
+    final source = store.ensureSource(TrackSource.vk, account: '1', name: 'A');
+    final id = store.upsertAll(source, [
+      const NewTrack(
+        sourceKey: '1_1',
+        artist: 'Kaleo',
+        title: 'Way Down We Go',
+        durationSec: 219,
+        addedAt: 5,
+      ),
+    ]).single;
+    store.saveVersionChoice(
+      VersionChoice(
+        trackId: id,
+        state: VersionState.suggested,
+        fileKey: '2_2',
+        fileSeconds: 219.6,
+        ownSeconds: 213.7,
+        listedSec: 219,
+        decidedAtMs: 1,
+      ),
+    );
+    store.close();
+    final db = sqlite3.open(dbPath);
+    dropVersion8(db);
+    db.execute('PRAGMA user_version = 7');
+    db.close();
+
+    final migrated = LibraryStore.open(dbPath);
+    addTearDown(migrated.close);
+    expect(versionOf(dbPath), librarySchemaVersion);
+    expect(migrated.versionChoices()[id]?.fileKey, '2_2');
+    expect(migrated.foundVersions(id), isNull);
   });
 
   test('a library from a newer build is refused and left alone', () {

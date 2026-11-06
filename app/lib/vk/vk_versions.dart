@@ -32,6 +32,11 @@ SongVersion versionFromItem(
 }) {
   final album = item['album'];
   final official = item['is_official'];
+  final thumb = switch ((item['thumb'], album)) {
+    (final Map<String, dynamic> own, _) => own,
+    (_, {'thumb': final Map<String, dynamic> albumThumb}) => albumThumb,
+    _ => null,
+  };
   return SongVersion(
     key: '${item['owner_id']}_${item['id']}',
     accessKey: (item['access_key'] as String?)?.isEmpty ?? true
@@ -44,6 +49,8 @@ SongVersion versionFromItem(
       {'title': final String title} when title != 'unnamed' => title,
       _ => null,
     },
+    coverUrl: thumb?['photo_135'] as String?,
+    coverLargeUrl: thumb?['photo_600'] as String?,
     listedSec: _intOf(item['duration']) ?? 0,
     file: file,
     official: official == true || official == 1,
@@ -72,13 +79,22 @@ class VersionQuery {
   final Set<String> ownKeys;
 }
 
+/// What a search found so far: every upload, in the order found, and the
+/// keys of those whose file is still being measured.
+typedef VersionProgress = void Function(
+  List<SongVersion> versions,
+  Set<String> measuring,
+);
+
 /// Searches VK through [client] for uploads of the song [query] names and
 /// measures each file. Uploads VK gives no link for are listed without a
-/// file. Throws as VK does when the search itself fails.
+/// file. Throws as VK does when the search itself fails. [progress] hears
+/// the uploads as soon as the search answers, then after each measured file.
 Future<List<SongVersion>> findVkVersions(
   VkClient client,
   VersionQuery query, {
   HttpClient? http,
+  VersionProgress? progress,
 }) async {
   final reply = await retryTransient(
     () => client.call('audio.search', {
@@ -108,7 +124,9 @@ Future<List<SongVersion>> findVkVersions(
   final reader =
       http ?? (HttpClient()..connectionTimeout = const Duration(seconds: 8));
   try {
-    final versions = List<SongVersion?>.filled(uploads.length, null);
+    final versions = [for (final item in uploads) versionFromItem(item)];
+    final measuring = {for (final version in versions) version.key};
+    progress?.call(List.of(versions), Set.of(measuring));
     var next = 0;
     Future<void> worker() async {
       while (next < uploads.length) {
@@ -118,11 +136,13 @@ Future<List<SongVersion>> findVkVersions(
           item,
           file: await _measureItem(client, reader, item),
         );
+        measuring.remove(versions[index].key);
+        progress?.call(List.of(versions), Set.of(measuring));
       }
     }
 
     await Future.wait([for (var i = 0; i < _measuredAtOnce; i++) worker()]);
-    return [for (final version in versions) ?version];
+    return versions;
   } finally {
     if (own) reader.close(force: true);
   }

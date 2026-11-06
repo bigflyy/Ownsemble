@@ -397,6 +397,7 @@ void main() {
     old.close();
 
     final db = sqlite3.open(path);
+    db.execute('DROP TABLE found_versions');
     db.execute('DROP TABLE vk_file_prints');
     db.execute('ALTER TABLE tracks DROP COLUMN same_likely');
     db.execute('DROP TABLE song_versions');

@@ -1,7 +1,7 @@
 import 'package:path/path.dart' as p;
 import 'package:sqlite3/sqlite3.dart';
 
-import '../playback/mp3_length.dart' show otherRecordingSeconds;
+import '../playback/mp3_length.dart' show FileFacts, otherRecordingSeconds;
 
 import 'file_print.dart';
 import 'library_records.dart';
@@ -327,8 +327,10 @@ class LibraryStore {
 
   /// Forgets the version chosen for row [from] when it hands over to another
   /// row: that row has its own file, checked again when it plays.
-  void _forgetVersion(int from) =>
-      _db.execute('DELETE FROM song_versions WHERE track_id = ?', [from]);
+  void _forgetVersion(int from) {
+    _db.execute('DELETE FROM song_versions WHERE track_id = ?', [from]);
+    _db.execute('DELETE FROM found_versions WHERE track_id = ?', [from]);
+  }
 
   // Merging songs of several accounts (Stage L).
 
@@ -1133,6 +1135,108 @@ class LibraryStore {
 
   /// Forgets the version chosen for [trackId]: its own file plays again.
   void removeVersionChoice(int trackId) => _forgetVersion(trackId);
+
+  /// How long a song's found versions are shown without searching again.
+  static const foundVersionsLifetime = Duration(days: 7);
+
+  /// Replaces the uploads of [trackId]'s song that VK's search found with
+  /// [versions] (VK's current file for the row itself is not kept: its
+  /// print says how it plays).
+  void saveFoundVersions(int trackId, List<SongVersion> versions, {int? atMs}) {
+    final at = atMs ?? _now();
+    _transaction(() {
+      _db.execute('DELETE FROM found_versions WHERE track_id = ?', [trackId]);
+      final insert = _db.prepare('''
+        INSERT OR IGNORE INTO found_versions (track_id, position, file_key,
+          access_key, artist, title, album, cover_url, cover_large_url,
+          listed_sec, seconds, bytes, official, vk_track_id, found_at_ms)
+        SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+        WHERE EXISTS (SELECT 1 FROM tracks WHERE id = ?1)
+      ''');
+      try {
+        var position = 0;
+        for (final version in versions) {
+          if (version.isCurrentFile) continue;
+          insert.execute([
+            trackId,
+            position++,
+            version.key,
+            version.accessKey,
+            version.artist,
+            version.title,
+            version.album,
+            version.coverUrl,
+            version.coverLargeUrl,
+            version.listedSec,
+            version.file?.seconds,
+            version.file?.bytes,
+            version.official ? 1 : 0,
+            version.vkTrackId,
+            at,
+          ]);
+        }
+      } finally {
+        insert.close();
+      }
+    });
+  }
+
+  /// The uploads of [trackId]'s song found last, in the order found, and
+  /// when; null when it was never searched.
+  ({List<SongVersion> versions, int foundAtMs})? foundVersions(int trackId) {
+    final rows = _db.select(
+      'SELECT * FROM found_versions WHERE track_id = ? ORDER BY position',
+      [trackId],
+    );
+    if (rows.isEmpty) return null;
+    return (
+      versions: [
+        for (final row in rows)
+          SongVersion(
+            key: row['file_key'] as String,
+            accessKey: row['access_key'] as String?,
+            artist: row['artist'] as String,
+            title: row['title'] as String,
+            album: row['album'] as String?,
+            coverUrl: row['cover_url'] as String?,
+            coverLargeUrl: row['cover_large_url'] as String?,
+            listedSec: row['listed_sec'] as int,
+            file: switch ((row['seconds'], row['bytes'])) {
+              (final num seconds, final int bytes) => FileFacts(
+                bytes: bytes,
+                seconds: seconds.toDouble(),
+              ),
+              _ => null,
+            },
+            official: row['official'] == 1,
+            vkTrackId: row['vk_track_id'] as int?,
+          ),
+      ],
+      foundAtMs: rows.first['found_at_ms'] as int,
+    );
+  }
+
+  /// How VK's file for row [trackId] plays, from its stored print; null
+  /// when there is none, it found no file, or it was read when VK listed
+  /// another length.
+  FileFacts? printedFileOf(int trackId) {
+    final rows = _db.select(
+      '''
+      SELECT p.bytes, p.seconds FROM vk_file_prints p
+      JOIN tracks t ON t.id = p.track_id AND t.duration_sec = p.listed_sec
+      WHERE p.track_id = ?
+      ''',
+      [trackId],
+    );
+    if (rows.isEmpty) return null;
+    return switch ((rows.first['seconds'], rows.first['bytes'])) {
+      (final num seconds, final int bytes) => FileFacts(
+        bytes: bytes,
+        seconds: seconds.toDouble(),
+      ),
+      _ => null,
+    };
+  }
 
   /// VK's `track_id` of row [trackId]; null when VK gave none.
   int? vkTrackIdOf(int trackId) =>
