@@ -88,7 +88,7 @@ class VersionTag extends StatelessWidget {
   }
 }
 
-/// Whether [track] offers "Choose version...": every library song that a
+/// Whether [track] offers "Versions" in its menu: every library song that a
 /// logged-in VK account has, checked or not (Stage M1, user 2026-11-06: an
 /// item that shows only after a swap was found cannot be discovered).
 bool canChooseVersion(PlaybackController playback, Track track) =>
