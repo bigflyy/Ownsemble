@@ -33,14 +33,14 @@ class SyncStatusBar extends StatelessWidget {
   /// wrong, and the whole state in its tooltip.
   Widget _state(SourceInfo source, TextStyle? style, {required bool compact}) {
     final account = this.account;
-    final failed = !sync.running && source.lastSyncError != null;
+    final failed = !sync.syncing && source.lastSyncError != null;
     final full = describeSourceState(
       source,
       lastResult: sync.lastOutcome?.resultOf(source.id),
       now: DateTime.now(),
     );
     final loggedOut = account != null && !account.hasSession(source.account);
-    final state = sync.running
+    final state = sync.syncing
         ? 'syncing...'
         : !compact
         ? full
@@ -75,10 +75,13 @@ class SyncStatusBar extends StatelessWidget {
         final loginNeeded =
             account != null && (!account.loggedIn || sync.loginExpired);
         final progress = sync.progress;
+        final checking = sync.checking;
         final sources = sync.syncedSources;
         final percent = progress == null
             ? 0
             : (progress.fraction * 100).round();
+        // Stage M2: the check of every song's file after a sync.
+        final fraction = progress?.fraction ?? checking?.fraction;
         final own = OwnColors.of(context);
         return Stack(
           children: [
@@ -111,7 +114,7 @@ class SyncStatusBar extends StatelessWidget {
                                 _SourceState(
                                   name: 'VK',
                                   state: sync.canSync
-                                      ? (sync.running
+                                      ? (sync.syncing
                                             ? 'syncing...'
                                             : 'not synced yet')
                                       : 'not logged in',
@@ -127,24 +130,40 @@ class SyncStatusBar extends StatelessWidget {
                   if (loginNeeded)
                     LogInButton(account: account)
                   else
-                    OutlinedButton.icon(
-                      style: OutlinedButton.styleFrom(
-                        foregroundColor: own.text,
-                        side: BorderSide(color: own.line),
-                        minimumSize: const Size(0, 30),
-                        padding: const EdgeInsets.symmetric(horizontal: 12),
-                        textStyle: const TextStyle(
-                          fontFamily: appFontFamily,
-                          fontSize: 13,
+                    Tooltip(
+                      message: checking == null
+                          ? ''
+                          : checking.searching
+                          ? 'Looking for the right version of songs whose '
+                                'VK file changed: ${checking.done} of '
+                                '${checking.total}'
+                          : "Checking each song's file on VK for a changed "
+                                'recording: ${checking.done} of '
+                                '${checking.total}',
+                      child: OutlinedButton.icon(
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: own.text,
+                          side: BorderSide(color: own.line),
+                          minimumSize: const Size(0, 30),
+                          padding: const EdgeInsets.symmetric(horizontal: 12),
+                          textStyle: const TextStyle(
+                            fontFamily: appFontFamily,
+                            fontSize: 13,
+                          ),
                         ),
-                      ),
-                      key: const ValueKey('sync-now'),
-                      onPressed: sync.canSync && !sync.running
-                          ? sync.syncNow
-                          : null,
-                      icon: const Icon(Icons.sync, size: 16),
-                      label: Text(
-                        sync.running ? 'Syncing $percent%' : 'Sync now',
+                        key: const ValueKey('sync-now'),
+                        onPressed: sync.canSync && !sync.running
+                            ? sync.syncNow
+                            : null,
+                        icon: const Icon(Icons.sync, size: 16),
+                        label: Text(
+                          checking != null
+                              ? 'Checking files '
+                                    '${(checking.fraction * 100).round()}%'
+                              : sync.running
+                              ? 'Syncing $percent%'
+                              : 'Sync now',
+                        ),
                       ),
                     ),
                   if (account != null &&
@@ -168,14 +187,16 @@ class SyncStatusBar extends StatelessWidget {
                 ],
               ),
             ),
-            if (progress != null)
+            if (fraction != null)
               Positioned(
                 left: 0,
                 right: 0,
                 top: 0,
                 child: LinearProgressIndicator(
-                  key: const ValueKey('sync-progress'),
-                  value: progress.fraction,
+                  key: ValueKey(
+                    progress != null ? 'sync-progress' : 'file-check-progress',
+                  ),
+                  value: fraction,
                   minHeight: 2,
                 ),
               ),

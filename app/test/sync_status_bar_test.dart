@@ -8,6 +8,7 @@ import 'package:ownsemble/library/track.dart';
 import 'package:ownsemble/playback/playback_controller.dart';
 import 'package:ownsemble/playback/player_service.dart';
 import 'package:ownsemble/sync/background_sync.dart';
+import 'package:ownsemble/sync/file_check.dart';
 import 'package:ownsemble/ui/library_controller.dart';
 import 'package:ownsemble/ui/library_screen.dart';
 import 'package:ownsemble/ui/sync_controller.dart';
@@ -497,6 +498,98 @@ void main() {
         ),
       );
       expect(button.onPressed, isNull);
+    });
+  });
+
+  group('the file check after a sync (Stage M2)', () {
+    late Completer<FileCheckOutcome> check;
+    late void Function(FileCheckProgress) checkReport;
+    late List<String> calls;
+    late List<FileCheckOutcome> checked;
+    late SyncController sync;
+
+    setUp(() {
+      calls = [];
+      checked = [];
+      sync = SyncController(
+        sources: [vkSource()],
+        runner: (_) async {
+          calls.add('sync');
+          return SyncOutcome(sources: [vkSource(syncedAtMs: 1)]);
+        },
+        checker: (onProgress) {
+          calls.add('check');
+          checkReport = onProgress;
+          check = Completer();
+          return check.future;
+        },
+        onLibraryChanged: (_) {},
+        onFilesChecked: checked.add,
+      );
+    });
+
+    test('runs after the sync, which hands over first', () async {
+      final whole = sync.syncNow();
+      final synced = await sync.synced;
+      expect(synced, isNotNull);
+      expect(calls, ['sync', 'check']);
+      expect(sync.running, isTrue);
+      expect(sync.syncing, isFalse);
+      expect(sync.progress, isNull);
+      expect(sync.checking, isNotNull);
+
+      check.complete(
+        const FileCheckOutcome(checked: 3, swapped: 1, decided: 1),
+      );
+      await whole;
+      expect(sync.running, isFalse);
+      expect(checked.single.decided, 1);
+      expect(sync.lastCheck?.checked, 3);
+    });
+
+    test('a login during the check syncs again after it', () async {
+      final whole = sync.syncNow();
+      await sync.synced;
+      final again = sync.syncAfterRunning();
+      check.complete(const FileCheckOutcome());
+      await pumpEventQueue();
+      expect(calls, ['sync', 'check', 'sync', 'check']);
+      check.complete(const FileCheckOutcome());
+      await whole;
+      await again;
+      expect(sync.running, isFalse);
+    });
+
+    test('a failed check ends quietly', () async {
+      final whole = sync.syncNow();
+      await sync.synced;
+      check.completeError(StateError('no network'));
+      expect(await whole, isNotNull);
+      expect(sync.running, isFalse);
+      expect(checked, isEmpty);
+    });
+
+    testWidgets('the bar says it checks files, not that it syncs', (
+      tester,
+    ) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(body: SyncStatusBar(sync: sync)),
+        ),
+      );
+      unawaited(sync.syncNow());
+      await tester.pump();
+      await tester.pump();
+      checkReport(const FileCheckProgress(done: 60, total: 120));
+      await tester.pump();
+      expect(find.text('Checking files 45%'), findsOneWidget);
+      expect(find.textContaining('syncing...'), findsNothing);
+      expect(find.byKey(const ValueKey('file-check-progress')), findsOneWidget);
+      check.complete(const FileCheckOutcome());
+      await tester.pump();
+      await tester.pump();
+      expect(find.text('Sync now'), findsOneWidget);
+      expect(find.byKey(const ValueKey('file-check-progress')), findsNothing);
     });
   });
 }

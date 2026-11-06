@@ -17,6 +17,7 @@ import 'storage/audio_storage.dart';
 import 'storage/cover_store.dart';
 import 'storage/stored_check.dart';
 import 'sync/background_sync.dart';
+import 'sync/file_check.dart';
 import 'ui/albums.dart';
 import 'ui/collections_controller.dart';
 import 'ui/cover_tile.dart';
@@ -227,11 +228,40 @@ Future<void> main(List<String> args) async {
     );
   }
 
+  // Stage M2: after each sync, every song's VK file is checked in the
+  // background, so a swapped song has its version before it is played.
+  FileCheckRunner? fileChecker() {
+    final sessions = [
+      for (final session in account.sessions)
+        VkSyncSession(session.account, session.cookies),
+    ];
+    if (sessions.isEmpty) return null;
+    return (onProgress) => checkVkFilesInBackground(
+      dbPath: dbPath,
+      sessions: sessions,
+      onProgress: onProgress,
+    );
+  }
+
+  final perfLog = File(p.join(options.dataDir, 'perf.log'));
   sync = SyncController(
     sources: sources,
     runner: syncRunner(),
+    checker: fileChecker(),
     onLibraryChanged: (loaded) =>
         library.replaceTracks(loaded.tracks, loaded.index),
+    onFilesChecked: (outcome) {
+      if (outcome.changedChoices) player.versions?.reload();
+      // Counts and times only: no titles, keys or links.
+      perfLog.writeAsStringSync(
+        '${DateTime.now().toIso8601String()} file check: '
+        '${outcome.checked} files in ${outcome.readMs} ms, '
+        '${outcome.swapped} swapped, ${outcome.decided} decided, '
+        '${outcome.failed} failed, ${outcome.forgotten} fixed by VK, '
+        'search ${outcome.searchMs} ms\n',
+        mode: FileMode.append,
+      );
+    },
   );
   // The source filter offers the sources with songs, and drops a filter
   // whose source left.
@@ -246,6 +276,7 @@ Future<void> main(List<String> args) async {
   var logins = account.logins;
   account.addListener(() {
     sync.runner = syncRunner();
+    sync.checker = fileChecker();
     if (account.logins != logins) unawaited(sync.syncAfterRunning());
     logins = account.logins;
   });
@@ -318,6 +349,8 @@ Future<void> _afterFirstFrame({
   await player.init(volume: playback.volume, mute: playback.mutedByUser);
   // The library syncs itself on every start, in the background.
   final startSync = sync.syncNow();
+  // The sync's own part: the file check after it runs on in the background.
+  final startSynced = sync.synced;
   _logPlayTimings(player, File(p.join(options.dataDir, 'perf.log')));
   await account.identify();
 
@@ -340,7 +373,7 @@ Future<void> _afterFirstFrame({
   if (options.benchFile != null) {
     // Measure the library as it is after the start sync, not while the
     // sync may swap it out.
-    await startSync;
+    await startSynced;
     final result = await SpeedBench(
       library: library,
       player: player,
