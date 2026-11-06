@@ -339,6 +339,25 @@ void main() {
         decidedAtMs: 1,
       ),
     );
+    // "Nothing matches", stored when VK's search answered with no songs.
+    final none = store.upsertAll(source, [
+      const NewTrack(
+        sourceKey: '1_2',
+        artist: 'Операция Пластилин',
+        title: 'Ты и я',
+        durationSec: 219,
+        addedAt: 6,
+      ),
+    ]).single;
+    store.saveVersionChoice(
+      VersionChoice(
+        trackId: none,
+        state: VersionState.none,
+        ownSeconds: 226.5,
+        listedSec: 219,
+        decidedAtMs: 1,
+      ),
+    );
     store.close();
     final db = sqlite3.open(dbPath);
     dropVersion8(db);
@@ -350,6 +369,8 @@ void main() {
     expect(versionOf(dbPath), librarySchemaVersion);
     expect(migrated.versionChoices()[id]?.fileKey, '2_2');
     expect(migrated.foundVersions(id), isNull);
+    // Decided again by the next check.
+    expect(migrated.versionChoices().containsKey(none), isFalse);
   });
 
   test('a library from a newer build is refused and left alone', () {

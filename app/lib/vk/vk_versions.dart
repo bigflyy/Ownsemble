@@ -96,15 +96,23 @@ Future<List<SongVersion>> findVkVersions(
   HttpClient? http,
   VersionProgress? progress,
 }) async {
-  final reply = await retryTransient(
-    () => client.call('audio.search', {
+  final items = await retryTransient(() async {
+    final reply = await client.call('audio.search', {
       'q': '${query.artist} ${query.title}',
       'count': '$versionSearchCount',
-    }),
-  );
-  final items = reply is Map<String, dynamic> && reply['items'] is List
-      ? (reply['items'] as List).whereType<Map<String, dynamic>>()
-      : const <Map<String, dynamic>>[];
+    });
+    final items = reply is Map<String, dynamic> && reply['items'] is List
+        ? (reply['items'] as List).whereType<Map<String, dynamic>>().toList()
+        : const <Map<String, dynamic>>[];
+    // A search for a library song finds at least that song. No songs at
+    // all is VK not answering (seen 2026-11-06 while the first file check
+    // read thousands of files), not "no other uploads": asked again, and
+    // if it stays empty the choice lasts this run only.
+    if (items.isEmpty) {
+      throw VkException('audio.search answered with no songs', transient: true);
+    }
+    return items;
+  });
   final seen = <String>{};
   final uploads = <Map<String, dynamic>>[];
   for (final item in items) {

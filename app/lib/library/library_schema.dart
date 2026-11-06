@@ -190,7 +190,12 @@ void _addFilePrints(Database db) {
 /// `position` in the order they were found; `seconds` and `bytes` describe
 /// its file as measured (null: VK gave no file or it could not be read).
 /// The whole list of a song is replaced at each search; no link is kept.
+///
+/// Automatic "none" choices are dropped: earlier builds stored one when
+/// VK's search answered with no songs at all (VK not answering, seen
+/// 2026-11-06), so the next file check decides them again. Picks stay.
 void _addFoundVersions(Database db) {
+  db.execute("DELETE FROM song_versions WHERE state = 'none'");
   db.execute('''
     CREATE TABLE found_versions (
       track_id INTEGER NOT NULL REFERENCES tracks (id) ON DELETE CASCADE,
