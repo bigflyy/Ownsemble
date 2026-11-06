@@ -19,7 +19,8 @@ struct WindowPlacement {
 };
 
 // The placement file of the data folder the app runs on: --data-dir from
-// |arguments| (UTF-8), else the app's default folder under %APPDATA%.
+// |arguments| (UTF-8), else the app's default folder under %APPDATA%; empty
+// (no file) for an agent check (OWNSEMBLE_BACKGROUND_WINDOW) without one.
 std::wstring WindowPlacementPath(const std::vector<std::string>& arguments);
 
 // Reads the file at |path|. Empty when there is none, when it is broken, or

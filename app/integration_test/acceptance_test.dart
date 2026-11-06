@@ -1016,11 +1016,22 @@ void main() {
     final window = OwnWindow.find();
     final normalFrame = window.frameSize;
     window.resize(100, 100);
-    await waitUntil(
-      tester,
-      () => find.byKey(const ValueKey('list-header')).evaluate().isEmpty,
-      what: 'the short layout after a real resize',
-    );
+    try {
+      await waitUntil(
+        tester,
+        () => find.byKey(const ValueKey('list-header')).evaluate().isEmpty,
+        what: 'the short layout after a real resize',
+      );
+    } on TestFailure {
+      final view = tester.view;
+      // ignore: avoid_print
+      print(
+        'resize: frame before $normalFrame, now ${window.frameSize}, client '
+        '${window.clientSize}, scale ${window.scale}; Flutter view '
+        '${view.physicalSize} at ${view.devicePixelRatio}',
+      );
+      rethrow;
+    }
     await tester.pumpAndSettle();
     final (smallWidth, smallHeight) = window.clientSize;
     expect(smallWidth, closeTo(480 * window.scale, 1));

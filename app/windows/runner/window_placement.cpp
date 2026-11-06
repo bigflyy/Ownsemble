@@ -35,6 +35,13 @@ std::wstring WindowPlacementPath(const std::vector<std::string>& arguments) {
       return ToWide(arguments[i + 1]) + L"\\" + kFileName;
     }
   }
+  // An agent check without its own data folder (an integration test gets it
+  // as a build define, not an argument) must not open at, or save over, the
+  // user's own window (seen 2026-11-07: the user's maximized window made the
+  // check's window too big to shrink). Empty: nothing is read or written.
+  if (GetEnvironmentVariableW(L"OWNSEMBLE_BACKGROUND_WINDOW", nullptr, 0) > 0) {
+    return std::wstring();
+  }
   wchar_t app_data[MAX_PATH];
   const DWORD length = GetEnvironmentVariableW(L"APPDATA", app_data, MAX_PATH);
   if (length == 0 || length >= MAX_PATH) {
@@ -44,6 +51,9 @@ std::wstring WindowPlacementPath(const std::vector<std::string>& arguments) {
 }
 
 std::optional<WindowPlacement> LoadWindowPlacement(const std::wstring& path) {
+  if (path.empty()) {
+    return std::nullopt;
+  }
   std::ifstream file(path.c_str());
   LONG left, top, width, height;
   int maximized;
@@ -63,6 +73,9 @@ std::optional<WindowPlacement> LoadWindowPlacement(const std::wstring& path) {
 }
 
 void SaveWindowPlacement(HWND window, const std::wstring& path) {
+  if (path.empty()) {
+    return;
+  }
   WINDOWPLACEMENT placement = {sizeof(placement)};
   if (!GetWindowPlacement(window, &placement)) {
     return;
