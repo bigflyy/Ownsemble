@@ -98,9 +98,13 @@ String describePlayError(Object error) => switch (error) {
 }.replaceAll(RegExp(r'https?://\S+'), '<url>');
 
 /// Why VK gives no link for a song.
-String noStreamReason(VkStream stream) => stream.restricted
-    ? 'the artist or their representative made it unavailable on VK'
-    : 'VK does not offer this song';
+String noStreamReason(VkStream stream) => switch (stream) {
+  VkStream(restricted: true) =>
+    'the artist or their representative made it unavailable on VK',
+  VkStream(untilRelease: true) =>
+    'VK will open this song after its official release',
+  _ => 'VK does not offer this song',
+};
 
 /// mpv options tuned for fast start of single audio files.
 const defaultMpvOptions = <String, String>{

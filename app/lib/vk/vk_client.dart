@@ -67,7 +67,12 @@ class VkException implements Exception {
 
 /// What VK offers for one song. Never logged: [link] is a private link.
 class VkStream {
-  const VkStream({this.link, this.restricted = false, this.playlistLinks = 0});
+  const VkStream({
+    this.link,
+    this.restricted = false,
+    this.untilRelease = false,
+    this.playlistLinks = 0,
+  });
 
   /// Fresh link to the audio; null when VK gives none.
   final Uri? link;
@@ -80,6 +85,10 @@ class VkStream {
   /// musician or their representative decided the song is unavailable.
   /// Other codes were never seen, so nothing is claimed about them.
   final bool restricted;
+
+  /// VK's `content_restricted` is 5 (first seen 2026-11-06): the popup says
+  /// access opens after the song's official release.
+  final bool untilRelease;
 }
 
 /// Calls one VK web API method and returns its `response` value.
@@ -189,6 +198,7 @@ class VkClient {
       return VkStream(
         link: link,
         restricted: audio['content_restricted'] == 1,
+        untilRelease: audio['content_restricted'] == 5,
         playlistLinks: playlistLinks,
       );
     }

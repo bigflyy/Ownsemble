@@ -90,9 +90,21 @@ void main() {
       expect(stream.restricted, isTrue);
     });
 
+    test('a song VK holds back until its release is marked so', () async {
+      // Code 5, first seen 2026-11-06 (Shovel - Track 32): VK's popup says
+      // access opens after the official release.
+      final vk = FakeVkAudio({copy: audio('', restricted: 5)});
+      final stream = await vk.resolveStream(copy, null);
+      expect(stream.link, isNull);
+      expect(stream.untilRelease, isTrue);
+      expect(stream.restricted, isFalse);
+    });
+
     test('other restriction codes are not read as withdrawn', () async {
       final vk = FakeVkAudio({copy: audio('', restricted: 2)});
-      expect((await vk.resolveStream(copy, null)).restricted, isFalse);
+      final stream = await vk.resolveStream(copy, null);
+      expect(stream.restricted, isFalse);
+      expect(stream.untilRelease, isFalse);
     });
 
     test('a song VK does not know has no link', () async {

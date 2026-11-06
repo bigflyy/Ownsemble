@@ -65,6 +65,13 @@ void main() {
       );
     });
 
+    test('a song held back until its release says so', () {
+      expect(
+        noStreamReason(const VkStream(untilRelease: true)),
+        contains('after its official release'),
+      );
+    });
+
     test('any other song says VK does not offer it', () {
       expect(
         noStreamReason(const VkStream()),

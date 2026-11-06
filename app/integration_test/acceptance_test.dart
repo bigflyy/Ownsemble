@@ -625,6 +625,12 @@ void main() {
           );
           blocked++;
           notPlayed.add('withdrawn on VK: ${songName(track)}');
+        } else if (timing.error!.contains('after its official release') &&
+            timing.toSoundMs < 5000) {
+          // VK hides some songs until their release (code 5, seen
+          // 2026-11-06 on Shovel - Track 32); the app must say so quickly.
+          blocked++;
+          notPlayed.add('held back until release on VK: ${songName(track)}');
         } else if (timing.error!.contains("VK's server is not delivering") &&
             timing.toSoundMs < 5000) {
           // VK's own server failed; the app must say so quickly.
