@@ -197,13 +197,22 @@ void main() {
     expect(library.all, hasLength(3));
   });
 
-  testWidgets('with one account the likely switch is not shown', (
+  testWidgets('with one account the likely switch is shown greyed out', (
     tester,
   ) async {
+    // User, 2026-11-06: keep it visible, so the setting can be found
+    // before a second account is added.
     store.removeSource(second);
     sync.updateSources(store.sources());
     await openDialog(tester);
-    expect(find.byKey(const ValueKey('merge-likely')), findsNothing);
+    final tile = tester.widget<CheckboxListTile>(
+      find.byKey(const ValueKey('merge-likely')),
+    );
+    expect(tile.onChanged, isNull);
+    expect(find.textContaining('needs a second account'), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('merge-likely')));
+    await tester.pumpAndSettle();
+    expect(store.mergeLikely, isFalse);
   });
 
   testWidgets('removing asks first', (tester) async {

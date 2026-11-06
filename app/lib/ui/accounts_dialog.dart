@@ -86,9 +86,11 @@ class _AccountList extends StatelessWidget {
                 ],
               ),
             ),
-          if (known.length > 1 && sources != null) ...[
+          // Shown greyed out with one account (user, 2026-11-06), so the
+          // setting can be found before a second account is added.
+          if (known.isNotEmpty && sources != null) ...[
             const SizedBox(height: 8),
-            _MergeLikelySwitch(sources: sources!),
+            _MergeLikelySwitch(sources: sources!, enabled: known.length > 1),
           ],
           const SizedBox(height: 12),
           Row(
@@ -115,9 +117,12 @@ class _AccountList extends StatelessWidget {
 /// The setting "also merge likely copies" (Stage L, user 2026-11-04: merge
 /// only when certain, the closest rule as a choice in settings).
 class _MergeLikelySwitch extends StatefulWidget {
-  const _MergeLikelySwitch({required this.sources});
+  const _MergeLikelySwitch({required this.sources, required this.enabled});
 
   final SourceEditor sources;
+
+  /// False with one account: there is nothing to merge yet.
+  final bool enabled;
 
   @override
   State<_MergeLikelySwitch> createState() => _MergeLikelySwitchState();
@@ -145,7 +150,9 @@ class _MergeLikelySwitchState extends State<_MergeLikelySwitch> {
       controlAffinity: ListTileControlAffinity.leading,
       dense: true,
       value: _on,
-      onChanged: _busy ? null : (value) => _set(value ?? false),
+      onChanged: _busy || !widget.enabled
+          ? null
+          : (value) => _set(value ?? false),
       title: const Text(
         'Also merge likely copies',
         style: TextStyle(fontSize: 14),
@@ -153,7 +160,8 @@ class _MergeLikelySwitchState extends State<_MergeLikelySwitch> {
       subtitle: Text(
         'Show a song once when the accounts have two files with one VK '
         'song id that play within 1 s of each other. Probably the same '
-        'recording, not certainly: such songs are marked "likely same".',
+        'recording, not certainly: such songs are marked "likely same".'
+        '${widget.enabled ? '' : ' This needs a second account.'}',
         style: TextStyle(fontSize: 12, color: colors.dim),
       ),
     );
