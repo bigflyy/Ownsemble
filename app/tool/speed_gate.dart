@@ -64,6 +64,28 @@ final _setWindowPos = _user32
       int Function(int, int, int, int, int, int, int)
     >('SetWindowPos');
 
+/// MonitorFromPoint takes a POINT by value: x in the low 32 bits, y above.
+final _monitorFromPoint = _user32
+    .lookupFunction<IntPtr Function(Int64, Uint32), int Function(int, int)>(
+      'MonitorFromPoint',
+    );
+final _getDpiForMonitor = DynamicLibrary.open('shcore.dll')
+    .lookupFunction<
+      Int32 Function(IntPtr, Int32, Pointer<Uint32>, Pointer<Uint32>),
+      int Function(int, int, Pointer<Uint32>, Pointer<Uint32>)
+    >('GetDpiForMonitor');
+
+/// The DPI of the monitor nearest to the screen point ([x], [y]).
+int _dpiAt(int x, int y) {
+  const nearest = 2;
+  final monitor = _monitorFromPoint((y << 32) | (x & 0xFFFFFFFF), nearest);
+  final dpi = calloc<Uint32>(2);
+  _getDpiForMonitor(monitor, 0, dpi, dpi + 1);
+  final value = dpi.value;
+  calloc.free(dpi);
+  return value;
+}
+
 final _setDpiAwareness = _user32
     .lookupFunction<IntPtr Function(IntPtr), int Function(int)>(
       'SetThreadDpiAwarenessContext',
@@ -325,9 +347,20 @@ Future<Map<String, Object?>> _checkWindowPlacement(String dataDir) async {
     return result;
   }
 
-  final normal = await withWindow(
-    '100 100 900 700 0\n',
-    (window, _) async => (_windowSize(window), _isZoomed(window) != 0),
+  // A background window moves off-screen after it opens; when the monitor
+  // there has another scale than the one at (100, 100), Windows rescales it
+  // (seen 2026-11-07 with two monitors: 900 x 700 became 600 x 467). The
+  // saved size is expected in the scale it ends up in.
+  var savedDpi = 96;
+  var windowDpi = 96;
+  final normal = await withWindow('100 100 900 700 0\n', (window, _) async {
+    savedDpi = _dpiAt(100 + 450, 100 + 12);
+    windowDpi = _getDpiForWindow(window);
+    return (_windowSize(window), _isZoomed(window) != 0);
+  });
+  final normalExpected = (
+    (900 * windowDpi / savedDpi).round(),
+    (700 * windowDpi / savedDpi).round(),
   );
   final maximized = await withWindow(
     '100 100 900 700 1\n',
@@ -365,6 +398,7 @@ Future<Map<String, Object?>> _checkWindowPlacement(String dataDir) async {
   file.deleteSync();
   return {
     'normal': '${normal.$1}',
+    'normalExpected': '$normalExpected (dpi $savedDpi saved, $windowDpi now)',
     'maximized': maximized,
     'offScreenFallsBackTo': '$offScreen',
     'smallSavedOpensAt': '$smallSaved',
@@ -372,7 +406,8 @@ Future<Map<String, Object?>> _checkWindowPlacement(String dataDir) async {
     'closeExit': exit,
     'saved': saved.join(' '),
     'ok':
-        normal.$1 == (900, 700) &&
+        (normal.$1.$1 - normalExpected.$1).abs() <= 1 &&
+        (normal.$1.$2 - normalExpected.$2).abs() <= 1 &&
         !normal.$2 &&
         maximized &&
         offScreen != (900, 700) &&
