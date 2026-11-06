@@ -148,4 +148,27 @@ class Track {
   /// Whether no account has this song any more; it plays only if stored.
   bool get isGone =>
       goneAtMs != null && copies.every((copy) => copy.goneAtMs != null);
+
+  /// This song with [other]'s cover in every size and its color: how an
+  /// album's place shows the user's own copy of one of its songs.
+  Track withCoversOf(Track other) => Track(
+    id: id,
+    sourceId: sourceId,
+    source: source,
+    artist: artist,
+    title: title,
+    album: album,
+    durationSec: durationSec,
+    sourceKey: sourceKey,
+    accessKey: accessKey,
+    coverUrl: other.coverUrl,
+    coverLargeUrl: other.coverLargeUrl,
+    coverMidUrl: other.coverMidUrl,
+    coverFullUrl: other.coverFullUrl,
+    tint: other.tint,
+    goneAtMs: goneAtMs,
+    localPath: localPath,
+    pinned: pinned,
+    copies: copies,
+  );
 }

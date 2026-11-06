@@ -537,6 +537,36 @@ void main() {
       '${outsideSongs.length} not in the library',
     );
     expect(outsideSongs, isNotEmpty);
+    // Every row shows the album's cover, the library's songs too (user,
+    // 2026-11-07): their own copy may be tied to a single with another one.
+    final albumCovers = {for (final t in outsideSongs) ?t.coverUrl};
+    final ownSongs = library.visible.where((t) => t.inLibrary).toList();
+    final otherOwnCover = ownSongs
+        .where((t) => t.coverUrl != library.rowCover(t).coverUrl)
+        .length;
+    var tilesChecked = 0;
+    for (final song in ownSongs) {
+      final shown = library.rowCover(song).coverUrl;
+      expect(
+        albumCovers,
+        contains(shown),
+        reason: '${song.title} shows the album cover',
+      );
+      final tile = find.descendant(
+        of: find.byKey(ValueKey('song-${song.id}')),
+        matching: find.byType(TrackTile),
+      );
+      if (tile.evaluate().isEmpty) continue;
+      expect(tester.widget<TrackTile>(tile).track.coverUrl, shown);
+      tilesChecked++;
+    }
+    expect(tilesChecked, greaterThan(0), reason: 'rows with tiles were built');
+    // ignore: avoid_print
+    print(
+      'album covers: ${ownSongs.length} of your songs show the album cover '
+      '(${albumCovers.length} distinct on VK), $otherOwnCover of them have '
+      'another cover of their own; $tilesChecked row tiles checked',
+    );
     expect(
       library.visible.where((t) => t.inLibrary).length,
       albumAtOnce,

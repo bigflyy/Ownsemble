@@ -27,7 +27,7 @@ Track song(
 
 /// A song as the album's VK list names it; [id] negative when the library
 /// lacks it.
-AlbumSong listed(int id, String title, {int? vkTrackId}) => (
+AlbumSong listed(int id, String title, {int? vkTrackId, String? cover}) => (
   track: Track(
     id: id,
     sourceId: 1,
@@ -37,6 +37,9 @@ AlbumSong listed(int id, String title, {int? vkTrackId}) => (
     album: 'Человеко-часы',
     durationSec: 200,
     sourceKey: '-5_${id.abs()}',
+    coverUrl: cover,
+    coverLargeUrl: cover == null ? null : '$cover-large',
+    tint: cover == null ? null : 0xFF102030,
   ),
   vkTrackId: vkTrackId,
 );
@@ -151,6 +154,51 @@ void main() {
       expect(library.viewCount, 5);
     },
   );
+
+  test("rows of an album show the album's cover, your songs too", () async {
+    tracks[0] = Track(
+      id: 1,
+      sourceId: 1,
+      source: TrackSource.vk,
+      artist: 'Дайте танк (!)',
+      title: 'Люди',
+      album: 'Человеко-часы',
+      durationSec: 200,
+      sourceKey: '1_1',
+      coverUrl: 'single.jpg',
+      tint: 0xFFAABBCC,
+    );
+    final library = open();
+    library.openAlbum(tracks.first);
+    // Until VK's list is in, nothing says what the album's cover is.
+    expect(library.rowCover(tracks[0]), same(tracks[0]));
+
+    catalog.answer.complete([
+      listed(-1, 'Профессионал', vkTrackId: 103, cover: 'album-a.jpg'),
+      listed(-2, 'Альтернатива', vkTrackId: 102, cover: 'album-b.jpg'),
+      listed(-3, 'Люди', vkTrackId: 101, cover: 'album-c.jpg'),
+    ]);
+    await pumpEventQueue();
+    // Your song shows the cover the album gives it, and stays your song.
+    final own = library.rowCover(tracks[0]);
+    expect(own.id, 1);
+    expect(own.sourceKey, '1_1');
+    expect(own.coverUrl, 'album-c.jpg');
+    expect(own.coverLargeUrl, 'album-c.jpg-large');
+    expect(own.tint, 0xFF102030);
+    // A song outside the library already has the album's cover.
+    final outside = library.visible[1];
+    expect(library.rowCover(outside), same(outside));
+    // A version the list does not name gets the album's first cover.
+    expect(library.rowCover(tracks[3]).coverUrl, 'album-a.jpg');
+    // The library's song itself keeps its own cover (player, side panel).
+    expect(library.visible[2], same(tracks[0]));
+    expect(tracks[0].coverUrl, 'single.jpg');
+
+    // Anywhere else rows show their own covers.
+    library.goBack();
+    expect(library.rowCover(tracks[0]), same(tracks[0]));
+  });
 
   test('Back goes to the place the album was opened from', () async {
     final library = open();

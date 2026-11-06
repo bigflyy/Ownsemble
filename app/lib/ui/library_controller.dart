@@ -508,6 +508,7 @@ class LibraryController extends ChangeNotifier {
     if (catalog == null) return const [];
     final libraryIds = catalog.libraryIds(album);
     final listed = _albumLists[album];
+    _albumCovers = const {};
     if (listed == null) {
       if (!_albumFailures.containsKey(album)) _fetchAlbum(album);
       return [for (final id in libraryIds) ?_byId[id]];
@@ -517,16 +518,40 @@ class LibraryController extends ChangeNotifier {
     ]);
     final shown = <int>{};
     final tracks = <Track>[];
+    final covers = <int, Track>{};
+    Track? firstCover;
     for (final song in listed) {
       final own = _byId[owned[song.vkTrackId]];
       final track = own ?? song.track;
-      if (shown.add(track.id)) tracks.add(track);
+      if (!shown.add(track.id)) continue;
+      tracks.add(track);
+      if (!song.track.hasCover) continue;
+      firstCover ??= song.track;
+      if (own != null) covers[own.id] = song.track;
     }
     for (final id in libraryIds) {
       final track = _byId[id];
-      if (track != null && shown.add(id)) tracks.add(track);
+      if (track == null || !shown.add(id)) continue;
+      tracks.add(track);
+      if (firstCover != null) covers[id] = firstCover;
     }
+    _albumCovers = covers;
     return tracks;
+  }
+
+  /// Library songs of the album on screen, each with the album song whose
+  /// cover its row shows. Set when the album's VK list is in.
+  Map<int, Track> _albumCovers = const {};
+
+  /// [track] as its row in the current place shows it. In an album's place
+  /// every row shows the album's cover, the user's own songs too (user,
+  /// 2026-11-07): their copy is often tied to a single or a compilation
+  /// with another cover. Everywhere else, and in the player, a song keeps
+  /// its own cover.
+  Track rowCover(Track track) {
+    if (_view.kind != ViewKind.album) return track;
+    final cover = _albumCovers[track.id];
+    return cover == null ? track : track.withCoversOf(cover);
   }
 
   /// Asks the album's source for its full list, unless it is on its way or

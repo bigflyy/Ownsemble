@@ -480,7 +480,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
       case 'add-to-queue':
         await widget.playback.addToQueue(track);
       case 'view-cover':
-        await showCoverViewer(context, track);
+        await showCoverViewer(context, library.rowCover(track));
     }
   }
 
@@ -585,7 +585,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
       case 'add-to-queue':
         await widget.playback.addToQueue(track);
       case 'view-cover':
-        await showCoverViewer(context, track);
+        await showCoverViewer(context, library.rowCover(track));
       case 'download':
         final messenger = ScaffoldMessenger.of(context);
         final error = await widget.playback.download(track);
@@ -1062,6 +1062,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
                 ),
                 number: index + 1,
                 track: track,
+                cover: library.rowCover(track),
                 stored:
                     _storage?.stateOf(track) ??
                     (path: track.localPath, pinned: track.pinned),
@@ -1564,6 +1565,7 @@ class _SongRow extends StatelessWidget {
     super.key,
     required this.number,
     required this.track,
+    required this.cover,
     required this.stored,
     required this.downloading,
     required this.saving,
@@ -1597,6 +1599,10 @@ class _SongRow extends StatelessWidget {
   /// Position in the list, shown when thumbnails are off.
   final int number;
   final Track track;
+
+  /// The song with the cover its row shows: in an album's place, the
+  /// album's cover (`LibraryController.rowCover`).
+  final Track cover;
 
   /// How the song's audio is stored now (may be newer than [track]).
   final StoredState stored;
@@ -1726,7 +1732,7 @@ class _SongRow extends StatelessWidget {
                         ? Stack(
                             alignment: Alignment.center,
                             children: [
-                              TrackTile(track: track, size: 44, radius: 8),
+                              TrackTile(track: cover, size: 44, radius: 8),
                               if (isCurrent)
                                 Container(
                                   width: 44,
