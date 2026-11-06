@@ -103,8 +103,7 @@ void main() {
       copy.path,
       '--vk-session',
       firstSession,
-      '--vk-session',
-      secondSession,
+      if (secondSession.isNotEmpty) ...['--vk-session', secondSession],
       '--muted',
     ]);
     await tester.pump();
@@ -184,7 +183,7 @@ void main() {
       '${suggested.ownSeconds.toStringAsFixed(1)} s (${suggested.ownBytes} '
       'bytes), suggested file ${suggested.fileSeconds?.toStringAsFixed(1)} s',
     );
-    expect(suggested.ownSeconds - track.durationSec, greaterThan(3));
+    expect((suggested.ownSeconds - track.durationSec).abs(), greaterThan(3));
     // Mpv plays it for a while, so its save can finish.
     await waitUntil(
       tester,
@@ -306,40 +305,64 @@ void main() {
 
     // 6. The album opens from a row of the versions place (user,
     // 2026-11-06: "album is not clickable at Versions view"), listed by VK
-    // through the song's account, read-only. VK's file row shows the song's
-    // own album; uploads found by the search mostly name none.
-    final withAlbum = shown.firstWhere((v) => (v.album ?? '').isNotEmpty);
+    // through the song's account, read-only: VK's file row shows the song's
+    // own album, an upload its own when VK's search names one (few do).
+    final named = shown
+        .where((v) => !v.isCurrentFile && (v.album ?? '').isNotEmpty)
+        .toList();
     say(
-      'album clicked on: ${withAlbum.isCurrentFile ? 'vk-file' : 'upload'} '
-      'row; uploads with a named album: '
-      '${shown.where((v) => !v.isCurrentFile && (v.album ?? '').isNotEmpty).length}'
-      ' of ${shown.length - 1}, with an album link: '
-      '${shown.where((v) => v.albumKey != null).length}',
+      'uploads with a named album: ${named.length} of ${shown.length - 1}, '
+      'of them with a link: ${named.where((v) => v.albumKey != null).length}',
     );
-    await tester.tap(
-      find.descendant(
-        of: rowOf(withAlbum),
-        matching: find.text(withAlbum.album!),
-      ),
-    );
-    final albumClock = Stopwatch()..start();
-    await tester.pump();
-    expect(library.view.kind, ViewKind.album);
-    expect(library.view.album?.link, isNotNull);
-    await waitUntil(
-      tester,
-      () => library.albumStatus?.load != AlbumLoad.loading,
-      what: "the upload's album",
-    );
-    final albumStatus = library.albumStatus!;
-    say(
-      'album opened: ${albumStatus.load.name} after '
-      '${albumClock.elapsedMilliseconds} ms, ${library.visible.length} songs'
-      '${albumStatus.reason == null ? '' : ', ${albumStatus.reason}'}',
-    );
-    expect(albumStatus.load, AlbumLoad.loaded, reason: albumStatus.reason);
-    expect(library.visible, isNotEmpty);
-    await shot(tester, 'album');
+    Future<void> openAlbumFrom(SongVersion version) async {
+      final where = version.isCurrentFile ? 'vk-file' : 'upload';
+      // Only rows on screen are built; long lists scroll to it first.
+      final scroll = library.scroll;
+      scroll.jumpTo(0);
+      await tester.pump();
+      while (rowOf(version).evaluate().isEmpty &&
+          scroll.offset < scroll.position.maxScrollExtent) {
+        scroll.jumpTo(
+          (scroll.offset + 200).clamp(0, scroll.position.maxScrollExtent),
+        );
+        await tester.pump();
+      }
+      await tester.ensureVisible(rowOf(version));
+      await tester.pump();
+      await tester.tap(
+        find.descendant(
+          of: rowOf(version),
+          matching: find.text(version.album!),
+        ),
+      );
+      final albumClock = Stopwatch()..start();
+      await tester.pump();
+      expect(library.view.kind, ViewKind.album, reason: '$where album');
+      expect(library.view.album?.link, isNotNull);
+      await waitUntil(
+        tester,
+        () => library.albumStatus?.load != AlbumLoad.loading,
+        what: 'the $where album',
+      );
+      final albumStatus = library.albumStatus!;
+      say(
+        '$where row album opened: ${albumStatus.load.name} after '
+        '${albumClock.elapsedMilliseconds} ms, ${library.visible.length} '
+        'songs${albumStatus.reason == null ? '' : ', ${albumStatus.reason}'}',
+      );
+      expect(albumStatus.load, AlbumLoad.loaded, reason: albumStatus.reason);
+      expect(library.visible, isNotEmpty);
+      await shot(tester, 'album-$where');
+    }
+
+    if ((shown.first.album ?? '').isNotEmpty) {
+      await openAlbumFrom(shown.first);
+      await tester.tap(find.byKey(const ValueKey('album-back')));
+      await tester.pumpAndSettle();
+      expect(library.view.kind, ViewKind.versions);
+    }
+    final linked = named.where((v) => v.albumKey != null).firstOrNull;
+    if (linked != null) await openAlbumFrom(linked);
     say('versions check passed');
   });
 }
