@@ -63,6 +63,10 @@ const periodBesideTitleMinWidth = 1100.0;
 /// Listened, Last played, Added); narrower ones show Plays and Last played.
 const allPlayColumnsMinWidth = 1000.0;
 
+/// A song list narrower than this shows no play columns: the titles need
+/// the room.
+const playColumnsMinWidth = 600.0;
+
 /// Which play columns the Songs list shows.
 enum PlayColumns { none, some, all }
 
@@ -847,7 +851,8 @@ class _LibraryScreenState extends State<LibraryScreen> {
               final filters = view.kind == ViewKind.songs
                   ? library.filters
                   : null;
-              final playColumns = filters == null
+              final playColumns =
+                  filters == null || listWidth < playColumnsMinWidth
                   ? PlayColumns.none
                   : listWidth >= allPlayColumnsMinWidth
                   ? PlayColumns.all
@@ -858,6 +863,25 @@ class _LibraryScreenState extends State<LibraryScreen> {
                       library.filterSources.length < 2
                   ? null
                   : _SourceFilter(library: library, tight: tight);
+              final filterBar = filters == null
+                  ? null
+                  : FilterBar(
+                      filters: filters,
+                      songs: library.all,
+                      settings: _settings,
+                      // A short window keeps three song rows: the bar folds
+                      // into the title row.
+                      narrow: narrowBar || tight,
+                      sources: sourceChips,
+                      period: periodBesideTitle && !tight
+                          ? null
+                          : PeriodControls(
+                              filters: filters,
+                              settings: _settings,
+                              narrow: narrowBar,
+                              compact: tight,
+                            ),
+                    );
               return Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
@@ -872,34 +896,35 @@ class _LibraryScreenState extends State<LibraryScreen> {
                         : _albumDetail(view),
                     actions: [
                       if (view.kind == ViewKind.versions) _versionsSearch(),
-                      if (filters != null && periodBesideTitle)
+                      if (filters != null && periodBesideTitle && !tight)
                         PeriodControls(
                           filters: filters,
                           settings: _settings,
                           narrow: false,
+                        ),
+                      if (tight && filterBar != null)
+                        // One line that scrolls sideways, like the source
+                        // chips: the list keeps its rows.
+                        Flexible(
+                          flex: 3,
+                          child: Align(
+                            alignment: Alignment.centerRight,
+                            child: SingleChildScrollView(
+                              key: const ValueKey('filter-bar-scroll'),
+                              scrollDirection: Axis.horizontal,
+                              child: filterBar,
+                            ),
+                          ),
                         ),
                     ],
                     // A song's versions are one song: nothing to filter.
                     // On Songs the source chips join the filter chips.
                     filter: filters == null ? sourceChips : null,
                   ),
-                  if (filters != null)
+                  if (filterBar != null && !tight)
                     Padding(
-                      padding: EdgeInsets.fromLTRB(24, 0, 24, tight ? 4 : 10),
-                      child: FilterBar(
-                        filters: filters,
-                        songs: library.all,
-                        settings: _settings,
-                        narrow: narrowBar,
-                        sources: sourceChips,
-                        period: periodBesideTitle
-                            ? null
-                            : PeriodControls(
-                                filters: filters,
-                                settings: _settings,
-                                narrow: narrowBar,
-                              ),
-                      ),
+                      padding: const EdgeInsets.fromLTRB(24, 0, 24, 10),
+                      child: filterBar,
                     ),
                   if (!tight && !view.isLater && library.visible.isNotEmpty)
                     _ListHeader(
@@ -1047,7 +1072,9 @@ class _LibraryScreenState extends State<LibraryScreen> {
     required bool showAlbum,
     required PlayColumns playColumns,
   }) {
-    final filters = playColumns == PlayColumns.none ? null : library.filters;
+    final filters = library.view.kind == ViewKind.songs
+        ? library.filters
+        : null;
     if (library.visible.isEmpty) {
       final filtered = library.filterSources
           .where((source) => source.id == library.sourceFilter)
@@ -1344,9 +1371,14 @@ class _ViewHeading extends StatelessWidget {
                 ),
                 if (count != null) ...[
                   const SizedBox(width: 10),
-                  Text(
-                    count!,
-                    style: TextStyle(fontSize: 13, color: colors.dim),
+                  // Shrinks too: a short window has the filters in this row.
+                  Flexible(
+                    child: Text(
+                      count!,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(fontSize: 13, color: colors.dim),
+                    ),
                   ),
                 ],
               ],

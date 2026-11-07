@@ -424,7 +424,27 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('option-mid')));
     await tester.pumpAndSettle();
     expect(titles(), hasLength(2));
-    expect(find.text('Length: 3:30 to 4:30'), findsOneWidget);
+    expect(filters.filter.ruleFor(FilterField.length)?.values, {'mid'});
+  });
+
+  testWidgets('the smallest window keeps three song rows, chips or not', (
+    tester,
+  ) async {
+    filters.setRule(const FilterRule(FilterField.plays, values: {'1'}));
+    filters.setRule(const FilterRule(FilterField.artist, values: {'Кино'}));
+    await pumpShell(tester, size: const Size(480, 440));
+    expect(find.byKey(const ValueKey('period-compact')), findsOneWidget);
+    expect(find.byKey(const ValueKey('save-view')), findsNothing);
+    expect(
+      library.scroll.position.viewportDimension,
+      greaterThanOrEqualTo(3 * rowHeight),
+    );
+    // The compact period menu steps back and forth.
+    await tester.tap(find.byKey(const ValueKey('period-compact')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('period-back')));
+    await tester.pumpAndSettle();
+    expect(filters.period, const PlayPeriod.month(offset: -1));
   });
 
   testWidgets('a new play updates the Plays column', (tester) async {

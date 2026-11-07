@@ -20,11 +20,16 @@ class PeriodControls extends StatelessWidget {
     required this.filters,
     required this.settings,
     required this.narrow,
+    this.compact = false,
   });
 
   final SongFilters filters;
   final ShellSettings settings;
   final bool narrow;
+
+  /// A short window: one button with the dates, whose menu has the periods
+  /// and Earlier / Later, so the song list keeps its rows.
+  final bool compact;
 
   static const _choices = [
     (PeriodKind.week, 'Week'),
@@ -61,6 +66,7 @@ class PeriodControls extends StatelessWidget {
     final colors = OwnColors.of(context);
     final period = filters.period;
     final arrows = period.kind != PeriodKind.all;
+    if (compact) return _compactButton(period);
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
@@ -148,6 +154,66 @@ class PeriodControls extends StatelessWidget {
       ],
     );
   }
+}
+
+extension on PeriodControls {
+  Widget _compactButton(PlayPeriod period) => Builder(
+    builder: (anchor) => TextButton.icon(
+      key: const ValueKey('period-compact'),
+      style: TextButton.styleFrom(visualDensity: VisualDensity.compact),
+      onPressed: () async {
+        final pick = await showAnchoredPanel<String>(
+          anchor,
+          width: 200,
+          builder: (context) => Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              for (final (kind, label) in PeriodControls._choices)
+                _OptionRow(
+                  key: ValueKey('period-${kind.name}'),
+                  label: label,
+                  selected: period.kind == kind,
+                  radio: true,
+                  onTap: () => Navigator.of(context).pop(kind.name),
+                ),
+              if (period.kind != PeriodKind.all) ...[
+                _OptionRow(
+                  key: const ValueKey('period-back'),
+                  label: 'Earlier',
+                  about:
+                      'The ${PeriodControls._choices.firstWhere((c) => c.$1 == period.kind).$2.toLowerCase()} before',
+                  onTap: () => Navigator.of(context).pop('back'),
+                ),
+                if (period.canStepForward(filters.now))
+                  _OptionRow(
+                    key: const ValueKey('period-next'),
+                    label: 'Later',
+                    about: 'The one after',
+                    onTap: () => Navigator.of(context).pop('next'),
+                  ),
+              ],
+            ],
+          ),
+        );
+        if (pick == null || !anchor.mounted) return;
+        switch (pick) {
+          case 'back':
+            filters.stepPeriod(-1);
+          case 'next':
+            filters.stepPeriod(1);
+          default:
+            await _choose(anchor, PeriodKind.values.byName(pick));
+        }
+      },
+      iconAlignment: IconAlignment.end,
+      icon: const Icon(Icons.expand_more, size: 18),
+      label: Text(
+        period.label(filters.now),
+        key: const ValueKey('period-label'),
+        style: const TextStyle(fontWeight: FontWeight.w600),
+      ),
+    ),
+  );
 }
 
 class _Segment extends StatelessWidget {
@@ -372,7 +438,8 @@ class _FilterBarState extends State<FilterBar> {
             ),
           ),
         ],
-        if (filter.rules.isNotEmpty)
+        // A narrow window has these in the Filters panel.
+        if (filter.rules.isNotEmpty && !widget.narrow)
           TextButton(
             key: const ValueKey('clear-filters'),
             onPressed: () => setState(() {
@@ -382,7 +449,7 @@ class _FilterBarState extends State<FilterBar> {
             child: const Text('Clear all'),
           ),
         ?widget.sources,
-        if (canSave)
+        if (canSave && !widget.narrow)
           OutlinedButton.icon(
             key: const ValueKey('save-view'),
             onPressed: () async {
@@ -474,13 +541,33 @@ class FiltersPanel extends StatelessWidget {
             ),
             Padding(
               padding: const EdgeInsets.fromLTRB(8, 4, 12, 10),
-              child: Row(
+              child: Wrap(
+                spacing: 8,
+                runSpacing: 6,
+                alignment: WrapAlignment.end,
+                crossAxisAlignment: WrapCrossAlignment.center,
                 children: [
                   TextButton(
                     onPressed: filters.clear,
                     child: const Text('Clear all'),
                   ),
-                  const Spacer(),
+                  if (filters.view == null &&
+                      (!filters.filter.isEmpty ||
+                          filters.sort != SongSort.library)) ...[
+                    OutlinedButton(
+                      key: const ValueKey('panel-save-view'),
+                      onPressed: () async {
+                        final name = await askViewName(
+                          context,
+                          title: 'Save as view',
+                          initial: filters.suggestedName(),
+                          action: 'Save',
+                        );
+                        if (name != null) filters.saveView(name);
+                      },
+                      child: const Text('Save as view'),
+                    ),
+                  ],
                   FilledButton(
                     key: const ValueKey('filters-done'),
                     onPressed: () => Navigator.of(context).pop(),
