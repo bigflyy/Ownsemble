@@ -299,6 +299,7 @@ class _PeriodPickerState extends State<PeriodPicker> {
       mainAxisSpacing: 8,
       crossAxisSpacing: 8,
       childAspectRatio: 98 / 50,
+      clipBehavior: Clip.none,
       children: [
         for (var m = 1; m <= 12; m++)
           _Cell(
@@ -311,6 +312,11 @@ class _PeriodPickerState extends State<PeriodPicker> {
             heardMs: _heard[DateTime(_year, m)] ?? 0,
             fraction: most == 0 ? 0 : (_heard[DateTime(_year, m)] ?? 0) / most,
             mode: mode,
+            column: (m - 1) % 4,
+            columns: 4,
+            firstInGrid: m == 1,
+            lastInGrid: m == 12,
+            gap: 8,
             onTap: () => _pick(DayRange.month(_year, m)),
             child: (color) => Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -375,6 +381,7 @@ class _PeriodPickerState extends State<PeriodPicker> {
           mainAxisSpacing: 4,
           crossAxisSpacing: 4,
           childAspectRatio: 1.45,
+          clipBehavior: Clip.none,
           children: [
             for (var i = 0; i < lead; i++) const SizedBox.shrink(),
             for (var d = 1; d <= count; d++)
@@ -391,6 +398,11 @@ class _PeriodPickerState extends State<PeriodPicker> {
                             _fullDayMs)
                         .clamp(0, 1),
                 mode: mode,
+                column: (lead + d - 1) % 7,
+                columns: 7,
+                firstInGrid: d == 1,
+                lastInGrid: d == count,
+                gap: 4,
                 onTap: () =>
                     _pick(DayRange.day(DateTime(first.year, first.month, d))),
                 child: (color) => Center(
@@ -407,9 +419,11 @@ class _PeriodPickerState extends State<PeriodPicker> {
   }
 }
 
-/// One month tile or day: chosen ends filled, days between marked (filled,
-/// or with violet lines above and below when listening shows as color),
-/// and the listening as a line at the bottom or a green tint.
+/// One month tile or day, and the listening as a line at the bottom or a
+/// green tint. With Line or Off the chosen ends are filled violet and the
+/// tiles between light violet. With Color the tint must stay visible, so the
+/// ends get a violet ring and one violet outline goes around the range, one
+/// box per grid row (user's pick, 2026-11-08).
 class _Cell extends StatelessWidget {
   const _Cell({
     super.key,
@@ -421,6 +435,11 @@ class _Cell extends StatelessWidget {
     required this.heardMs,
     required this.fraction,
     required this.mode,
+    required this.column,
+    required this.columns,
+    required this.firstInGrid,
+    required this.lastInGrid,
+    required this.gap,
     required this.onTap,
     required this.child,
   });
@@ -435,6 +454,17 @@ class _Cell extends StatelessWidget {
   /// How full the line or tint is, 0 to 1.
   final double fraction;
   final CalendarListening mode;
+
+  /// The tile's column in its grid, the number of columns and the space
+  /// between tiles: where the range outline breaks to the next row.
+  final int column;
+  final int columns;
+
+  /// The first or last tile shown: a range that goes on into another month
+  /// or year still closes its box here.
+  final bool firstInGrid;
+  final bool lastInGrid;
+  final double gap;
   final VoidCallback onTap;
   final Widget Function(Color textColor) child;
 
@@ -449,24 +479,32 @@ class _Cell extends StatelessWidget {
         !isEnd &&
         !unit.first.isBefore(range.first) &&
         !unit.last.isAfter(range.last);
-    final tint = mode == CalendarListening.color && heardMs > 0 && !isEnd;
-    final Color background = isEnd
+    final color = mode == CalendarListening.color;
+    final filled = isEnd && !color;
+    final ring = isEnd && color;
+    final tint = color && heardMs > 0;
+    final Color background = filled
         ? colors.accent
-        : inside && mode != CalendarListening.color
+        : inside && !color
         ? colors.accentBg
         : tint
         ? colors.source3.withValues(alpha: 0.06 + 0.34 * fraction)
         : Colors.transparent;
-    final textColor = isEnd
+    final textColor = filled
         ? colors.onAccent
-        : inside
+        : inside && !color
         ? colors.accent
         : colors.text;
-    final lines = inside && mode == CalendarListening.color;
+    final outlined = color && !pending && (isEnd || inside);
+    final BorderSide side = ring
+        ? BorderSide(color: colors.accent, width: 2)
+        : filled || (inside && !color) || tint
+        ? BorderSide.none
+        : BorderSide(color: colors.line);
     final heard = heardMs == 0
         ? 'nothing played'
         : '${_hoursText(heardMs, always: true)} listened';
-    return Tooltip(
+    final tile = Tooltip(
       message: future ? label : '$label: $heard',
       waitDuration: const Duration(milliseconds: 500),
       child: Semantics(
@@ -478,25 +516,13 @@ class _Cell extends StatelessWidget {
           child: Material(
             color: background,
             shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(lines ? 0 : 8),
-              side: isEnd || inside || tint
-                  ? BorderSide.none
-                  : BorderSide(color: colors.line),
+              borderRadius: BorderRadius.circular(8),
+              side: side,
             ),
             child: InkWell(
               borderRadius: BorderRadius.circular(8),
               onTap: future ? null : onTap,
-              child: Container(
-                decoration: lines
-                    ? BoxDecoration(
-                        border: Border.symmetric(
-                          horizontal: BorderSide(
-                            color: colors.accent,
-                            width: 2,
-                          ),
-                        ),
-                      )
-                    : null,
+              child: Padding(
                 padding: const EdgeInsets.fromLTRB(8, 4, 8, 4),
                 child: Stack(
                   children: [
@@ -528,7 +554,74 @@ class _Cell extends StatelessWidget {
         ),
       ),
     );
+    if (!outlined) return tile;
+    return CustomPaint(
+      foregroundPainter: RangeOutline(
+        color: colors.accent,
+        gap: gap,
+        opensLeft: unit.first != range.first && column > 0 && !firstInGrid,
+        opensRight:
+            unit.last != range.last && column < columns - 1 && !lastInGrid,
+      ),
+      child: tile,
+    );
   }
+}
+
+/// This tile's part of the outline around a chosen range. Tiles in a row
+/// draw one box together: a side that [opensLeft] or [opensRight] runs on
+/// to the middle of the gap, where the neighbour's part takes over; a
+/// closed side gets the rounded end of the box, a little outside the tile.
+class RangeOutline extends CustomPainter {
+  RangeOutline({
+    required this.color,
+    required this.gap,
+    required this.opensLeft,
+    required this.opensRight,
+  });
+
+  final Color color;
+  final double gap;
+  final bool opensLeft;
+  final bool opensRight;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    // How far the box stands out from the tile: under half the gap, so the
+    // boxes of two rows never touch.
+    final out = gap / 2 - 1;
+    final half = gap / 2;
+    final left = opensLeft ? -half : -out;
+    final right = opensRight ? size.width + half : size.width + out;
+    canvas
+      ..save()
+      ..clipRect(
+        Rect.fromLTRB(left - 1, -out - 2, right + 1, size.height + out + 2),
+      )
+      ..drawRRect(
+        RRect.fromLTRBR(
+          // An open side reaches past the clip, so only its top and bottom
+          // lines show.
+          opensLeft ? left - 20 : left,
+          -out,
+          opensRight ? right + 20 : right,
+          size.height + out,
+          const Radius.circular(10),
+        ),
+        Paint()
+          ..color = color
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 2,
+      )
+      ..restore();
+  }
+
+  @override
+  bool shouldRepaint(RangeOutline old) =>
+      old.color != color ||
+      old.gap != gap ||
+      old.opensLeft != opensLeft ||
+      old.opensRight != opensRight;
 }
 
 /// Line, Color or Off, for every calendar.

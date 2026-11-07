@@ -13,6 +13,7 @@ import 'package:ownsemble/ui/collections_controller.dart';
 import 'package:ownsemble/ui/cover_tile.dart';
 import 'package:ownsemble/ui/library_controller.dart';
 import 'package:ownsemble/ui/library_screen.dart';
+import 'package:ownsemble/ui/period_picker.dart';
 import 'package:ownsemble/ui/shell_settings.dart';
 import 'package:ownsemble/ui/song_filters.dart';
 import 'package:ownsemble/ui/theme.dart';
@@ -325,6 +326,68 @@ void main() {
     await tester.pump();
     expect(settings.calendarListening, CalendarListening.color);
     expect(saved['ui.calendar_listening'], 'color');
+    // Color mode: the ends keep their listening tint and get a violet ring,
+    // and one outline goes around the chosen days (3 to 5 November share a
+    // week row, so it is one box).
+    final accent = OwnColors.of(
+      tester.element(find.byKey(const ValueKey('day-2026-11-3'))),
+    ).accent;
+    Material cellMaterial(String key) => tester.widget<Material>(
+      find
+          .descendant(
+            of: find.byKey(ValueKey(key)),
+            matching: find.byType(Material),
+          )
+          .first,
+    );
+    RangeOutline? outline(String key) {
+      for (final paint in tester.widgetList<CustomPaint>(
+        find.descendant(
+          of: find.byKey(ValueKey(key)),
+          matching: find.byType(CustomPaint),
+        ),
+      )) {
+        final painter = paint.foregroundPainter;
+        if (painter is RangeOutline) return painter;
+      }
+      return null;
+    }
+
+    final end = cellMaterial('day-2026-11-3');
+    expect(end.color, isNot(accent), reason: 'an end is not filled');
+    expect((end.shape! as RoundedRectangleBorder).side.color, accent);
+    expect(outline('day-2026-11-2'), isNull);
+    expect(
+      [
+        for (final day in [3, 4, 5])
+          (
+            outline('day-2026-11-$day')!.opensLeft,
+            outline('day-2026-11-$day')!.opensRight,
+          ),
+      ],
+      [(false, true), (true, true), (true, false)],
+    );
+    // A range that goes on into the next month closes its box at the
+    // month's last day.
+    await tester.tap(find.byKey(const ValueKey('picker-back')));
+    await tester.pump();
+    await tester.tap(find.byKey(const ValueKey('day-2026-10-29')));
+    await tester.pump();
+    await tester.tap(find.byKey(const ValueKey('picker-next')));
+    await tester.pump();
+    await tester.tap(find.byKey(const ValueKey('day-2026-11-5')));
+    await tester.pump();
+    await tester.tap(find.byKey(const ValueKey('picker-back')));
+    await tester.pump();
+    expect(outline('day-2026-10-31')!.opensRight, isFalse);
+    expect(outline('day-2026-10-30')!.opensRight, isTrue);
+    await tester.tap(find.byKey(const ValueKey('picker-next')));
+    await tester.pump();
+    expect(outline('day-2026-11-1')!.opensLeft, isFalse);
+    await tester.tap(find.byKey(const ValueKey('day-2026-11-3')));
+    await tester.pump();
+    await tester.tap(find.byKey(const ValueKey('day-2026-11-5')));
+    await tester.pump();
     await tester.tap(find.byKey(const ValueKey('picker-apply')));
     await tester.pumpAndSettle();
     expect(
