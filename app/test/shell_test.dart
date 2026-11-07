@@ -1071,10 +1071,12 @@ void main() {
     await tester.pump();
     expect(library.visible.map((t) => t.id), [ids[0], ids[1], ids[0]]);
 
-    await tester.tap(find.byKey(const ValueKey('nav-charts')));
+    // Stats is a page of numbers now; Artists and Playlists are later.
+    await tester.tap(find.byKey(const ValueKey('nav-stats')));
     await tester.pump();
-    expect(find.textContaining('Planned after the MVP'), findsOneWidget);
-    expect(find.text('later'), findsNWidgets(3));
+    expect(heading(tester), 'Stats');
+    expect(find.textContaining('Planned after the MVP'), findsNothing);
+    expect(find.text('later'), findsNWidgets(2));
   });
 
   testWidgets('search works inside the view, repeats included', (tester) async {

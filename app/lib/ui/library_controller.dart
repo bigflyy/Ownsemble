@@ -19,8 +19,8 @@ import 'type_jump.dart';
 /// Height of one song row; fixed so the list can skip layout of hidden rows.
 const rowHeight = 58.0;
 
-/// The views of the sidebar. Artists, Playlists and Charts are planned
-/// after the MVP and show a "later" page.
+/// The views of the sidebar. Artists and Playlists are planned after the
+/// MVP and show a "later" page; Stats is a page of numbers, not a list.
 ///
 /// Downloads holds the songs kept for good; stored holds everything that
 /// plays without the network, cached songs too ("On this computer"). An
@@ -36,7 +36,9 @@ enum ViewKind {
   stack,
   playlists,
   history,
-  charts,
+
+  /// Listening stats for the page's period (plan 04, D1).
+  stats,
   album,
 
   /// The uploads of one song on VK, to listen to and choose from (plan 03).
@@ -64,9 +66,13 @@ class LibraryView {
 
   /// Whether this view is a page planned for later, without songs yet.
   bool get isLater => switch (kind) {
-    ViewKind.artists || ViewKind.playlists || ViewKind.charts => true,
+    ViewKind.artists || ViewKind.playlists => true,
     _ => false,
   };
+
+  /// Whether the view is a page instead of a song list: a later page or
+  /// Stats.
+  bool get isPage => isLater || kind == ViewKind.stats;
 
   /// Whether a song can appear more than once (History, Stacks).
   bool get hasEntries => kind == ViewKind.history || kind == ViewKind.stack;
@@ -892,7 +898,7 @@ class LibraryController extends ChangeNotifier {
         _base = album == null ? const [] : _albumSongs(album);
       case ViewKind.versions:
         _base = _versionSongs();
-      case ViewKind.artists || ViewKind.playlists || ViewKind.charts:
+      case ViewKind.artists || ViewKind.playlists || ViewKind.stats:
         _base = const [];
     }
     _filterBaseBySource();

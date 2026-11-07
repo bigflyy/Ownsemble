@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../library/play_stats.dart';
+import '../library/song_filter.dart';
 import '../library/song_version.dart';
 import '../library/track.dart';
 import '../playback/playback_controller.dart';
@@ -25,6 +26,7 @@ import 'sidebar.dart';
 import 'song_filters.dart';
 import 'source_editor.dart';
 import 'sources_scope.dart';
+import 'stats_page.dart';
 import 'stat_text.dart';
 import 'sync_controller.dart';
 import 'sync_status_bar.dart';
@@ -268,7 +270,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
   bool _onJumpKey(KeyEvent event) {
     if (event is KeyUpEvent) return false;
     if (_typing || _covered) return false;
-    if (library.view.isLater || library.visible.isEmpty) return false;
+    if (library.view.isPage || library.visible.isEmpty) return false;
     final keyboard = HardwareKeyboard.instance;
     final jump = library.jump;
     final key = event.logicalKey;
@@ -413,6 +415,18 @@ class _LibraryScreenState extends State<LibraryScreen> {
   void _play(int index) {
     library.notePlayedFrom();
     widget.playback.playFrom(library.visible, index);
+  }
+
+  /// A Stats artist row: Songs with that artist's chip only, most played
+  /// in the period first.
+  void _openArtist(String artist) {
+    final filters = library.filters;
+    if (filters == null) return;
+    filters
+      ..showAllSongs()
+      ..setRule(FilterRule(FilterField.artist, values: {artist}))
+      ..setSort(SongSort.plays);
+    library.showView(LibraryView.songs);
   }
 
   /// Opens [track]'s versions in the list, like an album (plan 03): what
@@ -857,8 +871,11 @@ class _LibraryScreenState extends State<LibraryScreen> {
                   : listWidth >= allPlayColumnsMinWidth
                   ? PlayColumns.all
                   : PlayColumns.some;
+              final statsFilters = view.kind == ViewKind.stats
+                  ? library.filters
+                  : null;
               final sourceChips =
-                  view.isLater ||
+                  view.isPage ||
                       view.kind == ViewKind.versions ||
                       library.filterSources.length < 2
                   ? null
@@ -887,7 +904,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
                 children: [
                   _ViewHeading(
                     title: filters?.view?.name ?? _viewTitle(view),
-                    count: view.isLater ? null : _countLabel(),
+                    count: view.isPage ? null : _countLabel(),
                     jump: library.jump,
                     tight: tight,
                     onBack: view.listsOutside ? library.goBack : null,
@@ -896,6 +913,13 @@ class _LibraryScreenState extends State<LibraryScreen> {
                         : _albumDetail(view),
                     actions: [
                       if (view.kind == ViewKind.versions) _versionsSearch(),
+                      if (statsFilters != null)
+                        PeriodControls(
+                          filters: statsFilters,
+                          settings: _settings,
+                          narrow: narrowBar,
+                          compact: tight,
+                        ),
                       if (filters != null && periodBesideTitle && !tight)
                         PeriodControls(
                           filters: filters,
@@ -926,7 +950,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
                       padding: const EdgeInsets.fromLTRB(24, 0, 24, 10),
                       child: filterBar,
                     ),
-                  if (!tight && !view.isLater && library.visible.isNotEmpty)
+                  if (!tight && !view.isPage && library.visible.isNotEmpty)
                     _ListHeader(
                       numbered: !_settings.thumbnails,
                       showAlbum: showAlbum,
@@ -934,7 +958,16 @@ class _LibraryScreenState extends State<LibraryScreen> {
                       filters: filters,
                     ),
                   Expanded(
-                    child: view.isLater
+                    child: statsFilters != null
+                        ? StatsPage(
+                            filters: statsFilters,
+                            songs: library.all,
+                            onPlay: (list, index) =>
+                                widget.playback.playFrom(list, index),
+                            onOpenArtist: _openArtist,
+                            onOpenAlbum: library.openAlbum,
+                          )
+                        : view.isLater
                         ? _LaterPage(view: view)
                         : _songList(
                             colors,
@@ -1061,7 +1094,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
           'Stacks',
     ViewKind.playlists => 'Playlists',
     ViewKind.history => 'History',
-    ViewKind.charts => 'Charts',
+    ViewKind.stats => 'Stats',
     ViewKind.album => view.album?.title ?? 'Album',
     ViewKind.versions =>
       'Versions of ${library.versionsRow?.title ?? 'a song'}',
@@ -1843,13 +1876,10 @@ class _LaterPage extends StatelessWidget {
       ViewKind.artists =>
         'Every artist with their songs from all sources, and a page per '
             'artist. Planned after the MVP.',
-      ViewKind.playlists =>
+      _ =>
         'Ordered lists you arrange and edit freely, next to Stacks, which '
             'only grow on top. Planned after the MVP; this page will host '
             'them.',
-      _ =>
-        'Listening stats from History, for example top artists per month. '
-            'Planned after the MVP; charts get the whole page, not a list.',
     };
     return Center(
       child: ConstrainedBox(

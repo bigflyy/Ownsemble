@@ -1152,6 +1152,11 @@ class LibraryStore implements PlayLog, PlayStatsSource {
     }
   }
 
+  @override
+  int? firstPlayMs() =>
+      _db.select('SELECT min(played_at_ms) FROM history').first.values.first
+          as int?;
+
   /// Writes many plays at once: song id, start (Unix ms), heard ms and how
   /// it ended (a [PlayEnd] name). For generated test and gate libraries.
   void addPlays(Iterable<(int, int, int, String)> plays) => _transaction(() {

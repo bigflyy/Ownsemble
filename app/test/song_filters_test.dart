@@ -136,6 +136,26 @@ void main() {
     expect(f.allTimePlays(ids[2])?.plays, 1);
   });
 
+  test("Stats: the period's plays, the days compared, the first play", () {
+    final f = filters();
+    expect(f.inPeriod.keys, unorderedEquals([ids[0], ids[1]]));
+    final october = f.compared()!;
+    expect(
+      october.range,
+      DayRange(DateTime(2026, 10, 1), DateTime(2026, 10, 7)),
+    );
+    expect(october.plays, isEmpty);
+    f.setPeriod(
+      PlayPeriod.custom(DayRange(DateTime(2025, 3, 7), DateTime(2025, 3, 12))),
+    );
+    final before = f.compared()!;
+    expect(before.range, DayRange(DateTime(2025, 3, 1), DateTime(2025, 3, 6)));
+    expect(before.plays[ids[0]]!.plays, 6);
+    f.setPeriod(const PlayPeriod.all());
+    expect(f.compared(), isNull);
+    expect(f.firstPlayMs, DateTime(2025, 3, 1, 20).millisecondsSinceEpoch);
+  });
+
   test('saved views: automatic name, rename, delete, kept in settings', () {
     final f = filters()
       ..setRule(const FilterRule(FilterField.artist, values: {'Сплин'}))

@@ -238,6 +238,16 @@ void main() {
     });
   });
 
+  group('firstPlayMs', () {
+    test('is the start of the earliest play, counted or not', () {
+      expect(store.firstPlayMs(), isNull);
+      final ids = store.upsertAll(vk, [song('1_1')]);
+      play(ids[0], at(2026, 11, 5), heardSec: 200);
+      play(ids[0], at(2026, 11, 2, 9), heardSec: 1);
+      expect(store.firstPlayMs(), at(2026, 11, 2, 9));
+    });
+  });
+
   group('listenedIn', () {
     test('sums heard time per range, each range on its own', () {
       final ids = store.upsertAll(vk, [song('1_1'), song('1_2')]);

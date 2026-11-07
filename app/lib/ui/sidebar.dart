@@ -211,10 +211,9 @@ class Sidebar extends StatelessWidget {
                   const LibraryView(ViewKind.history),
                 ),
                 item(
-                  'Charts',
+                  'Stats',
                   Icons.bar_chart,
-                  const LibraryView(ViewKind.charts),
-                  later: true,
+                  const LibraryView(ViewKind.stats),
                 ),
               ],
             ),

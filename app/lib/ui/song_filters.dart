@@ -1,8 +1,10 @@
+import 'dart:collection';
 import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
 
 import '../library/day_range.dart';
+import '../library/listening_stats.dart';
 import '../library/play_period.dart';
 import '../library/play_stats.dart';
 import '../library/song_filter.dart';
@@ -148,6 +150,26 @@ class SongFilters extends ChangeNotifier {
   /// Plays of [trackId] of all time.
   SongPlays? allTimePlays(int trackId) => _allTime?[trackId];
 
+  /// Every song's plays in the page's period (empty until [load]).
+  Map<int, SongPlays> get inPeriod => UnmodifiableMapView(_inPeriod);
+
+  /// What the Stats tiles compare the period with: the days of
+  /// [comparedRange] and their plays; null for all time. Read once per
+  /// range: those days are over, new plays do not change them.
+  ({DayRange range, Map<int, SongPlays> plays})? compared() {
+    final range = comparedRange(_period, now);
+    if (range == null) return null;
+    final kept = _compared;
+    if (kept != null && kept.range == range) return kept;
+    return _compared = (range: range, plays: _source.songPlays(range: range));
+  }
+
+  ({DayRange range, Map<int, SongPlays> plays})? _compared;
+
+  /// When the first play was recorded (see [PlayStatsSource.firstPlayMs]).
+  int? get firstPlayMs => _firstPlayMs ??= _source.firstPlayMs();
+  int? _firstPlayMs;
+
   /// Reads the play numbers, once. The list can show before: rows show no
   /// numbers yet, and a filter that needs them waits for this.
   void load() {
@@ -160,6 +182,8 @@ class SongFilters extends ChangeNotifier {
   /// Reads all play numbers again (after a sync that merged songs).
   void reload() {
     _allTime = null;
+    _compared = null;
+    _firstPlayMs = null;
     _periodLoaded = false;
     _own.clear();
     load();
@@ -176,6 +200,7 @@ class SongFilters extends ChangeNotifier {
       map.addAll(fresh);
     }
 
+    _firstPlayMs ??= _source.firstPlayMs();
     update(_allTime!, null);
     if (_periodLoaded) update(_inPeriod, _loadedRange);
     for (final MapEntry(key: period, value: map) in _own.entries) {

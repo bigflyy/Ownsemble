@@ -161,6 +161,7 @@ void main() {
     FilterField? openRule,
     bool picker = false,
     bool pickerDays = false,
+    String? statsTab,
     CalendarListening calendar = CalendarListening.line,
     bool saveView = false,
   }) async {
@@ -419,6 +420,10 @@ void main() {
         await tester.pumpAndSettle();
       }
     }
+    if (statsTab != null) {
+      await tester.tap(find.byKey(ValueKey('stats-tab-$statsTab')));
+      await tester.pumpAndSettle();
+    }
     if (albumListed != null) {
       await tester.tap(find.text('Гранатовый альбом'));
       await tester.pump();
@@ -675,6 +680,37 @@ void main() {
   testWidgets(
     'light, narrow',
     (t) => shoot(t, 'light-narrow', dark: false, size: const Size(900, 760)),
+  );
+  testWidgets(
+    'dark, Stats',
+    (t) => shoot(
+      t,
+      'dark-stats',
+      dark: true,
+      view: const LibraryView(ViewKind.stats),
+    ),
+  );
+  testWidgets(
+    'light, Stats, artists, year',
+    (t) => shoot(
+      t,
+      'light-stats-artists',
+      dark: false,
+      view: const LibraryView(ViewKind.stats),
+      period: const PlayPeriod.year(),
+      statsTab: 'artists',
+    ),
+  );
+  testWidgets(
+    'dark, Stats, narrow, albums',
+    (t) => shoot(
+      t,
+      'dark-stats-narrow',
+      dark: true,
+      size: const Size(900, 760),
+      view: const LibraryView(ViewKind.stats),
+      statsTab: 'albums',
+    ),
   );
   testWidgets(
     'dark, On this computer',

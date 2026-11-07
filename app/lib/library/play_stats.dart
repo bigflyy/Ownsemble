@@ -6,6 +6,10 @@ import 'library_records.dart';
 abstract interface class PlayStatsSource {
   Map<int, SongPlays> songPlays({DayRange? range, int? trackId});
   List<int> listenedIn(List<DayRange> ranges);
+
+  /// Start of the earliest recorded play, Unix milliseconds; null when
+  /// nothing was played yet.
+  int? firstPlayMs();
 }
 
 /// What one song's plays add up to over some days (or all time).
