@@ -33,13 +33,17 @@ class CollectionsController extends ChangeNotifier implements PlayLog {
     onPlaysChanged?.call(track.id);
   }
 
-  /// Told which song's play counts may have changed: a play of it began
-  /// or ended (null: a song not known here). The song list's numbers
-  /// follow; heard time written while a song plays is not told.
+  /// Told which song's play counts may have changed: a play of it began,
+  /// started to count, or ended (null: a song not known here). The song
+  /// list's and Stats' numbers follow; other heard time written while a
+  /// song plays is not told.
   void Function(int? trackId)? onPlaysChanged;
 
   /// Song of each play that has not ended yet, by play id.
   final _openPlays = <int, int>{};
+
+  /// Open plays already told as counted.
+  final _countedPlays = <int>{};
 
   @override
   int beginPlay(
@@ -54,12 +58,24 @@ class CollectionsController extends ChangeNotifier implements PlayLog {
     return id;
   }
 
-  /// History shows no heard time, so only [onPlaysChanged] is told, and
-  /// only when the play ends.
+  /// History shows no heard time, so only [onPlaysChanged] is told: once
+  /// when the play passes the counting line (half the song or 4 minutes),
+  /// so Plays and Last played show it while it still plays (the user,
+  /// 2026-11-08: "when i just played a song. it still says last played
+  /// never"), and when it ends.
   @override
   void updatePlay(int playId, {required int listenedMs, PlayEnd? ended}) {
     _store.updatePlay(playId, listenedMs: listenedMs, ended: ended);
-    if (ended != null) onPlaysChanged?.call(_openPlays.remove(playId));
+    if (ended != null) {
+      _countedPlays.remove(playId);
+      onPlaysChanged?.call(_openPlays.remove(playId));
+      return;
+    }
+    final trackId = _openPlays[playId];
+    if (trackId == null || _countedPlays.contains(playId)) return;
+    if (!_store.playCounts(playId)) return;
+    _countedPlays.add(playId);
+    onPlaysChanged?.call(trackId);
   }
 
   /// The play a restarted app may go on with is remembered as open.

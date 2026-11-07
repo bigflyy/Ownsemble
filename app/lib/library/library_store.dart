@@ -1152,6 +1152,16 @@ class LibraryStore implements PlayLog, PlayStatsSource {
     }
   }
 
+  /// Whether play [playId] counts as a play of its song now
+  /// ([countedPlaySql]).
+  bool playCounts(int playId) =>
+      _db.select(
+        'SELECT $countedPlaySql AS counts FROM history h '
+        'JOIN tracks t ON t.id = h.track_id WHERE h.id = ?',
+        [playId],
+      ).firstOrNull?['counts'] ==
+      1;
+
   @override
   int? firstPlayMs() =>
       _db.select('SELECT min(played_at_ms) FROM history').first.values.first
