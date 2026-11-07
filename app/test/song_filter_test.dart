@@ -179,6 +179,7 @@ void main() {
       allTime: allTime,
       period: inMonth,
       isOffline: (t) => t.id == 4,
+      isFavorite: (t) => t.id == 2 || t.id == 3,
     );
     List<int> ids(SongFilter filter, [SongFacts? with_]) => [
       for (final song in songs)
@@ -257,7 +258,7 @@ void main() {
       expect(ids(one(FilterField.never, 'yes', negate: true)), [1, 2]);
     });
 
-    test('offline, cover, often skipped', () {
+    test('offline, cover, often skipped, favorite', () {
       SongFilter on(FilterField field, {bool negate = false}) =>
           const SongFilter().withRule(
             FilterRule(field, values: const {'yes'}, negate: negate),
@@ -266,6 +267,8 @@ void main() {
       expect(ids(on(FilterField.offline, negate: true)), [1, 2, 3]);
       expect(ids(on(FilterField.cover)), [1]);
       expect(ids(on(FilterField.skipped)), [3]);
+      expect(ids(on(FilterField.favorite)), [2, 3]);
+      expect(ids(on(FilterField.favorite, negate: true)), [1, 4]);
     });
 
     test('a rule without values is no rule', () {

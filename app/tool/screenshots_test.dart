@@ -243,6 +243,9 @@ void main() {
     store.saveAudioFile(ids[1], 'cache/a.mp3', 10, pinned: true);
     store.saveAudioFile(ids[3], 'cache/b.mp3', 10);
     store.markGone(vk, ['1_6']);
+    // Favorites (plan 05): the playing song and one more show filled hearts.
+    store.addFavorite(ids[0], atMs: 1);
+    store.addFavorite(ids[4], atMs: 2);
     final collections = CollectionsController(store);
     final stack = collections.createStack('Вечер у моря');
     collections.addToStack(stack, store.loadAll().first);
@@ -680,6 +683,26 @@ void main() {
   testWidgets(
     'light, narrow',
     (t) => shoot(t, 'light-narrow', dark: false, size: const Size(900, 760)),
+  );
+  testWidgets(
+    'dark, Favorites',
+    (t) => shoot(
+      t,
+      'dark-favorites',
+      dark: true,
+      view: const LibraryView(ViewKind.favorites),
+    ),
+  );
+  testWidgets(
+    'light, Favorites, bottom bar, narrow',
+    (t) => shoot(
+      t,
+      'light-favorites-narrow',
+      dark: false,
+      size: const Size(900, 760),
+      dock: PlayerDock.bottom,
+      view: const LibraryView(ViewKind.favorites),
+    ),
   );
   testWidgets(
     'dark, Stats',

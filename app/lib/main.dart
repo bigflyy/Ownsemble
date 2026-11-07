@@ -200,6 +200,7 @@ Future<void> main(List<String> args) async {
     readSetting: store.readSetting,
     writeSetting: store.writeSetting,
     isOffline: (track) => storage.stateOf(track).path != null,
+    isFavorite: (track) => collections.isFavorite(track.id),
   );
   // Chips or a sort kept from the last run need the play numbers before
   // the first frame; otherwise they are read just after it.

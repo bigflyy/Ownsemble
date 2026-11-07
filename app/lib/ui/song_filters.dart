@@ -92,7 +92,9 @@ class SongFilters extends ChangeNotifier {
     this._writeSetting,
     DateTime Function()? clock,
     bool Function(Track track)? isOffline,
+    bool Function(Track track)? isFavorite,
   }) : _clock = clock ?? DateTime.now,
+       isFavorite = isFavorite ?? ((track) => false),
        isOffline = isOffline ?? ((track) => track.isCached) {
     _views = _readViews(readSetting?.call(viewsSetting));
     _readState(readSetting?.call(stateSetting));
@@ -110,6 +112,9 @@ class SongFilters extends ChangeNotifier {
 
   /// Whether a song plays without the network (downloaded or cached).
   bool Function(Track track) isOffline;
+
+  /// Whether a song is a favorite (plan 05).
+  bool Function(Track track) isFavorite;
 
   SongFilter _filter = const SongFilter();
   PlayPeriod _period = const PlayPeriod.month();
@@ -236,6 +241,7 @@ class SongFilters extends ChangeNotifier {
       period: _inPeriod,
       own: _own,
       isOffline: isOffline,
+      isFavorite: isFavorite,
     );
     final kept = _filter.isEmpty
         ? all

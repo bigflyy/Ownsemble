@@ -27,6 +27,9 @@ const rowHeight = 58.0;
 /// album is not in the sidebar: it opens from a song's album name.
 enum ViewKind {
   songs,
+
+  /// The user's favorite songs, the newest favorite first (plan 05).
+  favorites,
   artists,
   downloads,
   stored,
@@ -806,6 +809,21 @@ class LibraryController extends ChangeNotifier {
 
   /// History or Stacks changed: refresh when one of them is shown.
   void _onSourceChanged() {
+    final favoriteChip =
+        _view.kind == ViewKind.songs &&
+        filters?.filter.ruleFor(FilterField.favorite) != null;
+    if (_view.kind == ViewKind.favorites || favoriteChip) {
+      final before = _base;
+      _rebuildBase();
+      if (_sameSongs(before, _base)) {
+        _base = before;
+        return;
+      }
+      _applySearch();
+      jump.clear();
+      notifyListeners();
+      return;
+    }
     if (!_view.hasEntries) return;
     _rebuildBase();
     _applySearch();
@@ -862,6 +880,11 @@ class LibraryController extends ChangeNotifier {
         final filters = this.filters;
         _filtersGeneration = filters?.generation ?? -1;
         _base = filters != null && filters.active ? filters.apply(_all) : null;
+      case ViewKind.favorites:
+        _base = [
+          for (final favorite in collections?.favorites ?? const <Favorite>[])
+            ?_byId[favorite.trackId],
+        ];
       case ViewKind.downloads:
         _base = _storedSongs((state) => state.path != null && state.pinned);
       case ViewKind.stored:
@@ -968,8 +991,10 @@ class LibraryController extends ChangeNotifier {
     _index = index;
     _byId = {for (final track in _all) track.id: track};
     _changedCount = null;
-    // A sync may merge songs, which moves their plays to one row.
+    // A sync may merge songs, which moves their plays and favorites to one
+    // row.
     if (filters?.loaded ?? false) filters!.reload();
+    collections?.reloadFavorites();
     _rebuildBase();
     _applySearch();
     jump.clear();

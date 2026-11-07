@@ -16,7 +16,9 @@ import 'package:ownsemble/ui/cover_tile.dart';
 import 'package:ownsemble/ui/library_controller.dart';
 import 'package:ownsemble/ui/library_screen.dart';
 import 'package:ownsemble/ui/player_bar.dart';
+import 'package:ownsemble/library/song_filter.dart';
 import 'package:ownsemble/ui/sidebar.dart';
+import 'package:ownsemble/ui/song_filters.dart';
 import 'package:ownsemble/ui/shell_settings.dart';
 import 'package:ownsemble/ui/sync_controller.dart';
 import 'package:ownsemble/ui/theme.dart';
@@ -1091,6 +1093,139 @@ void main() {
     await tester.pump();
     expect(library.visible.map((t) => t.id), [ids[3], ids[3]]);
     expect(find.text('2 of 3 songs'), findsOneWidget);
+  });
+
+  group('favorites', () {
+    TestGesture? mouse;
+    setUp(() => mouse = null);
+    Future<void> hover(WidgetTester tester, Finder target) async {
+      if (mouse == null) {
+        mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
+        addTearDown(mouse!.removePointer);
+        await mouse!.addPointer(location: Offset.zero);
+      }
+      await mouse!.moveTo(tester.getCenter(target));
+      await tester.pump();
+    }
+
+    testWidgets('a heart shows on the row under the mouse; a click makes the '
+        'song a favorite, listed newest first in Favorites', (tester) async {
+      await pumpShell(tester);
+      final heart1 = find.byKey(ValueKey('heart-${ids[1]}'));
+      expect(
+        find.descendant(of: heart1, matching: find.byType(IconButton)),
+        findsNothing,
+      );
+      await hover(tester, find.byKey(ValueKey('song-${ids[1]}')));
+      expect(
+        find.descendant(
+          of: heart1,
+          matching: find.byIcon(Icons.favorite_border),
+        ),
+        findsOneWidget,
+      );
+      await tester.tap(heart1);
+      await tester.pump();
+      expect(collections.isFavorite(ids[1]), isTrue);
+      expect(
+        find.descendant(of: heart1, matching: find.byIcon(Icons.favorite)),
+        findsOneWidget,
+      );
+
+      await hover(tester, find.byKey(ValueKey('song-${ids[3]}')));
+      await tester.tap(find.byKey(ValueKey('heart-${ids[3]}')));
+      await tester.pump();
+
+      await tester.tap(find.byKey(const ValueKey('nav-favorites')));
+      await tester.pump();
+      expect(heading(tester), 'Favorites');
+      expect(library.visible.map((t) => t.id), [ids[3], ids[1]]);
+      final count = find.descendant(
+        of: find.byKey(const ValueKey('nav-favorites')),
+        matching: find.text('2'),
+      );
+      expect(count, findsOneWidget);
+
+      // A click on a filled heart takes the song out at once.
+      await tester.tap(find.byKey(ValueKey('heart-${ids[3]}')));
+      await tester.pump();
+      expect(library.visible.map((t) => t.id), [ids[1]]);
+    });
+
+    testWidgets('the right-click menu adds and removes', (tester) async {
+      await pumpShell(tester);
+      Future<void> menu(String key) async {
+        await tester.tap(
+          find.byKey(ValueKey('song-${ids[2]}')),
+          buttons: kSecondaryMouseButton,
+        );
+        await tester.pumpAndSettle();
+        await tester.tap(find.byKey(ValueKey(key)));
+        await tester.pumpAndSettle();
+      }
+
+      await menu('menu-favorite');
+      expect(collections.isFavorite(ids[2]), isTrue);
+      await menu('menu-unfavorite');
+      expect(collections.isFavorite(ids[2]), isFalse);
+    });
+
+    testWidgets("the player's heart follows the playing song, in both "
+        'docks', (tester) async {
+      final player = _StartedPlayer();
+      await pumpShell(tester, player: player);
+      final playback = tester
+          .widget<LibraryScreen>(find.byType(LibraryScreen))
+          .playback;
+      await playback.playFrom(library.visible, 4);
+      await tester.pump();
+      final song = library.visible[4];
+      for (final dock in [PlayerDock.side, PlayerDock.bottom]) {
+        settings.dockTo(dock);
+        await tester.pump();
+        final heart = find.byKey(const ValueKey('player-heart'));
+        expect(heart, findsOneWidget, reason: '$dock');
+        await tester.tap(heart);
+        await tester.pump();
+        expect(collections.isFavorite(song.id), isTrue, reason: '$dock');
+        expect(
+          find.descendant(
+            of: find.byKey(ValueKey('heart-${song.id}')),
+            matching: find.byIcon(Icons.favorite),
+          ),
+          findsOneWidget,
+          reason: 'the row shows it too',
+        );
+        await tester.tap(heart);
+        await tester.pump();
+        expect(collections.isFavorite(song.id), isFalse, reason: '$dock');
+      }
+    });
+
+    testWidgets('a Favorite chip keeps favorites in Songs, and follows a '
+        'new heart', (tester) async {
+      final filters = SongFilters(
+        store,
+        isFavorite: (track) => collections.isFavorite(track.id),
+      );
+      library = LibraryController(
+        store.loadAll(),
+        collections: collections,
+        filters: filters,
+      );
+      collections.setFavorite(library.all[0], true);
+      // Wide enough for the chip row in the test font.
+      await pumpShell(tester, size: const Size(2000, 900));
+      filters.setRule(const FilterRule(FilterField.favorite, values: {'yes'}));
+      await tester.pump();
+      expect(library.visible.map((t) => t.id), [library.all[0].id]);
+      collections.setFavorite(library.all[5], true);
+      await tester.pump();
+      expect(library.visible.map((t) => t.id), [
+        library.all[0].id,
+        library.all[5].id,
+      ]);
+    });
   });
 
   testWidgets('a new Stack from the right-click menu; the same song can go '

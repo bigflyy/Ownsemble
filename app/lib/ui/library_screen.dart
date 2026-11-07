@@ -14,6 +14,7 @@ import '../playback/player_service.dart';
 import '../storage/audio_storage.dart';
 import 'album_link.dart';
 import 'collections_controller.dart';
+import 'favorite_heart.dart';
 import 'cover_tile.dart';
 import 'cover_viewer.dart';
 import 'filling_icon.dart';
@@ -583,6 +584,18 @@ class _LibraryScreenState extends State<LibraryScreen> {
             value: 'versions',
             child: Text('Versions'),
           ),
+        if (collections != null && inLibrary)
+          collections.isFavorite(track.id)
+              ? const PopupMenuItem(
+                  key: ValueKey('menu-unfavorite'),
+                  value: 'unfavorite',
+                  child: Text('Remove from Favorites'),
+                )
+              : const PopupMenuItem(
+                  key: ValueKey('menu-favorite'),
+                  value: 'favorite',
+                  child: Text('Add to Favorites'),
+                ),
         if (track.hasCover || (storage != null && inLibrary) || inStack)
           const PopupMenuDivider(),
         if (track.hasCover)
@@ -637,6 +650,10 @@ class _LibraryScreenState extends State<LibraryScreen> {
         }
       case 'remove':
         widget.playback.removeDownload(track);
+      case 'favorite':
+        collections!.setFavorite(track, true);
+      case 'unfavorite':
+        collections!.setFavorite(track, false);
       case 'unstack':
         collections!.removeStackEntry(entryId!);
       case final int stackChoice:
@@ -1082,6 +1099,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
 
   String _viewTitle(LibraryView view) => switch (view.kind) {
     ViewKind.songs => 'All songs',
+    ViewKind.favorites => 'Favorites',
     ViewKind.artists => 'Artists',
     ViewKind.downloads => 'Downloads',
     ViewKind.stored => 'On this computer',
@@ -1125,6 +1143,9 @@ class _LibraryScreenState extends State<LibraryScreen> {
           : filtered != null
           ? 'None of these songs are from ${filtered.name}.'
           : switch (library.view.kind) {
+              ViewKind.favorites =>
+                'No favorites yet. Click the heart on a song, or in the '
+                    'player, to keep it here.',
               ViewKind.downloads =>
                 'No downloads yet. Right-click a song and choose Download '
                     'to keep it on this computer.',
@@ -1222,6 +1243,13 @@ class _LibraryScreenState extends State<LibraryScreen> {
                   _play(index);
                 },
                 onMenu: (position) => _showSongMenu(index, position),
+                favorite: widget.collections?.isFavorite(track.id) ?? false,
+                onFavorite:
+                    widget.collections == null ||
+                        !track.inLibrary ||
+                        version != null
+                    ? null
+                    : () => widget.collections!.toggleFavorite(track),
                 versionTag: (compact) => version == null
                     ? VersionTag(
                         playback: widget.playback,
@@ -1648,8 +1676,9 @@ class _ListHeader extends StatelessWidget {
             const SizedBox(width: 14),
             Expanded(flex: 10, child: title('Album', SongSort.album)),
           ],
-          // The stored mark has no header: its tooltip explains it.
-          const SizedBox(width: 14 + 18),
+          // The heart and the stored mark have no header: their tooltips
+          // explain them.
+          const SizedBox(width: _heartGap + _heartWidth + 14 + 18),
           if (playColumns != PlayColumns.none) ...[
             const SizedBox(width: 14),
             SizedBox(
@@ -1696,6 +1725,10 @@ class _ListHeader extends StatelessWidget {
 }
 
 const _playsWidth = 48.0;
+
+/// The heart's place on a song row, and the gap before it (plan 05).
+const _heartWidth = 28.0;
+const _heartGap = 8.0;
 const _listenedWidth = 78.0;
 const _lastPlayedWidth = 92.0;
 const _addedWidth = 92.0;
@@ -1912,6 +1945,8 @@ class _SongRow extends StatelessWidget {
     required this.onTap,
     required this.onMenu,
     required this.versionTag,
+    this.favorite = false,
+    this.onFavorite,
     this.onOpenAlbum,
     this.outsideMeaning,
     this.tagsUnderTitle = false,
@@ -1979,6 +2014,13 @@ class _SongRow extends StatelessWidget {
 
   /// Opens the song's album (a click on its name).
   final VoidCallback? onOpenAlbum;
+
+  /// Whether the song is a favorite (plan 05).
+  final bool favorite;
+
+  /// Makes the song a favorite or no longer one; null: no heart (a song
+  /// outside the library, a version).
+  final VoidCallback? onFavorite;
 
   @override
   Widget build(BuildContext context) {
@@ -2068,164 +2110,181 @@ class _SongRow extends StatelessWidget {
           hoverColor: colors.hover,
           onTap: onTap,
           onSecondaryTapUp: (details) => onMenu(details.globalPosition),
-          child: Opacity(
-            opacity: unplayable ? 0.5 : 1,
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 14),
-              child: Row(
-                children: [
-                  SizedBox(
-                    width: 44,
-                    child: thumbnails
-                        ? Stack(
-                            alignment: Alignment.center,
-                            children: [
-                              TrackTile(track: cover, size: 44, radius: 8),
-                              if (isCurrent)
-                                Container(
-                                  width: 44,
-                                  height: 44,
-                                  decoration: BoxDecoration(
-                                    color: const Color(0x990A0C10),
-                                    borderRadius: BorderRadius.circular(8),
-                                  ),
-                                  child: Icon(
-                                    playing
-                                        ? Icons.graphic_eq
-                                        : Icons.pause_rounded,
-                                    size: 18,
-                                    color: Colors.white,
-                                  ),
-                                ),
-                            ],
-                          )
-                        : Align(
-                            alignment: Alignment.centerRight,
-                            child: isCurrent
-                                ? Icon(
-                                    playing
-                                        ? Icons.graphic_eq
-                                        : Icons.pause_rounded,
-                                    size: 16,
-                                    color: colors.accent,
-                                  )
-                                : Text(
-                                    '$number',
-                                    style: TextStyle(
-                                      fontSize: 13,
-                                      color: colors.dim2,
+          child: RowHoverScope(
+            child: Opacity(
+              opacity: unplayable ? 0.5 : 1,
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 14),
+                child: Row(
+                  children: [
+                    SizedBox(
+                      width: 44,
+                      child: thumbnails
+                          ? Stack(
+                              alignment: Alignment.center,
+                              children: [
+                                TrackTile(track: cover, size: 44, radius: 8),
+                                if (isCurrent)
+                                  Container(
+                                    width: 44,
+                                    height: 44,
+                                    decoration: BoxDecoration(
+                                      color: const Color(0x990A0C10),
+                                      borderRadius: BorderRadius.circular(8),
+                                    ),
+                                    child: Icon(
+                                      playing
+                                          ? Icons.graphic_eq
+                                          : Icons.pause_rounded,
+                                      size: 18,
+                                      color: Colors.white,
                                     ),
                                   ),
-                          ),
-                  ),
-                  const SizedBox(width: 14),
-                  Expanded(
-                    flex: 16,
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          track.title,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            fontSize: 15,
-                            fontWeight: FontWeight.w500,
-                            color: isCurrent ? colors.currentText : null,
-                          ),
-                        ),
-                        if (tagsUnderTitle)
-                          Row(
-                            children: [
-                              Flexible(
-                                child: Text(
-                                  track.artist,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: dimStyle,
-                                ),
-                              ),
-                              ...tags(compact: false),
-                            ],
-                          )
-                        else
-                          Text(
-                            track.artist,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: dimStyle,
-                          ),
-                      ],
+                              ],
+                            )
+                          : Align(
+                              alignment: Alignment.centerRight,
+                              child: isCurrent
+                                  ? Icon(
+                                      playing
+                                          ? Icons.graphic_eq
+                                          : Icons.pause_rounded,
+                                      size: 16,
+                                      color: colors.accent,
+                                    )
+                                  : Text(
+                                      '$number',
+                                      style: TextStyle(
+                                        fontSize: 13,
+                                        color: colors.dim2,
+                                      ),
+                                    ),
+                            ),
                     ),
-                  ),
-                  // Album, with the gone and filler tags at its end, so
-                  // a tag never shifts the columns. In a narrow column the
-                  // tags shrink to an icon with the same explanation.
-                  if (showAlbum) ...[
                     const SizedBox(width: 14),
                     Expanded(
-                      flex: 10,
-                      child: LayoutBuilder(
-                        builder: (context, box) => Row(
-                          children: [
-                            Expanded(
-                              child: AlbumLink(
-                                key: ValueKey('album-${track.id}'),
-                                album: track.album ?? '',
-                                style: dimStyle,
-                                onOpen: (track.album ?? '').isEmpty
-                                    ? null
-                                    : onOpenAlbum,
-                              ),
+                      flex: 16,
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            track.title,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              fontSize: 15,
+                              fontWeight: FontWeight.w500,
+                              color: isCurrent ? colors.currentText : null,
                             ),
-                            if (!tagsUnderTitle)
-                              ...tags(compact: box.maxWidth < 150),
-                          ],
-                        ),
+                          ),
+                          if (tagsUnderTitle)
+                            Row(
+                              children: [
+                                Flexible(
+                                  child: Text(
+                                    track.artist,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: dimStyle,
+                                  ),
+                                ),
+                                ...tags(compact: false),
+                              ],
+                            )
+                          else
+                            Text(
+                              track.artist,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: dimStyle,
+                            ),
+                        ],
                       ),
                     ),
-                  ] else if (!tagsUnderTitle)
-                    ...tags(compact: true),
-                  const SizedBox(width: 14),
-                  _SourceMark(
-                    track: track,
-                    meaning: meaning,
-                    child: storage != null && (downloading || saving)
-                        ? FillingIcon(
-                            key: ValueKey('filling-${track.id}'),
-                            storage: storage!,
-                            track: track,
-                            icon: icon,
-                            filled: downloading ? Icons.download : Icons.cloud,
-                            size: 18,
-                            color: sourceColor(context, track),
-                          )
-                        : Icon(
-                            icon,
-                            key: ValueKey('mark-${track.id}-${icon.codePoint}'),
-                            size: 18,
-                            color: sourceColor(context, track),
+                    // Album, with the gone and filler tags at its end, so
+                    // a tag never shifts the columns. In a narrow column the
+                    // tags shrink to an icon with the same explanation.
+                    if (showAlbum) ...[
+                      const SizedBox(width: 14),
+                      Expanded(
+                        flex: 10,
+                        child: LayoutBuilder(
+                          builder: (context, box) => Row(
+                            children: [
+                              Expanded(
+                                child: AlbumLink(
+                                  key: ValueKey('album-${track.id}'),
+                                  album: track.album ?? '',
+                                  style: dimStyle,
+                                  onOpen: (track.album ?? '').isEmpty
+                                      ? null
+                                      : onOpenAlbum,
+                                ),
+                              ),
+                              if (!tagsUnderTitle)
+                                ...tags(compact: box.maxWidth < 150),
+                            ],
                           ),
-                  ),
-                  ..._playCells(
-                    playColumns,
-                    periodPlays: periodPlays,
-                    allTimePlays: allTimePlays,
-                    addedAt: track.addedAt,
-                    now: now ?? DateTime.now(),
-                    colors: colors,
-                  ),
-                  const SizedBox(width: 14),
-                  SizedBox(
-                    width: 44,
-                    child: Text(
-                      formatDuration(Duration(seconds: track.durationSec)),
-                      textAlign: TextAlign.right,
-                      style: TextStyle(fontSize: 13, color: colors.dim2),
+                        ),
+                      ),
+                    ] else if (!tagsUnderTitle)
+                      ...tags(compact: true),
+                    const SizedBox(width: _heartGap),
+                    SizedBox(
+                      width: _heartWidth,
+                      child: onFavorite == null
+                          ? null
+                          : RowHeart(
+                              key: ValueKey('heart-${track.id}'),
+                              favorite: favorite,
+                              onPressed: onFavorite!,
+                            ),
                     ),
-                  ),
-                ],
+                    const SizedBox(width: 14),
+                    _SourceMark(
+                      track: track,
+                      meaning: meaning,
+                      child: storage != null && (downloading || saving)
+                          ? FillingIcon(
+                              key: ValueKey('filling-${track.id}'),
+                              storage: storage!,
+                              track: track,
+                              icon: icon,
+                              filled: downloading
+                                  ? Icons.download
+                                  : Icons.cloud,
+                              size: 18,
+                              color: sourceColor(context, track),
+                            )
+                          : Icon(
+                              icon,
+                              key: ValueKey(
+                                'mark-${track.id}-${icon.codePoint}',
+                              ),
+                              size: 18,
+                              color: sourceColor(context, track),
+                            ),
+                    ),
+                    ..._playCells(
+                      playColumns,
+                      periodPlays: periodPlays,
+                      allTimePlays: allTimePlays,
+                      addedAt: track.addedAt,
+                      now: now ?? DateTime.now(),
+                      colors: colors,
+                    ),
+                    const SizedBox(width: 14),
+                    SizedBox(
+                      width: 44,
+                      child: Text(
+                        formatDuration(Duration(seconds: track.durationSec)),
+                        textAlign: TextAlign.right,
+                        style: TextStyle(fontSize: 13, color: colors.dim2),
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ),
           ),

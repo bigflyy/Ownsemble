@@ -14,6 +14,9 @@ enum FilterField {
   length,
   cover,
   skipped,
+
+  /// The user's favorites (plan 05).
+  favorite,
 }
 
 /// How a chip's values are chosen.
@@ -139,18 +142,27 @@ const fieldInfo = <FilterField, FieldInfo>{
     about: 'You skip it early most times',
     notLabel: 'Not often skipped',
   ),
+  FilterField.favorite: FieldInfo(
+    'Favorite',
+    FieldShape.toggle,
+    about: 'Songs you gave a heart',
+    notLabel: 'Not favorite',
+  ),
 };
 
-/// What matching a song needs besides the song: its play numbers and
-/// whether it plays offline.
+/// What matching a song needs besides the song: its play numbers, whether
+/// it plays offline and whether it is a favorite.
 class SongFacts {
   SongFacts({
     required this.now,
     required this.allTime,
     required this.period,
     required this.isOffline,
+    this.isFavorite = _noFavorites,
     this.own = const {},
   });
+
+  static bool _noFavorites(Track track) => false;
 
   final DateTime now;
 
@@ -164,6 +176,7 @@ class SongFacts {
   final Map<PlayPeriod, Map<int, SongPlays>> own;
 
   final bool Function(Track track) isOffline;
+  final bool Function(Track track) isFavorite;
 
   // Where the date chips cut, Unix ms, each worked out once: a local
   // DateTime per song made a chip over 10,000 songs take 0.2 s.
@@ -319,6 +332,8 @@ class FilterRule extends FilterNode {
         return track.hasCover;
       case FilterField.skipped:
         return facts.allTime[track.id]?.oftenSkipped ?? false;
+      case FilterField.favorite:
+        return facts.isFavorite(track);
     }
   }
 

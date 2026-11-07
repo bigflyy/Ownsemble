@@ -119,6 +119,12 @@ class Sidebar extends StatelessWidget {
                   count: library.all.length,
                 ),
                 item(
+                  'Favorites',
+                  Icons.favorite_border,
+                  const LibraryView(ViewKind.favorites),
+                  count: collections?.favorites.length ?? 0,
+                ),
+                item(
                   'Artists',
                   Icons.person_outline,
                   const LibraryView(ViewKind.artists),

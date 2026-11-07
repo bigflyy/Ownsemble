@@ -6,6 +6,7 @@ import '../playback/playback_controller.dart';
 import '../storage/audio_storage.dart';
 import 'album_link.dart';
 import 'collections_controller.dart';
+import 'favorite_heart.dart';
 import 'cover_tile.dart';
 import 'cover_viewer.dart';
 import 'filling_icon.dart';
@@ -59,6 +60,7 @@ class NowPlayingPanel extends StatelessWidget {
           playback,
           ?player.storage,
           ?player.versions,
+          ?collections,
         ]),
         builder: (context, _) => StreamBuilder<Track?>(
           stream: player.currentStream,
@@ -119,11 +121,17 @@ class NowPlayingPanel extends StatelessWidget {
                       ),
                       // A song of an album that the library lacks has no row
                       // for a Stack or a download to point at.
-                      if (collections != null && track.inLibrary)
+                      if (collections != null && track.inLibrary) ...[
+                        FavoriteHeart(
+                          key: const ValueKey('player-heart'),
+                          favorite: collections!.isFavorite(track.id),
+                          onPressed: () => collections!.toggleFavorite(track),
+                        ),
                         StackMenuButton(
                           track: track,
                           collections: collections!,
                         ),
+                      ],
                       VersionsButton(
                         playback: playback,
                         track: track,
@@ -204,6 +212,7 @@ class DockBar extends StatelessWidget {
           playback,
           ?player.storage,
           ?player.versions,
+          ?collections,
         ]),
         builder: (context, _) => StreamBuilder<Track?>(
           stream: player.currentStream,
@@ -246,6 +255,13 @@ class DockBar extends StatelessWidget {
                                     : () => onOpenAlbum!(track),
                               ),
                             ),
+                            if (collections != null && track.inLibrary)
+                              FavoriteHeart(
+                                key: const ValueKey('player-heart'),
+                                favorite: collections!.isFavorite(track.id),
+                                onPressed: () =>
+                                    collections!.toggleFavorite(track),
+                              ),
                             UpNextButton(
                               playback: playback,
                               thumbnails: thumbnails,

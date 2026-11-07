@@ -3,12 +3,13 @@ import 'package:flutter/foundation.dart';
 import '../library/library_store.dart';
 import '../library/track.dart';
 
-/// History and Stacks as the UI shows them, read from and written to the
+/// History, Stacks and Favorites as the UI shows them, read from and written to the
 /// library database on the UI thread (each call takes well under a
 /// millisecond at MVP sizes).
 class CollectionsController extends ChangeNotifier implements PlayLog {
   CollectionsController(this._store) {
     _reloadStacks();
+    _reloadFavorites();
   }
 
   final LibraryStore _store;
@@ -109,4 +110,48 @@ class CollectionsController extends ChangeNotifier implements PlayLog {
   }
 
   void _reloadStacks() => _stacks = _store.stacks();
+
+  // Favorites (plan 05).
+
+  List<Favorite> _favorites = const [];
+  Set<int> _favoriteIds = const {};
+
+  /// Every favorite, the newest first.
+  List<Favorite> get favorites => _favorites;
+
+  /// Whether the song in row [trackId] is a favorite.
+  bool isFavorite(int trackId) => _favoriteIds.contains(trackId);
+
+  /// Makes [track] a favorite, or no longer one.
+  void setFavorite(Track track, bool favorite) {
+    if (favorite == isFavorite(track.id)) return;
+    if (favorite) {
+      _store.addFavorite(track.id);
+    } else {
+      _store.removeFavorite(track.id);
+    }
+    _reloadFavorites();
+    notifyListeners();
+  }
+
+  /// Makes [track] a favorite when it is not one, else no longer one.
+  void toggleFavorite(Track track) => setFavorite(track, !isFavorite(track.id));
+
+  /// Reads the favorites again: a merge or a removed account may have moved
+  /// them to other rows. Tells listeners only when they changed.
+  void reloadFavorites() {
+    final before = _favorites;
+    _reloadFavorites();
+    if (before.length == _favorites.length &&
+        Iterable.generate(before.length)
+            .every((i) => before[i] == _favorites[i])) {
+      return;
+    }
+    notifyListeners();
+  }
+
+  void _reloadFavorites() {
+    _favorites = _store.favorites();
+    _favoriteIds = {for (final f in _favorites) f.trackId};
+  }
 }
