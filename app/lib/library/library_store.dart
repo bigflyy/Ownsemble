@@ -91,7 +91,7 @@ class NewTrack {
 ///
 /// SQLite calls are synchronous; at 10,000 songs every query here takes a few
 /// milliseconds, so the UI thread calls them directly.
-class LibraryStore implements PlayLog {
+class LibraryStore implements PlayLog, PlayStatsSource {
   LibraryStore._(this._db);
 
   /// Opens (and if needed creates or upgrades) the library at [path].
@@ -905,7 +905,7 @@ class LibraryStore implements PlayLog {
       SELECT t.id, t.source_id, s.kind, t.source_key, t.access_key, t.artist,
              t.title, t.album, t.duration_sec, t.cover_url, t.cover_large_url,
              t.cover_mid_url, t.cover_full_url, t.tint, t.gone_at_ms, a.path,
-             a.pinned
+             a.pinned, t.added_at
       FROM tracks t
       JOIN sources s ON s.id = t.source_id
       LEFT JOIN audio_files a ON a.track_id = t.id
@@ -933,6 +933,7 @@ class LibraryStore implements PlayLog {
           localPath: row['path'] as String?,
           pinned: row['pinned'] == 1,
           copies: copies[row['id'] as int] ?? const [],
+          addedAt: row['added_at'] as int,
         ),
     ];
   }
@@ -1077,8 +1078,12 @@ class LibraryStore implements PlayLog {
   /// What each song's plays add up to in [range] (null: all time), by
   /// library id. Songs with no play in it are left out; a song heard only
   /// in plays that did not count is in, with no plays (see [SongPlays]).
-  Map<int, SongPlays> songPlays({DayRange? range}) {
-    final rows = _db.select(_songPlaysSql(range), [
+  ///
+  /// With [trackId], only that song (in the map when it has a play there).
+  @override
+  Map<int, SongPlays> songPlays({DayRange? range, int? trackId}) {
+    final rows = _db.select(_songPlaysSql(range, oneSong: trackId != null), [
+      ?trackId,
       if (range != null) ...[range.startMs, range.endMs],
     ]);
     return {
@@ -1088,20 +1093,26 @@ class LibraryStore implements PlayLog {
           listenedMs: row['listened'] as int,
           firstMs: row['first_ms'] as int?,
           lastMs: row['last_ms'] as int?,
+          starts: row['starts'] as int,
+          earlySkips: row['early_skips'] as int,
         ),
     };
   }
 
-  static String _songPlaysSql(DayRange? range) =>
+  static String _songPlaysSql(DayRange? range, {bool oneSong = false}) =>
       '''
       SELECT h.track_id,
              sum($countedPlaySql) AS plays,
              coalesce(sum(h.listened_ms), 0) AS listened,
              min(CASE WHEN $countedPlaySql THEN h.played_at_ms END) AS first_ms,
-             max(CASE WHEN $countedPlaySql THEN h.played_at_ms END) AS last_ms
-      FROM history h INDEXED BY ${range == null ? 'history_by_track' : 'history_by_time'}
+             max(CASE WHEN $countedPlaySql THEN h.played_at_ms END) AS last_ms,
+             count(*) AS starts,
+             sum($earlySkipSql) AS early_skips
+      FROM history h
+        INDEXED BY ${range == null || oneSong ? 'history_by_track' : 'history_by_time'}
       JOIN tracks t ON t.id = h.track_id
-      ${range == null ? '' : 'WHERE h.played_at_ms >= ? AND h.played_at_ms < ?'}
+      WHERE ${oneSong ? 'h.track_id = ?' : '1'}
+        ${range == null ? '' : 'AND h.played_at_ms >= ? AND h.played_at_ms < ?'}
       GROUP BY h.track_id
       ''';
 
@@ -1114,6 +1125,7 @@ class LibraryStore implements PlayLog {
       .join('\n');
 
   /// Time heard in each of [ranges], in the same order, milliseconds.
+  @override
   List<int> listenedIn(List<DayRange> ranges) {
     if (ranges.isEmpty) return const [];
     final statement = _db.prepare(

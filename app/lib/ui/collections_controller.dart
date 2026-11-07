@@ -30,7 +30,16 @@ class CollectionsController extends ChangeNotifier implements PlayLog {
   void recordPlay(Track track) {
     _store.addPlay(track.id);
     notifyListeners();
+    onPlaysChanged?.call(track.id);
   }
+
+  /// Told which song's play counts may have changed: a play of it began
+  /// or ended (null: a song not known here). The song list's numbers
+  /// follow; heard time written while a song plays is not told.
+  void Function(int? trackId)? onPlaysChanged;
+
+  /// Song of each play that has not ended yet, by play id.
+  final _openPlays = <int, int>{};
 
   @override
   int beginPlay(
@@ -39,17 +48,27 @@ class CollectionsController extends ChangeNotifier implements PlayLog {
     required bool shuffle,
   }) {
     final id = _store.beginPlay(trackId, start: start, shuffle: shuffle);
+    _openPlays[id] = trackId;
     notifyListeners();
+    onPlaysChanged?.call(trackId);
     return id;
   }
 
-  /// Not shown anywhere yet, so nobody is told.
+  /// History shows no heard time, so only [onPlaysChanged] is told, and
+  /// only when the play ends.
   @override
-  void updatePlay(int playId, {required int listenedMs, PlayEnd? ended}) =>
-      _store.updatePlay(playId, listenedMs: listenedMs, ended: ended);
+  void updatePlay(int playId, {required int listenedMs, PlayEnd? ended}) {
+    _store.updatePlay(playId, listenedMs: listenedMs, ended: ended);
+    if (ended != null) onPlaysChanged?.call(_openPlays.remove(playId));
+  }
 
+  /// The play a restarted app may go on with is remembered as open.
   @override
-  HistoryEntry? lastPlay() => _store.lastPlay();
+  HistoryEntry? lastPlay() {
+    final last = _store.lastPlay();
+    if (last != null) _openPlays[last.id] = last.trackId;
+    return last;
+  }
 
   /// Creates a Stack named [name] (trimmed); returns its id.
   int createStack(String name) {

@@ -24,6 +24,7 @@ import 'ui/cover_tile.dart';
 import 'ui/library_controller.dart';
 import 'ui/library_screen.dart';
 import 'ui/shell_settings.dart';
+import 'ui/song_filters.dart';
 import 'ui/source_editor.dart';
 import 'ui/sources_scope.dart';
 import 'ui/sync_controller.dart';
@@ -194,8 +195,19 @@ Future<void> main(List<String> args) async {
     storage: storage,
     cacheWhileStreaming: options.cacheWhileStreaming,
   )..versions = versions;
+  final filters = SongFilters(
+    store,
+    readSetting: store.readSetting,
+    writeSetting: store.writeSetting,
+    isOffline: (track) => storage.stateOf(track).path != null,
+  );
+  // Chips or a sort kept from the last run need the play numbers before
+  // the first frame; otherwise they are read just after it.
+  if (filters.active) filters.load();
+  collections.onPlaysChanged = filters.playsChanged;
   final library = LibraryController(
     tracks,
+    filters: filters,
     collections: collections,
     storage: storage,
     versions: player.versions,

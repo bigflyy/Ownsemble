@@ -51,7 +51,12 @@ class Track {
     this.localPath,
     this.pinned = false,
     this.copies = const [],
+    this.addedAt = 0,
   });
+
+  /// When the song was added to its source, by the source's own date, Unix
+  /// seconds (0: unknown).
+  final int addedAt;
 
   /// Library row id.
   final int id;
@@ -170,5 +175,6 @@ class Track {
     localPath: localPath,
     pinned: pinned,
     copies: copies,
+    addedAt: addedAt,
   );
 }

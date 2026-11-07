@@ -4,6 +4,7 @@ import 'package:flutter/widgets.dart';
 import '../library/library_records.dart';
 import '../library/search_index.dart';
 import '../library/search_text.dart';
+import '../library/song_filter.dart';
 import '../library/song_version.dart';
 import '../library/track.dart';
 import '../playback/stream_route.dart';
@@ -12,6 +13,7 @@ import '../storage/audio_storage.dart';
 import 'albums.dart';
 import 'collections_controller.dart';
 import 'place_history.dart';
+import 'song_filters.dart';
 import 'type_jump.dart';
 
 /// Height of one song row; fixed so the list can skip layout of hidden rows.
@@ -117,6 +119,7 @@ class LibraryController extends ChangeNotifier {
     this.storage,
     this.albums,
     this.versions,
+    this.filters,
     String? Function(String key)? readSetting,
     this._writeSetting,
   }) : _index = SearchIndex(_all),
@@ -127,10 +130,11 @@ class LibraryController extends ChangeNotifier {
     collections?.addListener(_onSourceChanged);
     storage?.addListener(_onStorageChanged);
     versions?.addListener(_onVersionsChanged);
+    filters?.addListener(_onFiltersChanged);
     final saved = _decodeView(readSetting?.call(viewSetting));
     if (saved != null) _view = saved;
     _source = int.tryParse(readSetting?.call(sourceSetting) ?? '');
-    if (saved != null || _source != null) {
+    if (saved != null || _source != null || (filters?.active ?? false)) {
       _rebuildBase();
       _applySearch();
     }
@@ -237,6 +241,24 @@ class LibraryController extends ChangeNotifier {
 
   /// The versions chosen for swapped songs, for the Changed on VK view.
   final VersionBook? versions;
+
+  /// The chips, period and sort of the Songs list (plan 04, C2).
+  final SongFilters? filters;
+
+  /// [SongFilters.generation] the Songs list was last built with.
+  int _filtersGeneration = -1;
+
+  /// Chips, period or sort changed: Songs is built again when on screen.
+  /// New play numbers alone change nothing here (rows show them).
+  void _onFiltersChanged() {
+    final generation = filters!.generation;
+    if (generation == _filtersGeneration) return;
+    if (_view.kind != ViewKind.songs) return;
+    _rebuildBase();
+    _applySearch();
+    jump.clear();
+    notifyListeners();
+  }
 
   /// How many songs Changed on VK lists; null until counted again.
   int? _changedCount;
@@ -790,7 +812,10 @@ class LibraryController extends ChangeNotifier {
   /// must not end a jump. A new mark on a row is the list's own business: it
   /// listens to the storage itself.
   void _onStorageChanged() {
-    if (!_view.listsStorage) return;
+    final offlineChip =
+        _view.kind == ViewKind.songs &&
+        filters?.filter.ruleFor(FilterField.offline) != null;
+    if (!_view.listsStorage && !offlineChip) return;
     final before = _base;
     _rebuildBase();
     if (_sameSongs(before, _base)) {
@@ -828,7 +853,9 @@ class LibraryController extends ChangeNotifier {
     _baseEntryIds = null;
     switch (_view.kind) {
       case ViewKind.songs:
-        _base = null;
+        final filters = this.filters;
+        _filtersGeneration = filters?.generation ?? -1;
+        _base = filters != null && filters.active ? filters.apply(_all) : null;
       case ViewKind.downloads:
         _base = _storedSongs((state) => state.path != null && state.pinned);
       case ViewKind.stored:
@@ -935,6 +962,8 @@ class LibraryController extends ChangeNotifier {
     _index = index;
     _byId = {for (final track in _all) track.id: track};
     _changedCount = null;
+    // A sync may merge songs, which moves their plays to one row.
+    if (filters?.loaded ?? false) filters!.reload();
     _rebuildBase();
     _applySearch();
     jump.clear();
@@ -952,6 +981,7 @@ class LibraryController extends ChangeNotifier {
     collections?.removeListener(_onSourceChanged);
     storage?.removeListener(_onStorageChanged);
     versions?.removeListener(_onVersionsChanged);
+    filters?.removeListener(_onFiltersChanged);
     _versionList?.removeListener(_onVersionListChanged);
     jump.dispose();
     searchText.dispose();

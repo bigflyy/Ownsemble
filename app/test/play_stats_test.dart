@@ -188,6 +188,42 @@ void main() {
       expect(stats[ids[1]], isNull);
     });
 
+    test('starts and early skips: a song skipped early most times', () {
+      final ids = store.upsertAll(vk, [song('1_1'), song('1_2')]);
+      final t = at(2026, 11, 1);
+      play(ids[0], t, heardSec: 5); // early skip
+      play(ids[0], t + 1, heardSec: 19.9); // early skip
+      play(ids[0], t + 2, heardSec: 150, ended: PlayEnd.finished);
+      play(ids[1], t + 3, heardSec: 5); // early skip
+      play(ids[1], t + 4, heardSec: 25); // skipped, not early
+      play(ids[1], t + 5, heardSec: 3, ended: PlayEnd.closed); // not a skip
+      final stats = store.songPlays();
+      expect(stats[ids[0]]!.starts, 3);
+      expect(stats[ids[0]]!.earlySkips, 2);
+      expect(stats[ids[0]]!.oftenSkipped, isTrue);
+      expect(stats[ids[1]]!.starts, 3);
+      expect(stats[ids[1]]!.earlySkips, 1);
+      expect(stats[ids[1]]!.oftenSkipped, isFalse);
+    });
+
+    test('one song alone, all time or in a range', () {
+      final ids = store.upsertAll(vk, [song('1_1'), song('1_2')]);
+      play(ids[0], at(2025, 5, 1), heardSec: 150);
+      play(ids[0], at(2026, 5, 1), heardSec: 150);
+      play(ids[1], at(2026, 5, 1), heardSec: 150);
+      expect(store.songPlays(trackId: ids[0]).keys, [ids[0]]);
+      expect(store.songPlays(trackId: ids[0])[ids[0]]!.plays, 2);
+      final y2026 = store.songPlays(
+        range: DayRange.year(2026),
+        trackId: ids[0],
+      );
+      expect(y2026[ids[0]]!.plays, 1);
+      expect(
+        store.songPlays(range: DayRange.year(2024), trackId: ids[0]),
+        isEmpty,
+      );
+    });
+
     test('a play still going on counts once it is over the line', () {
       final ids = store.upsertAll(vk, [song('1_1')]);
       final id = store.beginPlay(

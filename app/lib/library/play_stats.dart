@@ -1,4 +1,12 @@
+import 'day_range.dart';
 import 'library_records.dart';
+
+/// Where play numbers come from: the library database, a stand-in in
+/// tests.
+abstract interface class PlayStatsSource {
+  Map<int, SongPlays> songPlays({DayRange? range, int? trackId});
+  List<int> listenedIn(List<DayRange> ranges);
+}
 
 /// What one song's plays add up to over some days (or all time).
 ///
@@ -11,6 +19,8 @@ class SongPlays {
     required this.listenedMs,
     this.firstMs,
     this.lastMs,
+    this.starts = 0,
+    this.earlySkips = 0,
   });
 
   /// Counted plays.
@@ -24,7 +34,19 @@ class SongPlays {
   /// null when no play counted.
   final int? firstMs;
   final int? lastMs;
+
+  /// Every recorded start of the song, counted or not.
+  final int starts;
+
+  /// Plays skipped early: another song started within [earlySkipMs].
+  final int earlySkips;
+
+  /// Whether the song is skipped early most times it starts (at least 3).
+  bool get oftenSkipped => starts >= 3 && earlySkips * 2 > starts;
 }
+
+/// A play skipped before this much was heard is an early skip (plan 04, B1).
+const earlySkipMs = 20 * 1000;
 
 /// Heard time at which a play counts: half the song, but never more than
 /// 4 minutes (Last.fm's rule).
@@ -56,3 +78,6 @@ const countedPlaySql =
     '(CASE WHEN h.listened_ms IS NULL THEN 1 '
     "WHEN t.duration_sec <= $shortSongSec THEN h.ended IS 'finished' "
     'ELSE h.listened_ms >= min(t.duration_sec * 500, $countedPlayCapMs) END)';
+
+/// 1 when a play in `history h` was skipped early, else 0.
+const earlySkipSql = "(h.ended IS 'skipped' AND h.listened_ms < $earlySkipMs)";
