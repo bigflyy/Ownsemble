@@ -6,7 +6,7 @@ import 'package:sqlite3/sqlite3.dart';
 /// Schema version this build reads and writes (`PRAGMA user_version`).
 ///
 /// 0 is the speed-gate build's single `tracks` table (or an empty file).
-const librarySchemaVersion = 11;
+const librarySchemaVersion = 12;
 
 /// How many colors sources can have; the theme has one per slot, from 1.
 const sourceColorCount = 6;
@@ -51,6 +51,7 @@ void migrateLibrary(Database db, {String? dataDir}) {
     if (version < 9) _addPlayDetails(db);
     if (version < 10) _addFoundVersionAlbums(db);
     if (version < 11) _expireListsWithoutAlbumLinks(db);
+    if (version < 12) _addPlaysByTime(db);
     db.execute('PRAGMA user_version = $librarySchemaVersion');
     db.execute('COMMIT');
   } catch (_) {
@@ -249,6 +250,22 @@ void _expireListsWithoutAlbumLinks(Database db) {
       WHERE album IS NOT NULL AND album != '' AND album_key IS NULL
     )
   ''');
+}
+
+/// Version 12: indexes for filters and stats over any days (plan 04, C1).
+/// Both hold what counting needs besides the song's length, so plays are
+/// read from an index alone: by time for a day range, by song for all time
+/// (the old by-song index grows two columns; it serves its old uses too).
+void _addPlaysByTime(Database db) {
+  db.execute(
+    'CREATE INDEX IF NOT EXISTS history_by_time '
+    'ON history (played_at_ms, track_id, listened_ms, ended)',
+  );
+  db.execute('DROP INDEX IF EXISTS history_by_track');
+  db.execute(
+    'CREATE INDEX history_by_track '
+    'ON history (track_id, played_at_ms, listened_ms, ended)',
+  );
 }
 
 void _createVersion1(Database db) {

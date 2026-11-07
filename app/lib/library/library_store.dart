@@ -6,7 +6,9 @@ import '../playback/mp3_length.dart' show FileFacts, otherRecordingSeconds;
 import 'file_print.dart';
 import 'library_records.dart';
 import 'library_schema.dart';
+import 'day_range.dart';
 import 'merge_plan.dart';
+import 'play_stats.dart';
 import 'same_song.dart';
 import 'song_version.dart';
 import 'track.dart';
@@ -1069,6 +1071,81 @@ class LibraryStore implements PlayLog {
         ended: PlayEnd.values.asNameMap()[row['ended']],
       ),
   ];
+
+  // Play counts (plan 04, C1).
+
+  /// What each song's plays add up to in [range] (null: all time), by
+  /// library id. Songs with no play in it are left out; a song heard only
+  /// in plays that did not count is in, with no plays (see [SongPlays]).
+  Map<int, SongPlays> songPlays({DayRange? range}) {
+    final rows = _db.select(_songPlaysSql(range), [
+      if (range != null) ...[range.startMs, range.endMs],
+    ]);
+    return {
+      for (final row in rows)
+        row['track_id'] as int: SongPlays(
+          plays: row['plays'] as int,
+          listenedMs: row['listened'] as int,
+          firstMs: row['first_ms'] as int?,
+          lastMs: row['last_ms'] as int?,
+        ),
+    };
+  }
+
+  static String _songPlaysSql(DayRange? range) =>
+      '''
+      SELECT h.track_id,
+             sum($countedPlaySql) AS plays,
+             coalesce(sum(h.listened_ms), 0) AS listened,
+             min(CASE WHEN $countedPlaySql THEN h.played_at_ms END) AS first_ms,
+             max(CASE WHEN $countedPlaySql THEN h.played_at_ms END) AS last_ms
+      FROM history h INDEXED BY ${range == null ? 'history_by_track' : 'history_by_time'}
+      JOIN tracks t ON t.id = h.track_id
+      ${range == null ? '' : 'WHERE h.played_at_ms >= ? AND h.played_at_ms < ?'}
+      GROUP BY h.track_id
+      ''';
+
+  /// The query plan of [songPlays] for [range], for tests.
+  String explainSongPlays({DayRange? range}) => _db
+      .select('EXPLAIN QUERY PLAN ${_songPlaysSql(range)}', [
+        if (range != null) ...[range.startMs, range.endMs],
+      ])
+      .map((row) => row['detail'])
+      .join('\n');
+
+  /// Time heard in each of [ranges], in the same order, milliseconds.
+  List<int> listenedIn(List<DayRange> ranges) {
+    if (ranges.isEmpty) return const [];
+    final statement = _db.prepare(
+      'SELECT coalesce(sum(listened_ms), 0) FROM history '
+      'WHERE played_at_ms >= ? AND played_at_ms < ?',
+    );
+    try {
+      return [
+        for (final range in ranges)
+          statement.select([range.startMs, range.endMs]).first.values.first
+              as int,
+      ];
+    } finally {
+      statement.close();
+    }
+  }
+
+  /// Writes many plays at once: song id, start (Unix ms), heard ms and how
+  /// it ended (a [PlayEnd] name). For generated test and gate libraries.
+  void addPlays(Iterable<(int, int, int, String)> plays) => _transaction(() {
+    final statement = _db.prepare(
+      'INSERT INTO history (track_id, played_at_ms, started, shuffle, '
+      "listened_ms, ended) VALUES (?, ?, 'chosen', 0, ?, ?)",
+    );
+    try {
+      for (final (trackId, atMs, listenedMs, ended) in plays) {
+        statement.execute([trackId, atMs, listenedMs, ended]);
+      }
+    } finally {
+      statement.close();
+    }
+  });
 
   // Stacks.
 

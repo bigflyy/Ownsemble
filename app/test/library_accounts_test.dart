@@ -397,6 +397,11 @@ void main() {
     old.close();
 
     final db = sqlite3.open(path);
+    db.execute('DROP INDEX history_by_time');
+    db.execute('DROP INDEX history_by_track');
+    db.execute(
+      'CREATE INDEX history_by_track ON history (track_id, played_at_ms)',
+    );
     for (final column in ['listened_ms', 'started', 'shuffle', 'ended']) {
       db.execute('ALTER TABLE history DROP COLUMN $column');
     }

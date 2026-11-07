@@ -16,8 +16,18 @@ void dropVersion6(Database db) {
   db.execute('DROP TABLE song_versions');
 }
 
+/// Takes back what version 12 added (play count indexes).
+void dropVersion12(Database db) {
+  db.execute('DROP INDEX history_by_time');
+  db.execute('DROP INDEX history_by_track');
+  db.execute(
+    'CREATE INDEX history_by_track ON history (track_id, played_at_ms)',
+  );
+}
+
 /// Takes back what version 10 added (album links of found uploads).
 void dropVersion10(Database db) {
+  dropVersion12(db);
   db.execute('ALTER TABLE found_versions DROP COLUMN album_key');
   db.execute('ALTER TABLE found_versions DROP COLUMN album_access_key');
 }
@@ -512,6 +522,34 @@ void main() {
     expect(migrated.foundVersions(ids[0])?.foundAtMs, 0, reason: 'expired');
     expect(migrated.foundVersions(ids[0])?.versions, hasLength(1));
     expect(migrated.foundVersions(ids[1])?.foundAtMs, 1000, reason: 'kept');
+  });
+
+  test('version 11 gets the play count indexes and keeps its plays', () {
+    final store = LibraryStore.open(dbPath);
+    final source = store.ensureSource(TrackSource.vk, account: '1', name: 'VK');
+    final id = store.upsertAll(source, [
+      const NewTrack(
+        sourceKey: '1_1',
+        artist: 'Кино',
+        title: 'Кукушка',
+        durationSec: 398,
+        addedAt: 0,
+      ),
+    ]).single;
+    store
+      ..addPlay(id, atMs: 1000)
+      ..close();
+    final db = sqlite3.open(dbPath);
+    dropVersion12(db);
+    db
+      ..execute('PRAGMA user_version = 11')
+      ..close();
+
+    final migrated = LibraryStore.open(dbPath);
+    addTearDown(migrated.close);
+    expect(versionOf(dbPath), librarySchemaVersion);
+    expect(migrated.songPlays()[id]?.plays, 1);
+    expect(migrated.explainSongPlays(), contains('COVERING INDEX'));
   });
 
   test('a library from a newer build is refused and left alone', () {
