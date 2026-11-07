@@ -144,7 +144,7 @@ const fieldInfo = <FilterField, FieldInfo>{
 /// What matching a song needs besides the song: its play numbers and
 /// whether it plays offline.
 class SongFacts {
-  const SongFacts({
+  SongFacts({
     required this.now,
     required this.allTime,
     required this.period,
@@ -164,6 +164,31 @@ class SongFacts {
   final Map<PlayPeriod, Map<int, SongPlays>> own;
 
   final bool Function(Track track) isOffline;
+
+  // Where the date chips cut, Unix ms, each worked out once: a local
+  // DateTime per song made a chip over 10,000 songs take 0.2 s.
+  late final int _todayMs = _dayMs(0);
+  late final int _weekMs = _dayMs(-6);
+  late final int _thirtyDaysMs = _dayMs(-29);
+  late final int _yearStartMs = DateTime(now.year).millisecondsSinceEpoch;
+  late final int _yearAgoMs = DateTime(
+    now.year - 1,
+    now.month,
+    now.day,
+  ).millisecondsSinceEpoch;
+  late final int _monthAgoMs = DateTime(
+    now.year,
+    now.month - 1,
+    now.day,
+  ).millisecondsSinceEpoch;
+  late final int _halfYearAgoMs = DateTime(
+    now.year,
+    now.month - 6,
+    now.day,
+  ).millisecondsSinceEpoch;
+
+  int _dayMs(int days) =>
+      DateTime(now.year, now.month, now.day + days).millisecondsSinceEpoch;
 }
 
 /// A node of the filter's rule tree: a rule, or a group of nodes.
@@ -250,18 +275,16 @@ class FilterRule extends FilterNode {
   }
 
   bool _matchesValue(Track track, SongFacts facts, String value) {
-    final now = facts.now;
     switch (field) {
       case FilterField.artist:
         return track.artist == value;
       case FilterField.added:
-        final added = DateTime.fromMillisecondsSinceEpoch(track.addedAt * 1000);
-        final today = DateTime(now.year, now.month, now.day);
+        final added = track.addedAt * 1000;
         return switch (value) {
-          '7d' => !added.isBefore(today.subtract(const Duration(days: 6))),
-          '30d' => !added.isBefore(today.subtract(const Duration(days: 29))),
-          'year' => added.year == now.year,
-          'old' => added.isBefore(DateTime(now.year - 1, now.month, now.day)),
+          '7d' => added >= facts._weekMs,
+          '30d' => added >= facts._thirtyDaysMs,
+          'year' => added >= facts._yearStartMs,
+          'old' => added < facts._yearAgoMs,
           _ => false,
         };
       case FilterField.plays:
@@ -273,13 +296,11 @@ class FilterRule extends FilterNode {
       case FilterField.lastPlayed:
         final lastMs = facts.allTime[track.id]?.lastMs;
         if (lastMs == null) return false;
-        final last = DateTime.fromMillisecondsSinceEpoch(lastMs);
-        final today = DateTime(now.year, now.month, now.day);
         return switch (value) {
-          'today' => !last.isBefore(today),
-          '7d' => !last.isBefore(today.subtract(const Duration(days: 6))),
-          'month+' => last.isBefore(DateTime(now.year, now.month - 1, now.day)),
-          'half+' => last.isBefore(DateTime(now.year, now.month - 6, now.day)),
+          'today' => lastMs >= facts._todayMs,
+          '7d' => lastMs >= facts._weekMs,
+          'month+' => lastMs < facts._monthAgoMs,
+          'half+' => lastMs < facts._halfYearAgoMs,
           _ => false,
         };
       case FilterField.never:

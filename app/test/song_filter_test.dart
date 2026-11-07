@@ -324,6 +324,43 @@ void main() {
     });
   });
 
+  test('date chips over 10,000 songs stay fast', () {
+    final many = [
+      for (var i = 0; i < 10000; i++)
+        track(
+          i,
+          'Artist ${i % 500}',
+          added: DateTime(2020 + i % 7, 1 + i % 12),
+        ),
+    ];
+    final allTime = {
+      for (var i = 0; i < 10000; i += 2)
+        i: plays(3, lastMs: DateTime(2026, 1 + i % 11).millisecondsSinceEpoch),
+    };
+    final facts = SongFacts(
+      now: now,
+      allTime: allTime,
+      period: const {},
+      isOffline: (_) => false,
+    );
+    final filter = const SongFilter()
+        .withRule(
+          const FilterRule(FilterField.lastPlayed, values: {'month+', '7d'}),
+        )
+        .withRule(const FilterRule(FilterField.added, values: {'old'}));
+    for (final song in many) {
+      filter.matches(song, facts);
+    }
+    final watch = Stopwatch()..start();
+    var kept = 0;
+    for (final song in many) {
+      if (filter.matches(song, facts)) kept++;
+    }
+    final ms = watch.elapsedMicroseconds / 1000;
+    expect(kept, greaterThan(0));
+    expect(ms, lessThan(15), reason: '$ms ms');
+  });
+
   group('auto names', () {
     test('period first, then the chips', () {
       final filter = const SongFilter()
