@@ -25,8 +25,13 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:image/image.dart' as img;
 import 'package:integration_test/integration_test.dart';
 import 'package:media_kit/media_kit.dart' show NativePlayer;
+import 'package:ownsemble/library/day_range.dart';
 import 'package:ownsemble/library/library_store.dart';
+import 'package:ownsemble/library/play_period.dart';
+import 'package:ownsemble/library/play_stats.dart';
+import 'package:ownsemble/library/song_filter.dart';
 import 'package:ownsemble/library/track.dart';
+import 'package:ownsemble/library/search_text.dart';
 import 'package:ownsemble/main.dart' as app;
 import 'package:ownsemble/playback/play_queue.dart';
 import 'package:ownsemble/playback/playback_controller.dart';
@@ -36,6 +41,7 @@ import 'package:ownsemble/playback/stream_proxy.dart'
 import 'package:ownsemble/storage/audio_storage.dart';
 import 'package:ownsemble/storage/cover_store.dart';
 import 'package:ownsemble/ui/cover_tile.dart';
+import 'package:ownsemble/ui/filter_bar.dart';
 import 'package:ownsemble/ui/library_controller.dart';
 import 'package:ownsemble/ui/library_screen.dart';
 import 'package:ownsemble/ui/shell_settings.dart';
@@ -1409,6 +1415,141 @@ void main() {
     print(
       'Go to the song: row $playingRow of ${library.visible.length}, '
       'title click, Ctrl+L, Alt+Left, Alt+Right ok',
+    );
+
+    // Filters (plan 04, C2) on the real library and the plays of this run.
+    // The Plays numbers must equal a count made here from History with the
+    // counting rule; then the chips, the search, a sort, the Custom picker
+    // and Save as view are used through the screen.
+    final filters = library.filters!;
+    filters
+      ..showAllSongs()
+      ..setPeriod(const PlayPeriod.all());
+    await tester.pump();
+    expect(filters.loaded, isTrue, reason: 'play numbers read after start');
+    final counted = <int, int>{};
+    final todayCounted = <int, int>{};
+    final today = DayRange.day(DateTime.now());
+    final checkStore = LibraryStore.open(p.join(copyDir, 'library.db'));
+    try {
+      for (final play in checkStore.history(limit: 1 << 30)) {
+        final song = library.byId(play.trackId);
+        if (song == null) continue;
+        final counts = isCountedPlay(
+          listenedMs: play.listenedMs,
+          ended: play.ended,
+          durationSec: song.durationSec,
+        );
+        if (!counts) continue;
+        counted[song.id] = (counted[song.id] ?? 0) + 1;
+        if (today.contains(play.playedAtMs)) {
+          todayCounted[song.id] = (todayCounted[song.id] ?? 0) + 1;
+        }
+      }
+    } finally {
+      checkStore.close();
+    }
+    final countMismatches = [
+      for (final song in library.all)
+        if ((filters.allTimePlays(song.id)?.plays ?? 0) !=
+            (counted[song.id] ?? 0))
+          '${songName(song)}: app ${filters.allTimePlays(song.id)?.plays}, '
+              'History ${counted[song.id]}',
+    ];
+    expect(countMismatches, isEmpty, reason: 'Plays equal the History');
+    expect(todayCounted, isNotEmpty, reason: 'this run counted plays today');
+
+    // Artist chip: the playing song's artist, picked in its menu.
+    final artist = player.current!.artist;
+    await tester.tap(find.byKey(const ValueKey('chip-artist')));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byKey(const ValueKey('artist-search')), artist);
+    await tester.pump();
+    await tester.tap(find.byKey(ValueKey('option-$artist')));
+    await tester.pump();
+    Navigator.of(tester.element(find.byType(RuleMenu))).pop();
+    await tester.pumpAndSettle();
+    final byArtist = library.all.where((t) => t.artist == artist).length;
+    expect(library.visible.length, byArtist);
+    expect(library.visible.every((t) => t.artist == artist), isTrue);
+
+    // Is not: every other song.
+    filters.setRule(
+      filters.filter.ruleFor(FilterField.artist)!.copyWith(negate: true),
+    );
+    await tester.pump();
+    expect(library.visible.length, library.all.length - byArtist);
+    filters.removeField(FilterField.artist);
+
+    // Plays 1 or more today, through the Custom picker's days: the songs
+    // this run counted, sorted by plays, most first; search narrows them.
+    await tester.tap(find.byKey(const ValueKey('period-custom')));
+    await tester.pumpAndSettle();
+    if (find.text('Exact days').evaluate().isNotEmpty) {
+      await tester.tap(find.byKey(const ValueKey('picker-exact')));
+      await tester.pumpAndSettle();
+    }
+    final now = DateTime.now();
+    final dayKey = ValueKey('day-${now.year}-${now.month}-${now.day}');
+    await tester.tap(find.byKey(dayKey));
+    await tester.pump();
+    await tester.tap(find.byKey(const ValueKey('picker-apply')));
+    await tester.pumpAndSettle();
+    expect(filters.period, PlayPeriod.custom(today));
+    filters.setRule(const FilterRule(FilterField.plays, values: {'1'}));
+    await tester.pump();
+    await tester.tap(find.byKey(const ValueKey('sort-plays')));
+    await tester.pump();
+    expect(
+      {for (final t in library.visible) t.id},
+      todayCounted.keys.toSet(),
+      reason: 'Plays 1+ today lists the songs counted today',
+    );
+    final mostToday = todayCounted.values.reduce(max);
+    expect(filters.periodPlays(library.visible.first.id)?.plays, mostToday);
+    final searched = library.visible.last;
+    final word = searchWords(searched.title).first;
+    library.searchText.text = word;
+    await tester.pump();
+    expect(library.visible.map((t) => t.id), contains(searched.id));
+    expect(
+      library.visible.every((t) => todayCounted.containsKey(t.id)),
+      isTrue,
+      reason: 'the search keeps the filter',
+    );
+    library.searchText.clear();
+    await tester.pump();
+
+    // Save as view: the automatic name, the sidebar, and back.
+    await tester.tap(find.byKey(const ValueKey('save-view')));
+    await tester.pumpAndSettle();
+    final suggested = tester
+        .widget<TextField>(find.byKey(const ValueKey('view-name')))
+        .controller!
+        .text;
+    await tester.tap(find.byKey(const ValueKey('view-name-ok')));
+    await tester.pumpAndSettle();
+    final savedView = filters.views.last;
+    expect(savedView.name, suggested);
+    final shownToday = library.visible.length;
+    await tester.tap(find.byKey(const ValueKey('nav-songs')));
+    await tester.pump();
+    expect(library.visible.length, library.all.length);
+    await tester.tap(find.byKey(ValueKey('nav-view-${savedView.id}')));
+    await tester.pump();
+    expect(library.visible.length, shownToday);
+    filters
+      ..deleteView(savedView.id)
+      ..showAllSongs()
+      ..setPeriod(const PlayPeriod.month());
+    await tester.pump();
+    // ignore: avoid_print
+    print(
+      'Filters: Plays equal History for ${library.all.length} songs '
+      '(${counted.length} with counted plays, ${todayCounted.length} today); '
+      'Artist "$artist" $byArtist songs, is not ok; Custom today + Plays 1+ '
+      '$shownToday songs, sorted, searched; view "$suggested" saved and '
+      'opened',
     );
 
     // Stored audio: a streamed song is saved while it plays and then plays
