@@ -11,7 +11,9 @@ import 'package:flutter/services.dart'
 import 'package:flutter/widgets.dart';
 import 'package:media_kit/media_kit.dart' show NativePlayer;
 
+import '../library/play_period.dart';
 import '../library/search_text.dart';
+import '../library/song_filter.dart';
 import '../library/track.dart';
 import '../playback/playback_controller.dart';
 import '../playback/player_service.dart';
@@ -20,6 +22,7 @@ import '../storage/cover_store.dart';
 import '../ui/collections_controller.dart';
 import '../ui/cover_tile.dart';
 import '../ui/library_controller.dart';
+import '../ui/song_filters.dart';
 import '../vk/vk_client.dart';
 import 'key_state.dart';
 
@@ -78,6 +81,7 @@ class SpeedBench {
     final display = WidgetsBinding.instance.platformDispatcher.displays.first;
     final benches = <String, Future<Map<String, Object?>> Function()>{
       'search': _searchBench,
+      'searchFiltered': _filteredSearchBench,
       'typeJump': _typeJumpBench,
       'scroll': _scrollBench,
       'scrollCovers': _scrollCoversBench,
@@ -389,6 +393,115 @@ class SpeedBench {
         for (final query in queries)
           query: library.all.isEmpty ? 0 : _countMatches(query),
       },
+    };
+  }
+
+  /// The song list with chips, a period and a sort (plan 04, C2): how long
+  /// reading the play numbers, changing the period, adding a Plays chip and
+  /// sorting by plays take, then the search keystrokes of [_searchBench]
+  /// with all of that on. What the data folder had shown is put back.
+  Future<Map<String, Object?>> _filteredSearchBench() async {
+    final filters = library.filters;
+    if (filters == null) return {'skipped': 'no filters'};
+    final keptFilter = filters.filter;
+    final keptPeriod = filters.period;
+    final keptSort = (filters.sort, filters.descending);
+    final keptView = filters.view?.id;
+    library.showView(LibraryView.songs);
+    await _settle();
+
+    double timed(void Function() change) {
+      final watch = Stopwatch()..start();
+      change();
+      return watch.elapsedMicroseconds / 1000;
+    }
+
+    final loadMs = timed(filters.reload);
+    final steps = <String, double>{
+      'clear': timed(filters.showAllSongs),
+      'periodMonth': timed(() => filters.setPeriod(const PlayPeriod.month())),
+      'periodYear': timed(() => filters.setPeriod(const PlayPeriod.year())),
+      'periodAll': timed(() => filters.setPeriod(const PlayPeriod.all())),
+      'periodLastYear': timed(
+        () => filters.setPeriod(const PlayPeriod.year(offset: -1)),
+      ),
+      'playsChip': timed(
+        () =>
+            filters.setRule(const FilterRule(FilterField.plays, values: {'1'})),
+      ),
+      'sortByPlays': timed(() => filters.setSort(SongSort.plays)),
+      'lastPlayedChip': timed(
+        () => filters.setRule(
+          FilterRule(FilterField.lastPlayed, values: const {'month+'}),
+        ),
+      ),
+    };
+    await _settle();
+    final shown = library.visible.length;
+    final typed = await _typeQueries(const [
+      'кино',
+      'ёлка',
+      'metallica',
+      'night city',
+      'the',
+      'love remix',
+    ]);
+    final playOneMs = timed(
+      () => filters.playsChanged(library.visible.firstOrNull?.id),
+    );
+
+    filters
+      ..setFilter(keptFilter)
+      ..setPeriod(keptPeriod)
+      ..setSort(keptSort.$1, descending: keptSort.$2);
+    if (keptView != null) filters.openView(keptView);
+    await _settle();
+    return {
+      'readNumbersMs': loadMs,
+      'changeMs': steps,
+      'songsShownFiltered': shown,
+      'playEndedUpdateMs': playOneMs,
+      ...typed,
+    };
+  }
+
+  /// Types [queries] one character at a time and measures each keystroke
+  /// until the frame showing its results is rasterized.
+  Future<Map<String, Object?>> _typeQueries(List<String> queries) async {
+    final keystrokes = <({int startUs, int uiDoneUs, int queryUs})>[];
+    for (final query in queries) {
+      for (var length = 1; length <= query.length; length++) {
+        await Future<void>.delayed(const Duration(milliseconds: 40));
+        final startUs = Timeline.now;
+        library.searchText.text = query.substring(0, length);
+        final queryUs = library.lastQueryTime.inMicroseconds;
+        await WidgetsBinding.instance.endOfFrame;
+        keystrokes.add((
+          startUs: startUs,
+          uiDoneUs: Timeline.now,
+          queryUs: queryUs,
+        ));
+      }
+      await Future<void>.delayed(const Duration(milliseconds: 40));
+      library.searchText.clear();
+      await WidgetsBinding.instance.endOfFrame;
+    }
+    await _settle();
+    final toRasterMs = <double>[];
+    for (final keystroke in keystrokes) {
+      final frame = _firstFrameStartingAfter(keystroke.startUs);
+      if (frame == null) continue;
+      final rasterDone = frame.timestampInMicroseconds(FramePhase.rasterFinish);
+      toRasterMs.add((rasterDone - keystroke.startUs) / 1000);
+    }
+    return {
+      'keystrokes': keystrokes.length,
+      'matchedFrames': toRasterMs.length,
+      'keystrokeToRasterMs': _stats(toRasterMs),
+      'keystrokeToUiDoneMs': _stats([
+        for (final k in keystrokes) (k.uiDoneUs - k.startUs) / 1000,
+      ]),
+      'searchMs': _stats([for (final k in keystrokes) k.queryUs / 1000]),
     };
   }
 
