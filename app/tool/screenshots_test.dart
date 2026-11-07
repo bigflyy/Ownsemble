@@ -15,7 +15,10 @@ import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ownsemble/library/file_print.dart';
+import 'package:ownsemble/library/day_range.dart';
 import 'package:ownsemble/library/library_store.dart';
+import 'package:ownsemble/library/play_period.dart';
+import 'package:ownsemble/library/song_filter.dart';
 import 'package:ownsemble/library/track.dart';
 import 'package:ownsemble/playback/playback_controller.dart';
 import 'package:ownsemble/playback/player_service.dart';
@@ -24,6 +27,7 @@ import 'package:ownsemble/ui/albums.dart';
 import 'package:ownsemble/ui/collections_controller.dart';
 import 'package:ownsemble/ui/library_controller.dart';
 import 'package:ownsemble/ui/library_screen.dart';
+import 'package:ownsemble/ui/song_filters.dart';
 import 'package:ownsemble/ui/shell_settings.dart';
 import 'package:ownsemble/ui/source_editor.dart';
 import 'package:ownsemble/ui/sources_scope.dart';
@@ -149,6 +153,16 @@ void main() {
     // Opens the album of "Выхода нет": null leaves it closed, false shows it
     // while VK's list is on its way, true with the list in.
     bool? albumListed,
+    // Filters (plan 04, C2): chips in use, the page period, a chip's menu
+    // open, the Custom picker open (on its days with [pickerDays]).
+    List<FilterRule> rules = const [],
+    PlayPeriod? period,
+    SongSort? sort,
+    FilterField? openRule,
+    bool picker = false,
+    bool pickerDays = false,
+    CalendarListening calendar = CalendarListening.line,
+    bool saveView = false,
   }) async {
     final store = LibraryStore.open(':memory:');
     addTearDown(store.close);
@@ -260,8 +274,35 @@ void main() {
         ),
       );
     }
+    // Made-up plays over the last two years, more for the first songs, so
+    // the play columns and the picker's months have numbers.
+    final today = DateTime.now();
+    final noon = DateTime(today.year, today.month, today.day, 14);
+    final plays = <(int, int, int, String)>[];
+    for (var d = 0; d < 730; d += 3) {
+      for (final (i, id) in ids.indexed) {
+        if ((d * 7 + i * 13) % (i + 3) != 0) continue;
+        final at = DateTime(noon.year, noon.month, noon.day - d, 9 + i);
+        plays.add((id, at.millisecondsSinceEpoch, 170000, 'finished'));
+      }
+    }
+    store.addPlays(plays);
+    final settingsStore = <String, String?>{};
+    final filters = SongFilters(
+      store,
+      readSetting: (key) => settingsStore[key],
+      writeSetting: (key, value) => settingsStore[key] = value,
+      clock: () => noon,
+    );
+    for (final rule in rules) {
+      filters.setRule(rule);
+    }
+    if (period != null) filters.setPeriod(period);
+    if (sort != null) filters.sortBy(sort);
+    if (saveView) filters.saveView(filters.suggestedName());
     final library = LibraryController(
       store.loadAll(),
+      filters: filters,
       collections: collections,
       albums: LibraryAlbums(
         store: store,
@@ -271,7 +312,6 @@ void main() {
     );
     // The accounts dialog reads each account's last sync from the store.
     // A fixed time of day, so the shots do not change from run to run.
-    final today = DateTime.now();
     final syncedAt = DateTime(today.year, today.month, today.day, 9, 41);
     if (accountsDialog) {
       store.recordSync(vk, atMs: syncedAt.millisecondsSinceEpoch);
@@ -310,6 +350,7 @@ void main() {
       );
     }
     final settings = ShellSettings.inMemory();
+    settings.setCalendarListening(calendar);
     if (!dark) settings.toggleTheme();
     if (rail) settings.toggleRail();
     settings.dockTo(dock);
@@ -364,6 +405,19 @@ void main() {
     if (shortcutsList) {
       await tester.tap(find.byKey(const ValueKey('keyboard-help')));
       await tester.pumpAndSettle();
+    }
+    if (openRule != null) {
+      await tester.tap(find.byKey(ValueKey('chip-${openRule.name}')));
+      await tester.pumpAndSettle();
+    }
+    if (picker) {
+      await tester.tap(find.byKey(const ValueKey('period-custom')));
+      await tester.pumpAndSettle();
+      // A range of whole months opens on months, any other on its days.
+      if (pickerDays && find.text('Exact days').evaluate().isNotEmpty) {
+        await tester.tap(find.byKey(const ValueKey('picker-exact')));
+        await tester.pumpAndSettle();
+      }
     }
     if (albumListed != null) {
       await tester.tap(find.text('Гранатовый альбом'));
@@ -499,6 +553,123 @@ void main() {
       accountsDialog: true,
       secondLoggedOut: true,
       pixelRatio: 2,
+    ),
+  );
+  testWidgets(
+    'dark, filters in use',
+    (t) => shoot(
+      t,
+      'dark-filters',
+      dark: true,
+      rules: [
+        const FilterRule(FilterField.artist, values: {'Кино', 'Сплин', 'ДДТ'}),
+        const FilterRule(FilterField.plays, values: {'1'}),
+        FilterRule(
+          FilterField.lastPlayed,
+          values: const {'month+'},
+          negate: true,
+        ),
+      ],
+      period: const PlayPeriod.year(),
+      sort: SongSort.plays,
+    ),
+  );
+  testWidgets(
+    'light, a saved view, Plays with own dates',
+    (t) => shoot(
+      t,
+      'light-filters-view',
+      dark: false,
+      rules: [
+        FilterRule(
+          FilterField.plays,
+          values: const {'5'},
+          period: PlayPeriod.year(offset: -1).fixedAt(DateTime.now()),
+        ),
+        const FilterRule(FilterField.offline, values: {'yes'}),
+      ],
+      saveView: true,
+    ),
+  );
+  testWidgets(
+    'dark, Artist menu',
+    (t) => shoot(
+      t,
+      'dark-artist-menu',
+      dark: true,
+      rules: [
+        const FilterRule(FilterField.artist, values: {'Кино', 'Сплин'}),
+      ],
+      openRule: FilterField.artist,
+    ),
+  );
+  testWidgets(
+    'dark, Plays menu',
+    (t) => shoot(t, 'dark-plays-menu', dark: true, openRule: FilterField.plays),
+  );
+  testWidgets(
+    'dark, Custom months',
+    (t) => shoot(t, 'dark-picker-months', dark: true, picker: true),
+  );
+  testWidgets(
+    'light, Custom months, color',
+    (t) => shoot(
+      t,
+      'light-picker-months-color',
+      dark: false,
+      picker: true,
+      calendar: CalendarListening.color,
+      period: PlayPeriod.custom(
+        DayRange(
+          DateTime(DateTime.now().year, 1),
+          DateTime(DateTime.now().year, 3, 31),
+        ),
+      ),
+    ),
+  );
+  testWidgets(
+    'dark, Custom days',
+    (t) => shoot(
+      t,
+      'dark-picker-days',
+      dark: true,
+      picker: true,
+      pickerDays: true,
+      period: PlayPeriod.custom(
+        DayRange(
+          DateTime.now().subtract(const Duration(days: 12)),
+          DateTime.now().subtract(const Duration(days: 3)),
+        ),
+      ),
+    ),
+  );
+  testWidgets(
+    'dark, Custom days, color',
+    (t) => shoot(
+      t,
+      'dark-picker-days-color',
+      dark: true,
+      picker: true,
+      pickerDays: true,
+      calendar: CalendarListening.color,
+      period: PlayPeriod.custom(
+        DayRange(
+          DateTime.now().subtract(const Duration(days: 12)),
+          DateTime.now().subtract(const Duration(days: 3)),
+        ),
+      ),
+    ),
+  );
+  testWidgets(
+    'dark, narrow, filters',
+    (t) => shoot(
+      t,
+      'dark-narrow-filters',
+      dark: true,
+      size: const Size(900, 760),
+      rules: [
+        const FilterRule(FilterField.plays, values: {'1'}),
+      ],
     ),
   );
   testWidgets(
