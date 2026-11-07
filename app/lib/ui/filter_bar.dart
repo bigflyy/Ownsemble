@@ -207,7 +207,11 @@ class FilterBar extends StatefulWidget {
     required this.settings,
     required this.narrow,
     this.sources,
+    this.period,
   });
+
+  /// The period controls, first in the row (a narrow window).
+  final Widget? period;
 
   final SongFilters filters;
 
@@ -319,6 +323,7 @@ class _FilterBarState extends State<FilterBar> {
       runSpacing: 8,
       crossAxisAlignment: WrapCrossAlignment.center,
       children: [
+        ?widget.period,
         if (widget.narrow)
           Builder(
             builder: (anchor) => _ChipShape(
@@ -657,7 +662,9 @@ class _RuleMenuState extends State<RuleMenu> {
                 showSelectedIcon: false,
                 style: const ButtonStyle(
                   visualDensity: VisualDensity.compact,
-                  textStyle: WidgetStatePropertyAll(TextStyle(fontSize: 12)),
+                  textStyle: WidgetStatePropertyAll(
+                    TextStyle(fontSize: 12, fontFamily: appFontFamily),
+                  ),
                 ),
                 segments: const [
                   ButtonSegment(value: false, label: Text('is')),

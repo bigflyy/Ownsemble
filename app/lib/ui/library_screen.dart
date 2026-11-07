@@ -55,6 +55,10 @@ const tightWindowHeight = 540.0;
 /// button and the period buttons into one menu.
 const filterChipsMinWidth = 760.0;
 
+/// A song list at least this wide has the period controls beside its title;
+/// a narrower one starts the chip row with them, so a view's name has room.
+const periodBesideTitleMinWidth = 1100.0;
+
 /// A song list at least this wide shows every play column (Plays,
 /// Listened, Last played, Added); narrower ones show Plays and Last played.
 const allPlayColumnsMinWidth = 1000.0;
@@ -768,6 +772,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
     required double listWidth,
   }) {
     final narrowBar = listWidth < filterChipsMinWidth;
+    final periodBesideTitle = listWidth >= periodBesideTitleMinWidth;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -867,11 +872,11 @@ class _LibraryScreenState extends State<LibraryScreen> {
                         : _albumDetail(view),
                     actions: [
                       if (view.kind == ViewKind.versions) _versionsSearch(),
-                      if (filters != null)
+                      if (filters != null && periodBesideTitle)
                         PeriodControls(
                           filters: filters,
                           settings: _settings,
-                          narrow: narrowBar,
+                          narrow: false,
                         ),
                     ],
                     // A song's versions are one song: nothing to filter.
@@ -887,6 +892,13 @@ class _LibraryScreenState extends State<LibraryScreen> {
                         settings: _settings,
                         narrow: narrowBar,
                         sources: sourceChips,
+                        period: periodBesideTitle
+                            ? null
+                            : PeriodControls(
+                                filters: filters,
+                                settings: _settings,
+                                narrow: narrowBar,
+                              ),
                       ),
                     ),
                   if (!tight && !view.isLater && library.visible.isNotEmpty)

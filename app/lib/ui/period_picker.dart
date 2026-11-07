@@ -247,23 +247,27 @@ class _PeriodPickerState extends State<PeriodPicker> {
                 ),
                 child: Row(
                   children: [
-                    Flexible(
-                      child: Text(
-                        _rangeText,
-                        key: const ValueKey('picker-range'),
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(fontWeight: FontWeight.w600),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            _rangeText,
+                            key: const ValueKey('picker-range'),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(fontWeight: FontWeight.w600),
+                          ),
+                          Text(
+                            _hint,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(fontSize: 13, color: colors.dim2),
+                          ),
+                        ],
                       ),
                     ),
-                    const SizedBox(width: 8),
-                    Flexible(
-                      child: Text(
-                        _hint,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(fontSize: 13, color: colors.dim2),
-                      ),
-                    ),
-                    const Spacer(),
                     OutlinedButton(
                       key: const ValueKey('picker-exact'),
                       onPressed: _toggleExact,
@@ -451,7 +455,7 @@ class _Cell extends StatelessWidget {
         : inside && mode != CalendarListening.color
         ? colors.accentBg
         : tint
-        ? colors.source3.withValues(alpha: 0.12 + 0.5 * fraction)
+        ? colors.source3.withValues(alpha: 0.06 + 0.34 * fraction)
         : Colors.transparent;
     final textColor = isEnd
         ? colors.onAccent
@@ -539,7 +543,9 @@ class _ModeSwitch extends StatelessWidget {
     showSelectedIcon: false,
     style: const ButtonStyle(
       visualDensity: VisualDensity.compact,
-      textStyle: WidgetStatePropertyAll(TextStyle(fontSize: 12)),
+      textStyle: WidgetStatePropertyAll(
+        TextStyle(fontSize: 12, fontFamily: appFontFamily),
+      ),
     ),
     segments: const [
       ButtonSegment(value: CalendarListening.line, label: Text('Line')),
