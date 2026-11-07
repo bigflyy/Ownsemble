@@ -4,6 +4,7 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../library/play_stats.dart';
 import '../library/song_version.dart';
 import '../library/track.dart';
 import '../playback/playback_controller.dart';
@@ -15,13 +16,16 @@ import 'collections_controller.dart';
 import 'cover_tile.dart';
 import 'cover_viewer.dart';
 import 'filling_icon.dart';
+import 'filter_bar.dart';
 import 'library_controller.dart';
 import 'player_bar.dart';
 import 'shell_settings.dart';
 import 'shortcuts_help.dart';
 import 'sidebar.dart';
+import 'song_filters.dart';
 import 'source_editor.dart';
 import 'sources_scope.dart';
+import 'stat_text.dart';
 import 'sync_controller.dart';
 import 'sync_status_bar.dart';
 import 'theme.dart';
@@ -46,6 +50,17 @@ const albumColumnMinWidth = 440.0;
 /// Shorter than this, the toolbar and the view's title tighten and the column
 /// names go, so that the song list keeps its rows.
 const tightWindowHeight = 540.0;
+
+/// A song list narrower than this folds the filter chips into one Filters
+/// button and the period buttons into one menu.
+const filterChipsMinWidth = 760.0;
+
+/// A song list at least this wide shows every play column (Plays,
+/// Listened, Last played, Added); narrower ones show Plays and Last played.
+const allPlayColumnsMinWidth = 1000.0;
+
+/// Which play columns the Songs list shows.
+enum PlayColumns { none, some, all }
 
 /// How far Left and Right move within a song.
 const seekKeyStep = Duration(seconds: 5);
@@ -102,6 +117,10 @@ class _LibraryScreenState extends State<LibraryScreen> {
   @override
   void initState() {
     super.initState();
+    // Play numbers are read after the first frame: the list shows first.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) library.filters?.load();
+    });
     // A song that cannot play says why at the bottom of the window.
     _subscriptions.add(
       widget.player.timings.listen((timing) {
@@ -677,6 +696,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
                               ?widget.collections,
                               ?_storage,
                               ?widget.player.versions,
+                              ?library.filters,
                             ]),
                             builder: (context, _) {
                               final counts = _storedCounts();
@@ -697,6 +717,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
                               colors,
                               showAlbum: showAlbum,
                               tight: tight,
+                              listWidth: listWidth,
                             ),
                           ),
                           if (sidePanel)
@@ -744,7 +765,9 @@ class _LibraryScreenState extends State<LibraryScreen> {
     OwnColors colors, {
     required bool showAlbum,
     required bool tight,
+    required double listWidth,
   }) {
+    final narrowBar = listWidth < filterChipsMinWidth;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -812,14 +835,29 @@ class _LibraryScreenState extends State<LibraryScreen> {
               ?_storage,
               ?widget.collections,
               ?widget.player.versions,
+              ?library.filters,
             ]),
             builder: (context, _) {
               final view = library.view;
+              final filters = view.kind == ViewKind.songs
+                  ? library.filters
+                  : null;
+              final playColumns = filters == null
+                  ? PlayColumns.none
+                  : listWidth >= allPlayColumnsMinWidth
+                  ? PlayColumns.all
+                  : PlayColumns.some;
+              final sourceChips =
+                  view.isLater ||
+                      view.kind == ViewKind.versions ||
+                      library.filterSources.length < 2
+                  ? null
+                  : _SourceFilter(library: library, tight: tight);
               return Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   _ViewHeading(
-                    title: _viewTitle(view),
+                    title: filters?.view?.name ?? _viewTitle(view),
                     count: view.isLater ? null : _countLabel(),
                     jump: library.jump,
                     tight: tight,
@@ -829,24 +867,43 @@ class _LibraryScreenState extends State<LibraryScreen> {
                         : _albumDetail(view),
                     actions: [
                       if (view.kind == ViewKind.versions) _versionsSearch(),
+                      if (filters != null)
+                        PeriodControls(
+                          filters: filters,
+                          settings: _settings,
+                          narrow: narrowBar,
+                        ),
                     ],
                     // A song's versions are one song: nothing to filter.
-                    filter:
-                        view.isLater ||
-                            view.kind == ViewKind.versions ||
-                            library.filterSources.length < 2
-                        ? null
-                        : _SourceFilter(library: library, tight: tight),
+                    // On Songs the source chips join the filter chips.
+                    filter: filters == null ? sourceChips : null,
                   ),
+                  if (filters != null)
+                    Padding(
+                      padding: EdgeInsets.fromLTRB(24, 0, 24, tight ? 4 : 10),
+                      child: FilterBar(
+                        filters: filters,
+                        songs: library.all,
+                        settings: _settings,
+                        narrow: narrowBar,
+                        sources: sourceChips,
+                      ),
+                    ),
                   if (!tight && !view.isLater && library.visible.isNotEmpty)
                     _ListHeader(
                       numbered: !_settings.thumbnails,
                       showAlbum: showAlbum,
+                      playColumns: playColumns,
+                      filters: filters,
                     ),
                   Expanded(
                     child: view.isLater
                         ? _LaterPage(view: view)
-                        : _songList(colors, showAlbum: showAlbum),
+                        : _songList(
+                            colors,
+                            showAlbum: showAlbum,
+                            playColumns: playColumns,
+                          ),
                   ),
                 ],
               );
@@ -973,12 +1030,22 @@ class _LibraryScreenState extends State<LibraryScreen> {
       'Versions of ${library.versionsRow?.title ?? 'a song'}',
   };
 
-  Widget _songList(OwnColors colors, {required bool showAlbum}) {
+  Widget _songList(
+    OwnColors colors, {
+    required bool showAlbum,
+    required PlayColumns playColumns,
+  }) {
+    final filters = playColumns == PlayColumns.none ? null : library.filters;
     if (library.visible.isEmpty) {
       final filtered = library.filterSources
           .where((source) => source.id == library.sourceFilter)
           .firstOrNull;
-      final empty = library.searchText.text.isNotEmpty
+      final chips = filters != null && filters.filter.rules.isNotEmpty;
+      final empty = chips
+          ? library.searchText.text.isNotEmpty
+                ? 'No songs match "${library.searchText.text}" and the filters.'
+                : 'No songs match the filters.'
+          : library.searchText.text.isNotEmpty
           ? filtered == null
                 ? 'No songs match "${library.searchText.text}"'
                 : 'No songs from ${filtered.name} match '
@@ -1062,6 +1129,10 @@ class _LibraryScreenState extends State<LibraryScreen> {
                 ),
                 number: index + 1,
                 track: track,
+                playColumns: playColumns,
+                periodPlays: filters?.periodPlays(track.id),
+                allTimePlays: filters?.allTimePlays(track.id),
+                now: filters?.now,
                 cover: library.rowCover(track),
                 stored:
                     _storage?.stateOf(track) ??
@@ -1436,11 +1507,20 @@ class _SourceChip extends StatelessWidget {
 /// Names the columns of [_SongRow] above the list, where scrolling leaves it
 /// in place. Its widths and gaps are the row's, or the two would drift apart.
 class _ListHeader extends StatelessWidget {
-  const _ListHeader({required this.numbered, required this.showAlbum});
+  const _ListHeader({
+    required this.numbered,
+    required this.showAlbum,
+    this.playColumns = PlayColumns.none,
+    this.filters,
+  });
 
   /// Whether the rows show numbers instead of tiles.
   final bool numbered;
   final bool showAlbum;
+  final PlayColumns playColumns;
+
+  /// The Songs list's sort; null: the titles do not sort.
+  final SongFilters? filters;
 
   @override
   Widget build(BuildContext context) {
@@ -1450,6 +1530,25 @@ class _ListHeader extends StatelessWidget {
       fontWeight: FontWeight.w500,
       color: colors.dim2,
     );
+    Widget title(String label, SongSort sort, {bool right = false}) {
+      final filters = this.filters;
+      if (filters == null) {
+        return Text(
+          label,
+          textAlign: right ? TextAlign.right : null,
+          style: style,
+        );
+      }
+      return _SortTitle(
+        label: label,
+        sort: sort,
+        filters: filters,
+        right: right,
+        style: style,
+      );
+    }
+
+    final period = filters?.period.label(filters!.now) ?? '';
     return Container(
       key: const ValueKey('list-header'),
       // The list's side padding plus the row's.
@@ -1467,21 +1566,182 @@ class _ListHeader extends StatelessWidget {
                 : null,
           ),
           const SizedBox(width: 14),
-          Expanded(flex: 16, child: Text('Title', style: style)),
+          Expanded(flex: 16, child: title('Title', SongSort.title)),
           if (showAlbum) ...[
             const SizedBox(width: 14),
-            Expanded(flex: 10, child: Text('Album', style: style)),
+            Expanded(flex: 10, child: title('Album', SongSort.album)),
           ],
           // The stored mark has no header: its tooltip explains it.
-          const SizedBox(width: 14 + 18 + 14),
+          const SizedBox(width: 14 + 18),
+          if (playColumns != PlayColumns.none) ...[
+            const SizedBox(width: 14),
+            SizedBox(
+              width: _playsWidth,
+              child: Tooltip(
+                message:
+                    'Counted plays in $period: a play counts after half '
+                    'the song or 4 minutes',
+                child: title('Plays', SongSort.plays, right: true),
+              ),
+            ),
+            if (playColumns == PlayColumns.all) ...[
+              const SizedBox(width: 14),
+              SizedBox(
+                width: _listenedWidth,
+                child: Tooltip(
+                  message: 'Time heard in $period, skips too',
+                  child: title('Listened', SongSort.listened, right: true),
+                ),
+              ),
+            ],
+            const SizedBox(width: 14),
+            SizedBox(
+              width: _lastPlayedWidth,
+              child: title('Last played', SongSort.lastPlayed),
+            ),
+            if (playColumns == PlayColumns.all) ...[
+              const SizedBox(width: 14),
+              SizedBox(
+                width: _addedWidth,
+                child: title('Added', SongSort.added),
+              ),
+            ],
+          ],
+          const SizedBox(width: 14),
           SizedBox(
             width: 44,
-            child: Text('Time', textAlign: TextAlign.right, style: style),
+            child: title('Time', SongSort.length, right: true),
           ),
         ],
       ),
     );
   }
+}
+
+const _playsWidth = 48.0;
+const _listenedWidth = 78.0;
+const _lastPlayedWidth = 92.0;
+const _addedWidth = 92.0;
+
+/// A column title that sorts the Songs list: click to sort by it, again to
+/// turn the order around; the sorted column is colored with an arrow.
+class _SortTitle extends StatelessWidget {
+  const _SortTitle({
+    required this.label,
+    required this.sort,
+    required this.filters,
+    required this.right,
+    required this.style,
+  });
+
+  final String label;
+  final SongSort sort;
+  final SongFilters filters;
+  final bool right;
+  final TextStyle style;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = OwnColors.of(context);
+    final on = filters.sort == sort;
+    final text = Text(
+      label,
+      maxLines: 1,
+      overflow: TextOverflow.ellipsis,
+      style: on ? style.copyWith(color: colors.accent) : style,
+    );
+    final arrow = Icon(
+      filters.descending ? Icons.arrow_downward : Icons.arrow_upward,
+      size: 12,
+      color: colors.accent,
+    );
+    return Semantics(
+      button: true,
+      selected: on,
+      child: InkWell(
+        key: ValueKey('sort-${sort.name}'),
+        borderRadius: BorderRadius.circular(4),
+        onTap: () => filters.sortBy(sort),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          mainAxisAlignment: right
+              ? MainAxisAlignment.end
+              : MainAxisAlignment.start,
+          children: [
+            if (on && right) arrow,
+            Flexible(child: text),
+            if (on && !right) arrow,
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// The play cells of a Songs row, after the stored mark: Plays (in the
+/// page's period), Listened, Last played and Added, as [columns] says.
+List<Widget> _playCells(
+  PlayColumns columns, {
+  required SongPlays? periodPlays,
+  required SongPlays? allTimePlays,
+  required int addedAt,
+  required DateTime now,
+  required OwnColors colors,
+}) {
+  if (columns == PlayColumns.none) return const [];
+  final dim = TextStyle(fontSize: 13, color: colors.dim2);
+  final plays = periodPlays?.plays ?? 0;
+  return [
+    const SizedBox(width: 14),
+    SizedBox(
+      width: _playsWidth,
+      child: Text(
+        plays == 0 ? '-' : '$plays',
+        textAlign: TextAlign.right,
+        style: plays == 0
+            ? dim
+            : const TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+                fontFeatures: [FontFeature.tabularFigures()],
+              ),
+      ),
+    ),
+    if (columns == PlayColumns.all) ...[
+      const SizedBox(width: 14),
+      SizedBox(
+        width: _listenedWidth,
+        child: Text(
+          listenedText(periodPlays?.listenedMs ?? 0),
+          textAlign: TextAlign.right,
+          maxLines: 1,
+          style: dim,
+        ),
+      ),
+    ],
+    const SizedBox(width: 14),
+    SizedBox(
+      width: _lastPlayedWidth,
+      child: Text(
+        lastPlayedText(allTimePlays?.lastMs, now),
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: TextStyle(fontSize: 13, color: colors.dim),
+      ),
+    ),
+    if (columns == PlayColumns.all) ...[
+      const SizedBox(width: 14),
+      SizedBox(
+        width: _addedWidth,
+        child: Text(
+          dayText(addedAt),
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: dim,
+        ),
+      ),
+    ],
+  ];
 }
 
 /// What was typed for a jump and how it went: "mad  2 of 3" or "mad  no
@@ -1581,7 +1841,21 @@ class _SongRow extends StatelessWidget {
     this.onOpenAlbum,
     this.outsideMeaning,
     this.tagsUnderTitle = false,
+    this.playColumns = PlayColumns.none,
+    this.periodPlays,
+    this.allTimePlays,
+    this.now,
   });
+
+  /// Which play columns show (Songs only).
+  final PlayColumns playColumns;
+
+  /// The song's plays in the page's period, and of all time.
+  final SongPlays? periodPlays;
+  final SongPlays? allTimePlays;
+
+  /// Today, for "Last played".
+  final DateTime? now;
 
   /// The tags go after the artist, on the title's second line, instead of
   /// the Album column (a song's versions: the line has room for words).
@@ -1859,6 +2133,14 @@ class _SongRow extends StatelessWidget {
                             size: 18,
                             color: sourceColor(context, track),
                           ),
+                  ),
+                  ..._playCells(
+                    playColumns,
+                    periodPlays: periodPlays,
+                    allTimePlays: allTimePlays,
+                    addedAt: track.addedAt,
+                    now: now ?? DateTime.now(),
+                    colors: colors,
                   ),
                   const SizedBox(width: 14),
                   SizedBox(

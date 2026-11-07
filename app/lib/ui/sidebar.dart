@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 
 import 'collections_controller.dart';
+import 'filter_bar.dart' show askViewName;
 import 'library_controller.dart';
+import 'song_filters.dart';
 import 'theme.dart';
 
 /// Width of the full sidebar and of the icon rail.
@@ -47,6 +49,8 @@ class Sidebar extends StatelessWidget {
     final colors = OwnColors.of(context);
     final view = library.view;
     final stacks = collections?.stacks ?? const [];
+    final filters = library.filters;
+    final savedView = view.kind == ViewKind.songs ? filters?.view : null;
     Widget item(
       String label,
       IconData icon,
@@ -62,10 +66,17 @@ class Sidebar extends StatelessWidget {
       icon: sub ? null : icon,
       count: count,
       later: later,
-      selected: view == target,
+      selected:
+          view == target && (target != LibraryView.songs || savedView == null),
       rail: rail,
       sub: sub,
-      onTap: () => library.showView(target),
+      onTap: () {
+        // Songs from a saved view: all songs again.
+        if (target == LibraryView.songs && savedView != null) {
+          filters!.showAllSongs();
+        }
+        library.showView(target);
+      },
     );
     return Container(
       width: rail ? railWidth : sidebarWidth,
@@ -131,6 +142,24 @@ class Sidebar extends StatelessWidget {
                   const LibraryView(ViewKind.changed),
                   count: changed,
                 ),
+                if (filters != null && filters.views.isNotEmpty) ...[
+                  if (!rail) const _Section('Views'),
+                  for (final saved in filters.views)
+                    _NavItem(
+                      key: ValueKey('nav-view-${saved.id}'),
+                      label: saved.name,
+                      icon: Icons.bookmark_outline,
+                      selected: savedView?.id == saved.id,
+                      rail: rail,
+                      sub: false,
+                      onTap: () {
+                        filters.openView(saved.id);
+                        library.showView(LibraryView.songs);
+                      },
+                      onMenu: (position) =>
+                          _viewMenu(context, filters, saved, position),
+                    ),
+                ],
                 if (!rail) const _Section('Collections'),
                 if (rail)
                   item(
@@ -208,6 +237,49 @@ class Sidebar extends StatelessWidget {
   }
 }
 
+/// A saved view's right-click menu: Rename or Delete.
+Future<void> _viewMenu(
+  BuildContext context,
+  SongFilters filters,
+  SavedView saved,
+  Offset position,
+) async {
+  final choice = await showMenu<String>(
+    context: context,
+    position: RelativeRect.fromLTRB(
+      position.dx,
+      position.dy,
+      position.dx,
+      position.dy,
+    ),
+    items: const [
+      PopupMenuItem(
+        key: ValueKey('view-rename'),
+        value: 'rename',
+        child: Text('Rename...'),
+      ),
+      PopupMenuItem(
+        key: ValueKey('view-delete'),
+        value: 'delete',
+        child: Text('Delete view'),
+      ),
+    ],
+  );
+  if (!context.mounted) return;
+  switch (choice) {
+    case 'rename':
+      final name = await askViewName(
+        context,
+        title: 'Rename view',
+        initial: saved.name,
+        action: 'Rename',
+      );
+      if (name != null) filters.renameView(saved.id, name);
+    case 'delete':
+      filters.deleteView(saved.id);
+  }
+}
+
 /// The app icon "Overlap": three source-colored circles, overlapping.
 class _Logo extends StatelessWidget {
   const _Logo({required this.size});
@@ -276,7 +348,11 @@ class _NavItem extends StatelessWidget {
     this.count,
     this.later = false,
     this.hint,
+    this.onMenu,
   });
+
+  /// Opens the item's menu at a position on screen (right click).
+  final void Function(Offset position)? onMenu;
 
   final String label;
   final IconData? icon;
@@ -349,6 +425,9 @@ class _NavItem extends StatelessWidget {
         borderRadius: BorderRadius.circular(8),
         hoverColor: colors.hover,
         onTap: onTap,
+        onSecondaryTapUp: onMenu == null
+            ? null
+            : (details) => onMenu!(details.globalPosition),
         child: Container(
           height: sub ? 32 : 38,
           padding: EdgeInsets.symmetric(horizontal: rail ? 0 : 10),
