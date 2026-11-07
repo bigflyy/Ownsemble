@@ -1616,6 +1616,98 @@ void main() {
       '"$suggested" saved and opened',
     );
 
+    // Stats (plan 04, D1) over all time: the tiles equal the History count
+    // made above, the top song has the most counted plays and plays when
+    // clicked, an artist row opens Songs with that artist's chip, an album
+    // row opens the album.
+    String textsOf(Finder parent) => find
+        .descendant(of: parent, matching: find.byType(Text))
+        .evaluate()
+        .map((e) => (e.widget as Text).data ?? '')
+        .join(' | ');
+    filters.setPeriod(const PlayPeriod.all());
+    final statsClock = Stopwatch()..start();
+    await tester.tap(find.byKey(const ValueKey('nav-stats')));
+    await tester.pump();
+    statsClock.stop();
+    expect(library.view.kind, ViewKind.stats);
+    final countedPlays = counted.values.fold(0, (a, b) => a + b);
+    expect(
+      textsOf(find.byKey(const ValueKey('stats-tile-plays'))),
+      contains('| $countedPlays |'),
+      reason: 'Counted plays tile equals History',
+    );
+    expect(
+      textsOf(find.byKey(const ValueKey('stats-tile-songs'))),
+      contains('| ${counted.length} |'),
+      reason: 'Songs played tile equals History',
+    );
+    final countedArtists = {
+      for (final id in counted.keys) library.byId(id)!.artist,
+    };
+    expect(
+      textsOf(find.byKey(const ValueKey('stats-tile-artists'))),
+      contains('| ${countedArtists.length} |'),
+      reason: 'Artists played tile equals History',
+    );
+    final topSong = library.all.firstWhere(
+      (t) =>
+          counted[t.id] == most &&
+          textsOf(find.byKey(const ValueKey('stats-row-0'))).contains(t.title),
+    );
+    await tester.tap(find.byKey(const ValueKey('stats-row-0')));
+    await tester.pump();
+    await waitUntil(
+      tester,
+      () => player.current?.id == topSong.id,
+      what: 'the top song to start from Stats',
+    );
+    await tester.tap(find.byKey(const ValueKey('stats-tab-artists')));
+    await tester.pump();
+    final topArtist = library.all
+        .firstWhere(
+          (t) =>
+              countedArtists.contains(t.artist) &&
+              textsOf(find.byKey(const ValueKey('stats-row-0')))
+                  .contains('| ${t.artist} | '),
+        )
+        .artist;
+    await tester.tap(find.byKey(const ValueKey('stats-row-0')));
+    await tester.pump();
+    expect(library.view, LibraryView.songs);
+    expect(filters.filter.ruleFor(FilterField.artist)?.values, {topArtist});
+    expect(
+      library.visible.every((t) => t.artist == topArtist),
+      isTrue,
+      reason: 'an artist row opens that artist',
+    );
+    await tester.tap(find.byKey(const ValueKey('nav-stats')));
+    await tester.pump();
+    await tester.tap(find.byKey(const ValueKey('stats-tab-albums')));
+    await tester.pump();
+    var albumOpened = 'no album with counted plays';
+    if (find.byKey(const ValueKey('stats-row-0')).evaluate().isNotEmpty) {
+      await tester.tap(find.byKey(const ValueKey('stats-row-0')));
+      await tester.pump();
+      expect(library.view.kind, ViewKind.album);
+      albumOpened = 'album opened';
+      library.goBack();
+      await tester.pump();
+      expect(library.view.kind, ViewKind.stats, reason: 'Back returns');
+    }
+    filters
+      ..showAllSongs()
+      ..setPeriod(const PlayPeriod.month());
+    await tester.tap(find.byKey(const ValueKey('nav-songs')));
+    await tester.pump();
+    // ignore: avoid_print
+    print(
+      'Stats: opened in ${statsClock.elapsedMilliseconds} ms; tiles equal '
+      'History ($countedPlays plays, ${counted.length} songs, '
+      '${countedArtists.length} artists); top song played on click; '
+      'artist row opened Songs filtered; $albumOpened',
+    );
+
     // Stored audio: a streamed song is saved while it plays and then plays
     // from disk; Download keeps a song; the cache limit removes cached
     // songs but never downloaded ones.
