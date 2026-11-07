@@ -18,7 +18,8 @@ import 'dart:async';
 import 'dart:io';
 import 'dart:math';
 
-import 'package:flutter/gestures.dart' show kSecondaryMouseButton;
+import 'package:flutter/gestures.dart'
+    show PointerDeviceKind, kSecondaryMouseButton;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -1706,6 +1707,66 @@ void main() {
       'History ($countedPlays plays, ${counted.length} songs, '
       '${countedArtists.length} artists); top song played on click; '
       'artist row opened Songs filtered; $albumOpened',
+    );
+
+    // Favorites (plan 05), all by clicks: the player's heart makes the
+    // playing song a favorite, the right-click menu another; Favorites lists
+    // them newest first; the heart on a row (shown under the mouse) takes one
+    // out; the database holds what the screen shows.
+    final favoriteFirst = player.current!;
+    await tester.tap(find.byKey(const ValueKey('player-heart')));
+    await tester.pump();
+    final favoriteSecond = library.visible.firstWhere(
+      (t) => t.id != favoriteFirst.id && t.inLibrary,
+    );
+    library.scroll.jumpTo(0);
+    await tester.pump();
+    await tester.tap(
+      find.byKey(ValueKey('song-${favoriteSecond.id}')),
+      buttons: kSecondaryMouseButton,
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('menu-favorite')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('nav-favorites')));
+    await tester.pump();
+    expect(library.view.kind, ViewKind.favorites);
+    expect(library.visible.map((t) => t.id), [
+      favoriteSecond.id,
+      favoriteFirst.id,
+    ], reason: 'Favorites lists the newest favorite first');
+    final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
+    await mouse.addPointer(location: Offset.zero);
+    await mouse.moveTo(
+      tester.getCenter(find.byKey(ValueKey('song-${favoriteFirst.id}'))),
+    );
+    await tester.pump();
+    await tester.tap(find.byKey(ValueKey('heart-${favoriteFirst.id}')));
+    await tester.pump();
+    await mouse.removePointer();
+    expect(library.visible.map((t) => t.id), [favoriteSecond.id]);
+    final favoritesStore = LibraryStore.open(p.join(copyDir, 'library.db'));
+    try {
+      expect(favoritesStore.favorites().map((f) => f.trackId), [
+        favoriteSecond.id,
+      ], reason: 'the database holds the favorites the screen shows');
+    } finally {
+      favoritesStore.close();
+    }
+    await tester.tap(
+      find.byKey(ValueKey('song-${favoriteSecond.id}')),
+      buttons: kSecondaryMouseButton,
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('menu-unfavorite')));
+    await tester.pumpAndSettle();
+    expect(library.visible, isEmpty);
+    await tester.tap(find.byKey(const ValueKey('nav-songs')));
+    await tester.pump();
+    // ignore: avoid_print
+    print(
+      'Favorites: player heart, menu, Favorites newest first, row heart '
+      'under the mouse took one out, database equal',
     );
 
     // Stored audio: a streamed song is saved while it plays and then plays
