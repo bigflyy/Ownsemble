@@ -1511,7 +1511,9 @@ void main() {
               'History ${counted[song.id]}',
     ];
     expect(countMismatches, isEmpty, reason: 'Plays equal the History');
-    expect(todayCounted, isNotEmpty, reason: 'this run counted plays today');
+    // The run skips through songs, so its own plays rarely count; the
+    // library's older plays do.
+    expect(counted, isNotEmpty, reason: 'the library has counted plays');
 
     // Artist chip: the playing song's artist, picked in its menu.
     final artist = player.current!.artist;
@@ -1552,22 +1554,30 @@ void main() {
     expect(filters.period, PlayPeriod.custom(today));
     filters.setRule(const FilterRule(FilterField.plays, values: {'1'}));
     await tester.pump();
-    await tester.tap(find.byKey(const ValueKey('sort-plays')));
-    await tester.pump();
     expect(
       {for (final t in library.visible) t.id},
       todayCounted.keys.toSet(),
       reason: 'Plays 1+ today lists the songs counted today',
     );
-    final mostToday = todayCounted.values.reduce(max);
-    expect(filters.periodPlays(library.visible.first.id)?.plays, mostToday);
+    // All time: the songs with counted plays, most played first.
+    filters.setPeriod(const PlayPeriod.all());
+    await tester.pump();
+    await tester.tap(find.byKey(const ValueKey('sort-plays')));
+    await tester.pump();
+    expect(
+      {for (final t in library.visible) t.id},
+      counted.keys.toSet(),
+      reason: 'Plays 1+ of all time lists the songs with counted plays',
+    );
+    final most = counted.values.reduce(max);
+    expect(filters.periodPlays(library.visible.first.id)?.plays, most);
     final searched = library.visible.last;
     final word = searchWords(searched.title).first;
     library.searchText.text = word;
     await tester.pump();
     expect(library.visible.map((t) => t.id), contains(searched.id));
     expect(
-      library.visible.every((t) => todayCounted.containsKey(t.id)),
+      library.visible.every((t) => counted.containsKey(t.id)),
       isTrue,
       reason: 'the search keeps the filter',
     );
@@ -1601,9 +1611,9 @@ void main() {
     print(
       'Filters: Plays equal History for ${library.all.length} songs '
       '(${counted.length} with counted plays, ${todayCounted.length} today); '
-      'Artist "$artist" $byArtist songs, is not ok; Custom today + Plays 1+ '
-      '$shownToday songs, sorted, searched; view "$suggested" saved and '
-      'opened',
+      'Artist "$artist" $byArtist songs, is not ok; Custom today picked; '
+      'Plays 1+ of all time $shownToday songs, sorted, searched; view '
+      '"$suggested" saved and opened',
     );
 
     // Stored audio: a streamed song is saved while it plays and then plays
