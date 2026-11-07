@@ -1109,12 +1109,21 @@ class LibraryStore implements PlayLog, PlayStatsSource {
              count(*) AS starts,
              sum($earlySkipSql) AS early_skips
       FROM history h
-        INDEXED BY ${range == null || oneSong ? 'history_by_track' : 'history_by_time'}
+        INDEXED BY ${_readsBySong(range, oneSong) ? 'history_by_track' : 'history_by_time'}
       JOIN tracks t ON t.id = h.track_id
       WHERE ${oneSong ? 'h.track_id = ?' : '1'}
         ${range == null ? '' : 'AND h.played_at_ms >= ? AND h.played_at_ms < ?'}
       GROUP BY h.track_id
       ''';
+
+  /// Whether [songPlays] reads plays song by song rather than by time.
+  ///
+  /// By time reads only the range's plays but must sort them by song; by
+  /// song reads every play, already in song order. On 3 years of 100 plays
+  /// a day (plan 04, D1) by time won up to 62 days (12 vs 13 ms) and lost
+  /// beyond (a year 63 vs 36 ms, two years 145 vs 54 ms).
+  static bool _readsBySong(DayRange? range, bool oneSong) =>
+      range == null || oneSong || range.dayCount > 62;
 
   /// The query plan of [songPlays] for [range], for tests.
   String explainSongPlays({DayRange? range}) => _db

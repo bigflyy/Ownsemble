@@ -270,6 +270,11 @@ void main() {
       store.songPlays();
       final all = _timeMs(() => store.songPlays());
       final inMonth = _timeMs(() => store.songPlays(range: month));
+      final inYear = _timeMs(
+        () => store.songPlays(
+          range: DayRange(lastDay.subtract(const Duration(days: 364)), lastDay),
+        ),
+      );
       final year = DateTime.fromMillisecondsSinceEpoch(_historyEnd).year;
       final tiles = _timeMs(
         () => store.listenedIn([
@@ -285,12 +290,14 @@ void main() {
       // ignore: avoid_print
       print(
         'songPlays all ${all.toStringAsFixed(1)} ms, month '
-        '${inMonth.toStringAsFixed(1)} ms; listenedIn 12 months '
+        '${inMonth.toStringAsFixed(1)} ms, year ${inYear.toStringAsFixed(1)} '
+        'ms; listenedIn 12 months '
         '${tiles.toStringAsFixed(1)} ms, 31 days ${days.toStringAsFixed(1)} ms',
       );
       expect(store.songPlays(range: month), isNotEmpty);
       expect(all, lessThan(150));
       expect(inMonth, lessThan(40));
+      expect(inYear, lessThan(60));
       expect(tiles, lessThan(40));
       expect(days, lessThan(40));
     });
@@ -300,6 +307,19 @@ void main() {
         range: DayRange(DateTime(2025, 1, 1), DateTime(2025, 1, 31)),
       );
       expect(range, contains('COVERING INDEX history_by_time'));
+      // Two months still read by time; anything longer reads every song's
+      // plays in order (no sorting), measured faster from about 62 days on
+      // a 3-year history.
+      expect(
+        store.explainSongPlays(
+          range: DayRange(DateTime(2025, 1, 1), DateTime(2025, 3, 3)),
+        ),
+        contains('COVERING INDEX history_by_time'),
+      );
+      expect(
+        store.explainSongPlays(range: DayRange.year(2025)),
+        contains('COVERING INDEX history_by_track'),
+      );
       expect(
         store.explainSongPlays(),
         contains('COVERING INDEX history_by_track'),
