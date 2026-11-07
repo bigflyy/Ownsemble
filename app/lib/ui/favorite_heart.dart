@@ -55,37 +55,44 @@ class RowHeart extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (!favorite && !RowHoverScope.of(context)) return const SizedBox();
-    return FavoriteHeart(favorite: favorite, onPressed: onPressed, size: 18);
+    return FavoriteHeart(favorite: favorite, onPressed: onPressed, small: true);
   }
 }
 
-/// A heart button that makes a song a favorite or no longer one.
+/// A heart button that makes a song a favorite or no longer one. In the
+/// player it is a standard button, as big as the buttons beside it; on a
+/// row ([small]) it is a small one that fits the row's slot.
 class FavoriteHeart extends StatelessWidget {
   const FavoriteHeart({
     super.key,
     required this.favorite,
     required this.onPressed,
-    this.size = 20,
+    this.small = false,
   });
 
   final bool favorite;
   final VoidCallback onPressed;
-  final double size;
+  final bool small;
 
   @override
   Widget build(BuildContext context) {
     final colors = OwnColors.of(context);
+    final icon = Icon(
+      favorite ? Icons.favorite : Icons.favorite_border,
+      color: favorite ? colors.accent : colors.dim,
+    );
+    final tooltip = favorite ? 'Remove from Favorites' : 'Add to Favorites';
+    if (!small) {
+      return IconButton(tooltip: tooltip, onPressed: onPressed, icon: icon);
+    }
     return IconButton(
-      tooltip: favorite ? 'Remove from Favorites' : 'Add to Favorites',
+      tooltip: tooltip,
       onPressed: onPressed,
       padding: EdgeInsets.zero,
       visualDensity: VisualDensity.compact,
-      constraints: BoxConstraints.tightFor(width: size + 10, height: size + 10),
-      iconSize: size,
-      icon: Icon(
-        favorite ? Icons.favorite : Icons.favorite_border,
-        color: favorite ? colors.accent : colors.dim,
-      ),
+      constraints: const BoxConstraints.tightFor(width: 28, height: 28),
+      iconSize: 18,
+      icon: icon,
     );
   }
 }

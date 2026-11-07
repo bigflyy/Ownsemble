@@ -1185,6 +1185,20 @@ void main() {
         await tester.pump();
         final heart = find.byKey(const ValueKey('player-heart'));
         expect(heart, findsOneWidget, reason: '$dock');
+        // The user, 2026-11-08: the heart sat above the buttons beside it.
+        final neighbour = dock == PlayerDock.side
+            ? find.byType(StackMenuButton)
+            : find.byType(UpNextButton);
+        expect(
+          tester.getCenter(heart).dy,
+          tester.getCenter(neighbour).dy,
+          reason: '$dock: the heart is in line with the buttons beside it',
+        );
+        expect(
+          tester.getSize(heart),
+          tester.getSize(neighbour),
+          reason: '$dock: the heart is as big as the buttons beside it',
+        );
         await tester.tap(heart);
         await tester.pump();
         expect(collections.isFavorite(song.id), isTrue, reason: '$dock');
