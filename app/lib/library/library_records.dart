@@ -158,6 +158,9 @@ class UpsertResult {
 
 /// A song key's state in the library: its VK access key, stored cover links
 /// and when it was marked gone (null while the source still has it).
+/// A favorite song and when it was made one (plan 05).
+typedef Favorite = ({int trackId, int addedAtMs});
+
 typedef KnownTrack = ({
   String? accessKey,
   String? coverUrl,

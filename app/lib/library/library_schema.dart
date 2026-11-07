@@ -6,7 +6,7 @@ import 'package:sqlite3/sqlite3.dart';
 /// Schema version this build reads and writes (`PRAGMA user_version`).
 ///
 /// 0 is the speed-gate build's single `tracks` table (or an empty file).
-const librarySchemaVersion = 12;
+const librarySchemaVersion = 13;
 
 /// How many colors sources can have; the theme has one per slot, from 1.
 const sourceColorCount = 6;
@@ -52,6 +52,7 @@ void migrateLibrary(Database db, {String? dataDir}) {
     if (version < 10) _addFoundVersionAlbums(db);
     if (version < 11) _expireListsWithoutAlbumLinks(db);
     if (version < 12) _addPlaysByTime(db);
+    if (version < 13) _addFavorites(db);
     db.execute('PRAGMA user_version = $librarySchemaVersion');
     db.execute('COMMIT');
   } catch (_) {
@@ -265,6 +266,20 @@ void _addPlaysByTime(Database db) {
   db.execute(
     'CREATE INDEX history_by_track '
     'ON history (track_id, played_at_ms, listened_ms, ended)',
+  );
+}
+
+/// Version 13: the user's favorite songs, with the time each was added
+/// (plan 05). Kept only here: VK has no favorites of its own.
+void _addFavorites(Database db) {
+  db.execute('''
+    CREATE TABLE IF NOT EXISTS favorites (
+      track_id INTEGER PRIMARY KEY REFERENCES tracks (id),
+      added_at_ms INTEGER NOT NULL
+    )
+  ''');
+  db.execute(
+    'CREATE INDEX IF NOT EXISTS favorites_by_added ON favorites (added_at_ms, track_id)',
   );
 }
 

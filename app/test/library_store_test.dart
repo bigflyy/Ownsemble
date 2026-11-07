@@ -380,6 +380,49 @@ void main() {
     });
   });
 
+  group('favorites', () {
+    late List<int> ids;
+    setUp(() {
+      ids = store.upsertAll(vk, [
+        song('1_1', 'Кино', 'Группа крови'),
+        song('1_2', 'Земфира', 'Хочешь?'),
+        song('1_3', 'Сплин', 'Выхода нет'),
+      ]);
+    });
+
+    test('are listed newest first, with the date each was added', () {
+      store.addFavorite(ids[1], atMs: 100);
+      store.addFavorite(ids[0], atMs: 300);
+      store.addFavorite(ids[2], atMs: 200);
+      expect(store.favorites(), [
+        (trackId: ids[0], addedAtMs: 300),
+        (trackId: ids[2], addedAtMs: 200),
+        (trackId: ids[1], addedAtMs: 100),
+      ]);
+    });
+
+    test('adding a favorite again keeps its first date', () {
+      store.addFavorite(ids[0], atMs: 100);
+      store.addFavorite(ids[0], atMs: 900);
+      expect(store.favorites(), [(trackId: ids[0], addedAtMs: 100)]);
+    });
+
+    test('removing takes only that song out', () {
+      store.addFavorite(ids[0], atMs: 1);
+      store.addFavorite(ids[1], atMs: 2);
+      store.removeFavorite(ids[0]);
+      store.removeFavorite(ids[2]);
+      expect(store.favorites(), [(trackId: ids[1], addedAtMs: 2)]);
+    });
+
+    test('a sync that marks the song gone keeps the favorite', () {
+      store.addFavorite(ids[0], atMs: 1);
+      store.markGone(vk, ['1_1']);
+      expect(store.favorites().single.trackId, ids[0]);
+      expect(store.loadAll().firstWhere((t) => t.id == ids[0]).isGone, isTrue);
+    });
+  });
+
   group('settings', () {
     test('settings are read, overwritten and removed', () {
       expect(store.readSetting('theme'), isNull);

@@ -265,6 +265,7 @@ class LibraryStore implements PlayLog, PlayStatsSource {
         AND id NOT IN (SELECT track_id FROM history)
         AND id NOT IN (SELECT track_id FROM stack_entries)
         AND id NOT IN (SELECT track_id FROM audio_files)
+        AND id NOT IN (SELECT track_id FROM favorites)
       ''',
       [sourceId],
     );
@@ -289,11 +290,20 @@ class LibraryStore implements PlayLog, PlayStatsSource {
     return unused;
   });
 
-  /// Makes History, Stacks and stored audio of row [from] point at row [to].
-  /// When both have stored audio, [to]'s stays, kept if either was a download,
-  /// and the path of [from]'s file is returned.
+  /// Makes History, Stacks, Favorites and stored audio of row [from] point at
+  /// row [to]. A favorite on both keeps the earlier date. When both have
+  /// stored audio, [to]'s stays, kept if either was a download, and the path
+  /// of [from]'s file is returned.
   String? _moveReferences(int from, int to) {
     _forgetVersion(from);
+    _db.execute(
+      'INSERT INTO favorites (track_id, added_at_ms) '
+      'SELECT ?, added_at_ms FROM favorites WHERE track_id = ? '
+      'ON CONFLICT (track_id) DO UPDATE SET '
+      'added_at_ms = min(added_at_ms, excluded.added_at_ms)',
+      [to, from],
+    );
+    _db.execute('DELETE FROM favorites WHERE track_id = ?', [from]);
     _db.execute('UPDATE history SET track_id = ? WHERE track_id = ?', [
       to,
       from,
@@ -1236,6 +1246,27 @@ class LibraryStore implements PlayLog, PlayStatsSource {
         row['track_id'] as int,
         row['added_at_ms'] as int,
       ),
+  ];
+
+  // Favorites (plan 05).
+
+  /// Makes [trackId] a favorite; a song that already is one keeps its date.
+  void addFavorite(int trackId, {int? atMs}) => _db.execute(
+    'INSERT OR IGNORE INTO favorites (track_id, added_at_ms) VALUES (?, ?)',
+    [trackId, atMs ?? _now()],
+  );
+
+  /// Makes [trackId] no longer a favorite.
+  void removeFavorite(int trackId) =>
+      _db.execute('DELETE FROM favorites WHERE track_id = ?', [trackId]);
+
+  /// Every favorite, the newest first.
+  List<Favorite> favorites() => [
+    for (final row in _db.select(
+      'SELECT track_id, added_at_ms FROM favorites '
+      'ORDER BY added_at_ms DESC, track_id DESC',
+    ))
+      (trackId: row['track_id'] as int, addedAtMs: row['added_at_ms'] as int),
   ];
 
   // Song versions (Stage K).

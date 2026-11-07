@@ -43,12 +43,13 @@ void main() {
     int firstTrackId = 7,
     int secondTrackId = 7,
     bool merge = true,
+    int key = 1,
   }) {
     final a = store.upsertAll(first, [
-      song('1_1', 'Хочешь?', trackId: firstTrackId, accessKey: 'key-1'),
+      song('1_$key', 'Хочешь?', trackId: firstTrackId, accessKey: 'key-1'),
     ]).single;
     final b = store.upsertAll(second, [
-      song('2_1', 'Хочешь?', trackId: secondTrackId, accessKey: 'key-2'),
+      song('2_$key', 'Хочешь?', trackId: secondTrackId, accessKey: 'key-2'),
     ]).single;
     if (merge) mergeSameFiles(store);
     return (a, b);
@@ -280,6 +281,26 @@ void main() {
       expect(track.pinned, isTrue);
     });
 
+    test('a favorite moves to the listed row, with the earlier date', () {
+      final (a, b) = sharedSong(merge: false);
+      store.addFavorite(b, atMs: 1000);
+      mergeSameFiles(store);
+      expect(store.favorites().single, (trackId: a, addedAtMs: 1000));
+
+      final (c, d) = sharedSong(
+        merge: false,
+        key: 3,
+        firstTrackId: 9,
+        secondTrackId: 9,
+      );
+      store.addFavorite(c, atMs: 5000);
+      store.addFavorite(d, atMs: 2000);
+      mergeSameFiles(store);
+      expect(store.favorites().where((f) => f.trackId == c || f.trackId == d), [
+        (trackId: c, addedAtMs: 2000),
+      ]);
+    });
+
     test('with audio on both rows one file stays, kept if either was', () {
       final (a, b) = sharedSong(merge: false);
       store.saveAudioFile(a, 'cache/vk_1_1.mp3', 10);
@@ -302,23 +323,25 @@ void main() {
       expect(store.sources().single.id, first);
     });
 
-    test('keeps a played, stacked or stored song, marked gone', () {
+    test('keeps a played, stacked, stored or favorite song, marked gone', () {
       final ids = store.upsertAll(second, [
         song('2_1', 'В истории'),
         song('2_2', 'На стопке'),
         song('2_3', 'На диске'),
-        song('2_4', 'Ничего'),
+        song('2_4', 'Любимая'),
+        song('2_5', 'Ничего'),
       ]);
       store.addPlay(ids[0]);
       store.addToStack(store.createStack('Вечер'), ids[1]);
       store.saveAudioFile(ids[2], 'cache/vk_2_3.mp3', 10);
+      store.addFavorite(ids[3]);
 
       store.removeSource(second);
 
       final left = store.loadAll();
       expect(
         left.map((t) => t.title),
-        unorderedEquals(['В истории', 'На стопке', 'На диске']),
+        unorderedEquals(['В истории', 'На стопке', 'На диске', 'Любимая']),
       );
       expect(left.every((t) => t.isGone), isTrue);
       expect(store.sources().single.id, first);
@@ -338,6 +361,13 @@ void main() {
       expect(track.isGone, isFalse);
       expect(track.localPath, 'cache/vk_1_1.mp3');
       expect(store.history().single.trackId, b);
+    });
+
+    test('a merged favorite stays, on the other account', () {
+      final (a, b) = sharedSong();
+      store.addFavorite(a, atMs: 7);
+      store.removeSource(first);
+      expect(store.favorites(), [(trackId: b, addedAtMs: 7)]);
     });
 
     test('the other copies follow the song to its new row', () {

@@ -552,6 +552,34 @@ void main() {
     expect(migrated.explainSongPlays(), contains('COVERING INDEX'));
   });
 
+  test('version 12 gains favorites and keeps its songs', () {
+    final store = LibraryStore.open(dbPath);
+    final source = store.ensureSource(TrackSource.vk, account: '1', name: 'VK');
+    final id = store.upsertAll(source, [
+      const NewTrack(
+        sourceKey: '1_1',
+        artist: 'Земфира',
+        title: 'Хочешь?',
+        durationSec: 197,
+        addedAt: 0,
+      ),
+    ]).single;
+    store.close();
+    final db = sqlite3.open(dbPath);
+    db
+      ..execute('DROP TABLE favorites')
+      ..execute('PRAGMA user_version = 12')
+      ..close();
+
+    final migrated = LibraryStore.open(dbPath);
+    addTearDown(migrated.close);
+    expect(versionOf(dbPath), librarySchemaVersion);
+    expect(migrated.favorites(), isEmpty);
+    migrated.addFavorite(id, atMs: 5);
+    expect(migrated.favorites(), [(trackId: id, addedAtMs: 5)]);
+    expect(migrated.loadAll().single.title, 'Хочешь?');
+  });
+
   test('a library from a newer build is refused and left alone', () {
     final db = sqlite3.open(dbPath);
     db.execute('PRAGMA user_version = ${librarySchemaVersion + 1}');
