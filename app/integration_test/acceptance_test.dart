@@ -228,7 +228,17 @@ void main() {
       (index * rowHeight).clamp(0, library.scroll.position.maxScrollExtent),
     );
     await tester.pump();
-    await tester.tap(find.byKey(ValueKey('song-${track.id}')));
+    // On the title (first: an album may have the same name): the row's
+    // middle can be its album's name, which opens
+    // the album instead (the play columns moved the Album column left).
+    await tester.tap(
+      find
+          .descendant(
+            of: find.byKey(ValueKey('song-${track.id}')),
+            matching: find.text(track.title),
+          )
+          .first,
+    );
     await tester.pump();
   }
 
@@ -242,12 +252,56 @@ void main() {
     await tapSong(tester, track);
     PlayTiming? timing;
     unawaited(result.then((t) => timing = t));
-    await waitUntil(
-      tester,
-      () => timing != null,
-      timeout: const Duration(seconds: 25),
-      what: 'play result of $label',
-    );
+    try {
+      await waitUntil(
+        tester,
+        () => timing != null,
+        timeout: const Duration(seconds: 25),
+        what: 'play result of $label',
+      );
+    } on TestFailure {
+      // Says where the tap went, so a play that never started is found.
+      final row = find.byKey(ValueKey('song-${track.id}'));
+      final center = row.evaluate().isEmpty ? null : tester.getCenter(row);
+      final hits = center == null
+          ? const <String>[]
+          : [
+              for (final entry in tester.hitTestOnBinding(center).path.take(12))
+                entry.target.runtimeType.toString(),
+            ];
+      // ignore: avoid_print
+      print(
+        'No play result for ${songName(track)} (id ${track.id}): row '
+        '${row.evaluate().isEmpty ? 'not built' : 'at $center'}, scroll '
+        '${library.scroll.offset} of ${library.scroll.position.maxScrollExtent}'
+        ', view ${library.view}, visible ${library.visible.length}, player '
+        'current ${player.current?.id}, loaded ${player.currentLoaded}, '
+        'hit ${hits.join(' < ')}, view kind ${library.view.kind.name}, '
+        'search "${library.searchText.text}", filters active '
+        '${library.filters?.active}, source ${library.sourceFilter}',
+      );
+      // The same play again, awaited, so an error it throws is seen.
+      final playback = tester
+          .widget<LibraryScreen>(find.byType(LibraryScreen))
+          .playback;
+      try {
+        final again = await playback
+            .playFrom(
+              library.visible,
+              library.visible.indexWhere((t) => t.id == track.id),
+            )
+            .timeout(const Duration(seconds: 40));
+        // ignore: avoid_print
+        print('Played again directly: ok ${again?.ok}, ${again?.error}');
+      } catch (error, stack) {
+        // ignore: avoid_print
+        print(
+          'Played again directly: $error | '
+          '${stack.toString().split('\n').take(12).join(' | ')}',
+        );
+      }
+      rethrow;
+    }
     return timing!;
   }
 
