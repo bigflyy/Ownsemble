@@ -11,20 +11,21 @@ import 'song_filters.dart';
 import 'stat_text.dart';
 import 'theme.dart';
 
-const _weekdayShort = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-const _monthShort = [
+/// Day and month names for the Calendar tab and the year report.
+const weekdayShort = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+const monthShort = [
   'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', //
   'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
 ];
-const _monthFull = [
+const monthFull = [
   'January', 'February', 'March', 'April', 'May', 'June', //
   'July', 'August', 'September', 'October', 'November', 'December',
 ];
 
 /// A day as "Fri 6 Nov 2026", or "Fri 6 Nov" without [year].
 String calendarDayText(DateTime day, {bool year = true}) =>
-    '${_weekdayShort[day.weekday - 1]} ${day.day} '
-    '${_monthShort[day.month - 1]}${year ? ' ${day.year}' : ''}';
+    '${weekdayShort[day.weekday - 1]} ${day.day} '
+    '${monthShort[day.month - 1]}${year ? ' ${day.year}' : ''}';
 
 /// "2026-11-06", for widget keys.
 String isoDay(DateTime day) =>
@@ -252,7 +253,7 @@ class _StatsCalendarState extends State<StatsCalendar> {
                 children: [
                   Expanded(
                     child: Text(
-                      _monthFull[m - 1],
+                      monthFull[m - 1],
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: const TextStyle(
@@ -825,13 +826,13 @@ class _HoursCard extends StatelessWidget {
                           children: [
                             SizedBox(
                               width: _nameW,
-                              child: Text(_weekdayShort[w - 1], style: small),
+                              child: Text(weekdayShort[w - 1], style: small),
                             ),
                             for (var h = 0; h < 24; h++)
                               Tooltip(
                                 key: ValueKey('cal-hour-$w-$h'),
                                 message:
-                                    '${_weekdayShort[w - 1]} $h:00: '
+                                    '${weekdayShort[w - 1]} $h:00: '
                                     '${grid[weekHour(w, h)] > 0 ? listenedText(grid[weekHour(w, h)]) : 'nothing'}',
                                 waitDuration: const Duration(milliseconds: 400),
                                 child: Container(

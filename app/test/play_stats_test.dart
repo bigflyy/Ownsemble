@@ -3,6 +3,7 @@ import 'package:ownsemble/library/day_range.dart';
 import 'package:ownsemble/library/library_store.dart';
 import 'package:ownsemble/library/play_stats.dart';
 import 'package:ownsemble/library/track.dart';
+import 'package:ownsemble/library/year_report.dart';
 
 NewTrack song(String key, {int seconds = 200}) => NewTrack(
   sourceKey: key,
@@ -320,6 +321,59 @@ void main() {
         '${oneDay.toStringAsFixed(1)} ms, a year '
         '${yearPlays.toStringAsFixed(1)} ms',
       );
+      // The year report: its reads and its one pass over the year's plays.
+      final songs = {for (final t in store.loadAll()) t.id: t};
+      final allTime = store.songPlays();
+      late YearReport report;
+      final reportMs = _timeMs(() {
+        report = YearReport.build(
+          year: year,
+          now: DateTime.now(),
+          firstPlayMs: store.firstPlayMs(),
+          plays: store.playsIn(calendarYear),
+          songs: songs,
+          allTime: allTime,
+          before: store.songPlays(
+            range: DayRange(DateTime(1970), DateTime(year - 1, 12, 31)),
+          ),
+          compared: (
+            range: DayRange.year(year - 1),
+            plays: store.songPlays(range: DayRange.year(year - 1)),
+          ),
+        );
+      });
+      final monthMs = _timeMs(() => report.month(1));
+      final beforeMs = _timeMs(
+        () => store.songPlays(
+          range: DayRange(DateTime(1970), DateTime(year - 1, 12, 31)),
+        ),
+      );
+      final yearPlays2 = store.playsIn(calendarYear);
+      final passMs = _timeMs(
+        () => YearReport.build(
+          year: year,
+          now: DateTime.now(),
+          firstPlayMs: store.firstPlayMs(),
+          plays: yearPlays2,
+          songs: songs,
+          allTime: allTime,
+          before: const {},
+          compared: null,
+        ),
+      );
+      // ignore: avoid_print
+      print(
+        'before-year read ${beforeMs.toStringAsFixed(1)} ms, the pass alone '
+        '${passMs.toStringAsFixed(1)} ms',
+      );
+      // ignore: avoid_print
+      print(
+        'year report ${reportMs.toStringAsFixed(1)} ms, a month '
+        '${monthMs.toStringAsFixed(1)} ms',
+      );
+      expect(report.totals.plays, greaterThan(0));
+      expect(reportMs, lessThan(400));
+      expect(monthMs, lessThan(100));
       expect(store.playsIn(DayRange.day(lastDay)), hasLength(100));
       expect(yearDays, lessThan(60));
       expect(gridYear, lessThan(150));

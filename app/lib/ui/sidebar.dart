@@ -67,7 +67,11 @@ class Sidebar extends StatelessWidget {
       count: count,
       later: later,
       selected:
-          view == target && (target != LibraryView.songs || savedView == null),
+          (view == target ||
+              // A year report is opened from Stats.
+              (view.kind == ViewKind.yearReport &&
+                  target.kind == ViewKind.stats)) &&
+          (target != LibraryView.songs || savedView == null),
       rail: rail,
       sub: sub,
       onTap: () {

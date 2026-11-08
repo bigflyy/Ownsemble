@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../library/day_range.dart';
 import '../library/listening_stats.dart';
 import '../library/track.dart';
 import 'cover_tile.dart';
@@ -25,6 +26,7 @@ class StatsPage extends StatefulWidget {
     required this.onPlay,
     required this.onOpenArtist,
     required this.onOpenAlbum,
+    this.onOpenYear,
   });
 
   final SongFilters filters;
@@ -39,6 +41,10 @@ class StatsPage extends StatefulWidget {
   /// An album row was clicked: open the album of its most played song.
   final void Function(Track track) onOpenAlbum;
 
+  /// The banner's button was clicked: open the report of [year] (plan 04,
+  /// D2). Without it there is no banner.
+  final void Function(int year)? onOpenYear;
+
   @override
   State<StatsPage> createState() => _StatsPageState();
 }
@@ -52,6 +58,26 @@ class _StatsPageState extends State<StatsPage> {
   /// Songs by id, made again only when the library's list is another one.
   Map<int, Track> _byId = const {};
   List<Track>? _byIdOf;
+
+  /// The banner's year and its plays, read again when plays change.
+  ({int year, int version, ListeningStats stats})? _yearKept;
+
+  /// Plays of [year] for the banner: the page's own when the period is
+  /// that year, else read once per year and plays version.
+  ListeningStats _yearStats(int year, ListeningStats page, DayRange? range) {
+    if (range == DayRange.year(year)) return page;
+    final filters = widget.filters, version = filters.playsVersion;
+    final kept = _yearKept;
+    if (kept != null && kept.year == year && kept.version == version) {
+      return kept.stats;
+    }
+    final stats = ListeningStats(
+      byId,
+      filters.songPlaysIn(DayRange.year(year)),
+    );
+    _yearKept = (year: year, version: version, stats: stats);
+    return stats;
+  }
 
   /// Below this width the tiles go two by two and the bars are left out.
   static const _narrowWidth = 760.0;
@@ -109,10 +135,35 @@ class _StatsPageState extends State<StatsPage> {
     final rows = stats.top(_tab);
     final topPlays = rows.isEmpty ? 1 : rows.first.plays;
 
+    // The year report's banner: the year of the period's last day.
+    final periodRange = filters.period.rangeAt(now);
+    final year = (periodRange?.last ?? now).year;
+    final openYear = widget.onOpenYear;
+    final yearStats = openYear == null
+        ? null
+        : _yearStats(year, stats, periodRange);
+    final banner = yearStats == null || yearStats.totals.listenedMs == 0
+        ? null
+        : _YearBanner(
+            key: const ValueKey('stats-year-banner'),
+            title: year == now.year
+                ? 'Your $year so far'
+                : 'Your $year in review',
+            line: [
+              '${listenedText(yearStats.totals.listenedMs)} listened',
+              if (yearStats.top(RankBy.songs, limit: 1).firstOrNull
+                  case final best?)
+                'song of the year: ${best.name} (${best.detail})',
+            ].join(', '),
+            onOpen: () => openYear!(year),
+          );
+
     return LayoutBuilder(
       builder: (context, constraints) {
         final narrow = constraints.maxWidth < _narrowWidth;
         final head = <Widget>[
+          if (banner != null)
+            Padding(padding: const EdgeInsets.only(bottom: 14), child: banner),
           if (narrow)
             Column(
               children: [
@@ -229,6 +280,64 @@ class _StatsPageState extends State<StatsPage> {
           },
         );
       },
+    );
+  }
+}
+
+/// "Your 2025 in review": the year's time heard and song of the year, and
+/// the button that opens its report.
+class _YearBanner extends StatelessWidget {
+  const _YearBanner({
+    super.key,
+    required this.title,
+    required this.line,
+    required this.onOpen,
+  });
+
+  final String title;
+  final String line;
+  final VoidCallback onOpen;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = OwnColors.of(context);
+    return Container(
+      padding: const EdgeInsets.fromLTRB(18, 12, 12, 12),
+      decoration: BoxDecoration(
+        color: colors.accentBg,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: const TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  line,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(fontSize: 13, color: colors.dim),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 12),
+          FilledButton(
+            key: const ValueKey('stats-open-year'),
+            onPressed: onOpen,
+            child: const Text('Open year report'),
+          ),
+        ],
+      ),
     );
   }
 }

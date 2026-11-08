@@ -168,6 +168,10 @@ void main() {
     bool calendarRange = false,
     // Scrolls the Stats page down this far before the shot.
     double statsScroll = 0,
+    // Opens the report of this many years before this one (0: this year),
+    // with a month's facts open when [reportMonth] is given.
+    int? reportYearsAgo,
+    int? reportMonth,
     CalendarListening calendar = CalendarListening.line,
     bool saveView = false,
     // The first song gets three artists and a short title (the bottom bar
@@ -353,6 +357,9 @@ void main() {
     final sources = ValueNotifier(store.sources());
     if (twoAccounts) library.watchSources(sources);
     library.showView(view);
+    if (reportYearsAgo != null) {
+      library.openYearReport(DateTime.now().year - reportYearsAgo);
+    }
     if (filtered) library.showSource(second);
     // The sync bar and the accounts dialog, with saved sessions only: no
     // runner, so nothing syncs and no request leaves the test.
@@ -468,6 +475,18 @@ void main() {
       await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
       await tester.tap(day(2));
       await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
+      await tester.pumpAndSettle();
+    }
+    if (reportMonth != null) {
+      final bar = find.byKey(ValueKey('year-month-$reportMonth'));
+      await tester.ensureVisible(bar);
+      await tester.pumpAndSettle();
+      await tester.tap(bar);
+      await tester.pumpAndSettle();
+      await tester.drag(
+        find.byKey(const ValueKey('year-report')),
+        const Offset(0, 3000),
+      );
       await tester.pumpAndSettle();
     }
     if (statsScroll > 0) {
@@ -871,6 +890,43 @@ void main() {
       view: const LibraryView(ViewKind.stats),
       period: const PlayPeriod.year(offset: -2),
       statsTab: 'calendar',
+    ),
+  );
+  testWidgets(
+    'dark, year report, last year, a month open',
+    (t) => shoot(
+      t,
+      'dark-year-report',
+      dark: true,
+      size: const Size(1440, 2500),
+      dock: PlayerDock.bottom,
+      view: const LibraryView(ViewKind.stats),
+      reportYearsAgo: 1,
+      reportMonth: 3,
+    ),
+  );
+  testWidgets(
+    'light, year report, this year, narrow, long names',
+    (t) => shoot(
+      t,
+      'light-year-report-narrow',
+      dark: false,
+      size: const Size(900, 3000),
+      dock: PlayerDock.bottom,
+      view: const LibraryView(ViewKind.stats),
+      reportYearsAgo: 0,
+      longNames: true,
+    ),
+  );
+  testWidgets(
+    'dark, year report, the first year, side panel',
+    (t) => shoot(
+      t,
+      'dark-year-report-first',
+      dark: true,
+      size: const Size(1440, 1200),
+      view: const LibraryView(ViewKind.stats),
+      reportYearsAgo: 2,
     ),
   );
   testWidgets(

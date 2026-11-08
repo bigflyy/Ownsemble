@@ -427,6 +427,96 @@ void main() {
     });
   });
 
+  group('Year report', () {
+    Finder key(String k) => find.byKey(ValueKey(k));
+
+    testWidgets('the banner names the year and opens its report; Back '
+        'returns to Stats', (tester) async {
+      await pumpStats(tester);
+      final banner = textIn(key('stats-year-banner'));
+      expect(banner, contains('Your 2026 so far'));
+      // 300 + 450 + 400 s; Выхода нет has 3 plays.
+      expect(
+        banner,
+        contains('19 min listened, song of the year: Выхода нет (Сплин)'),
+      );
+
+      await tester.tap(key('stats-open-year'));
+      await tester.pump();
+      expect(library.view, const LibraryView(ViewKind.yearReport, year: 2026));
+      expect(find.text('Your 2026'), findsOneWidget);
+      expect(textIn(key('year-tile-plays')), contains('6'));
+      // 2025 had 6 plays by 7 Nov.
+      expect(textIn(key('year-tile-plays')), contains('Same as'));
+      expect(textIn(key('year-song')), contains('Выхода нет'));
+      expect(key('year-note'), findsNothing);
+      expect(
+        tester.widget<IconButton>(key('year-later')).onPressed,
+        isNull,
+        reason: 'no later year than this one',
+      );
+
+      // The year before: Кукушка, and the note on when counting began.
+      await tester.tap(key('year-earlier'));
+      await tester.pump();
+      expect(find.text('Your 2025'), findsOneWidget);
+      expect(textIn(key('year-song')), contains('Кукушка'));
+      expect(textIn(key('year-note')), contains('Counting since 1 Oct 2025'));
+      expect(textIn(key('year-tile-run')), contains('6 days'));
+      expect(
+        tester.widget<IconButton>(key('year-earlier')).onPressed,
+        isNull,
+        reason: 'nothing was recorded before 2025',
+      );
+
+      // A month's own facts.
+      await tester.ensureVisible(key('year-month-10'));
+      await tester.pump();
+      await tester.tap(key('year-month-10'));
+      await tester.pump();
+      final factsBox = find.byKey(
+        const ValueKey('year-month-facts'),
+        skipOffstage: false,
+      );
+      await tester.ensureVisible(factsBox);
+      await tester.pump();
+      final facts = textIn(factsBox);
+      expect(facts, contains('October'));
+      expect(facts, contains('Кукушка'));
+      expect(facts, contains('6 counted plays'));
+
+      await tester.tap(key('album-back'));
+      await tester.pump();
+      expect(library.view, const LibraryView(ViewKind.stats));
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('songs new to you and a narrow window', (tester) async {
+      await pumpStats(tester, size: const Size(760, 900));
+      library.openYearReport(2026);
+      await tester.pump();
+      expect(tester.takeException(), isNull);
+      // Every 2026 song but Кукушка is new; Выхода нет has most plays.
+      final fresh = find.byKey(
+        const ValueKey('year-new-0'),
+        skipOffstage: false,
+      );
+      await tester.ensureVisible(fresh);
+      await tester.pump();
+      expect(textIn(fresh), contains('Выхода нет'));
+      expect(textIn(fresh), contains('first on 3 Nov'));
+      expect(
+        textIn(find.byKey(const ValueKey('year-new-1'), skipOffstage: false)),
+        contains('Группа крови'),
+      );
+      expect(
+        find.byKey(const ValueKey('year-new-2'), skipOffstage: false),
+        findsNothing,
+      );
+      expect(tester.takeException(), isNull);
+    });
+  });
+
   testWidgets('a narrow window keeps every tile and the rows', (tester) async {
     await pumpStats(tester, size: const Size(760, 800));
     for (final tile in ['listened', 'plays', 'songs', 'artists']) {

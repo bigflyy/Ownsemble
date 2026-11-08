@@ -42,6 +42,9 @@ enum ViewKind {
 
   /// Listening stats for the page's period (plan 04, D1).
   stats,
+
+  /// One year's report, opened from Stats (plan 04, D2).
+  yearReport,
   album,
 
   /// The uploads of one song on VK, to listen to and choose from (plan 03).
@@ -52,7 +55,13 @@ enum ViewKind {
 /// which one.
 @immutable
 class LibraryView {
-  const LibraryView(this.kind, {this.stackId, this.album, this.versionsOf});
+  const LibraryView(
+    this.kind, {
+    this.stackId,
+    this.album,
+    this.versionsOf,
+    this.year,
+  });
 
   static const songs = LibraryView(ViewKind.songs);
 
@@ -62,6 +71,9 @@ class LibraryView {
 
   /// The library row whose versions are shown.
   final int? versionsOf;
+
+  /// The year a year report is about.
+  final int? year;
 
   /// Whether the view lists songs outside the library (an album's, a
   /// song's versions), which the search index does not hold.
@@ -73,9 +85,13 @@ class LibraryView {
     _ => false,
   };
 
-  /// Whether the view is a page instead of a song list: a later page or
-  /// Stats.
-  bool get isPage => isLater || kind == ViewKind.stats;
+  /// Whether the view is a page instead of a song list: a later page,
+  /// Stats or a year report.
+  bool get isPage =>
+      isLater || kind == ViewKind.stats || kind == ViewKind.yearReport;
+
+  /// Whether the view is opened from another one and shows a Back button.
+  bool get hasBack => listsOutside || kind == ViewKind.yearReport;
 
   /// Whether a song can appear more than once (History, Stacks).
   bool get hasEntries => kind == ViewKind.history || kind == ViewKind.stack;
@@ -90,10 +106,11 @@ class LibraryView {
       other.kind == kind &&
       other.stackId == stackId &&
       other.album == album &&
-      other.versionsOf == versionsOf;
+      other.versionsOf == versionsOf &&
+      other.year == year;
 
   @override
-  int get hashCode => Object.hash(kind, stackId, album, versionsOf);
+  int get hashCode => Object.hash(kind, stackId, album, versionsOf, year);
 }
 
 /// How far an open album's song list got.
@@ -179,6 +196,9 @@ class LibraryController extends ChangeNotifier {
     if (kind == null || kind == ViewKind.album || kind == ViewKind.versions) {
       return null;
     }
+    // A year report opens from Stats, and Back has nothing to return to
+    // in a new run: Stats opens instead.
+    if (kind == ViewKind.yearReport) return const LibraryView(ViewKind.stats);
     if (kind != ViewKind.stack || parts.length < 2) return LibraryView(kind);
     final stackId = int.tryParse(parts[1]);
     final exists = collections?.stacks.any((s) => s.id == stackId) ?? false;
@@ -507,6 +527,21 @@ class LibraryController extends ChangeNotifier {
     _places.leave(_here);
     _showList(view, '', null);
     if (scroll.hasClients) scroll.jumpTo(0);
+  }
+
+  /// Opens the report of [year] as a new place (from Stats; Back returns).
+  void openYearReport(int year) {
+    final view = LibraryView(ViewKind.yearReport, year: year);
+    if (view == _view) return;
+    _places.leave(_here);
+    _showList(view, '', null);
+  }
+
+  /// Shows the report of [year] in place of the one shown (its arrows):
+  /// Back still returns to where the report was opened from.
+  void showYearReport(int year) {
+    if (_view.kind != ViewKind.yearReport) return openYearReport(year);
+    _showList(LibraryView(ViewKind.yearReport, year: year), '', null);
   }
 
   /// What the open album's heading says; null when no album is shown.
@@ -924,7 +959,10 @@ class LibraryController extends ChangeNotifier {
         _base = album == null ? const [] : _albumSongs(album);
       case ViewKind.versions:
         _base = _versionSongs();
-      case ViewKind.artists || ViewKind.playlists || ViewKind.stats:
+      case ViewKind.artists ||
+          ViewKind.playlists ||
+          ViewKind.stats ||
+          ViewKind.yearReport:
         _base = const [];
     }
     _filterBaseBySource();

@@ -431,6 +431,12 @@ class SongFilters extends ChangeNotifier {
   List<int> heardByDay(DayRange range) => _source.heardByDay(range);
   List<int> heardByWeekHour(DayRange? range) => _source.heardByWeekHour(range);
 
+  /// For the year report: plays of [range] (null: all time) by song, and
+  /// every song's of all time (empty until [load]).
+  Map<int, SongPlays> songPlaysIn(DayRange? range) =>
+      _source.songPlays(range: range);
+  Map<int, SongPlays> get allTime => UnmodifiableMapView(_allTime ?? const {});
+
   void _changed() {
     _loadPeriodStats();
     _writeState();

@@ -1034,6 +1034,11 @@ void main() {
       expect(restart().view, LibraryView.songs);
     });
 
+    test('a year report comes back as Stats: Back would lead nowhere', () {
+      restart().openYearReport(2025);
+      expect(restart().view, const LibraryView(ViewKind.stats));
+    });
+
     test('nothing or nonsense saved means all songs', () {
       expect(restart().view, LibraryView.songs);
       saved[LibraryController.viewSetting] = 'sideways';

@@ -33,6 +33,7 @@ import 'sync_controller.dart';
 import 'sync_status_bar.dart';
 import 'theme.dart';
 import 'type_jump.dart';
+import 'year_report_page.dart';
 import 'version_marks.dart';
 import 'vk_accounts.dart';
 
@@ -924,12 +925,25 @@ class _LibraryScreenState extends State<LibraryScreen> {
                     count: view.isPage ? null : _countLabel(),
                     jump: library.jump,
                     tight: tight,
-                    onBack: view.listsOutside ? library.goBack : null,
+                    onBack: view.hasBack ? library.goBack : null,
                     detail: view.kind == ViewKind.versions
                         ? _versionsDetail()
                         : _albumDetail(view),
                     actions: [
                       if (view.kind == ViewKind.versions) _versionsSearch(),
+                      if (view.kind == ViewKind.yearReport &&
+                          library.filters != null)
+                        YearArrows(
+                          year: view.year!,
+                          firstYear: switch (library.filters!.firstPlayMs) {
+                            final ms? => DateTime.fromMillisecondsSinceEpoch(
+                              ms,
+                            ).year,
+                            null => null,
+                          },
+                          thisYear: library.filters!.now.year,
+                          onYear: library.showYearReport,
+                        ),
                       if (statsFilters != null)
                         PeriodControls(
                           filters: statsFilters,
@@ -983,6 +997,17 @@ class _LibraryScreenState extends State<LibraryScreen> {
                                 widget.playback.playFrom(list, index),
                             onOpenArtist: _openArtist,
                             onOpenAlbum: library.openAlbum,
+                            onOpenYear: library.openYearReport,
+                          )
+                        : view.kind == ViewKind.yearReport &&
+                              library.filters != null
+                        ? YearReportPage(
+                            filters: library.filters!,
+                            songs: library.all,
+                            year: view.year!,
+                            onPlay: (list, index) =>
+                                widget.playback.playFrom(list, index),
+                            onOpenArtist: _openArtist,
                           )
                         : view.isLater
                         ? _LaterPage(view: view)
@@ -1113,6 +1138,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
     ViewKind.playlists => 'Playlists',
     ViewKind.history => 'History',
     ViewKind.stats => 'Stats',
+    ViewKind.yearReport => 'Your ${view.year}',
     ViewKind.album => view.album?.title ?? 'Album',
     ViewKind.versions =>
       'Versions of ${library.versionsRow?.title ?? 'a song'}',
