@@ -15,6 +15,16 @@ String listenedText(int ms) {
   return '${minutes ~/ 60} h ${(minutes % 60).toString().padLeft(2, '0')} min';
 }
 
+/// Heard time in a small space: "-", "<1 min", "45 min", "2.5 h", "12 h".
+String shortListenedText(int ms) {
+  if (ms <= 0) return '-';
+  final minutes = (ms / 60000).round();
+  if (minutes < 1) return '<1 min';
+  if (minutes < 60) return '$minutes min';
+  final hours = ms / 3600000;
+  return hours < 10 ? '${hours.toStringAsFixed(1)} h' : '${hours.round()} h';
+}
+
 /// When a song was last played, from [now]: "Today", "Yesterday", "4 days
 /// ago", "3 weeks ago", "8 months ago", "2 years ago"; "Never" for null.
 String lastPlayedText(int? ms, DateTime now) {

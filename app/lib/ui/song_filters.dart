@@ -186,6 +186,7 @@ class SongFilters extends ChangeNotifier {
 
   /// Reads all play numbers again (after a sync that merged songs).
   void reload() {
+    _playsVersion++;
     _allTime = null;
     _compared = null;
     _firstPlayMs = null;
@@ -199,6 +200,7 @@ class SongFilters extends ChangeNotifier {
   void playsChanged(int? trackId) {
     if (_allTime == null) return;
     if (trackId == null) return reload();
+    _playsVersion++;
     void update(Map<int, SongPlays> map, DayRange? range) {
       final fresh = _source.songPlays(range: range, trackId: trackId);
       map.remove(trackId);
@@ -418,6 +420,16 @@ class SongFilters extends ChangeNotifier {
 
   /// Monthly or daily listening for the Custom picker's tiles.
   List<int> listenedIn(List<DayRange> ranges) => _source.listenedIn(ranges);
+
+  /// Bumped when a play began, counted or ended, or all numbers were read
+  /// again: what the Calendar tab read before may be out of date.
+  int get playsVersion => _playsVersion;
+  int _playsVersion = 0;
+
+  /// For the Calendar tab (plan 04, D2); see [PlayStatsSource].
+  List<PlayMoment> playsIn(DayRange? range) => _source.playsIn(range);
+  List<int> heardByDay(DayRange range) => _source.heardByDay(range);
+  List<int> heardByWeekHour(DayRange? range) => _source.heardByWeekHour(range);
 
   void _changed() {
     _loadPeriodStats();

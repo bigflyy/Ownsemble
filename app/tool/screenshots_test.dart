@@ -33,6 +33,7 @@ import 'package:ownsemble/ui/source_editor.dart';
 import 'package:ownsemble/ui/sources_scope.dart';
 import 'package:ownsemble/ui/sync_controller.dart';
 import 'package:ownsemble/ui/theme.dart';
+import 'package:ownsemble/ui/stats_calendar.dart';
 import 'package:ownsemble/ui/vk_accounts.dart';
 import 'package:ownsemble/vk/vk_client.dart';
 import 'package:ownsemble/vk/vk_login_window.dart';
@@ -162,6 +163,11 @@ void main() {
     bool picker = false,
     bool pickerDays = false,
     String? statsTab,
+    // Calendar tab (plan 04, D2): pick the days from 6 to 2 days ago
+    // (click, then Shift+click).
+    bool calendarRange = false,
+    // Scrolls the Stats page down this far before the shot.
+    double statsScroll = 0,
     CalendarListening calendar = CalendarListening.line,
     bool saveView = false,
     // The first song gets three artists and a short title (the bottom bar
@@ -448,6 +454,27 @@ void main() {
     }
     if (statsTab != null) {
       await tester.tap(find.byKey(ValueKey('stats-tab-$statsTab')));
+      await tester.pumpAndSettle();
+    }
+    if (calendarRange) {
+      final today = DateTime.now();
+      Finder day(int ago) => find.byKey(
+        ValueKey(
+          'cal-day-${isoDay(DateTime(today.year, today.month, today.day - ago))}',
+        ),
+      );
+      await tester.tap(day(6));
+      await tester.pump();
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
+      await tester.tap(day(2));
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
+      await tester.pumpAndSettle();
+    }
+    if (statsScroll > 0) {
+      await tester.drag(
+        find.byKey(const ValueKey('stats-page')),
+        Offset(0, -statsScroll),
+      );
       await tester.pumpAndSettle();
     }
     if (albumListed != null) {
@@ -781,6 +808,69 @@ void main() {
       size: const Size(900, 760),
       view: const LibraryView(ViewKind.stats),
       statsTab: 'albums',
+    ),
+  );
+  testWidgets(
+    'dark, Stats, Calendar',
+    (t) => shoot(
+      t,
+      'dark-stats-calendar',
+      dark: true,
+      size: const Size(1440, 1300),
+      view: const LibraryView(ViewKind.stats),
+      statsTab: 'calendar',
+    ),
+  );
+  testWidgets(
+    'light, Stats, Calendar, a range, long names',
+    (t) => shoot(
+      t,
+      'light-stats-calendar-range',
+      dark: false,
+      dock: PlayerDock.bottom,
+      view: const LibraryView(ViewKind.stats),
+      statsTab: 'calendar',
+      calendarRange: true,
+      longNames: true,
+    ),
+  );
+  testWidgets(
+    'dark, Stats, Calendar, narrow',
+    (t) => shoot(
+      t,
+      'dark-stats-calendar-narrow',
+      dark: true,
+      size: const Size(900, 760),
+      dock: PlayerDock.bottom,
+      view: const LibraryView(ViewKind.stats),
+      statsTab: 'calendar',
+      calendarRange: true,
+      statsScroll: 700,
+    ),
+  );
+  testWidgets(
+    'light, Stats, Calendar, narrow, When you listen',
+    (t) => shoot(
+      t,
+      'light-stats-calendar-narrow-hours',
+      dark: false,
+      size: const Size(900, 760),
+      dock: PlayerDock.bottom,
+      view: const LibraryView(ViewKind.stats),
+      statsTab: 'calendar',
+      statsScroll: 1400,
+    ),
+  );
+  testWidgets(
+    'light, Stats, Calendar, the first year',
+    (t) => shoot(
+      t,
+      'light-stats-calendar-first-year',
+      dark: false,
+      size: const Size(1440, 1300),
+      view: const LibraryView(ViewKind.stats),
+      period: const PlayPeriod.year(offset: -2),
+      statsTab: 'calendar',
     ),
   );
   testWidgets(

@@ -5,6 +5,7 @@ import '../library/track.dart';
 import 'cover_tile.dart';
 import 'song_filters.dart';
 import 'stat_text.dart';
+import 'stats_calendar.dart';
 import 'theme.dart';
 
 /// The Stats place (plan 04, D1, mockup A picked in B3): four tiles for the
@@ -44,6 +45,9 @@ class StatsPage extends StatefulWidget {
 
 class _StatsPageState extends State<StatsPage> {
   RankBy _tab = RankBy.songs;
+
+  /// Whether the Calendar tab is shown instead of a top list (plan 04, D2).
+  bool _calendar = false;
 
   /// Songs by id, made again only when the library's list is another one.
   Map<int, Track> _byId = const {};
@@ -149,13 +153,24 @@ class _StatsPageState extends State<StatsPage> {
                   _TabButton(
                     key: ValueKey('stats-tab-${by.name}'),
                     label: label,
-                    selected: _tab == by,
-                    onTap: () => setState(() => _tab = by),
+                    selected: !_calendar && _tab == by,
+                    onTap: () => setState(() {
+                      _tab = by;
+                      _calendar = false;
+                    }),
                   ),
+                _TabButton(
+                  key: const ValueKey('stats-tab-calendar'),
+                  label: 'Calendar',
+                  selected: _calendar,
+                  onTap: () => setState(() => _calendar = true),
+                ),
               ],
             ),
           ),
-          if (rows.isNotEmpty)
+          if (_calendar)
+            StatsCalendar(filters: filters, byId: byId, onPlay: widget.onPlay),
+          if (!_calendar && rows.isNotEmpty)
             _RankRow.header(
               colors,
               first: switch (_tab) {
@@ -169,7 +184,13 @@ class _StatsPageState extends State<StatsPage> {
         return ListView.builder(
           key: const ValueKey('stats-page'),
           padding: const EdgeInsets.fromLTRB(24, 0, 24, 20),
-          itemCount: head.length + (rows.isEmpty ? 1 : rows.length),
+          itemCount:
+              head.length +
+              (_calendar
+                  ? 0
+                  : rows.isEmpty
+                  ? 1
+                  : rows.length),
           itemBuilder: (context, index) {
             if (index < head.length) return head[index];
             if (rows.isEmpty) {

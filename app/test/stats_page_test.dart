@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ownsemble/library/library_store.dart';
 import 'package:ownsemble/library/play_period.dart';
@@ -256,6 +257,174 @@ void main() {
     expect(calls, hasLength(1));
     expect(calls.single.$1, [ids[1], ids[3], ids[0]]);
     expect(calls.single.$2, 1);
+  });
+
+  group('Calendar tab', () {
+    String tip(WidgetTester tester, String key) =>
+        tester.widget<Tooltip>(find.byKey(ValueKey(key))).message!;
+    Finder panel() => find.byKey(const ValueKey('cal-panel'));
+
+    Future<void> openCalendar(WidgetTester tester) async {
+      await tester.tap(find.byKey(const ValueKey('stats-tab-calendar')));
+      await tester.pump();
+    }
+
+    testWidgets('shows the period year with each day heard, and the latest '
+        'day played', (tester) async {
+      await pumpStats(tester);
+      await openCalendar(tester);
+      for (var m = 1; m <= 12; m++) {
+        expect(find.byKey(ValueKey('cal-month-$m')), findsOneWidget);
+      }
+      // November 2026: 300 + 450 + 400 s.
+      expect(
+        textIn(find.byKey(const ValueKey('cal-month-11'))),
+        contains('19 min'),
+      );
+      expect(tip(tester, 'cal-day-2026-11-06'), 'Fri 6 Nov 2026: 7 min');
+      expect(
+        tip(tester, 'cal-day-2026-11-01'),
+        'Sun 1 Nov 2026: nothing played',
+      );
+      expect(tip(tester, 'cal-day-2026-11-08'), 'Sun 8 Nov 2026');
+      // The latest day with plays in the period is chosen at first.
+      final shown = textIn(panel());
+      expect(shown, contains('Fri 6 Nov 2026'));
+      expect(shown, contains('7 min, 2 plays, 2 counted'));
+      expect(shown, contains('09:00'));
+      expect(shown, contains('10:00'));
+      expect(shown, contains('Группа крови'));
+      expect(shown, isNot(contains('Выхода нет')));
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('a click picks a day, Shift+click a range', (tester) async {
+      await pumpStats(tester);
+      await openCalendar(tester);
+      await tester.tap(find.byKey(const ValueKey('cal-day-2026-11-03')));
+      await tester.pump();
+      expect(textIn(panel()), contains('Tue 3 Nov 2026'));
+      expect(textIn(panel()), contains('Выхода нет'));
+      expect(textIn(panel()), isNot(contains('Группа крови')));
+
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
+      await tester.tap(find.byKey(const ValueKey('cal-day-2026-11-06')));
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
+      await tester.pump();
+      final shown = textIn(panel());
+      expect(shown, contains('3 - 6 Nov 2026'));
+      expect(shown, contains('4 days'));
+      // 3 x 150 s + 2 x 200 s.
+      expect(shown, contains('14 min, 5 plays, 5 counted'));
+      // A range names each day above its plays.
+      expect(shown, contains('Wed 4 Nov'));
+      expect(shown, contains('Fri 6 Nov'));
+
+      // Shift+click before the first end turns the range around.
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
+      await tester.tap(find.byKey(const ValueKey('cal-day-2026-11-02')));
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
+      await tester.pump();
+      expect(textIn(panel()), contains('2 - 3 Nov 2026'));
+
+      // A future day cannot be picked.
+      await tester.tap(find.byKey(const ValueKey('cal-day-2026-11-20')));
+      await tester.pump();
+      expect(textIn(panel()), contains('2 - 3 Nov 2026'));
+    });
+
+    testWidgets('days before the first play are marked, and a year with no '
+        'plays says so', (tester) async {
+      await pumpStats(tester);
+      filters.setPeriod(const PlayPeriod.year(offset: -1));
+      await tester.pump();
+      await openCalendar(tester);
+      expect(
+        tip(tester, 'cal-day-2025-09-30'),
+        'Tue 30 Sep 2025: before the app recorded plays',
+      );
+      expect(tip(tester, 'cal-day-2025-10-06'), 'Mon 6 Oct 2025: 5 min');
+      expect(textIn(panel()), contains('Mon 6 Oct 2025'));
+
+      filters.setPeriod(const PlayPeriod.year(offset: -3));
+      await tester.pump();
+      expect(textIn(panel()), contains('Nothing played in 2023'));
+    });
+
+    testWidgets('Play these songs plays the days songs in time order, once '
+        'each', (tester) async {
+      final calls = <(List<int>, int)>[];
+      filters.load();
+      tester.view.physicalSize = const Size(1600, 1400);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: buildTheme(OwnColors.light),
+          home: Scaffold(
+            body: StatsPage(
+              filters: filters,
+              songs: library.all,
+              onPlay: (list, index) =>
+                  calls.add(([for (final t in list) t.id], index)),
+              onOpenArtist: (_) {},
+              onOpenAlbum: (_) {},
+            ),
+          ),
+        ),
+      );
+      await openCalendar(tester);
+      await tester.tap(find.byKey(const ValueKey('cal-day-2026-11-02')));
+      await tester.pump();
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
+      await tester.tap(find.byKey(const ValueKey('cal-day-2026-11-06')));
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
+      await tester.pump();
+      await tester.tap(find.byKey(const ValueKey('cal-play-all')));
+      expect(calls, hasLength(1));
+      expect(calls.single.$1, [ids[0], ids[1], ids[3]]);
+      expect(calls.single.$2, 0);
+      // A play row plays the same songs from its own.
+      final row = find.byKey(const ValueKey('cal-play-3'), skipOffstage: false);
+      await tester.ensureVisible(row);
+      await tester.pump();
+      await tester.tap(row);
+      expect(calls.last.$1, [ids[0], ids[1], ids[3]]);
+      expect(calls.last.$2, 1);
+    });
+
+    testWidgets('When you listen adds up the period by weekday and hour', (
+      tester,
+    ) async {
+      await pumpStats(tester);
+      await openCalendar(tester);
+      expect(
+        textIn(find.byKey(const ValueKey('cal-hours'))),
+        contains('Time listened in November 2026 by weekday and hour'),
+      );
+      // Mon 2 Nov 9:00 300 s; Fri 6 Nov 9:00 and 10:00 200 s each.
+      expect(tip(tester, 'cal-hour-1-9'), 'Mon 9:00: 5 min');
+      expect(tip(tester, 'cal-hour-5-10'), 'Fri 10:00: 3 min');
+      expect(tip(tester, 'cal-hour-7-20'), 'Sun 20:00: nothing');
+    });
+
+    testWidgets('a narrow window puts the days below the months', (
+      tester,
+    ) async {
+      await pumpStats(tester, size: const Size(760, 900));
+      await openCalendar(tester);
+      final months = tester.getRect(find.byKey(const ValueKey('cal-month-1')));
+      expect(tester.getRect(panel()).top, greaterThan(months.bottom));
+      expect(tester.takeException(), isNull);
+      await pumpStats(tester, size: const Size(1800, 900));
+      await openCalendar(tester);
+      expect(
+        tester.getRect(panel()).left,
+        greaterThan(
+          tester.getRect(find.byKey(const ValueKey('cal-month-1'))).right,
+        ),
+      );
+    });
   });
 
   testWidgets('a narrow window keeps every tile and the rows', (tester) async {

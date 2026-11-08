@@ -12,6 +12,14 @@ void main() {
     expect(listenedText((3 * 60 + 5) * 60000), '3 h 05 min');
   });
 
+  test('heard time in a small space', () {
+    expect(shortListenedText(0), '-');
+    expect(shortListenedText(20000), '<1 min');
+    expect(shortListenedText(45 * 60000), '45 min');
+    expect(shortListenedText(150 * 60000), '2.5 h');
+    expect(shortListenedText((12 * 60 + 20) * 60000), '12 h');
+  });
+
   test('last played, by calendar days', () {
     expect(lastPlayedText(null, now), 'Never');
     expect(lastPlayedText(ms(DateTime(2026, 11, 7, 0, 5)), now), 'Today');

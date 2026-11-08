@@ -2,7 +2,7 @@ import 'day_range.dart';
 import 'library_records.dart';
 import 'listening_calendar.dart';
 
-export 'listening_calendar.dart' show PlayMoment, weekHour;
+export 'listening_calendar.dart' show PlayMoment, heatLevels, weekHour;
 
 /// Where play numbers come from: the library database, a stand-in in
 /// tests.

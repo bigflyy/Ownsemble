@@ -28,6 +28,25 @@ class PlayMoment {
   final PlayEnd? ended;
 }
 
+/// Shades for a heatmap of [values] (time heard per day or per hour): 0 for
+/// nothing, 4 for the busiest, and each quarter of the busiest below one
+/// shade lighter (a quarter or less is 1).
+List<int> heatLevels(List<int> values) {
+  final most = values.fold(0, (top, v) => v > top ? v : top);
+  return [
+    for (final v in values)
+      if (v <= 0)
+        0
+      else
+        switch (v / most) {
+          <= 0.25 => 1,
+          <= 0.5 => 2,
+          <= 0.75 => 3,
+          _ => 4,
+        },
+  ];
+}
+
 /// Index of a weekday ([DateTime.monday] .. [DateTime.sunday]) and an hour
 /// (0-23) in a heard-by-weekday-and-hour list: Monday's hours first.
 int weekHour(int weekday, int hour) => (weekday - 1) * 24 + hour;

@@ -63,6 +63,17 @@ void main() {
     });
   });
 
+  group('heatLevels', () {
+    test('shade 4 is the busiest, each quarter below one lighter; none '
+        'stays 0', () {
+      expect(heatLevels([0, 10, 20, 30, 40, 0]), [0, 1, 2, 3, 4, 0]);
+      expect(heatLevels([0, 11, 21, 31]), [0, 2, 3, 4]);
+      expect(heatLevels([5, 5, 5]), [4, 4, 4]);
+      expect(heatLevels([0, 0]), [0, 0]);
+      expect(heatLevels(const []), isEmpty);
+    });
+  });
+
   group('playsIn', () {
     test('gives the days plays in time order, with what counted', () {
       // Out of order on purpose: the list is sorted by start.
