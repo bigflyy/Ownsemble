@@ -85,6 +85,28 @@ class NewTrack {
     vkAlbumKey: vkAlbumKey,
     vkAlbumAccessKey: vkAlbumAccessKey,
   );
+
+  /// The account's own copy of this found song, as the add answered: the
+  /// same song under [newKey], added at [addedAt] (Unix seconds). Its access
+  /// key is left empty: the copy has a key of its own that VK gives only on
+  /// the next read, and the account's own songs play without one. The next
+  /// sync fills in VK's key and date on the same row.
+  NewTrack asAddedCopy(String newKey, {required int addedAt}) => NewTrack(
+    artist: artist,
+    title: title,
+    album: album,
+    durationSec: durationSec,
+    addedAt: addedAt,
+    sourceKey: newKey,
+    coverUrl: coverUrl,
+    coverLargeUrl: coverLargeUrl,
+    coverMidUrl: coverMidUrl,
+    coverFullUrl: coverFullUrl,
+    tint: tint,
+    vkTrackId: vkTrackId,
+    vkAlbumKey: vkAlbumKey,
+    vkAlbumAccessKey: vkAlbumAccessKey,
+  );
 }
 
 /// The library database.
@@ -808,7 +830,8 @@ class LibraryStore implements PlayLog, PlayStatsSource {
       '''
       SELECT l.id FROM tracks l
       WHERE l.same_as IS NULL AND l.id IN (
-        SELECT coalesce(same_as, id) FROM tracks WHERE vk_album_key = ?)
+        SELECT coalesce(same_as, id) FROM tracks
+        WHERE vk_album_key = ? AND removed_at_ms IS NULL)
       ORDER BY l.added_at DESC, l.id DESC
       ''',
       [albumKey],
@@ -822,6 +845,7 @@ class LibraryStore implements PlayLog, PlayStatsSource {
     for (final row in _db.select(
       'SELECT id FROM tracks '
       'WHERE same_as IS NULL AND album = ? AND artist = ? '
+      'AND removed_at_ms IS NULL '
       'ORDER BY added_at DESC, id DESC',
       [album, artist],
     ))
@@ -841,6 +865,7 @@ class LibraryStore implements PlayLog, PlayStatsSource {
       for (final row in _db.select(
         'SELECT vk_track_id, coalesce(same_as, id) AS listed FROM tracks '
         'WHERE vk_track_id IN (${List.filled(chunk.length, '?').join(', ')}) '
+        'AND removed_at_ms IS NULL '
         'ORDER BY same_as IS NOT NULL, id',
         chunk,
       )) {
@@ -892,14 +917,99 @@ class LibraryStore implements PlayLog, PlayStatsSource {
     }
   }
 
+  /// Marks the songs [keys] of [sourceId] as removed by the user, after VK
+  /// removed them from the account (plan 06, C2). A removed row is no longer
+  /// listed ([loadAll]) nor counted as in the library ([songRows]), but it
+  /// stays, so History, Stats, Stacks and stored audio still point at it,
+  /// and [restoreRemoved] can bring it back. It is also marked gone, as the
+  /// account no longer has it, so a sync does not look for it again. Returns
+  /// how many rows were newly marked.
+  int markRemoved(int sourceId, Iterable<String> keys, {int? atMs}) {
+    final at = atMs ?? _now();
+    final mark = _db.prepare(
+      'UPDATE tracks SET removed_at_ms = ?1, '
+      'gone_at_ms = coalesce(gone_at_ms, ?1) '
+      'WHERE source_id = ?2 AND source_key = ?3 AND removed_at_ms IS NULL',
+    );
+    try {
+      return _transaction(() {
+        var marked = 0;
+        for (final key in keys) {
+          mark.execute([at, sourceId, key]);
+          marked += _db.updatedRows;
+        }
+        return marked;
+      });
+    } finally {
+      mark.close();
+    }
+  }
+
+  /// Undo of [markRemoved] once VK restored the song: the same row (same
+  /// key, so the same plays, favorite and stored audio) is listed again with
+  /// [restored]'s details and no gone mark. A song with no row is added.
+  /// Returns the row's id.
+  int restoreRemoved(int sourceId, NewTrack restored) {
+    // Two steps, not one transaction (the upsert runs its own): the row is
+    // at worst back but still hidden, and the database is used from one
+    // thread, so nothing reads it in between.
+    final id = upsertAll(sourceId, [restored]).single;
+    _db.execute('UPDATE tracks SET removed_at_ms = NULL WHERE id = ?', [id]);
+    return id;
+  }
+
+  /// Every row of the library that is not removed, as the same-song key reads
+  /// it ([FoundMatcher] tells by these which found songs the library has).
+  /// Gone rows are in: the listed song says it is gone, and the caller may
+  /// offer to add it again.
+  List<SongRow> songRows() => [
+    for (final row in _db.select('''
+      SELECT t.id, t.source_id, t.source_key, t.artist, t.title,
+             t.duration_sec, t.vk_track_id, t.same_as
+      FROM tracks t WHERE t.removed_at_ms IS NULL
+      ORDER BY t.id
+    '''))
+      SongRow(
+        id: row['id'] as int,
+        sourceId: row['source_id'] as int,
+        sourceKey: row['source_key'] as String,
+        text: songMatchText(row['artist'] as String, row['title'] as String),
+        seconds: row['duration_sec'] as int,
+        vkTrackId: row['vk_track_id'] as int?,
+        sameAs: row['same_as'] as int?,
+      ),
+  ];
+
   /// The whole library, newest first, with each song's stored audio and its
-  /// copies in other accounts. Copies themselves are not listed.
-  List<Track> loadAll() {
+  /// copies in other accounts. Copies themselves are not listed, nor are
+  /// rows the user removed ([markRemoved]): a song is listed while its own
+  /// row or a copy is not removed.
+  List<Track> loadAll() => _loadTracks('''
+      t.removed_at_ms IS NULL OR EXISTS (
+        SELECT 1 FROM tracks c
+        WHERE c.same_as = t.id AND c.removed_at_ms IS NULL)
+    ''');
+
+  /// The songs the user removed ([markRemoved]) and [loadAll] leaves out,
+  /// newest first: History and Stacks still show the plays and entries that
+  /// point at them.
+  List<Track> loadRemoved() => _loadTracks('''
+      t.removed_at_ms IS NOT NULL AND NOT EXISTS (
+        SELECT 1 FROM tracks c
+        WHERE c.same_as = t.id AND c.removed_at_ms IS NULL)
+    ''');
+
+  /// The listed rows (not copies) that match [where], an SQL condition on
+  /// `t`, newest first, with their stored audio and their copies that are
+  /// not removed.
+  List<Track> _loadTracks(String where) {
     final copies = <int, List<TrackCopy>>{};
     for (final row in _db.select('''
       SELECT same_as, source_id, source_key, access_key, gone_at_ms,
              same_likely
-      FROM tracks WHERE same_as IS NOT NULL ORDER BY id
+      FROM tracks
+      WHERE same_as IS NOT NULL AND removed_at_ms IS NULL
+      ORDER BY id
     ''')) {
       (copies[row['same_as'] as int] ??= []).add(
         TrackCopy(
@@ -919,7 +1029,7 @@ class LibraryStore implements PlayLog, PlayStatsSource {
       FROM tracks t
       JOIN sources s ON s.id = t.source_id
       LEFT JOIN audio_files a ON a.track_id = t.id
-      WHERE t.same_as IS NULL
+      WHERE t.same_as IS NULL AND ($where)
       ORDER BY t.added_at DESC, t.id DESC
     ''');
     return [

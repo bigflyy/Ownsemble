@@ -580,6 +580,33 @@ void main() {
     expect(migrated.loadAll().single.title, 'Хочешь?');
   });
 
+  test('version 13 gains removed marks and keeps its songs listed', () {
+    final store = LibraryStore.open(dbPath);
+    final source = store.ensureSource(TrackSource.vk, account: '1', name: 'VK');
+    store.upsertAll(source, [
+      const NewTrack(
+        sourceKey: '1_1',
+        artist: 'Земфира',
+        title: 'Хочешь?',
+        durationSec: 197,
+        addedAt: 0,
+      ),
+    ]);
+    store.close();
+    final db = sqlite3.open(dbPath);
+    db
+      ..execute('ALTER TABLE tracks DROP COLUMN removed_at_ms')
+      ..execute('PRAGMA user_version = 13')
+      ..close();
+
+    final migrated = LibraryStore.open(dbPath);
+    addTearDown(migrated.close);
+    expect(versionOf(dbPath), librarySchemaVersion);
+    expect(migrated.loadAll().single.title, 'Хочешь?');
+    expect(migrated.markRemoved(source, ['1_1']), 1);
+    expect(migrated.loadAll(), isEmpty);
+  });
+
   test('a library from a newer build is refused and left alone', () {
     final db = sqlite3.open(dbPath);
     db.execute('PRAGMA user_version = ${librarySchemaVersion + 1}');
