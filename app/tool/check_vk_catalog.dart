@@ -119,6 +119,15 @@ Future<void> main(List<String> args) async {
       name(newest.first) == '${pick.artist} - ${pick.title}',
       'the newest song is the found one by name',
     );
+    // The app stores the copy without an access key (NewTrack.asAddedCopy)
+    // until the next sync: VK must give the account's own song without one.
+    final stream = await client.resolveStream(added.newKey!, null);
+    check(stream.link != null, 'the copy gives a stream without an access key');
+    check(
+      newest.first['track_id'] == null ||
+          '${newest.first['track_id']}' == '${pick.vkTrackId}',
+      'the copy keeps the track id of the found song (FoundMatcher rule 2)',
+    );
 
     print('3. delete the copy');
     clock = Stopwatch()..start();
