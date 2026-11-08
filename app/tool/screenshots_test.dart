@@ -18,12 +18,14 @@ import 'package:ownsemble/library/file_print.dart';
 import 'package:ownsemble/library/day_range.dart';
 import 'package:ownsemble/library/library_store.dart';
 import 'package:ownsemble/library/play_period.dart';
+import 'package:ownsemble/library/search_index.dart';
 import 'package:ownsemble/library/song_filter.dart';
 import 'package:ownsemble/library/track.dart';
 import 'package:ownsemble/playback/playback_controller.dart';
 import 'package:ownsemble/playback/player_service.dart';
 import 'package:ownsemble/storage/audio_storage.dart';
 import 'package:ownsemble/ui/albums.dart';
+import 'package:ownsemble/ui/catalog_search.dart';
 import 'package:ownsemble/ui/collections_controller.dart';
 import 'package:ownsemble/ui/library_controller.dart';
 import 'package:ownsemble/ui/library_screen.dart';
@@ -51,6 +53,10 @@ class _ShownPlayer extends PlayerService {
     : super(muted: true, dataDir: '.', storage: storage);
 
   Track? _track;
+  final _tracks = StreamController<Track?>.broadcast();
+
+  @override
+  Stream<Track?> get currentStream => _tracks.stream;
 
   @override
   bool get isReady => true;
@@ -68,6 +74,7 @@ class _ShownPlayer extends PlayerService {
   @override
   Future<PlayTiming> play(Track track, {Duration? from}) async {
     _track = track;
+    _tracks.add(track);
     return const PlayTiming(ok: true, cached: true, resolveMs: 0, toSoundMs: 1);
   }
 }
@@ -182,6 +189,17 @@ void main() {
     // The first song (the most played) plays, so its rows show the moving
     // playing mark (Stats lists, the Calendar panel, the year report).
     bool playingFirst = false,
+    // Search place A (plan 06, C3): these words in the search box, the On VK
+    // part filled from a made-up VK answer; [catalogPlays] plays the third
+    // found song, [catalogAdd] clicks the + of the second, [catalogFolded]
+    // folds the part, [catalogAll] ticks every account, [catalogMenu] opens
+    // the account list.
+    String? catalogQuery,
+    bool catalogPlays = false,
+    bool catalogAdd = false,
+    bool catalogFolded = false,
+    bool catalogAll = false,
+    bool catalogMenu = false,
   }) async {
     final store = LibraryStore.open(':memory:');
     addTearDown(store.close);
@@ -402,9 +420,72 @@ void main() {
 
     // A song playing while it is saved, and another one downloading.
     final storage = AudioStorage(dataDir: '.', store: store);
-    final player = saving || playingFirst
+    final player = saving || playingFirst || catalogPlays
         ? _ShownPlayer(storage)
         : PlayerService(muted: true, dataDir: '.');
+    // A made-up VK: what the search finds and an add that always works.
+    // Nothing leaves the test.
+    CatalogSearch? catalog;
+    if (catalogQuery != null) {
+      var newId = 700;
+      Future<Object?> fakeVk(String method, Map<String, String> params) async {
+        if (method == 'audio.add') {
+          return {
+            'items_count': 1,
+            'errors_count': 0,
+            'items': [
+              {'new_audio_id': newId++, 'new_owner_id': 1},
+            ],
+            'errors': <Object>[],
+          };
+        }
+        final found = [
+          // The library's own "Группа крови", another upload: a check.
+          ('Кино', 'Группа крови', 'Группа крови', 180),
+          ('Кино', 'Кукушка', 'Последний герой', 401),
+          ('Кино', 'Звезда по имени Солнце', 'Звезда по имени Солнце', 225),
+          ('Кино', 'Пачка сигарет', 'Звезда по имени Солнце', 268),
+          ('Кино', 'Восьмиклассница', '45', 187),
+          ('Кино', 'Перемен', 'Последний герой', 295),
+          ('Кино', 'Спокойная ночь', 'Группа крови', 368),
+          ('Кино', 'Последний герой', 'Последний герой', 213),
+          ('Кино', 'Хочу перемен (Live)', 'Концерт в Лужниках', 312),
+          ('Кино', 'Красно-жёлтые дни', 'Чёрный альбом', 334),
+          ('Кино', 'Мама, мы все сошли с ума', 'Группа крови', 254),
+          ('Кино', 'Музыка волн', 'Чёрный альбом', 349),
+        ];
+        return jsonDecode(
+          jsonEncode({
+            'count': 268,
+            'items': [
+              for (final (i, (artist, title, album, seconds)) in found.indexed)
+                {
+                  'owner_id': -77,
+                  'id': 10 + i,
+                  'artist': artist,
+                  'title': title,
+                  'duration': seconds,
+                  'album': {'title': album},
+                },
+            ],
+          }),
+        );
+      }
+
+      catalog = CatalogSearch(
+        library: library,
+        store: store,
+        sources: sources,
+        apiOfSource: (id) => fakeVk,
+        onLibraryChanged: ({required severalAccounts}) => library.replaceTracks(
+          store.loadAll(),
+          SearchIndex(store.loadAll()),
+        ),
+        pause: const Duration(milliseconds: 10),
+      );
+      if (catalogAll) catalog.toggleAll();
+      if (catalogFolded) catalog.toggleFolded();
+    }
     if (playingFirst && !saving) {
       await player.play(library.all.firstWhere((t) => t.id == ids[0]));
     }
@@ -422,6 +503,7 @@ void main() {
     tester.view.devicePixelRatio = pixelRatio;
     addTearDown(tester.view.reset);
     final boundary = GlobalKey();
+    final playback = PlaybackController(player: player);
     await tester.pumpWidget(
       RepaintBoundary(
         key: boundary,
@@ -432,12 +514,13 @@ void main() {
             sources: sources,
             child: LibraryScreen(
               library: library,
-              playback: PlaybackController(player: player),
+              playback: playback,
               collections: collections,
               settings: settings,
               sync: sync,
               account: accounts,
               sources: editor,
+              catalog: catalog,
             ),
           ),
         ),
@@ -516,7 +599,37 @@ void main() {
       await tester.pump();
       await tester.pump();
     }
-    if (playingFirst) {
+    if (catalog != null) {
+      library.searchText.text = catalogQuery!;
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 50));
+      await tester.pumpAndSettle();
+      if (catalogPlays) {
+        await playback.playFrom([
+          for (final found in catalog.songs) found.track,
+        ], 2);
+        player.playing.value = true;
+        await tester.pump();
+      }
+      if (catalogAdd) {
+        await tester.tap(
+          find.descendant(
+            of: find.byKey(ValueKey('found-${catalog.songs[1].track.id}')),
+            matching: find.byKey(const ValueKey('add-song')),
+          ),
+        );
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 150));
+        // Halfway through the Songs count's violet.
+        await tester.pump(const Duration(milliseconds: 400));
+      }
+      if (catalogMenu) {
+        await tester.tap(find.byKey(const ValueKey('catalog-targets')));
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 300));
+      }
+    }
+    if (playingFirst || catalogPlays) {
       // The bars move without end, so no pumpAndSettle after this.
       player.playing.value = true;
       await tester.pump(const Duration(milliseconds: 300));
@@ -543,8 +656,81 @@ void main() {
     });
     library.jump.clear();
     // Stops the playing timer of the controller before the tree goes.
-    if (playingFirst) player.playing.value = false;
+    if (playingFirst || catalogPlays) player.playing.value = false;
+    // Lets the note at the bottom time out, so no timer is left.
+    if (catalogAdd) await tester.pump(const Duration(seconds: 10));
+    catalog?.dispose();
   }
+
+  testWidgets(
+    'dark, search with the On VK part, a found song playing',
+    (t) => shoot(
+      t,
+      'dark-catalog',
+      dark: true,
+      catalogQuery: 'кино',
+      catalogPlays: true,
+    ),
+  );
+  testWidgets(
+    'light, search with the On VK part, after +',
+    (t) => shoot(
+      t,
+      'light-catalog-added',
+      dark: false,
+      dock: PlayerDock.bottom,
+      catalogQuery: 'кино',
+      catalogPlays: true,
+      catalogAdd: true,
+    ),
+  );
+  testWidgets(
+    'light, search with the On VK part, narrow',
+    (t) => shoot(
+      t,
+      'light-catalog-narrow',
+      dark: false,
+      size: const Size(700, 820),
+      dock: PlayerDock.bottom,
+      catalogQuery: 'кино',
+      catalogPlays: true,
+    ),
+  );
+  testWidgets(
+    'dark, search with the On VK part, two accounts, both ticked',
+    (t) => shoot(
+      t,
+      'dark-catalog-two',
+      dark: true,
+      twoAccounts: true,
+      catalogQuery: 'кино',
+      catalogAll: true,
+      catalogMenu: true,
+    ),
+  );
+  testWidgets(
+    'dark, search with the On VK part, two accounts, after +',
+    (t) => shoot(
+      t,
+      'dark-catalog-two-added',
+      dark: true,
+      twoAccounts: true,
+      dock: PlayerDock.bottom,
+      catalogQuery: 'кино',
+      catalogAll: true,
+      catalogAdd: true,
+    ),
+  );
+  testWidgets(
+    'light, the On VK part folded, no own song matches',
+    (t) => shoot(
+      t,
+      'light-catalog-folded',
+      dark: false,
+      catalogQuery: 'кукушка',
+      catalogFolded: true,
+    ),
+  );
 
   testWidgets('dark, side panel', (t) => shoot(t, 'dark-side', dark: true));
   testWidgets(
