@@ -194,29 +194,35 @@ class _StatsPageState extends State<StatsPage> {
             decoration: BoxDecoration(
               border: Border(bottom: BorderSide(color: colors.line)),
             ),
-            child: Row(
-              children: [
-                for (final (by, label) in const [
-                  (RankBy.songs, 'Songs'),
-                  (RankBy.artists, 'Artists'),
-                  (RankBy.albums, 'Albums'),
-                ])
+            // Scrolls sideways when the page is narrower than the tabs
+            // (the side player in a small window).
+            child: SingleChildScrollView(
+              key: const ValueKey('stats-tabs'),
+              scrollDirection: Axis.horizontal,
+              child: Row(
+                children: [
+                  for (final (by, label) in const [
+                    (RankBy.songs, 'Songs'),
+                    (RankBy.artists, 'Artists'),
+                    (RankBy.albums, 'Albums'),
+                  ])
+                    _TabButton(
+                      key: ValueKey('stats-tab-${by.name}'),
+                      label: label,
+                      selected: !_calendar && _tab == by,
+                      onTap: () => setState(() {
+                        _tab = by;
+                        _calendar = false;
+                      }),
+                    ),
                   _TabButton(
-                    key: ValueKey('stats-tab-${by.name}'),
-                    label: label,
-                    selected: !_calendar && _tab == by,
-                    onTap: () => setState(() {
-                      _tab = by;
-                      _calendar = false;
-                    }),
+                    key: const ValueKey('stats-tab-calendar'),
+                    label: 'Calendar',
+                    selected: _calendar,
+                    onTap: () => setState(() => _calendar = true),
                   ),
-                _TabButton(
-                  key: const ValueKey('stats-tab-calendar'),
-                  label: 'Calendar',
-                  selected: _calendar,
-                  onTap: () => setState(() => _calendar = true),
-                ),
-              ],
+                ],
+              ),
             ),
           ),
           if (_calendar)

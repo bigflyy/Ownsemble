@@ -109,6 +109,10 @@ class _StatsCalendarState extends State<StatsCalendar> {
   /// next to a panel this wide (3 x 4 or 4 x 3 months, the panel as tall);
   /// with less room it goes below them, its list at most this tall.
   static const _panelMinWidth = 320.0;
+
+  /// The panel's widest: in a wide window its time heard would otherwise
+  /// stand far from the song (user, 2026-11-08).
+  static const _panelMaxWidth = 600.0;
   static const _narrowListHeight = 340.0;
 
   List<int> _heardInYear(int year, int version) {
@@ -328,7 +332,13 @@ class _StatsCalendarState extends State<StatsCalendar> {
               ),
               const SizedBox(width: 20),
               Expanded(
-                child: SizedBox(height: height, child: panel(fill: true)),
+                child: Align(
+                  alignment: Alignment.topLeft,
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: _panelMaxWidth),
+                    child: SizedBox(height: height, child: panel(fill: true)),
+                  ),
+                ),
               ),
             ],
           );
@@ -343,7 +353,10 @@ class _StatsCalendarState extends State<StatsCalendar> {
               ),
               hint,
               const SizedBox(height: 16),
-              panel(fill: false),
+              ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: _panelMaxWidth),
+                child: panel(fill: false),
+              ),
             ],
           );
         }

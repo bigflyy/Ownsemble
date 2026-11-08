@@ -425,6 +425,39 @@ void main() {
         ),
       );
     });
+
+    testWidgets('the panel keeps a readable width in a very wide window', (
+      tester,
+    ) async {
+      // Beside the months (user, 2026-11-08: the heard time stood far from
+      // the song).
+      await pumpStats(tester, size: const Size(2560, 1400));
+      await openCalendar(tester);
+      final months = tester.getRect(find.byKey(const ValueKey('cal-month-1')));
+      expect(tester.getRect(panel()).left, greaterThan(months.right));
+      expect(tester.getSize(panel()).width, lessThanOrEqualTo(600));
+      // Below the months, in a main area about 700 wide.
+      settings.dockTo(PlayerDock.bottom);
+      await pumpStats(tester, size: const Size(1000, 900));
+      await openCalendar(tester);
+      final below = tester.getRect(find.byKey(const ValueKey('cal-month-1')));
+      expect(tester.getRect(panel()).top, greaterThan(below.bottom));
+      expect(tester.getSize(panel()).width, 600);
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('the tabs scroll sideways when the page is very narrow', (
+      tester,
+    ) async {
+      // The side player leaves about 300 for the page.
+      await pumpStats(tester, size: const Size(1120, 900));
+      await openCalendar(tester);
+      expect(tester.takeException(), isNull);
+      final tabs = tester.widget<SingleChildScrollView>(
+        find.byKey(const ValueKey('stats-tabs')),
+      );
+      expect(tabs.scrollDirection, Axis.horizontal);
+    });
   });
 
   group('Year report', () {

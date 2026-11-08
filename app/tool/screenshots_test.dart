@@ -470,6 +470,9 @@ void main() {
           'cal-day-${isoDay(DateTime(today.year, today.month, today.day - ago))}',
         ),
       );
+      // November sits below the fold of a short window.
+      await tester.ensureVisible(day(6));
+      await tester.pumpAndSettle();
       await tester.tap(day(6));
       await tester.pump();
       await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);

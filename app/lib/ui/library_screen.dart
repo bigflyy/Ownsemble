@@ -63,6 +63,11 @@ const filterChipsMinWidth = 760.0;
 /// a narrower one starts the chip row with them, so a view's name has room.
 const periodBesideTitleMinWidth = 1100.0;
 
+/// Narrower than this, the Stats heading shows the period as a menu: its
+/// title, arrows and five period buttons need about 810 (a 1000 window with
+/// the bottom player overflowed, 2026-11-08).
+const statsPeriodButtonsMinWidth = 840.0;
+
 /// A song list at least this wide shows every play column (Plays,
 /// Listened, Last played, Added); narrower ones show Plays and Last played.
 const allPlayColumnsMinWidth = 1000.0;
@@ -948,7 +953,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
                         PeriodControls(
                           filters: statsFilters,
                           settings: _settings,
-                          narrow: narrowBar,
+                          narrow: listWidth < statsPeriodButtonsMinWidth,
                           compact: tight,
                         ),
                       if (filters != null && periodBesideTitle && !tight)
