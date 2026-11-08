@@ -264,6 +264,19 @@ void main() {
     // songs the library lacks. Nothing leaves the test.
     final albumList = Completer<Object?>();
     if (albumListed ?? false) {
+      // "Новые люди" is also in the library, added from a single: its row
+      // in the album names the album (user, 2026-11-08).
+      store.upsertAll(vk, [
+        const NewTrack(
+          sourceKey: '1_50',
+          artist: 'Сплин',
+          title: 'Новые люди',
+          album: 'Новые люди (сингл)',
+          durationSec: 247,
+          addedAt: 500,
+          vkTrackId: 550,
+        ),
+      ]);
       albumList.complete(
         jsonDecode(
           jsonEncode({
@@ -272,7 +285,7 @@ void main() {
               for (final (i, (title, seconds, track)) in [
                 ('Гранатовый альбом', 225, 0),
                 ('Выхода нет', 214, 502),
-                ('Новые люди', 247, 0),
+                ('Новые люди', 247, 550),
                 ('Иди через лес', 233, 0),
               ].indexed)
                 {

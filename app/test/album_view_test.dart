@@ -200,6 +200,29 @@ void main() {
     expect(library.rowCover(tracks[0]), same(tracks[0]));
   });
 
+  test(
+    "rows of an album name that album, your songs from a single too",
+    () async {
+      // The user, 2026-11-08 (Аффинаж - От меча): a song added from a single
+      // showed the single as its album inside the album's place.
+      tracks[0] = song(1, 'Люди', album: 'Люди (сингл)');
+      catalog.libraryIdList = [3, 4];
+      final library = open();
+      library.openAlbum(tracks[2]);
+      catalog.answer.complete(vkList);
+      await pumpEventQueue();
+      expect(library.visible, contains(same(tracks[0])));
+      final own = library.rowCover(tracks[0]);
+      expect(own.album, 'Человеко-часы');
+      expect(own.id, 1);
+      expect(own.sourceKey, '1_1');
+      // The song itself keeps its single (player, side panel, other places).
+      expect(tracks[0].album, 'Люди (сингл)');
+      library.goBack();
+      expect(library.rowCover(tracks[0]).album, 'Люди (сингл)');
+    },
+  );
+
   test('Back goes to the place the album was opened from', () async {
     final library = open();
     library.searchText.text = 'люди';

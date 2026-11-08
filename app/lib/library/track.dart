@@ -154,15 +154,16 @@ class Track {
   bool get isGone =>
       goneAtMs != null && copies.every((copy) => copy.goneAtMs != null);
 
-  /// This song with [other]'s cover in every size and its color: how an
-  /// album's place shows the user's own copy of one of its songs.
-  Track withCoversOf(Track other) => Track(
+  /// This song with [other]'s cover in every size and its color, and named
+  /// as on [album] when given: how an album's place shows the user's own
+  /// copy of one of its songs.
+  Track withCoversOf(Track other, {String? album}) => Track(
     id: id,
     sourceId: sourceId,
     source: source,
     artist: artist,
     title: title,
-    album: album,
+    album: album ?? this.album,
     durationSec: durationSec,
     sourceKey: sourceKey,
     accessKey: accessKey,

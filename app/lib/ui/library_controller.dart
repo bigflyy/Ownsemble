@@ -575,14 +575,17 @@ class LibraryController extends ChangeNotifier {
   Map<int, Track> _albumCovers = const {};
 
   /// [track] as its row in the current place shows it. In an album's place
-  /// every row shows the album's cover, the user's own songs too (user,
-  /// 2026-11-07): their copy is often tied to a single or a compilation
-  /// with another cover. Everywhere else, and in the player, a song keeps
-  /// its own cover.
+  /// every row shows the album's cover and the album's name, the user's own
+  /// songs too (user, 2026-11-07 for covers, 2026-11-08 for names): their
+  /// copy is often tied to a single or a compilation. Everywhere else, and
+  /// in the player, a song keeps its own cover and album.
   Track rowCover(Track track) {
     if (_view.kind != ViewKind.album) return track;
     final cover = _albumCovers[track.id];
-    return cover == null ? track : track.withCoversOf(cover);
+    final name = _view.album?.title;
+    final renamed = name != null && track.album != name;
+    if (cover == null && !renamed) return track;
+    return track.withCoversOf(cover ?? track, album: renamed ? name : null);
   }
 
   /// Asks the album's source for its full list, unless it is on its way or

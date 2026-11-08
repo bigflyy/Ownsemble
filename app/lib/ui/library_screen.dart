@@ -1277,7 +1277,10 @@ class _LibraryScreenState extends State<LibraryScreen> {
                 // An upload VK gives no album link for shows its album as
                 // plain text. Asked only for those rows: for a library song
                 // it costs a database read per row.
-                onOpenAlbum: version != null && library.albumOf(track) == null
+                // In an album's place the name is that album: nothing to open.
+                onOpenAlbum:
+                    library.view.kind == ViewKind.album ||
+                        version != null && library.albumOf(track) == null
                     ? null
                     : () {
                         library.jump.clear();
@@ -1983,8 +1986,8 @@ class _SongRow extends StatelessWidget {
   final int number;
   final Track track;
 
-  /// The song with the cover its row shows: in an album's place, the
-  /// album's cover (`LibraryController.rowCover`).
+  /// The song with the cover and album name its row shows: in an album's
+  /// place, the album's (`LibraryController.rowCover`).
   final Track cover;
 
   /// How the song's audio is stored now (may be newer than [track]).
@@ -2215,9 +2218,9 @@ class _SongRow extends StatelessWidget {
                               Expanded(
                                 child: AlbumLink(
                                   key: ValueKey('album-${track.id}'),
-                                  album: track.album ?? '',
+                                  album: cover.album ?? '',
                                   style: dimStyle,
-                                  onOpen: (track.album ?? '').isEmpty
+                                  onOpen: (cover.album ?? '').isEmpty
                                       ? null
                                       : onOpenAlbum,
                                 ),
