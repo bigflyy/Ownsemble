@@ -82,6 +82,14 @@ class SpeedBench {
     final benches = <String, Future<Map<String, Object?>> Function()>{
       'search': _searchBench,
       'searchFiltered': _filteredSearchBench,
+      'stats': () async {
+        // A failed step loses only this part, not the whole run.
+        try {
+          return await _statsBench();
+        } on Object catch (error) {
+          return {'error': '$error'};
+        }
+      },
       'typeJump': _typeJumpBench,
       'scroll': _scrollBench,
       'scrollCovers': _scrollCoversBench,
@@ -463,6 +471,93 @@ class SpeedBench {
       'playEndedUpdateMs': playOneMs,
       ...typed,
     };
+  }
+
+  /// Stats (plan 04, D4): how long Stats, its Calendar tab and a whole
+  /// year's report take to show, each from the change to the frame on
+  /// screen, three times each. Uses last year, a full one. What the data
+  /// folder had shown is put back.
+  Future<Map<String, Object?>> _statsBench() async {
+    final filters = library.filters;
+    if (filters == null) return {'skipped': 'no filters'};
+    final keptPeriod = filters.period;
+    final keptView = library.view;
+    final lastYear = filters.now.year - 1;
+    final steps = <({String name, int startUs, int uiDoneUs})>[];
+
+    Future<void> step(String name, void Function() change) async {
+      await Future<void>.delayed(const Duration(milliseconds: 300));
+      final startUs = Timeline.now;
+      change();
+      await WidgetsBinding.instance.endOfFrame;
+      steps.add((name: name, startUs: startUs, uiDoneUs: Timeline.now));
+    }
+
+    for (var round = 0; round < 3; round++) {
+      library.showView(LibraryView.songs);
+      filters.setPeriod(const PlayPeriod.year(offset: -1));
+      await _settle();
+      await step(
+        'stats',
+        () => library.showView(const LibraryView(ViewKind.stats)),
+      );
+      await step('calendar', () => _tapKey('stats-tab-calendar'));
+      await step('yearReport', () => library.openYearReport(lastYear));
+      await step('back', library.goBack);
+      // The next round opens Stats on its usual tab.
+      _tapKey('stats-tab-songs');
+    }
+    await _settle();
+    final result = <String, Object?>{'year': lastYear};
+    for (final name in const ['stats', 'calendar', 'yearReport', 'back']) {
+      final mine = steps.where((s) => s.name == name).toList();
+      final toRaster = <double>[];
+      for (final s in mine) {
+        final frame = _firstFrameStartingAfter(s.startUs);
+        if (frame == null) continue;
+        toRaster.add(
+          (frame.timestampInMicroseconds(FramePhase.rasterFinish) - s.startUs) /
+              1000,
+        );
+      }
+      result[name] = {
+        'toRasterMs': toRaster,
+        'uiDoneMs': [for (final s in mine) (s.uiDoneUs - s.startUs) / 1000],
+      };
+    }
+    library.showView(keptView);
+    filters.setPeriod(keptPeriod);
+    await _settle();
+    return result;
+  }
+
+  /// Calls the tap handler under the widget keyed [key], as a click would.
+  void _tapKey(String key) {
+    void Function()? onTap;
+    void find(Element element) {
+      if (onTap != null) return;
+      final widget = element.widget;
+      if (widget.key == ValueKey(key)) {
+        void inner(Element e) {
+          if (onTap != null) return;
+          final w = e.widget;
+          if (w is GestureDetector && w.onTap != null) {
+            onTap = w.onTap;
+            return;
+          }
+          e.visitChildElements(inner);
+        }
+
+        inner(element);
+        return;
+      }
+      element.visitChildElements(find);
+    }
+
+    WidgetsBinding.instance.rootElement?.visitChildElements(find);
+    final tap = onTap;
+    if (tap == null) throw StateError('nothing to tap at $key');
+    tap();
   }
 
   /// Types [queries] one character at a time and measures each keystroke
