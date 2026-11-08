@@ -46,6 +46,8 @@ import 'package:ownsemble/ui/filter_bar.dart';
 import 'package:ownsemble/ui/library_controller.dart';
 import 'package:ownsemble/ui/library_screen.dart';
 import 'package:ownsemble/ui/shell_settings.dart';
+import 'package:ownsemble/ui/stat_text.dart';
+import 'package:ownsemble/ui/stats_calendar.dart';
 import 'package:ownsemble/ui/sync_controller.dart';
 import 'package:ownsemble/vk/vk_sync.dart';
 import 'package:path/path.dart' as p;
@@ -1707,6 +1709,116 @@ void main() {
       await tester.pump();
       expect(library.view.kind, ViewKind.stats, reason: 'Back returns');
     }
+    // ignore: avoid_print
+    print(
+      'Stats: opened in ${statsClock.elapsedMilliseconds} ms; tiles equal '
+      'History ($countedPlays plays, ${counted.length} songs, '
+      '${countedArtists.length} artists); top song played on click; '
+      'artist row opened Songs filtered; $albumOpened',
+    );
+
+    // Calendar tab and year report (plan 04, D2), against a count made here
+    // from History. The song started above is stopped first: heard time
+    // grows every 5 s while a song plays.
+    await player.stop();
+    await tester.pump(const Duration(milliseconds: 300));
+    final calNow = DateTime.now();
+    final todayPlays = <HistoryEntry>[];
+    var todayHeard = 0, todayCounted2 = 0, yearCounted = 0, yearHeard = 0;
+    final calStore = LibraryStore.open(p.join(copyDir, 'library.db'));
+    try {
+      for (final play in calStore.history(limit: 1 << 30).reversed) {
+        final song = library.byId(play.trackId);
+        final counts =
+            song != null &&
+            isCountedPlay(
+              listenedMs: play.listenedMs,
+              ended: play.ended,
+              durationSec: song.durationSec,
+            );
+        if (DayRange.year(calNow.year).contains(play.playedAtMs)) {
+          yearHeard += play.listenedMs ?? 0;
+          if (counts) yearCounted++;
+        }
+        if (!today.contains(play.playedAtMs)) continue;
+        todayPlays.add(play);
+        todayHeard += play.listenedMs ?? 0;
+        if (counts) todayCounted2++;
+      }
+    } finally {
+      calStore.close();
+    }
+    final calendarClock = Stopwatch()..start();
+    await tester.tap(find.byKey(const ValueKey('stats-tab-calendar')));
+    await tester.pump();
+    calendarClock.stop();
+    final todayKey = 'cal-day-${isoDay(today.first)}';
+    expect(
+      tester.widget<Tooltip>(find.byKey(ValueKey(todayKey))).message,
+      '${calendarDayText(today.first)}: ${listenedText(todayHeard)}',
+      reason: "today's square says the time heard in History",
+    );
+    final panel = find.byKey(const ValueKey('cal-panel'));
+    expect(textsOf(panel), contains(calendarDayText(today.first)));
+    expect(
+      textsOf(panel),
+      contains(
+        '${listenedText(todayHeard)}, ${todayPlays.length} plays, '
+        '$todayCounted2 counted',
+      ),
+      reason: "the panel adds up today's plays as History does",
+    );
+    // Shift+click on yesterday: the two days.
+    final yesterday = DateTime(calNow.year, calNow.month, calNow.day - 1);
+    Future<void> reveal(Finder target) async {
+      await tester.ensureVisible(target);
+      await tester.pump();
+    }
+
+    await reveal(find.byKey(ValueKey(todayKey)));
+    await tester.tap(find.byKey(ValueKey(todayKey)));
+    await tester.pump();
+    await reveal(find.byKey(ValueKey('cal-day-${isoDay(yesterday)}')));
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
+    await tester.tap(find.byKey(ValueKey('cal-day-${isoDay(yesterday)}')));
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
+    await tester.pump();
+    expect(textsOf(panel), contains('2 days: '));
+    // Back to today; Play these songs starts the first song played today.
+    await reveal(find.byKey(ValueKey(todayKey)));
+    await tester.tap(find.byKey(ValueKey(todayKey)));
+    await tester.pump();
+    final firstToday = todayPlays
+        .map((e) => library.byId(e.trackId))
+        .firstWhere((t) => t != null)!;
+    await reveal(find.byKey(const ValueKey('cal-play-all')));
+    await tester.tap(find.byKey(const ValueKey('cal-play-all')));
+    await tester.pump();
+    await waitUntil(
+      tester,
+      () => player.current?.id == firstToday.id,
+      what: "the first song of today to start from the Calendar",
+    );
+    // The year report from the banner: this year's counted plays.
+    final reportClock = Stopwatch()..start();
+    // The banner tops a lazily built list: scroll back up to it.
+    await tester.drag(
+      find.byKey(const ValueKey('stats-page')),
+      const Offset(0, 5000),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('stats-open-year')));
+    await tester.pump();
+    reportClock.stop();
+    expect(library.view, LibraryView(ViewKind.yearReport, year: calNow.year));
+    expect(
+      textsOf(find.byKey(const ValueKey('year-tile-plays'))),
+      contains('| $yearCounted |'),
+      reason: 'the year report counts plays as History does',
+    );
+    library.goBack();
+    await tester.pump();
+    expect(library.view.kind, ViewKind.stats, reason: 'Back returns');
     filters
       ..showAllSongs()
       ..setPeriod(const PlayPeriod.month());
@@ -1714,10 +1826,12 @@ void main() {
     await tester.pump();
     // ignore: avoid_print
     print(
-      'Stats: opened in ${statsClock.elapsedMilliseconds} ms; tiles equal '
-      'History ($countedPlays plays, ${counted.length} songs, '
-      '${countedArtists.length} artists); top song played on click; '
-      'artist row opened Songs filtered; $albumOpened',
+      'Calendar: opened in ${calendarClock.elapsedMilliseconds} ms; today '
+      '${listenedText(todayHeard)}, ${todayPlays.length} plays, '
+      '$todayCounted2 counted, equal to History; Shift+click picked 2 days; '
+      'Play these songs started ${firstToday.title}. Year report: opened '
+      'in ${reportClock.elapsedMilliseconds} ms, $yearCounted counted plays '
+      '(${listenedText(yearHeard)}) equal to History; Back returned',
     );
 
     // Favorites (plan 05), all by clicks: the player's heart makes the
