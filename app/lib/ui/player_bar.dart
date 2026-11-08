@@ -241,27 +241,41 @@ class DockBar extends StatelessWidget {
                               ),
                               const SizedBox(width: 12),
                             ],
+                            // The heart follows the title, as in Spotify;
+                            // Up Next keeps its place at the end.
                             Expanded(
-                              child: SongTitle(
-                                track: track,
-                                mark: VersionTag(
-                                  playback: playback,
-                                  track: track,
-                                  onOpen: onOpenVersions,
+                              child: Align(
+                                alignment: Alignment.centerLeft,
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Flexible(
+                                      child: SongTitle(
+                                        track: track,
+                                        mark: VersionTag(
+                                          playback: playback,
+                                          track: track,
+                                          onOpen: onOpenVersions,
+                                        ),
+                                        onGoToSong: onGoToSong,
+                                        onOpenAlbum: onOpenAlbum == null
+                                            ? null
+                                            : () => onOpenAlbum!(track),
+                                      ),
+                                    ),
+                                    if (collections != null && track.inLibrary)
+                                      FavoriteHeart(
+                                        key: const ValueKey('player-heart'),
+                                        favorite: collections!.isFavorite(
+                                          track.id,
+                                        ),
+                                        onPressed: () =>
+                                            collections!.toggleFavorite(track),
+                                      ),
+                                  ],
                                 ),
-                                onGoToSong: onGoToSong,
-                                onOpenAlbum: onOpenAlbum == null
-                                    ? null
-                                    : () => onOpenAlbum!(track),
                               ),
                             ),
-                            if (collections != null && track.inLibrary)
-                              FavoriteHeart(
-                                key: const ValueKey('player-heart'),
-                                favorite: collections!.isFavorite(track.id),
-                                onPressed: () =>
-                                    collections!.toggleFavorite(track),
-                              ),
                             UpNextButton(
                               playback: playback,
                               thumbnails: thumbnails,
@@ -410,6 +424,7 @@ class SongTitle extends StatelessWidget {
       mainAxisSize: MainAxisSize.min,
       children: [
         Row(
+          mainAxisSize: MainAxisSize.min,
           children: [
             Flexible(
               child: onGoToSong == null

@@ -1199,6 +1199,17 @@ void main() {
           tester.getSize(neighbour),
           reason: '$dock: the heart is as big as the buttons beside it',
         );
+        if (dock == PlayerDock.bottom) {
+          // The user, 2026-11-08: in the bottom bar the heart stood far
+          // from the title. It follows the title and artist, as in
+          // Spotify.
+          expect(
+            tester.getTopLeft(heart).dx -
+                tester.getTopRight(find.byType(SongTitle)).dx,
+            lessThan(24),
+            reason: 'the heart sits right after the title',
+          );
+        }
         await tester.tap(heart);
         await tester.pump();
         expect(collections.isFavorite(song.id), isTrue, reason: '$dock');
