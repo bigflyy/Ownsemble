@@ -101,6 +101,34 @@ void main() {
   });
   tearDown(() => store.close());
 
+  test('plays from before heard time was kept are counted apart', () {
+    // No heard time and no end, as plays recorded before schema 9.
+    store.addPlays([
+      for (final day in [1, 3])
+        (
+          ids[2],
+          DateTime(2026, 11, day, 10).millisecondsSinceEpoch,
+          null,
+          null,
+        ),
+    ]);
+    // A play that has just begun has 0 heard so far: it is timed.
+    store.beginPlay(
+      ids[3],
+      start: PlayStart.chosen,
+      shuffle: false,
+      atMs: DateTime(2026, 11, 7, 13).millisecondsSinceEpoch,
+    );
+    final report = reportOf(2026);
+    expect(report.untimedPlays, 2);
+    // Выхода нет on 2 Nov has its heard time.
+    expect(
+      report.firstTimedMs,
+      DateTime(2026, 11, 2, 9).millisecondsSinceEpoch,
+    );
+    expect(reportOf(2025).untimedPlays, 0);
+  });
+
   test('totals, compared with the year before', () {
     final report = reportOf(2025);
     expect(report.totals.plays, 8);

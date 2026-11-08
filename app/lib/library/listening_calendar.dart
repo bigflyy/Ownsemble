@@ -10,6 +10,7 @@ class PlayMoment {
     required this.listenedMs,
     required this.counted,
     this.ended,
+    this.timed = true,
   });
 
   final int trackId;
@@ -22,6 +23,10 @@ class PlayMoment {
   final int listenedMs;
 
   final bool counted;
+
+  /// False for a play recorded before heard time was kept (schema 9,
+  /// 6 Nov 2026): its [listenedMs] is 0 because it is unknown.
+  final bool timed;
 
   /// How the play ended; null while it goes on, after a crash, or before
   /// schema 9.

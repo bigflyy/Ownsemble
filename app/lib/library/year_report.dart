@@ -101,6 +101,14 @@ class YearReport {
 
   BusyDay? busiestDay;
 
+  /// Plays with no heard time: recorded before the app kept it (schema 9,
+  /// 6 Nov 2026). They count as plays but add no time.
+  int untimedPlays = 0;
+
+  /// The year's first play with a heard time, Unix milliseconds; null when
+  /// it has none.
+  int? firstTimedMs;
+
   /// Time heard on each day of the year, from 1 January.
   late final List<int> dayHeard;
 
@@ -186,6 +194,11 @@ class YearReport {
       final hour = starts[day + 1] - starts[day] == Duration.millisecondsPerDay
           ? (p.atMs - starts[day]) ~/ Duration.millisecondsPerHour
           : DateTime.fromMillisecondsSinceEpoch(p.atMs).hour;
+      if (!p.timed) {
+        untimedPlays++;
+      } else {
+        firstTimedMs ??= p.atMs;
+      }
       dayHeard[day] += p.listenedMs;
       monthHeard[month] += p.listenedMs;
       hourHeard[hour] += p.listenedMs;

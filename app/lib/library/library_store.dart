@@ -1167,7 +1167,8 @@ class LibraryStore implements PlayLog, PlayStatsSource {
     for (final row in _db.select(
       '''
       SELECT h.track_id, h.played_at_ms, coalesce(h.listened_ms, 0) AS heard,
-             h.ended, $countedPlaySql AS counted
+             h.ended, $countedPlaySql AS counted,
+             h.listened_ms IS NOT NULL AS timed
       FROM history h INDEXED BY history_by_time
       JOIN tracks t ON t.id = h.track_id
       ${range == null ? '' : 'WHERE h.played_at_ms >= ? AND h.played_at_ms < ?'}
@@ -1183,6 +1184,7 @@ class LibraryStore implements PlayLog, PlayStatsSource {
         listenedMs: row['heard'] as int,
         counted: row['counted'] == 1,
         ended: PlayEnd.values.asNameMap()[row['ended']],
+        timed: row['timed'] == 1,
       ),
   ];
 
@@ -1233,8 +1235,9 @@ class LibraryStore implements PlayLog, PlayStatsSource {
           as int?;
 
   /// Writes many plays at once: song id, start (Unix ms), heard ms and how
-  /// it ended (a [PlayEnd] name). For generated test and gate libraries.
-  void addPlays(Iterable<(int, int, int, String)> plays) => _transaction(() {
+  /// it ended (a [PlayEnd] name); null heard ms and end for a play as
+  /// recorded before schema 9. For generated test and gate libraries.
+  void addPlays(Iterable<(int, int, int?, String?)> plays) => _transaction(() {
     final statement = _db.prepare(
       'INSERT INTO history (track_id, played_at_ms, started, shuffle, '
       "listened_ms, ended) VALUES (?, ?, 'chosen', 0, ?, ?)",
