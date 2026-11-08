@@ -417,6 +417,12 @@ void main() {
 
   testWidgets('the app works the way the user uses it', (tester) async {
     expect(dataDir, isNotEmpty, reason: 'pass --dart-define=OWNSEMBLE_DATA');
+    // The system's "reduce motion": the playing mark's bars stand still, so
+    // pumpAndSettle can settle while a song plays (their motion is checked
+    // in test/playing_mark_test.dart).
+    tester.platformDispatcher.accessibilityFeaturesTestValue =
+        const FakeAccessibilityFeatures(disableAnimations: true);
+    addTearDown(tester.platformDispatcher.clearAccessibilityFeaturesTestValue);
     final copyDir = '$dataDir-acceptance';
     final fakeKey = prepareCopy(dataDir, copyDir);
     // The copied library keeps the History of whoever used it before (the
@@ -1799,6 +1805,35 @@ void main() {
       () => player.current?.id == firstToday.id,
       what: "the first song of today to start from the Calendar",
     );
+    // While that list plays its button says Pause and its rows carry the
+    // playing mark (user, 2026-11-08); a click pauses it, not starts it over.
+    final playAll = find.byKey(const ValueKey('cal-play-all'));
+    await waitUntil(
+      tester,
+      () => player.playing.value && textsOf(playAll) == 'Pause',
+      what: 'Play these songs to show Pause while its list plays',
+    );
+    expect(
+      find.descendant(
+        of: panel,
+        matching: find.byKey(const ValueKey('playing-bars')),
+      ),
+      findsWidgets,
+      reason: 'the playing song is marked in the Calendar panel',
+    );
+    await tester.tap(playAll);
+    await waitUntil(
+      tester,
+      () => !player.playing.value && textsOf(playAll) == 'Play these songs',
+      what: 'Pause to pause the Calendar list',
+    );
+    expect(player.current?.id, firstToday.id, reason: 'paused, not restarted');
+    await tester.tap(playAll);
+    await waitUntil(
+      tester,
+      () => player.playing.value && player.current?.id == firstToday.id,
+      what: 'Play these songs to resume the paused song',
+    );
     // The year report from the banner: this year's counted plays.
     final reportClock = Stopwatch()..start();
     // The banner tops a lazily built list: scroll back up to it.
@@ -1816,6 +1851,30 @@ void main() {
       contains('| $yearCounted |'),
       reason: 'the year report counts plays as History does',
     );
+    // The song of the year: Play starts it and turns into Pause (user,
+    // 2026-11-08); when it is already the playing song, Pause pauses it.
+    final yearPlay = find.byKey(const ValueKey('year-play-song'));
+    var yearButton = 'none';
+    if (yearPlay.evaluate().isNotEmpty) {
+      final before = textsOf(yearPlay);
+      await tester.tap(yearPlay);
+      await waitUntil(
+        tester,
+        () => before == 'Pause'
+            ? !player.playing.value && textsOf(yearPlay) == 'Play'
+            : player.playing.value && textsOf(yearPlay) == 'Pause',
+        what: 'the song of the year button to turn from $before',
+      );
+      yearButton = '$before -> ${textsOf(yearPlay)}';
+      if (!player.playing.value) {
+        await tester.tap(yearPlay);
+        await waitUntil(
+          tester,
+          () => player.playing.value,
+          what: 'the song of the year to resume',
+        );
+      }
+    }
     library.goBack();
     await tester.pump();
     expect(library.view.kind, ViewKind.stats, reason: 'Back returns');
@@ -1831,7 +1890,9 @@ void main() {
       '$todayCounted2 counted, equal to History; Shift+click picked 2 days; '
       'Play these songs started ${firstToday.title}. Year report: opened '
       'in ${reportClock.elapsedMilliseconds} ms, $yearCounted counted plays '
-      '(${listenedText(yearHeard)}) equal to History; Back returned',
+      '(${listenedText(yearHeard)}) equal to History; song of the year '
+      'button $yearButton; Back returned. Play these songs showed Pause '
+      'and the playing mark, paused and resumed the same song',
     );
 
     // Favorites (plan 05), all by clicks: the player's heart makes the

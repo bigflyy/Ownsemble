@@ -82,6 +82,11 @@ void main() {
   testWidgets('a song whose VK file was swapped', (tester) async {
     expect(dataDir, isNotEmpty, reason: 'pass --dart-define=OWNSEMBLE_DATA');
     expect(trackId, isNot(-1), reason: 'pass OWNSEMBLE_TRACK');
+    // Reduce motion: the playing mark stands still, so pumpAndSettle can
+    // settle while a song plays.
+    tester.platformDispatcher.accessibilityFeaturesTestValue =
+        const FakeAccessibilityFeatures(disableAnimations: true);
+    addTearDown(tester.platformDispatcher.clearAccessibilityFeaturesTestValue);
     // A fresh copy of the library alone: no stored audio, so it streams.
     final copy = Directory('$dataDir-versions');
     if (copy.existsSync()) copy.deleteSync(recursive: true);
