@@ -4,6 +4,7 @@ import '../library/day_range.dart';
 import '../library/listening_stats.dart';
 import '../library/track.dart';
 import 'cover_tile.dart';
+import 'playing_mark.dart';
 import 'song_filters.dart';
 import 'stat_text.dart';
 import 'stats_calendar.dart';
@@ -270,6 +271,7 @@ class _StatsPageState extends State<StatsPage> {
               row: row,
               share: row.plays / topPlays,
               bars: !narrow,
+              song: _tab == RankBy.songs,
               onTap: () => switch (_tab) {
                 RankBy.songs => widget.onPlay([
                   for (final r in rows) r.songs.single,
@@ -457,6 +459,7 @@ class _RankRow extends StatelessWidget {
     required this.row,
     required this.share,
     required this.bars,
+    required this.song,
     required this.onTap,
     required this.tooltip,
   });
@@ -465,6 +468,9 @@ class _RankRow extends StatelessWidget {
   final RankedRow row;
   final double share;
   final bool bars;
+
+  /// A song's row, which shows the playing mark while that song is on.
+  final bool song;
   final VoidCallback onTap;
   final String tooltip;
 
@@ -531,7 +537,9 @@ class _RankRow extends StatelessWidget {
                     ),
                   ),
                 ),
-                TrackTile(track: row.songs.first, size: 40, radius: 8),
+                song
+                    ? MarkedTile(track: row.songs.first, size: 40, radius: 8)
+                    : TrackTile(track: row.songs.first, size: 40, radius: 8),
                 const SizedBox(width: 12),
                 Expanded(
                   child: Column(

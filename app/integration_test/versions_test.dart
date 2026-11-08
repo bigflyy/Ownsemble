@@ -34,6 +34,7 @@ import 'package:ownsemble/main.dart' as app;
 import 'package:ownsemble/playback/player_service.dart';
 import 'package:ownsemble/ui/library_controller.dart';
 import 'package:ownsemble/ui/library_screen.dart';
+import 'package:ownsemble/ui/playing_mark.dart';
 import 'package:path/path.dart' as p;
 import 'package:sqlite3/sqlite3.dart';
 
@@ -250,10 +251,7 @@ void main() {
     expect((heardLength! - listen.file!.seconds).abs(), lessThan(1.5));
     await tester.pump(const Duration(milliseconds: 300));
     expect(
-      find.descendant(
-        of: rowOf(listen),
-        matching: find.byIcon(Icons.graphic_eq),
-      ),
+      find.descendant(of: rowOf(listen), matching: find.byType(PlayingMark)),
       findsOneWidget,
       reason: 'the playing mark on its row',
     );

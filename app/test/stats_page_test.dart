@@ -13,10 +13,12 @@ import 'package:ownsemble/ui/collections_controller.dart';
 import 'package:ownsemble/ui/cover_tile.dart';
 import 'package:ownsemble/ui/library_controller.dart';
 import 'package:ownsemble/ui/library_screen.dart';
+import 'package:ownsemble/ui/playing_mark.dart';
 import 'package:ownsemble/ui/shell_settings.dart';
 import 'package:ownsemble/ui/song_filters.dart';
 import 'package:ownsemble/ui/stats_page.dart';
 import 'package:ownsemble/ui/theme.dart';
+import 'package:ownsemble/ui/year_report_page.dart';
 
 /// Saturday 7 November 2026.
 final now = DateTime(2026, 11, 7, 14);
@@ -524,6 +526,38 @@ void main() {
       expect(tester.takeException(), isNull);
     });
 
+    testWidgets('top songs show the time heard; plays without one are '
+        'explained', (tester) async {
+      // Before heard time was kept: Хочешь? begun on 1 Nov, never timed.
+      store.addPlays([
+        (ids[2], DateTime(2026, 11, 1, 10).millisecondsSinceEpoch, null, null),
+      ]);
+      await pumpStats(tester);
+      library.openYearReport(2026);
+      await tester.pump();
+      final top = find.byKey(
+        const ValueKey('year-song-0'),
+        skipOffstage: false,
+      );
+      await tester.ensureVisible(top);
+      await tester.pump();
+      // Выхода нет: 3 plays of 150 s.
+      expect(textIn(top), contains('3 plays'));
+      expect(textIn(top), contains('8 min'));
+      final untimed = find.byKey(
+        const ValueKey('year-song-3'),
+        skipOffstage: false,
+      );
+      expect(textIn(untimed), contains('Хочешь?'));
+      expect(textIn(untimed), contains('1 play'));
+      expect(textIn(untimed), isNot(contains('min')));
+      expect(
+        textIn(find.byKey(const ValueKey('year-untimed'), skipOffstage: false)),
+        contains('1 play from before 2 Nov 2026 has no heard time'),
+      );
+      expect(tester.takeException(), isNull);
+    });
+
     testWidgets('songs new to you and a narrow window', (tester) async {
       await pumpStats(tester, size: const Size(760, 900));
       library.openYearReport(2026);
@@ -547,6 +581,183 @@ void main() {
         findsNothing,
       );
       expect(tester.takeException(), isNull);
+    });
+  });
+
+  group('Playing mark', () {
+    Finder mark(String rowKey) => find.descendant(
+      of: find.byKey(ValueKey(rowKey), skipOffstage: false),
+      matching: find.byKey(const ValueKey('playing-mark'), skipOffstage: false),
+      skipOffstage: false,
+    );
+
+    Future<void> pumpPage(WidgetTester tester, Widget page) async {
+      tester.view.physicalSize = const Size(1600, 1400);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      // Выхода нет is playing.
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: buildTheme(OwnColors.light),
+          home: Scaffold(
+            body: NowPlaying(trackId: ids[1], playing: true, child: page),
+          ),
+        ),
+      );
+    }
+
+    testWidgets('the top songs and the calendar panel mark the playing '
+        'song on every row of it', (tester) async {
+      filters.load();
+      await pumpPage(
+        tester,
+        StatsPage(
+          filters: filters,
+          songs: library.all,
+          onPlay: (_, _) {},
+          onOpenArtist: (_) {},
+          onOpenAlbum: (_) {},
+        ),
+      );
+      expect(mark('stats-row-0'), findsOneWidget);
+      expect(mark('stats-row-1'), findsNothing);
+      // An artist is not a song: no mark on Сплин.
+      await tester.tap(find.byKey(const ValueKey('stats-tab-artists')));
+      await tester.pump();
+      expect(find.byKey(const ValueKey('playing-mark')), findsNothing);
+
+      await tester.tap(find.byKey(const ValueKey('stats-tab-calendar')));
+      await tester.pump();
+      // Fri 6 Nov: Группа крови twice.
+      expect(mark('cal-play-0'), findsNothing);
+      await tester.tap(find.byKey(const ValueKey('cal-day-2026-11-03')));
+      await tester.pump();
+      expect(mark('cal-play-0'), findsOneWidget);
+      // Mon 2 Nov: only Кукушка.
+      await tester.tap(find.byKey(const ValueKey('cal-day-2026-11-02')));
+      await tester.pump();
+      expect(find.byKey(const ValueKey('playing-mark')), findsNothing);
+    });
+
+    testWidgets('the year report marks the playing song in its song lists, '
+        'not in its artists', (tester) async {
+      filters.load();
+      await pumpPage(
+        tester,
+        YearReportPage(
+          filters: filters,
+          songs: library.all,
+          year: 2026,
+          onPlay: (_, _) {},
+          onOpenArtist: (_) {},
+        ),
+      );
+      expect(mark('year-song-0'), findsOneWidget);
+      expect(mark('year-song-1'), findsNothing);
+      expect(mark('year-artist-0'), findsNothing);
+      expect(mark('year-new-0'), findsOneWidget);
+      expect(mark('year-new-1'), findsNothing);
+    });
+  });
+
+  group('Play turns into Pause', () {
+    String label(String key) => textIn(find.byKey(ValueKey(key)));
+
+    Future<void> pumpPage(
+      WidgetTester tester,
+      Widget page, {
+      required int? trackId,
+      required bool playing,
+      List<int> contextIds = const [],
+      VoidCallback? onPlayOrPause,
+    }) async {
+      tester.view.physicalSize = const Size(1600, 1400);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: buildTheme(OwnColors.light),
+          home: Scaffold(
+            body: NowPlaying(
+              trackId: trackId,
+              playing: playing,
+              contextIds: contextIds,
+              onPlayOrPause: onPlayOrPause,
+              child: page,
+            ),
+          ),
+        ),
+      );
+    }
+
+    testWidgets('the song of the year: Pause while it plays, Play while '
+        'it is paused or another song plays', (tester) async {
+      filters.load();
+      final page = YearReportPage(
+        filters: filters,
+        songs: library.all,
+        year: 2026,
+        onPlay: (_, _) {},
+        onOpenArtist: (_) {},
+      );
+      // Выхода нет is the song of 2026.
+      await pumpPage(tester, page, trackId: ids[1], playing: true);
+      expect(label('year-play-song'), 'Pause');
+      await pumpPage(tester, page, trackId: ids[1], playing: false);
+      expect(label('year-play-song'), 'Play');
+      await pumpPage(tester, page, trackId: ids[3], playing: true);
+      expect(label('year-play-song'), 'Play');
+    });
+
+    testWidgets('Play these songs: Pause while that list plays, and a click '
+        'pauses it instead of starting it over', (tester) async {
+      filters.load();
+      final calls = <(List<int>, int)>[];
+      var toggles = 0;
+      final page = StatsPage(
+        filters: filters,
+        songs: library.all,
+        onPlay: (list, index) =>
+            calls.add(([for (final t in list) t.id], index)),
+        onOpenArtist: (_) {},
+        onOpenAlbum: (_) {},
+      );
+      Future<void> pumpWith(List<int> contextIds, int trackId) async {
+        await pumpPage(
+          tester,
+          page,
+          trackId: trackId,
+          playing: true,
+          contextIds: contextIds,
+          onPlayOrPause: () => toggles++,
+        );
+        await tester.pump();
+      }
+
+      // 2 to 6 Nov in time order: Кукушка, Выхода нет, Группа крови;
+      // the second one plays from that list.
+      final days = [ids[0], ids[1], ids[3]];
+      await pumpWith(days, ids[1]);
+      await tester.tap(find.byKey(const ValueKey('stats-tab-calendar')));
+      await tester.pump();
+      await tester.tap(find.byKey(const ValueKey('cal-day-2026-11-02')));
+      await tester.pump();
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
+      await tester.tap(find.byKey(const ValueKey('cal-day-2026-11-06')));
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
+      await tester.pump();
+      expect(label('cal-play-all'), 'Pause');
+      await tester.tap(find.byKey(const ValueKey('cal-play-all')));
+      expect(toggles, 1);
+      expect(calls, isEmpty);
+
+      // The same song playing from another list: the button starts this one.
+      await pumpWith([ids[1]], ids[1]);
+      expect(label('cal-play-all'), 'Play these songs');
+      await tester.tap(find.byKey(const ValueKey('cal-play-all')));
+      expect(toggles, 1);
+      expect(calls.single.$1, days);
+      expect(calls.single.$2, 0);
     });
   });
 

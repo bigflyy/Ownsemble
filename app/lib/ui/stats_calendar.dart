@@ -6,7 +6,7 @@ import '../library/library_records.dart';
 import '../library/play_period.dart';
 import '../library/play_stats.dart';
 import '../library/track.dart';
-import 'cover_tile.dart';
+import 'playing_mark.dart';
 import 'song_filters.dart';
 import 'stat_text.dart';
 import 'theme.dart';
@@ -535,6 +535,24 @@ class _DaysPanel extends StatelessWidget {
   final String? countingSince;
   final void Function(List<Track> list, int index) onPlay;
 
+  /// Play these songs; Pause while this list plays, as Spotify's. A click
+  /// then pauses or resumes it instead of starting it over.
+  Widget _playAll(BuildContext context, List<Track> songs) {
+    final state = NowPlaying.listStateFor(context, songs);
+    return TextButton.icon(
+      key: const ValueKey('cal-play-all'),
+      onPressed: () {
+        if (state != null && NowPlaying.playOrPause(context)) return;
+        onPlay(songs, 0);
+      },
+      icon: Icon(
+        state == true ? Icons.pause_rounded : Icons.play_arrow_rounded,
+        size: 18,
+      ),
+      label: Text(state == true ? 'Pause' : 'Play these songs'),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final colors = OwnColors.of(context);
@@ -631,13 +649,7 @@ class _DaysPanel extends StatelessWidget {
                   ],
                 ),
               ),
-              if (songs.isNotEmpty)
-                TextButton.icon(
-                  key: const ValueKey('cal-play-all'),
-                  onPressed: () => onPlay(songs, 0),
-                  icon: const Icon(Icons.play_arrow_rounded, size: 18),
-                  label: const Text('Play these songs'),
-                ),
+              if (songs.isNotEmpty) _playAll(context, songs),
             ],
           ),
           if (entries.isNotEmpty) ...[
@@ -703,7 +715,7 @@ class _PlayRow extends StatelessWidget {
                 ),
               ),
             ),
-            TrackTile(track: track, size: 32, radius: 6),
+            MarkedTile(track: track, size: 32, radius: 6),
             const SizedBox(width: 10),
             Expanded(
               child: Column(

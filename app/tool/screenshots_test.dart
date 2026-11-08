@@ -177,6 +177,9 @@ void main() {
     // The first song gets three artists and a short title (the bottom bar
     // cuts the artist line at the title's width, user 2026-11-08).
     bool longNames = false,
+    // The first song (the most played) plays, so its rows show the moving
+    // playing mark (Stats lists, the Calendar panel, the year report).
+    bool playingFirst = false,
   }) async {
     final store = LibraryStore.open(':memory:');
     addTearDown(store.close);
@@ -397,9 +400,12 @@ void main() {
 
     // A song playing while it is saved, and another one downloading.
     final storage = AudioStorage(dataDir: '.', store: store);
-    final player = saving
+    final player = saving || playingFirst
         ? _ShownPlayer(storage)
         : PlayerService(muted: true, dataDir: '.');
+    if (playingFirst && !saving) {
+      await player.play(library.all.firstWhere((t) => t.id == ids[0]));
+    }
     if (saving) {
       final tracks = library.visible;
       await player.play(tracks[0]);
@@ -504,6 +510,11 @@ void main() {
       await tester.pump();
       await tester.pump();
     }
+    if (playingFirst) {
+      // The bars move without end, so no pumpAndSettle after this.
+      player.playing.value = true;
+      await tester.pump(const Duration(milliseconds: 300));
+    }
     // Text without the app's font shows here as solid boxes and in the real
     // app in the system font; icons have their own font.
     for (final paragraph
@@ -525,6 +536,8 @@ void main() {
           .writeAsBytesSync(png!.buffer.asUint8List());
     });
     library.jump.clear();
+    // Stops the playing timer of the controller before the tree goes.
+    if (playingFirst) player.playing.value = false;
   }
 
   testWidgets('dark, side panel', (t) => shoot(t, 'dark-side', dark: true));
@@ -806,6 +819,7 @@ void main() {
     (t) => shoot(
       t,
       'dark-stats',
+      playingFirst: true,
       dark: true,
       view: const LibraryView(ViewKind.stats),
     ),
@@ -837,6 +851,7 @@ void main() {
     (t) => shoot(
       t,
       'dark-stats-calendar',
+      playingFirst: true,
       dark: true,
       size: const Size(1440, 1300),
       view: const LibraryView(ViewKind.stats),
@@ -848,6 +863,7 @@ void main() {
     (t) => shoot(
       t,
       'light-stats-calendar-range',
+      playingFirst: true,
       dark: false,
       dock: PlayerDock.bottom,
       view: const LibraryView(ViewKind.stats),
@@ -857,10 +873,41 @@ void main() {
     ),
   );
   testWidgets(
+    'light, Stats, Calendar, a range, very wide window',
+    (t) => shoot(
+      t,
+      'light-stats-calendar-wide',
+      playingFirst: true,
+      dark: false,
+      size: const Size(2560, 1300),
+      dock: PlayerDock.bottom,
+      view: const LibraryView(ViewKind.stats),
+      statsTab: 'calendar',
+      calendarRange: true,
+      longNames: true,
+    ),
+  );
+  testWidgets(
+    'dark, Stats, Calendar, 1000 wide, bottom player',
+    (t) => shoot(
+      t,
+      'dark-stats-calendar-1000',
+      playingFirst: true,
+      dark: true,
+      size: const Size(1000, 900),
+      dock: PlayerDock.bottom,
+      view: const LibraryView(ViewKind.stats),
+      statsTab: 'calendar',
+      calendarRange: true,
+      statsScroll: 500,
+    ),
+  );
+  testWidgets(
     'dark, Stats, Calendar, narrow',
     (t) => shoot(
       t,
       'dark-stats-calendar-narrow',
+      playingFirst: true,
       dark: true,
       size: const Size(900, 760),
       dock: PlayerDock.bottom,
@@ -900,6 +947,7 @@ void main() {
     (t) => shoot(
       t,
       'dark-year-report',
+      playingFirst: true,
       dark: true,
       size: const Size(1440, 2500),
       dock: PlayerDock.bottom,
@@ -913,6 +961,7 @@ void main() {
     (t) => shoot(
       t,
       'light-year-report-narrow',
+      playingFirst: true,
       dark: false,
       size: const Size(900, 3000),
       dock: PlayerDock.bottom,

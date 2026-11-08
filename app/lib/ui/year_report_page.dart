@@ -7,6 +7,7 @@ import '../library/play_stats.dart';
 import '../library/track.dart';
 import '../library/year_report.dart';
 import 'cover_tile.dart';
+import 'playing_mark.dart';
 import 'song_filters.dart';
 import 'stat_text.dart';
 import 'stats_calendar.dart';
@@ -322,16 +323,42 @@ class _YearReportPageState extends State<YearReportPage> {
               ),
             ),
             const SizedBox(width: 12),
-            FilledButton.icon(
-              key: const ValueKey('year-play-song'),
-              onPressed: () => widget.onPlay(topSongs, 0),
-              icon: const Icon(Icons.play_arrow_rounded),
-              label: const Text('Play'),
-            ),
+            // Pause while the song plays, as Spotify's; a click on the
+            // current song pauses or resumes it (playFrom does that).
+            if (NowPlaying.stateFor(context, topSongs.first.id) == true)
+              FilledButton.icon(
+                key: const ValueKey('year-play-song'),
+                onPressed: () => widget.onPlay(topSongs, 0),
+                icon: const Icon(Icons.pause_rounded),
+                label: const Text('Pause'),
+              )
+            else
+              FilledButton.icon(
+                key: const ValueKey('year-play-song'),
+                onPressed: () => widget.onPlay(topSongs, 0),
+                icon: const Icon(Icons.play_arrow_rounded),
+                label: const Text('Play'),
+              ),
           ],
         ),
       ),
     ];
+  }
+
+  /// Why some songs show plays but little or no time heard: plays from
+  /// before the app kept heard time (6 Nov 2026). Null when none.
+  String? _untimedText(YearReport report) {
+    final n = report.untimedPlays;
+    if (n == 0) return null;
+    final first = report.firstTimedMs;
+    final when = first == null
+        ? 'recorded before heard time was kept'
+        : 'from before ${PlayPeriod.rangeLabel(DayRange.day(DateTime.fromMillisecondsSinceEpoch(first)))}';
+    return n == 1
+        ? '1 play $when has no heard time: it counts as a play but adds '
+              'no time.'
+        : '$n plays $when have no heard time: they count as plays but add '
+              'no time.';
   }
 
   Widget _tops(OwnColors colors, YearReport report) {
@@ -341,7 +368,7 @@ class _YearReportPageState extends State<YearReportPage> {
     return _TwoColumns(
       left: _Section(
         title: 'Top songs',
-        sub: 'By counted plays',
+        sub: 'By counted plays, with the time heard',
         child: _ListBox(
           rows: [
             for (final (i, row) in songs.indexed)
@@ -352,10 +379,16 @@ class _YearReportPageState extends State<YearReportPage> {
                 title: row.name,
                 sub: row.detail ?? '',
                 right: row.plays == 1 ? '1 play' : '${row.plays} plays',
+                // Nothing for a song with no heard time (plays before it
+                // was kept).
+                rightSub: row.listenedMs > 0
+                    ? listenedText(row.listenedMs)
+                    : null,
                 onTap: () => widget.onPlay(playList, i),
               ),
           ],
           empty: 'No song counted yet.',
+          footer: _untimedText(report),
         ),
       ),
       right: _Section(
@@ -369,6 +402,7 @@ class _YearReportPageState extends State<YearReportPage> {
                 rank: '${i + 1}',
                 track: row.songs.first,
                 title: row.name,
+                song: false,
                 sub:
                     '${row.songs.length == 1 ? '1 song' : '${row.songs.length} songs'}'
                     ', ${listenedText(row.listenedMs)}',
@@ -916,10 +950,13 @@ class _BigTile extends StatelessWidget {
 
 /// A list of up to five rows in a box, or a line when it is empty.
 class _ListBox extends StatelessWidget {
-  const _ListBox({required this.rows, required this.empty});
+  const _ListBox({required this.rows, required this.empty, this.footer});
 
   final List<Widget> rows;
   final String empty;
+
+  /// A small note under the rows.
+  final String? footer;
 
   @override
   Widget build(BuildContext context) {
@@ -932,7 +969,20 @@ class _ListBox extends StatelessWidget {
               padding: const EdgeInsets.all(10),
               child: Text(empty, style: TextStyle(color: colors.dim2)),
             )
-          : Column(children: rows),
+          : Column(
+              children: [
+                ...rows,
+                if (footer case final note?)
+                  Padding(
+                    key: const ValueKey('year-untimed'),
+                    padding: const EdgeInsets.fromLTRB(8, 6, 8, 4),
+                    child: Text(
+                      note,
+                      style: TextStyle(fontSize: 12, color: colors.dim2),
+                    ),
+                  ),
+              ],
+            ),
     );
   }
 }
@@ -946,6 +996,8 @@ class _ListRow extends StatelessWidget {
     required this.sub,
     required this.right,
     required this.onTap,
+    this.rightSub,
+    this.song = true,
   });
 
   final String? rank;
@@ -953,7 +1005,14 @@ class _ListRow extends StatelessWidget {
   final String title;
   final String sub;
   final String right;
+
+  /// A second, smaller line under [right] (a song's time heard).
+  final String? rightSub;
   final VoidCallback onTap;
+
+  /// A song's row (not an artist's), which shows the playing mark while
+  /// that song is on.
+  final bool song;
 
   @override
   Widget build(BuildContext context) {
@@ -976,7 +1035,9 @@ class _ListRow extends StatelessWidget {
                     style: TextStyle(fontSize: 13, color: colors.dim2),
                   ),
                 ),
-              TrackTile(track: track, size: 36, radius: 7),
+              song
+                  ? MarkedTile(track: track, size: 36, radius: 7)
+                  : TrackTile(track: track, size: 36, radius: 7),
               const SizedBox(width: 10),
               Expanded(
                 child: Column(
@@ -999,7 +1060,23 @@ class _ListRow extends StatelessWidget {
                 ),
               ),
               const SizedBox(width: 8),
-              Text(right, style: TextStyle(fontSize: 13, color: colors.dim)),
+              if (rightSub case final below?)
+                Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    Text(
+                      right,
+                      style: TextStyle(fontSize: 13, color: colors.dim),
+                    ),
+                    Text(
+                      below,
+                      style: TextStyle(fontSize: 12, color: colors.dim2),
+                    ),
+                  ],
+                )
+              else
+                Text(right, style: TextStyle(fontSize: 13, color: colors.dim)),
             ],
           ),
         ),

@@ -20,6 +20,7 @@ import 'cover_viewer.dart';
 import 'filling_icon.dart';
 import 'filter_bar.dart';
 import 'library_controller.dart';
+import 'playing_mark.dart';
 import 'player_bar.dart';
 import 'shell_settings.dart';
 import 'shortcuts_help.dart';
@@ -995,24 +996,30 @@ class _LibraryScreenState extends State<LibraryScreen> {
                     ),
                   Expanded(
                     child: statsFilters != null
-                        ? StatsPage(
-                            filters: statsFilters,
-                            songs: library.all,
-                            onPlay: (list, index) =>
-                                widget.playback.playFrom(list, index),
-                            onOpenArtist: _openArtist,
-                            onOpenAlbum: library.openAlbum,
-                            onOpenYear: library.openYearReport,
+                        ? NowPlayingScope(
+                            playback: widget.playback,
+                            child: StatsPage(
+                              filters: statsFilters,
+                              songs: library.all,
+                              onPlay: (list, index) =>
+                                  widget.playback.playFrom(list, index),
+                              onOpenArtist: _openArtist,
+                              onOpenAlbum: library.openAlbum,
+                              onOpenYear: library.openYearReport,
+                            ),
                           )
                         : view.kind == ViewKind.yearReport &&
                               library.filters != null
-                        ? YearReportPage(
-                            filters: library.filters!,
-                            songs: library.all,
-                            year: view.year!,
-                            onPlay: (list, index) =>
-                                widget.playback.playFrom(list, index),
-                            onOpenArtist: _openArtist,
+                        ? NowPlayingScope(
+                            playback: widget.playback,
+                            child: YearReportPage(
+                              filters: library.filters!,
+                              songs: library.all,
+                              year: view.year!,
+                              onPlay: (list, index) =>
+                                  widget.playback.playFrom(list, index),
+                              onOpenArtist: _openArtist,
+                            ),
                           )
                         : view.isLater
                         ? _LaterPage(view: view)
@@ -2163,13 +2170,12 @@ class _SongRow extends StatelessWidget {
                                     width: 44,
                                     height: 44,
                                     decoration: BoxDecoration(
-                                      color: const Color(0x990A0C10),
+                                      color: const Color(0xB30A0C10),
                                       borderRadius: BorderRadius.circular(8),
                                     ),
-                                    child: Icon(
-                                      playing
-                                          ? Icons.graphic_eq
-                                          : Icons.pause_rounded,
+                                    alignment: Alignment.center,
+                                    child: PlayingMark(
+                                      playing: playing,
                                       size: 18,
                                       color: Colors.white,
                                     ),
@@ -2179,10 +2185,8 @@ class _SongRow extends StatelessWidget {
                           : Align(
                               alignment: Alignment.centerRight,
                               child: isCurrent
-                                  ? Icon(
-                                      playing
-                                          ? Icons.graphic_eq
-                                          : Icons.pause_rounded,
+                                  ? PlayingMark(
+                                      playing: playing,
                                       size: 16,
                                       color: colors.accent,
                                     )
