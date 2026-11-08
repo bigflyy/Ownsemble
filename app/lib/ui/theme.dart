@@ -204,11 +204,20 @@ ThemeData buildTheme(OwnColors colors) {
       trackShape: const RoundedRectSliderTrackShape(),
       showValueIndicator: ShowValueIndicator.onDrag,
       valueIndicatorColor: colors.text,
-      valueIndicatorTextStyle: TextStyle(color: colors.bg, fontSize: 12),
+      valueIndicatorTextStyle: TextStyle(
+        fontFamily: appFontFamily,
+        color: colors.bg,
+        fontSize: 12,
+      ),
     ),
     snackBarTheme: SnackBarThemeData(
       backgroundColor: colors.text,
-      contentTextStyle: TextStyle(color: colors.bg, fontSize: 14),
+      // The app's font: a style given here replaces the theme's text font.
+      contentTextStyle: TextStyle(
+        fontFamily: appFontFamily,
+        color: colors.bg,
+        fontSize: 14,
+      ),
       behavior: SnackBarBehavior.floating,
     ),
   );
