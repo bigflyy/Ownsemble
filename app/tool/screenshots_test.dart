@@ -166,6 +166,8 @@ void main() {
     // Calendar tab (plan 04, D2): pick the days from 6 to 2 days ago
     // (click, then Shift+click).
     bool calendarRange = false,
+    // Opens the Calendar panel's Every play tab (a range opens on Top songs).
+    bool calendarPlays = false,
     // Scrolls the Stats page down this far before the shot.
     double statsScroll = 0,
     // Opens the report of this many years before this one (0: this year),
@@ -484,6 +486,10 @@ void main() {
       await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
       await tester.tap(day(2));
       await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
+      await tester.pumpAndSettle();
+    }
+    if (calendarPlays) {
+      await tester.tap(find.byKey(const ValueKey('cal-view-plays')));
       await tester.pumpAndSettle();
     }
     if (reportMonth != null) {
@@ -914,6 +920,23 @@ void main() {
       view: const LibraryView(ViewKind.stats),
       statsTab: 'calendar',
       calendarRange: true,
+      statsScroll: 700,
+    ),
+  );
+  testWidgets(
+    'light, Stats, Calendar, narrow, a range on Every play, long names',
+    (t) => shoot(
+      t,
+      'light-stats-calendar-narrow-plays',
+      playingFirst: true,
+      dark: false,
+      size: const Size(900, 760),
+      dock: PlayerDock.bottom,
+      view: const LibraryView(ViewKind.stats),
+      statsTab: 'calendar',
+      calendarRange: true,
+      calendarPlays: true,
+      longNames: true,
       statsScroll: 700,
     ),
   );

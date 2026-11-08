@@ -59,8 +59,9 @@ Color heatColor(OwnColors colors, int level) => level == 0
 ///
 /// Twelve small months of the page period's year, each day shaded by the
 /// time heard that day. A click picks a day, Shift+click another day picks
-/// the days between; the panel beside the months lists their plays in time
-/// order. Below, "When you listen" adds up the page period by weekday and
+/// the days between; the panel beside the months shows them on two tabs:
+/// Top songs (the most played of those days) and Every play (in time
+/// order). Below, "When you listen" adds up the page period by weekday and
 /// hour. Days before the first recorded play are hatched: nothing could be
 /// recorded then.
 class StatsCalendar extends StatefulWidget {
@@ -91,6 +92,12 @@ class _StatsCalendarState extends State<StatsCalendar> {
 
   /// The day a Shift+click reaches from.
   DateTime? _anchor;
+
+  /// The panel tab the user chose; null until they choose one, and then a
+  /// range opens on Top songs and one day on Every play (plan 04 D2e,
+  /// tabs picked by the user on 2026-11-08). A chosen tab stays while
+  /// other days are picked.
+  _PanelView? _view;
 
   // What was read, and for which days and plays version.
   ({int year, int version, List<int> heard})? _yearDays;
@@ -281,9 +288,16 @@ class _StatsCalendarState extends State<StatsCalendar> {
     }
 
     final months = [for (var m = 1; m <= 12; m++) month(m)];
+    final view =
+        _view ??
+        (shown != null && shown.dayCount > 1
+            ? _PanelView.top
+            : _PanelView.plays);
     Widget panel({required bool fill}) => _DaysPanel(
       key: const ValueKey('cal-panel'),
       fill: fill,
+      view: view,
+      onView: (chosen) => setState(() => _view = chosen),
       picked: shown == null ? null : _daysOf(shown, version),
       nothingIn: period.label(now),
       countingSince:
@@ -476,6 +490,16 @@ class _PickedDays {
       // A song no longer in the library adds to the numbers but has no row.
       if (track == null) continue;
       if (seen.add(track.id)) songs.add(track);
+      final sum = _sums.putIfAbsent(
+        track.id,
+        () => (track: track, counted: 0, heardMs: 0, firstMs: p.atMs),
+      );
+      _sums[track.id] = (
+        track: track,
+        counted: sum.counted + (p.counted ? 1 : 0),
+        heardMs: sum.heardMs + p.listenedMs,
+        firstMs: sum.firstMs,
+      );
       if (!oneDay) {
         final at = DateTime.fromMillisecondsSinceEpoch(p.atMs);
         final day = DateTime(at.year, at.month, at.day);
@@ -486,7 +510,18 @@ class _PickedDays {
       }
       entries.add((day: null, play: i, track: track));
     }
+    // Ranked as the Stats top list: counted plays, then time heard; a tie
+    // goes to the song played first.
+    top = _sums.values.toList()
+      ..sort((a, b) {
+        if (a.counted != b.counted) return b.counted - a.counted;
+        if (a.heardMs != b.heardMs) return b.heardMs - a.heardMs;
+        return a.firstMs - b.firstMs;
+      });
+    topSongs = [for (final row in top) row.track];
   }
+
+  final _sums = <int, _TopSong>{};
 
   final DayRange range;
   final List<PlayMoment> plays;
@@ -496,6 +531,10 @@ class _PickedDays {
 
   /// Each song once, in the order it was first played.
   final songs = <Track>[];
+
+  /// Each song once, the most played first, and its songs in that order.
+  late final List<_TopSong> top;
+  late final List<Track> topSongs;
   var heardMs = 0;
   var counted = 0;
 
@@ -506,10 +545,21 @@ class _PickedDays {
     0.0,
     (sum, e) => sum + (e.day != null ? dayHeight : rowHeight),
   );
+
+  double get topHeight => top.length * rowHeight;
 }
 
+/// The two tabs of the Calendar panel.
+enum _PanelView { top, plays }
+
+/// One song of the Top songs tab: its counted plays and time heard in the
+/// chosen days, and when it was first played in them.
+typedef _TopSong = ({Track track, int counted, int heardMs, int firstMs});
+
 /// The chosen days: what they add up to, a button that plays their songs,
-/// and every play in time order (a range names each day above its plays).
+/// and two tabs: Top songs, and every play in time order (a range names
+/// each day above its plays). Play these songs plays the open tab's songs
+/// in its order.
 ///
 /// With [fill] the list takes the panel's height; without, it is as tall as
 /// its rows, up to [_StatsCalendarState._narrowListHeight].
@@ -517,6 +567,8 @@ class _DaysPanel extends StatelessWidget {
   const _DaysPanel({
     super.key,
     required this.fill,
+    required this.view,
+    required this.onView,
     required this.picked,
     required this.nothingIn,
     required this.countingSince,
@@ -524,6 +576,10 @@ class _DaysPanel extends StatelessWidget {
   });
 
   final bool fill;
+
+  /// The open tab, and what a click on a tab calls.
+  final _PanelView view;
+  final ValueChanged<_PanelView> onView;
 
   /// The chosen days; null when nothing was played in the period.
   final _PickedDays? picked;
@@ -557,7 +613,8 @@ class _DaysPanel extends StatelessWidget {
   Widget build(BuildContext context) {
     final colors = OwnColors.of(context);
     final picked = this.picked;
-    final songs = picked?.songs ?? const <Track>[];
+    final onTop = view == _PanelView.top;
+    final songs = (onTop ? picked?.topSongs : picked?.songs) ?? const <Track>[];
 
     final String title;
     final String sub;
@@ -575,11 +632,23 @@ class _DaysPanel extends StatelessWidget {
           ? '${days}nothing played'
           : '$days${listenedText(picked.heardMs)}, '
                 '${count == 1 ? '1 play' : '$count plays'}, '
-                '${picked.counted} counted';
+                '${picked.counted} counted, '
+                '${songs.length == 1 ? '1 song' : '${songs.length} songs'}';
     }
 
     final entries = picked?.entries ?? const [];
-    final list = ListView.builder(
+    final top = picked?.top ?? const <_TopSong>[];
+    final topList = ListView.builder(
+      padding: EdgeInsets.zero,
+      itemCount: top.length,
+      itemBuilder: (context, index) => _TopRow(
+        key: ValueKey('cal-top-$index'),
+        rank: index + 1,
+        song: top[index],
+        onTap: () => onPlay(songs, index),
+      ),
+    );
+    final playList = ListView.builder(
       padding: EdgeInsets.zero,
       itemCount: entries.length,
       itemBuilder: (context, index) {
@@ -653,20 +722,185 @@ class _DaysPanel extends StatelessWidget {
             ],
           ),
           if (entries.isNotEmpty) ...[
+            const SizedBox(height: 10),
+            _ViewSwitch(view: view, onView: onView),
             const SizedBox(height: 6),
             if (fill)
-              Expanded(child: list)
+              Expanded(child: onTop ? topList : playList)
             else
               SizedBox(
-                height: picked!.listHeight.clamp(
+                height: (onTop ? picked!.topHeight : picked!.listHeight).clamp(
                   0.0,
                   _StatsCalendarState._narrowListHeight,
                 ),
-                child: list,
+                child: onTop ? topList : playList,
               ),
           ] else if (fill)
             const Spacer(),
         ],
+      ),
+    );
+  }
+}
+
+/// The panel's tabs as a small segmented switch: Top songs, Every play.
+class _ViewSwitch extends StatelessWidget {
+  const _ViewSwitch({required this.view, required this.onView});
+
+  final _PanelView view;
+  final ValueChanged<_PanelView> onView;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = OwnColors.of(context);
+    Widget segment(_PanelView value, String key, String label) {
+      final chosen = value == view;
+      return Semantics(
+        selected: chosen,
+        button: true,
+        child: InkWell(
+          key: ValueKey(key),
+          borderRadius: BorderRadius.circular(7),
+          hoverColor: colors.hover,
+          onTap: chosen ? null : () => onView(value),
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
+            decoration: BoxDecoration(
+              color: chosen ? colors.raised : null,
+              borderRadius: BorderRadius.circular(7),
+              boxShadow: chosen
+                  ? [
+                      BoxShadow(
+                        color: colors.shadow,
+                        blurRadius: 2,
+                        offset: const Offset(0, 1),
+                      ),
+                    ]
+                  : null,
+            ),
+            child: Text(
+              label,
+              style: TextStyle(
+                fontSize: 13,
+                fontWeight: chosen ? FontWeight.w600 : FontWeight.w500,
+                color: chosen ? colors.text : colors.dim,
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+
+    return Container(
+      padding: const EdgeInsets.all(3),
+      decoration: BoxDecoration(
+        color: colors.hover,
+        borderRadius: BorderRadius.circular(9),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          segment(_PanelView.top, 'cal-view-top', 'Top songs'),
+          segment(_PanelView.plays, 'cal-view-plays', 'Every play'),
+        ],
+      ),
+    );
+  }
+}
+
+/// One song of the Top songs tab: rank, cover, song, counted plays in the
+/// chosen days ("not counted" when none counted) and time heard.
+class _TopRow extends StatelessWidget {
+  const _TopRow({
+    super.key,
+    required this.rank,
+    required this.song,
+    required this.onTap,
+  });
+
+  final int rank;
+  final _TopSong song;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = OwnColors.of(context);
+    const numbers = [FontFeature.tabularFigures()];
+    final track = song.track;
+    final plays = song.counted == 0
+        ? 'not counted'
+        : song.counted == 1
+        ? '1 play'
+        : '${song.counted} plays';
+    return InkWell(
+      borderRadius: BorderRadius.circular(8),
+      hoverColor: colors.hover,
+      onTap: onTap,
+      child: SizedBox(
+        height: _PickedDays.rowHeight,
+        child: Row(
+          children: [
+            SizedBox(
+              width: 28,
+              child: Text(
+                '$rank',
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                  color: colors.dim,
+                  fontFeatures: numbers,
+                ),
+              ),
+            ),
+            MarkedTile(track: track, size: 32, radius: 6),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    track.title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                  Text(
+                    track.artist,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(fontSize: 12, color: colors.dim),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 8),
+            Text(
+              plays,
+              style: TextStyle(
+                fontSize: 12,
+                color: song.counted == 0 ? colors.dim2 : colors.text,
+                fontWeight: FontWeight.w500,
+                fontFeatures: numbers,
+              ),
+            ),
+            SizedBox(
+              width: 64,
+              child: Text(
+                listenedText(song.heardMs),
+                textAlign: TextAlign.right,
+                style: TextStyle(
+                  fontSize: 12,
+                  color: colors.dim,
+                  fontFeatures: numbers,
+                ),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

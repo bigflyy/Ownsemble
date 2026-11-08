@@ -313,12 +313,15 @@ void main() {
       await tester.tap(find.byKey(const ValueKey('cal-day-2026-11-06')));
       await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
       await tester.pump();
-      final shown = textIn(panel());
+      var shown = textIn(panel());
       expect(shown, contains('3 - 6 Nov 2026'));
       expect(shown, contains('4 days'));
       // 3 x 150 s + 2 x 200 s.
       expect(shown, contains('14 min, 5 plays, 5 counted'));
-      // A range names each day above its plays.
+      // On Every play a range names each day above its plays.
+      await tester.tap(find.byKey(const ValueKey('cal-view-plays')));
+      await tester.pump();
+      shown = textIn(panel());
       expect(shown, contains('Wed 4 Nov'));
       expect(shown, contains('Fri 6 Nov'));
 
@@ -382,6 +385,9 @@ void main() {
       await tester.tap(find.byKey(const ValueKey('cal-day-2026-11-06')));
       await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
       await tester.pump();
+      // A range opens on Top songs; Every play lists them in time order.
+      await tester.tap(find.byKey(const ValueKey('cal-view-plays')));
+      await tester.pump();
       await tester.tap(find.byKey(const ValueKey('cal-play-all')));
       expect(calls, hasLength(1));
       expect(calls.single.$1, [ids[0], ids[1], ids[3]]);
@@ -393,6 +399,80 @@ void main() {
       await tester.tap(row);
       expect(calls.last.$1, [ids[0], ids[1], ids[3]]);
       expect(calls.last.$2, 1);
+    });
+
+    testWidgets('Top songs and Every play: one day opens on Every play, a '
+        'range on Top songs, and a chosen tab stays', (tester) async {
+      final calls = <(List<int>, int)>[];
+      filters.load();
+      tester.view.physicalSize = const Size(1600, 1400);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: buildTheme(OwnColors.light),
+          home: Scaffold(
+            body: StatsPage(
+              filters: filters,
+              songs: library.all,
+              onPlay: (list, index) =>
+                  calls.add(([for (final t in list) t.id], index)),
+              onOpenArtist: (_) {},
+              onOpenAlbum: (_) {},
+            ),
+          ),
+        ),
+      );
+      Finder key(String k) => find.byKey(ValueKey(k));
+      await openCalendar(tester);
+      // Fri 6 Nov, one day: every play.
+      expect(key('cal-view-plays'), findsOneWidget);
+      expect(key('cal-play-0'), findsOneWidget);
+      expect(key('cal-top-0'), findsNothing);
+      // 2 to 6 Nov: the most played first, with plays and time heard.
+      await tester.tap(key('cal-day-2026-11-02'));
+      await tester.pump();
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
+      await tester.tap(key('cal-day-2026-11-06'));
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
+      await tester.pump();
+      expect(
+        textIn(panel()),
+        contains(
+          '5 days: 19 min, 6 plays, 6 counted, '
+          '3 songs',
+        ),
+      );
+      expect(key('cal-play-0'), findsNothing);
+      // Rank, the cover's letter (no art here), song, plays, time heard.
+      expect(
+        textIn(key('cal-top-0')),
+        '1 | С | Выхода нет | Сплин | 3 plays | 8 min',
+      );
+      expect(textIn(key('cal-top-1')), contains('Группа крови'));
+      expect(textIn(key('cal-top-1')), contains('7 min'));
+      expect(textIn(key('cal-top-2')), contains('Кукушка'));
+      // Play these songs and a row play the top list, in its order.
+      await tester.tap(key('cal-play-all'));
+      expect(calls.last.$1, [ids[1], ids[3], ids[0]]);
+      expect(calls.last.$2, 0);
+      await tester.tap(key('cal-top-2'));
+      expect(calls.last.$1, [ids[1], ids[3], ids[0]]);
+      expect(calls.last.$2, 2);
+      // A chosen tab stays while other days are picked.
+      await tester.tap(key('cal-view-plays'));
+      await tester.pump();
+      expect(key('cal-play-0'), findsOneWidget);
+      await tester.tap(key('cal-day-2026-11-04'));
+      await tester.pump();
+      expect(key('cal-play-0'), findsOneWidget);
+      await tester.tap(key('cal-view-top'));
+      await tester.pump();
+      await tester.tap(key('cal-day-2026-11-06'));
+      await tester.pump();
+      expect(textIn(key('cal-top-0')), contains('Группа крови'));
+      expect(textIn(key('cal-top-0')), contains('2 plays'));
+      expect(tester.takeException(), isNull);
     });
 
     testWidgets('When you listen adds up the period by weekday and hour', (
@@ -734,9 +814,9 @@ void main() {
         await tester.pump();
       }
 
-      // 2 to 6 Nov in time order: Кукушка, Выхода нет, Группа крови;
-      // the second one plays from that list.
-      final days = [ids[0], ids[1], ids[3]];
+      // 2 to 6 Nov on Top songs (a range opens there): Выхода нет,
+      // Группа крови, Кукушка; the first one plays from that list.
+      final days = [ids[1], ids[3], ids[0]];
       await pumpWith(days, ids[1]);
       await tester.tap(find.byKey(const ValueKey('stats-tab-calendar')));
       await tester.pump();
