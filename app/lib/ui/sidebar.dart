@@ -405,9 +405,10 @@ class _NavItem extends StatelessWidget {
                 ),
               ),
               if (count != null)
-                Text(
-                  '$count',
+                BumpCount(
+                  count: count!,
                   style: TextStyle(fontSize: 12, color: colors.dim2),
+                  bump: colors.accent,
                 ),
               if (later)
                 Container(
@@ -446,4 +447,59 @@ class _NavItem extends StatelessWidget {
     );
     return message == null ? item : Tooltip(message: message, child: item);
   }
+}
+
+/// A sidebar count that turns violet for a moment when it grows, such as
+/// Songs after + added a song (plan 06, board v4: no bounce, only colour).
+class BumpCount extends StatefulWidget {
+  const BumpCount({
+    super.key,
+    required this.count,
+    required this.style,
+    required this.bump,
+  });
+
+  final int count;
+  final TextStyle style;
+
+  /// The colour the count starts from after it grew.
+  final Color bump;
+
+  @override
+  State<BumpCount> createState() => _BumpCountState();
+}
+
+class _BumpCountState extends State<BumpCount>
+    with SingleTickerProviderStateMixin {
+  /// 1 right after the count grew, 0 at rest.
+  late final _glow = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 900),
+    value: 0,
+  );
+
+  @override
+  void didUpdateWidget(BumpCount old) {
+    super.didUpdateWidget(old);
+    if (widget.count > old.count && !MediaQuery.of(context).disableAnimations) {
+      _glow.reverse(from: 1);
+    }
+  }
+
+  @override
+  void dispose() {
+    _glow.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => AnimatedBuilder(
+    animation: _glow,
+    builder: (context, _) => Text(
+      '${widget.count}',
+      style: widget.style.copyWith(
+        color: Color.lerp(widget.style.color, widget.bump, _glow.value),
+      ),
+    ),
+  );
 }

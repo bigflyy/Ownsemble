@@ -13,6 +13,8 @@ import '../playback/version_book.dart';
 import '../playback/player_service.dart';
 import '../storage/audio_storage.dart';
 import 'album_link.dart';
+import 'catalog_part.dart';
+import 'catalog_search.dart';
 import 'collections_controller.dart';
 import 'favorite_heart.dart';
 import 'cover_tile.dart';
@@ -97,6 +99,7 @@ class LibraryScreen extends StatefulWidget {
     this.account,
     this.sources,
     this.collections,
+    this.catalog,
     this._settings,
   });
 
@@ -116,6 +119,9 @@ class LibraryScreen extends StatefulWidget {
 
   /// History and Stacks; without them those views stay empty.
   final CollectionsController? collections;
+
+  /// The On VK part under the search results; none when null.
+  final CatalogSearch? catalog;
 
   final ShellSettings? _settings;
 
@@ -720,6 +726,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
                         onGoToSong: _goToPlayingSong,
                         onOpenAlbum: library.openAlbum,
                         onOpenVersions: _openVersions,
+                        addButton: _playerAdd,
                         compact: !roomForSidebar,
                       ),
                     if (widget.sync case final sync?)
@@ -776,6 +783,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
                               onGoToSong: _goToPlayingSong,
                               onOpenAlbum: library.openAlbum,
                               onOpenVersions: _openVersions,
+                              addButton: _playerAdd,
                             ),
                         ],
                       ),
@@ -883,6 +891,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
               ?widget.collections,
               ?widget.player.versions,
               ?library.filters,
+              ?widget.catalog,
             ]),
             builder: (context, _) {
               final view = library.view;
@@ -987,7 +996,10 @@ class _LibraryScreenState extends State<LibraryScreen> {
                       padding: const EdgeInsets.fromLTRB(24, 0, 24, 10),
                       child: filterBar,
                     ),
-                  if (!tight && !view.isPage && library.visible.isNotEmpty)
+                  if (!tight &&
+                      !view.isPage &&
+                      (library.visible.isNotEmpty ||
+                          (widget.catalog?.active ?? false)))
                     _ListHeader(
                       numbered: !_settings.thumbnails,
                       showAlbum: showAlbum,
@@ -1027,6 +1039,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
                             colors,
                             showAlbum: showAlbum,
                             playColumns: playColumns,
+                            listWidth: listWidth,
                           ),
                   ),
                 ],
@@ -1160,11 +1173,14 @@ class _LibraryScreenState extends State<LibraryScreen> {
     OwnColors colors, {
     required bool showAlbum,
     required PlayColumns playColumns,
+    required double listWidth,
   }) {
     final filters = library.view.kind == ViewKind.songs
         ? library.filters
         : null;
-    if (library.visible.isEmpty) {
+    final catalog = widget.catalog;
+    final part = catalog != null && catalog.active ? catalog : null;
+    if (library.visible.isEmpty && part == null) {
       final filtered = library.filterSources
           .where((source) => source.id == library.sourceFilter)
           .firstOrNull;
@@ -1238,6 +1254,17 @@ class _LibraryScreenState extends State<LibraryScreen> {
               ),
       );
     }
+    final own = library.visible.length;
+    final extras = part == null
+        ? const <Widget Function(bool, Track?)>[]
+        : _catalogItems(
+            part,
+            colors,
+            showAlbum: showAlbum,
+            playColumns: playColumns,
+            wide: listWidth >= filterChipsMinWidth,
+            ownEmpty: own == 0,
+          );
     return StreamBuilder<Track?>(
       stream: widget.player.currentStream,
       initialData: widget.player.current,
@@ -1249,8 +1276,11 @@ class _LibraryScreenState extends State<LibraryScreen> {
             controller: library.scroll,
             padding: const EdgeInsets.fromLTRB(8, 0, 8, 12),
             itemExtent: rowHeight,
-            itemCount: library.visible.length,
+            itemCount: own + extras.length,
             itemBuilder: (context, index) {
+              if (index >= own) {
+                return extras[index - own](playing, current.data);
+              }
               final track = library.visible[index];
               final entryId = library.entryIdAt(index);
               final version = library.versionOf(track);
@@ -1330,6 +1360,157 @@ class _LibraryScreenState extends State<LibraryScreen> {
         ),
       ),
     );
+  }
+
+  /// The items of the On VK part after the own rows, each one row tall: a
+  /// line when none of the own songs match, the header, then (unfolded)
+  /// the found songs and the line under them. Each item is built from
+  /// whether the player plays and its current song.
+  List<Widget Function(bool playing, Track? current)> _catalogItems(
+    CatalogSearch part,
+    OwnColors colors, {
+    required bool showAlbum,
+    required PlayColumns playColumns,
+    required bool wide,
+    required bool ownEmpty,
+  }) {
+    final found = part.songs;
+    final status = part.folded ? null : catalogStatusRow(context, part);
+    return [
+      if (ownEmpty)
+        (_, _) => Padding(
+          key: const ValueKey('catalog-no-own'),
+          padding: const EdgeInsets.symmetric(horizontal: 22),
+          child: Align(
+            alignment: Alignment.centerLeft,
+            child: Text(
+              'None of your songs match "${library.searchText.text.trim()}"',
+              style: TextStyle(fontSize: 14, color: colors.dim),
+            ),
+          ),
+        ),
+      (_, _) => CatalogHeader(catalog: part, wide: wide),
+      if (!part.folded)
+        for (var i = 0; i < found.length; i++)
+          (playing, current) => _foundRow(
+            part,
+            i,
+            showAlbum: showAlbum,
+            playColumns: playColumns,
+            isCurrent: current?.id == found[i].track.id,
+            playing: playing,
+          ),
+      if (status != null) (_, _) => status,
+    ];
+  }
+
+  /// A song VK found: plays with a click, the found songs as its list; +
+  /// in the heart's slot.
+  Widget _foundRow(
+    CatalogSearch part,
+    int index, {
+    required bool showAlbum,
+    required PlayColumns playColumns,
+    required bool isCurrent,
+    required bool playing,
+  }) {
+    final found = part.songs[index];
+    final track = found.track;
+    return _SongRow(
+      key: ValueKey('found-${track.id}'),
+      number: index + 1,
+      track: track,
+      cover: track,
+      stored: (path: null, pinned: false),
+      downloading: false,
+      saving: false,
+      storage: null,
+      thumbnails: _settings.thumbnails,
+      showAlbum: showAlbum,
+      isCurrent: isCurrent,
+      isJump: false,
+      playing: playing,
+      playColumns: playColumns,
+      onTap: () {
+        library.jump.clear();
+        widget.playback.playFrom([
+          for (final song in part.songs) song.track,
+        ], index);
+      },
+      onMenu: (position) => _showFoundMenu(track, position),
+      versionTag: (_) => const SizedBox.shrink(),
+      action: foundAddButton(context, part, found, onAdd: _addFound),
+      mark: foundMark(context, part, found),
+    );
+  }
+
+  /// Adds a found song, then says where it went (or why not) at the bottom.
+  Future<void> _addFound(FoundSong found) async {
+    final catalog = widget.catalog;
+    if (catalog == null) return;
+    final messenger = ScaffoldMessenger.of(context);
+    final note = await catalog.add(found);
+    if (!mounted || note.isEmpty) return;
+    messenger
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(content: Text(note)));
+  }
+
+  /// The player's + for a found song that plays; null for any other song.
+  Widget? _playerAdd(Track track) {
+    final catalog = widget.catalog;
+    if (catalog == null || catalog.foundById(track.id) == null) return null;
+    return ListenableBuilder(
+      listenable: catalog,
+      builder: (context, _) => foundAddButton(
+        context,
+        catalog,
+        catalog.foundById(track.id)!,
+        onAdd: _addFound,
+        large: true,
+      ),
+    );
+  }
+
+  /// A found song's right-click menu: what any song outside the library
+  /// offers.
+  Future<void> _showFoundMenu(Track track, Offset position) async {
+    final action = await showMenu<String>(
+      context: context,
+      position: RelativeRect.fromLTRB(
+        position.dx,
+        position.dy,
+        position.dx,
+        position.dy,
+      ),
+      items: [
+        const PopupMenuItem(
+          key: ValueKey('menu-play-next'),
+          value: 'play-next',
+          child: Text('Play next'),
+        ),
+        const PopupMenuItem(
+          key: ValueKey('menu-add-to-queue'),
+          value: 'add-to-queue',
+          child: Text('Add to queue'),
+        ),
+        if (track.hasCover)
+          const PopupMenuItem(
+            key: ValueKey('menu-view-cover'),
+            value: 'view-cover',
+            child: Text('View cover'),
+          ),
+      ],
+    );
+    if (!mounted || action == null) return;
+    switch (action) {
+      case 'play-next':
+        await widget.playback.playNext(track);
+      case 'add-to-queue':
+        await widget.playback.addToQueue(track);
+      case 'view-cover':
+        await showCoverViewer(context, track);
+    }
   }
 }
 
@@ -1838,8 +2019,20 @@ List<Widget> _playCells(
   required int addedAt,
   required DateTime now,
   required OwnColors colors,
+  bool blank = false,
 }) {
   if (columns == PlayColumns.none) return const [];
+  // A found song outside the library has no plays and no Added date: the
+  // cells stay empty, so its row keeps the columns of the rows above.
+  if (blank) {
+    return [
+      const SizedBox(width: 14 + _playsWidth),
+      if (columns == PlayColumns.all)
+        const SizedBox(width: 14 + _listenedWidth),
+      const SizedBox(width: 14 + _lastPlayedWidth),
+      if (columns == PlayColumns.all) const SizedBox(width: 14 + _addedWidth),
+    ];
+  }
   final dim = TextStyle(fontSize: 13, color: colors.dim2);
   final plays = periodPlays?.plays ?? 0;
   return [
@@ -1995,7 +2188,17 @@ class _SongRow extends StatelessWidget {
     this.periodPlays,
     this.allTimePlays,
     this.now,
+    this.action,
+    this.mark,
   });
+
+  /// What sits in the heart's slot instead of the heart: the + of a found
+  /// song (plan 06, C3).
+  final Widget? action;
+
+  /// The mark instead of the stored-audio one: a found song's globe, or
+  /// the cloud once it is added.
+  final Widget? mark;
 
   /// Which play columns show (Songs only).
   final PlayColumns playColumns;
@@ -2271,7 +2474,13 @@ class _SongRow extends StatelessWidget {
                     const SizedBox(width: _heartGap),
                     SizedBox(
                       width: _heartWidth,
-                      child: onFavorite == null
+                      child: action != null
+                          ? OverflowBox(
+                              maxWidth: 34,
+                              maxHeight: 34,
+                              child: action,
+                            )
+                          : onFavorite == null
                           ? null
                           : RowHeart(
                               key: ValueKey('heart-${track.id}'),
@@ -2280,30 +2489,33 @@ class _SongRow extends StatelessWidget {
                             ),
                     ),
                     const SizedBox(width: 14),
-                    _SourceMark(
-                      track: track,
-                      meaning: meaning,
-                      child: storage != null && (downloading || saving)
-                          ? FillingIcon(
-                              key: ValueKey('filling-${track.id}'),
-                              storage: storage!,
-                              track: track,
-                              icon: icon,
-                              filled: downloading
-                                  ? Icons.download
-                                  : Icons.cloud,
-                              size: 18,
-                              color: sourceColor(context, track),
-                            )
-                          : Icon(
-                              icon,
-                              key: ValueKey(
-                                'mark-${track.id}-${icon.codePoint}',
+                    if (mark != null)
+                      SizedBox(width: 18, child: mark)
+                    else
+                      _SourceMark(
+                        track: track,
+                        meaning: meaning,
+                        child: storage != null && (downloading || saving)
+                            ? FillingIcon(
+                                key: ValueKey('filling-${track.id}'),
+                                storage: storage!,
+                                track: track,
+                                icon: icon,
+                                filled: downloading
+                                    ? Icons.download
+                                    : Icons.cloud,
+                                size: 18,
+                                color: sourceColor(context, track),
+                              )
+                            : Icon(
+                                icon,
+                                key: ValueKey(
+                                  'mark-${track.id}-${icon.codePoint}',
+                                ),
+                                size: 18,
+                                color: sourceColor(context, track),
                               ),
-                              size: 18,
-                              color: sourceColor(context, track),
-                            ),
-                    ),
+                      ),
                     ..._playCells(
                       playColumns,
                       periodPlays: periodPlays,
@@ -2311,6 +2523,7 @@ class _SongRow extends StatelessWidget {
                       addedAt: track.addedAt,
                       now: now ?? DateTime.now(),
                       colors: colors,
+                      blank: !track.inLibrary,
                     ),
                     const SizedBox(width: 14),
                     SizedBox(

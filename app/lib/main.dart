@@ -8,6 +8,7 @@ import 'package:path/path.dart' as p;
 
 import 'bench/speed_bench.dart';
 import 'library/library_store.dart';
+import 'library/search_index.dart';
 import 'library/track.dart';
 import 'playback/playback_controller.dart';
 import 'platform/end_process.dart';
@@ -19,6 +20,7 @@ import 'storage/stored_check.dart';
 import 'sync/background_sync.dart';
 import 'sync/file_check.dart';
 import 'ui/albums.dart';
+import 'ui/catalog_search.dart';
 import 'ui/collections_controller.dart';
 import 'ui/cover_tile.dart';
 import 'ui/library_controller.dart';
@@ -300,6 +302,27 @@ Future<void> main(List<String> args) async {
     library: library,
     dataDir: options.dataDir,
   );
+  // Search place A's On VK part (plan 06, C3). A song added while a sync
+  // runs is confirmed by one more sync right after it: the running one
+  // listed the account before the add. A song added to several accounts
+  // gets a sync at once, which merges its copies.
+  final catalog = CatalogSearch(
+    library: library,
+    store: store,
+    sources: sync.sourceList,
+    apiOfSource: (sourceId) => clientOfSource(sourceId)?.call,
+    onLibraryChanged: ({required severalAccounts}) {
+      final tracks = store.loadAll();
+      library.replaceTracks(tracks, SearchIndex(tracks));
+      sync.updateSources(store.sources());
+      if (sync.running || severalAccounts) {
+        unawaited(sync.syncAfterRunning());
+      }
+    },
+    readSetting: store.readSetting,
+    writeSetting: store.writeSetting,
+    log: logPerf,
+  );
   // A new login is synced at once, so the library fills without another step.
   var logins = account.logins;
   account.addListener(() {
@@ -341,6 +364,7 @@ Future<void> main(List<String> args) async {
       account: account,
       sources: sourceEditor,
       collections: collections,
+      catalog: catalog,
       settings: settings,
     ),
   );
@@ -547,6 +571,7 @@ class OwnsembleApp extends StatelessWidget {
     this.sync,
     this.account,
     this.sources,
+    this.catalog,
   });
 
   final CoverStore covers;
@@ -557,6 +582,7 @@ class OwnsembleApp extends StatelessWidget {
   final SyncController? sync;
   final VkAccounts? account;
   final SourceEditor? sources;
+  final CatalogSearch? catalog;
 
   @override
   Widget build(BuildContext context) {
@@ -575,6 +601,7 @@ class OwnsembleApp extends StatelessWidget {
             account: account,
             sources: sources,
             collections: collections,
+            catalog: catalog,
             settings: settings,
           ),
         ),

@@ -30,6 +30,7 @@ class NowPlayingPanel extends StatelessWidget {
     required this.onGoToSong,
     this.onOpenAlbum,
     this.onOpenVersions,
+    this.addButton,
   });
 
   final PlaybackController playback;
@@ -45,6 +46,10 @@ class NowPlayingPanel extends StatelessWidget {
 
   /// The versions button and the version tag: open the song's versions.
   final OpenVersions? onOpenVersions;
+
+  /// The + of a song found on VK that plays (plan 06, C3), in the heart's
+  /// place; null for any other song.
+  final Widget? Function(Track track)? addButton;
 
   @override
   Widget build(BuildContext context) {
@@ -122,6 +127,7 @@ class NowPlayingPanel extends StatelessWidget {
                       ),
                       // A song of an album that the library lacks has no row
                       // for a Stack or a download to point at.
+                      ?addButton?.call(track),
                       if (collections != null && track.inLibrary) ...[
                         FavoriteHeart(
                           key: const ValueKey('player-heart'),
@@ -178,6 +184,7 @@ class DockBar extends StatelessWidget {
     required this.compact,
     this.onOpenAlbum,
     this.onOpenVersions,
+    this.addButton,
   });
 
   final PlaybackController playback;
@@ -194,6 +201,10 @@ class DockBar extends StatelessWidget {
 
   /// The versions button and the version tag: open the song's versions.
   final OpenVersions? onOpenVersions;
+
+  /// The + of a song found on VK that plays (plan 06, C3), in the heart's
+  /// place; null for any other song.
+  final Widget? Function(Track track)? addButton;
 
   /// Very narrow window: the right column (volume and menus) is left out.
   final bool compact;
@@ -264,6 +275,7 @@ class DockBar extends StatelessWidget {
                                             : () => onOpenAlbum!(track),
                                       ),
                                     ),
+                                    ?addButton?.call(track),
                                     if (collections != null && track.inLibrary)
                                       FavoriteHeart(
                                         key: const ValueKey('player-heart'),
