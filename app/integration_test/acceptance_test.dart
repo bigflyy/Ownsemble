@@ -539,7 +539,18 @@ void main() {
     // The column headers name what the rows show, on real rows.
     final listHeader = find.byKey(const ValueKey('list-header'));
     expect(listHeader, findsOneWidget);
-    final firstTitle = find.text(library.visible.first.title).first;
+    // The file check changes the library while no frame is drawn; wait for
+    // the list to show its first row again (acceptance-09.log found none).
+    final firstName = library.visible.first.title;
+    for (var i = 0; i < 50 && find.text(firstName).evaluate().isEmpty; i++) {
+      await tester.pump(const Duration(milliseconds: 100));
+    }
+    expect(
+      find.text(firstName),
+      findsWidgets,
+      reason: 'the first row ("$firstName") is shown',
+    );
+    final firstTitle = find.text(firstName).first;
     expect(
       tester
           .getTopLeft(
