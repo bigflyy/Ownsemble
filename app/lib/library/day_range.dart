@@ -46,6 +46,12 @@ class DayRange {
       ).difference(DateTime.utc(first.year, first.month, first.day)).inDays +
       1;
 
+  /// Each day of the range, at local midnight, first to last.
+  List<DateTime> get days => [
+    for (var i = 0; i < dayCount; i++)
+      DateTime(first.year, first.month, first.day + i),
+  ];
+
   /// Whether a moment ([ms], Unix milliseconds) falls on one of the days.
   bool contains(int ms) => ms >= startMs && ms < endMs;
 

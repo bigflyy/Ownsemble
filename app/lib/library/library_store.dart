@@ -1162,6 +1162,61 @@ class LibraryStore implements PlayLog, PlayStatsSource {
     }
   }
 
+  @override
+  List<PlayMoment> playsIn(DayRange? range) => [
+    for (final row in _db.select(
+      '''
+      SELECT h.track_id, h.played_at_ms, coalesce(h.listened_ms, 0) AS heard,
+             h.ended, $countedPlaySql AS counted
+      FROM history h INDEXED BY history_by_time
+      JOIN tracks t ON t.id = h.track_id
+      ${range == null ? '' : 'WHERE h.played_at_ms >= ? AND h.played_at_ms < ?'}
+      ORDER BY h.played_at_ms, h.id
+      ''',
+      [
+        if (range != null) ...[range.startMs, range.endMs],
+      ],
+    ))
+      PlayMoment(
+        trackId: row['track_id'] as int,
+        atMs: row['played_at_ms'] as int,
+        listenedMs: row['heard'] as int,
+        counted: row['counted'] == 1,
+        ended: PlayEnd.values.asNameMap()[row['ended']],
+      ),
+  ];
+
+  @override
+  List<int> heardByDay(DayRange range) =>
+      listenedIn([for (final day in range.days) DayRange.day(day)]);
+
+  @override
+  List<int> heardByWeekHour(DayRange? range) {
+    final grid = List.filled(7 * 24, 0);
+    // strftime's %w counts from Sunday (0); localtime is the computer's
+    // time zone, as Dart's DateTime uses.
+    for (final row in _db.select(
+      '''
+      SELECT strftime('%w %H', played_at_ms / 1000, 'unixepoch', 'localtime')
+               AS slot,
+             sum(listened_ms) AS heard
+      FROM history INDEXED BY history_by_time
+      WHERE listened_ms > 0
+        ${range == null ? '' : 'AND played_at_ms >= ? AND played_at_ms < ?'}
+      GROUP BY slot
+      ''',
+      [
+        if (range != null) ...[range.startMs, range.endMs],
+      ],
+    )) {
+      final slot = (row['slot'] as String).split(' ');
+      final sunday0 = int.parse(slot[0]);
+      final weekday = sunday0 == 0 ? DateTime.sunday : sunday0;
+      grid[weekHour(weekday, int.parse(slot[1]))] = row['heard'] as int;
+    }
+    return grid;
+  }
+
   /// Whether play [playId] counts as a play of its song now
   /// ([countedPlaySql]).
   bool playCounts(int playId) =>

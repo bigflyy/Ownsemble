@@ -304,6 +304,28 @@ void main() {
         'ms; listenedIn 12 months '
         '${tiles.toStringAsFixed(1)} ms, 31 days ${days.toStringAsFixed(1)} ms',
       );
+      // The Calendar tab (plan 04, D2): a year of days, the weekday x hour
+      // grid for a year and for all time, one day's and a year's plays.
+      final calendarYear = DayRange.year(year);
+      final yearDays = _timeMs(() => store.heardByDay(calendarYear));
+      final gridYear = _timeMs(() => store.heardByWeekHour(calendarYear));
+      final gridAll = _timeMs(() => store.heardByWeekHour(null));
+      final oneDay = _timeMs(() => store.playsIn(DayRange.day(lastDay)));
+      final yearPlays = _timeMs(() => store.playsIn(calendarYear));
+      // ignore: avoid_print
+      print(
+        'heardByDay a year ${yearDays.toStringAsFixed(1)} ms; heardByWeekHour '
+        'year ${gridYear.toStringAsFixed(1)} ms, all '
+        '${gridAll.toStringAsFixed(1)} ms; playsIn a day '
+        '${oneDay.toStringAsFixed(1)} ms, a year '
+        '${yearPlays.toStringAsFixed(1)} ms',
+      );
+      expect(store.playsIn(DayRange.day(lastDay)), hasLength(100));
+      expect(yearDays, lessThan(60));
+      expect(gridYear, lessThan(150));
+      expect(gridAll, lessThan(400));
+      expect(oneDay, lessThan(10));
+      expect(yearPlays, lessThan(150));
       expect(store.songPlays(range: month), isNotEmpty);
       expect(all, lessThan(150));
       expect(inMonth, lessThan(40));

@@ -1,5 +1,8 @@
 import 'day_range.dart';
 import 'library_records.dart';
+import 'listening_calendar.dart';
+
+export 'listening_calendar.dart' show PlayMoment, weekHour;
 
 /// Where play numbers come from: the library database, a stand-in in
 /// tests.
@@ -10,6 +13,16 @@ abstract interface class PlayStatsSource {
   /// Start of the earliest recorded play, Unix milliseconds; null when
   /// nothing was played yet.
   int? firstPlayMs();
+
+  /// Every play in [range] (null: all time), oldest first.
+  List<PlayMoment> playsIn(DayRange? range);
+
+  /// Time heard on each day of [range], in order, milliseconds.
+  List<int> heardByDay(DayRange range);
+
+  /// Time heard by the local weekday and hour plays started in [range]
+  /// (null: all time): 7 x 24 values, indexed by [weekHour].
+  List<int> heardByWeekHour(DayRange? range);
 }
 
 /// What one song's plays add up to over some days (or all time).

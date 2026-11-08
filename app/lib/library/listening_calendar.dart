@@ -1,0 +1,33 @@
+import 'library_records.dart';
+
+/// One play as the Calendar tab and the year report read it (plan 04, D2):
+/// which song, when it started, how long it was heard and whether it
+/// counted ([isCountedPlay]).
+class PlayMoment {
+  const PlayMoment({
+    required this.trackId,
+    required this.atMs,
+    required this.listenedMs,
+    required this.counted,
+    this.ended,
+  });
+
+  final int trackId;
+
+  /// When the song started to sound, Unix milliseconds. The play belongs to
+  /// the local day and hour of this moment.
+  final int atMs;
+
+  /// Time heard; 0 for plays recorded before heard time was (schema 9).
+  final int listenedMs;
+
+  final bool counted;
+
+  /// How the play ended; null while it goes on, after a crash, or before
+  /// schema 9.
+  final PlayEnd? ended;
+}
+
+/// Index of a weekday ([DateTime.monday] .. [DateTime.sunday]) and an hour
+/// (0-23) in a heard-by-weekday-and-hour list: Monday's hours first.
+int weekHour(int weekday, int hour) => (weekday - 1) * 24 + hour;
