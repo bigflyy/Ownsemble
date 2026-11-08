@@ -164,6 +164,9 @@ void main() {
     String? statsTab,
     CalendarListening calendar = CalendarListening.line,
     bool saveView = false,
+    // The first song gets three artists and a short title (the bottom bar
+    // cuts the artist line at the title's width, user 2026-11-08).
+    bool longNames = false,
   }) async {
     final store = LibraryStore.open(':memory:');
     addTearDown(store.close);
@@ -172,8 +175,15 @@ void main() {
       account: '1',
       name: twoAccounts ? 'Мой VK' : 'VK',
     );
-    const songs = [
-      ('Кино', 'Группа крови', 'Группа крови'),
+    final songs = [
+      if (longNames)
+        (
+          'Сергей Канунников, Никита Алёшин, Илья Кудряшов',
+          'Полыхала степь',
+          'Зодчий',
+        )
+      else
+        ('Кино', 'Группа крови', 'Группа крови'),
       ('Земфира', 'Хочешь?', 'Прости меня моя любовь'),
       ('Сплин', 'Выхода нет', 'Гранатовый альбом'),
       ('Metallica', 'Nothing Else Matters', 'Metallica'),
@@ -487,6 +497,31 @@ void main() {
       dark: false,
       saving: true,
       dock: PlayerDock.bottom,
+      pixelRatio: 2,
+    ),
+  );
+  testWidgets(
+    'light, bottom bar, long artist names',
+    (t) => shoot(
+      t,
+      'light-long-names',
+      dark: false,
+      saving: true,
+      longNames: true,
+      dock: PlayerDock.bottom,
+      pixelRatio: 2,
+    ),
+  );
+  testWidgets(
+    'dark, bottom bar, long artist names, narrow',
+    (t) => shoot(
+      t,
+      'dark-long-names-narrow',
+      dark: true,
+      saving: true,
+      longNames: true,
+      dock: PlayerDock.bottom,
+      size: const Size(700, 640),
       pixelRatio: 2,
     ),
   );

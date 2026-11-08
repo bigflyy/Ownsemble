@@ -10,6 +10,7 @@ import 'favorite_heart.dart';
 import 'cover_tile.dart';
 import 'cover_viewer.dart';
 import 'filling_icon.dart';
+import 'fit_text.dart';
 import 'sources_scope.dart';
 import 'theme.dart';
 import 'version_marks.dart';
@@ -407,15 +408,35 @@ class SongTitle extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = OwnColors.of(context);
-    final title = Text(
+    // [whole]: the full text on one line, for a line that scrolls.
+    Text titleText({bool whole = false}) => Text(
       track.title,
       maxLines: large ? 3 : 1,
-      overflow: TextOverflow.ellipsis,
+      softWrap: !whole,
+      overflow: whole ? TextOverflow.visible : TextOverflow.ellipsis,
       style: TextStyle(
         fontSize: large ? 23 : 15,
         fontWeight: large ? FontWeight.w700 : FontWeight.w500,
         height: 1.2,
       ),
+    );
+    // In the bottom bar a cut line scrolls while the mouse is over it.
+    final Widget title = large
+        ? titleText()
+        : HoverMarquee(builder: (_, whole) => titleText(whole: whole));
+    Widget artistLine({bool whole = false}) => ArtistAlbumLine(
+      key: const ValueKey('player-artist'),
+      artist: track.source == TrackSource.generated
+          ? '${track.artist}  (test filler: plays a sample song)'
+          : track.artist,
+      album: track.album ?? '',
+      style: TextStyle(
+        fontSize: large ? 15 : 13,
+        color: large ? colors.text : colors.dim,
+      ),
+      albumStyle: TextStyle(fontSize: large ? 15 : 13, color: colors.dim),
+      onOpenAlbum: onOpenAlbum,
+      whole: whole,
     );
     final stored =
         storage?.stateOf(track) ??
@@ -429,8 +450,10 @@ class SongTitle extends StatelessWidget {
         : track.inLibrary
         ? 'streams'
         : 'streams, not in your library';
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+    final column = Column(
+      crossAxisAlignment: large
+          ? CrossAxisAlignment.start
+          : CrossAxisAlignment.stretch,
       mainAxisSize: MainAxisSize.min,
       children: [
         Row(
@@ -457,19 +480,17 @@ class SongTitle extends StatelessWidget {
         const SizedBox(height: 4),
         // The album shares the artist's line: the panel must not grow, or
         // the smallest window loses its controls.
-        ArtistAlbumLine(
-          key: const ValueKey('player-artist'),
-          artist: track.source == TrackSource.generated
-              ? '${track.artist}  (test filler: plays a sample song)'
-              : track.artist,
-          album: track.album ?? '',
-          style: TextStyle(
-            fontSize: large ? 15 : 13,
-            color: large ? colors.text : colors.dim,
+        if (large)
+          artistLine()
+        else
+          // The bottom bar's block takes the title's width; a longer artist
+          // line is cut there, but may always use 160 px.
+          CapIntrinsicWidth(
+            cap: _artistMinWidth,
+            child: HoverMarquee(
+              builder: (_, whole) => artistLine(whole: whole),
+            ),
           ),
-          albumStyle: TextStyle(fontSize: large ? 15 : 13, color: colors.dim),
-          onOpenAlbum: onOpenAlbum,
-        ),
         if (large) ...[
           const SizedBox(height: 6),
           Row(
@@ -498,7 +519,21 @@ class SongTitle extends StatelessWidget {
         ],
       ],
     );
+    if (large) return column;
+    // The bottom bar (user, 2026-11-08): the block is as wide as the title,
+    // between 160 and 280 px, so the heart after it stays by the title.
+    return ConstrainedBox(
+      constraints: const BoxConstraints(maxWidth: _blockMaxWidth),
+      child: IntrinsicWidth(child: column),
+    );
   }
+
+  /// The bottom bar's artist line may always use this much, even after a
+  /// one-letter title.
+  static const _artistMinWidth = 160.0;
+
+  /// The bottom bar's song text never takes more than this.
+  static const _blockMaxWidth = 280.0;
 }
 
 /// Shuffle, previous, play or pause, next, repeat.

@@ -12,9 +12,13 @@ class ArtistAlbumLine extends StatefulWidget {
     required this.style,
     required this.albumStyle,
     this.onOpenAlbum,
+    this.whole = false,
   });
 
   final String artist;
+
+  /// The whole line without an ellipsis, for a line that scrolls.
+  final bool whole;
 
   /// Empty for a song without an album: the artist alone.
   final String album;
@@ -64,7 +68,8 @@ class _ArtistAlbumLineState extends State<ArtistAlbumLine> {
         ],
       ),
       maxLines: 1,
-      overflow: TextOverflow.ellipsis,
+      softWrap: !widget.whole,
+      overflow: widget.whole ? TextOverflow.visible : TextOverflow.ellipsis,
     );
   }
 }
