@@ -1209,6 +1209,20 @@ void main() {
             lessThan(24),
             reason: 'the heart sits right after the title',
           );
+          // The user, 2026-11-08 again: Up Next stood alone in the empty
+          // middle. It goes with the other buttons on the right, as
+          // Spotify's queue button does.
+          expect(
+            tester.getTopLeft(find.byType(UpNextButton)).dx,
+            greaterThan(tester.getTopRight(find.byType(TransportRow)).dx),
+            reason: 'Up Next is in the right-hand group',
+          );
+          expect(
+            tester.getTopLeft(find.byType(StackMenuButton)).dx -
+                tester.getTopRight(find.byType(UpNextButton)).dx,
+            lessThan(8),
+            reason: 'Up Next sits beside the next button',
+          );
         }
         await tester.tap(heart);
         await tester.pump();
@@ -1420,6 +1434,16 @@ void main() {
           reason: '$key is cut off by the window',
         );
       }
+      // The right-hand buttons are left out here, so Up Next follows the
+      // heart instead of standing alone.
+      final upNext = tester.getRect(find.byType(UpNextButton));
+      expect(window.intersect(upNext), upNext, reason: 'Up Next is shown');
+      expect(
+        upNext.left -
+            tester.getTopRight(find.byKey(const ValueKey('player-heart'))).dx,
+        lessThan(8),
+        reason: 'Up Next sits right after the heart',
+      );
     });
 
     testWidgets('a side panel that would hide its controls moves to the '

@@ -276,10 +276,13 @@ class DockBar extends StatelessWidget {
                                 ),
                               ),
                             ),
-                            UpNextButton(
-                              playback: playback,
-                              thumbnails: thumbnails,
-                            ),
+                            // Without the right-hand group (a narrow
+                            // bar) Up Next follows the heart.
+                            if (compact)
+                              UpNextButton(
+                                playback: playback,
+                                thumbnails: thumbnails,
+                              ),
                           ],
                         ),
                 ),
@@ -301,6 +304,13 @@ class DockBar extends StatelessWidget {
                     child: Row(
                       mainAxisAlignment: MainAxisAlignment.end,
                       children: [
+                        // Up Next leads the right-hand buttons, as the
+                        // queue button does in Spotify.
+                        if (track != null)
+                          UpNextButton(
+                            playback: playback,
+                            thumbnails: thumbnails,
+                          ),
                         // A song of an album that the library lacks has no
                         // row for a Stack or a download to point at.
                         if (track != null &&
