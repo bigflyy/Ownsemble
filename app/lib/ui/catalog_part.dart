@@ -114,7 +114,6 @@ class CatalogHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final colors = OwnColors.of(context);
     final total = catalog.total;
     final count = catalog.searching
         ? 'searching...'
@@ -128,23 +127,111 @@ class CatalogHeader extends StatelessWidget {
         ? 'Folded: click to show what VK found'
         : 'Not in your library yet. Click a song to play it, + to add it to '
               'your library and to ${names.isEmpty ? 'VK' : names.join(' and ')}.';
+    return PartHeader(
+      headerKey: const ValueKey('catalog-header'),
+      countKey: const ValueKey('catalog-count'),
+      title: 'ON VK',
+      count: count,
+      note: wide ? note : null,
+      folded: catalog.folded,
+      onTap: catalog.toggleFolded,
+      lineAbove: true,
+      trailing: catalog.accounts.length > 1
+          ? CatalogTargetButton(catalog: catalog)
+          : null,
+    );
+  }
+}
+
+/// The header of your own songs in search, above them (C4d): a click folds
+/// or unfolds them, remembered like the On VK part's.
+class OwnResultsHeader extends StatelessWidget {
+  const OwnResultsHeader({
+    super.key,
+    required this.catalog,
+    required this.count,
+    required this.wide,
+  });
+
+  final CatalogSearch catalog;
+
+  /// How many of your songs match.
+  final int count;
+
+  /// Room for the line that says what the part is.
+  final bool wide;
+
+  @override
+  Widget build(BuildContext context) => PartHeader(
+    headerKey: const ValueKey('own-header'),
+    countKey: const ValueKey('own-count'),
+    title: 'IN YOUR LIBRARY',
+    count: count == 1 ? '1 song' : '$count songs',
+    note: !wide
+        ? null
+        : catalog.ownFolded
+        ? 'Folded: click to show your songs that match'
+        : 'Your songs that match. Click here to fold them.',
+    folded: catalog.ownFolded,
+    onTap: catalog.toggleOwnFolded,
+    lineAbove: false,
+  );
+}
+
+/// One row of a search part's header: the fold arrow, the part's name in
+/// small capitals, its count, and an optional line under them.
+class PartHeader extends StatelessWidget {
+  const PartHeader({
+    super.key,
+    required this.headerKey,
+    required this.countKey,
+    required this.title,
+    required this.count,
+    required this.note,
+    required this.folded,
+    required this.onTap,
+    required this.lineAbove,
+    this.trailing,
+  });
+
+  /// Keys of the clickable header and of its count, for tests.
+  final Key headerKey;
+  final Key countKey;
+  final String title;
+  final String count;
+
+  /// The line under the name; null shows none (a narrow list).
+  final String? note;
+  final bool folded;
+  final VoidCallback onTap;
+
+  /// A line above the header, parting it from the rows before it.
+  final bool lineAbove;
+  final Widget? trailing;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = OwnColors.of(context);
+    final note = this.note;
     return Padding(
-      padding: const EdgeInsets.only(top: 6),
+      padding: EdgeInsets.only(top: lineAbove ? 6 : 0),
       child: DecoratedBox(
         decoration: BoxDecoration(
-          border: Border(top: BorderSide(color: colors.line)),
+          border: lineAbove
+              ? Border(top: BorderSide(color: colors.line))
+              : null,
         ),
         child: InkWell(
-          key: const ValueKey('catalog-header'),
+          key: headerKey,
           borderRadius: BorderRadius.circular(8),
           hoverColor: colors.hover,
-          onTap: catalog.toggleFolded,
+          onTap: onTap,
           child: Padding(
             padding: const EdgeInsets.fromLTRB(10, 4, 8, 2),
             child: Row(
               children: [
                 AnimatedRotation(
-                  turns: catalog.folded ? -0.25 : 0,
+                  turns: folded ? -0.25 : 0,
                   duration: const Duration(milliseconds: 150),
                   child: Icon(Icons.expand_more, size: 20, color: colors.dim),
                 ),
@@ -157,7 +244,7 @@ class CatalogHeader extends StatelessWidget {
                       Row(
                         children: [
                           Text(
-                            'ON VK',
+                            title,
                             style: TextStyle(
                               fontSize: 12,
                               fontWeight: FontWeight.w600,
@@ -168,12 +255,12 @@ class CatalogHeader extends StatelessWidget {
                           const SizedBox(width: 10),
                           Text(
                             count,
-                            key: const ValueKey('catalog-count'),
+                            key: countKey,
                             style: TextStyle(fontSize: 12, color: colors.dim2),
                           ),
                         ],
                       ),
-                      if (wide)
+                      if (note != null)
                         Text(
                           note,
                           maxLines: 1,
@@ -183,8 +270,7 @@ class CatalogHeader extends StatelessWidget {
                     ],
                   ),
                 ),
-                if (catalog.accounts.length > 1)
-                  CatalogTargetButton(catalog: catalog),
+                ?trailing,
               ],
             ),
           ),

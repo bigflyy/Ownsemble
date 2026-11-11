@@ -28,6 +28,10 @@ const catalogTargetsSetting = 'catalog.add_to';
 /// Setting: "folded" when the On VK part is folded to its header.
 const catalogFoldedSetting = 'catalog.vk_folded';
 
+/// Setting: "folded" while your own songs in search are folded to their
+/// header (C4d); unset otherwise.
+const catalogOwnFoldedSetting = 'catalog.own_folded';
+
 /// Fewer letters than this ask VK nothing: one letter finds everything.
 const catalogMinQueryLength = 2;
 
@@ -111,9 +115,13 @@ class CatalogSearch extends ChangeNotifier {
     this.log,
   }) {
     _folded = readSetting?.call(catalogFoldedSetting) == 'folded';
+    _ownFolded = readSetting?.call(catalogOwnFoldedSetting) == 'folded';
     _targetsText = readSetting?.call(catalogTargetsSetting);
     library.addListener(_onLibraryChanged);
-    library.outsideAlbumOf = albumOfFound;
+    library
+      ..outsideAlbumOf = albumOfFound
+      ..countRowsAbove = _rowsAbove
+      ..unfoldForReveal = _unfoldOwnForReveal;
     _sources.addListener(_onSourcesChanged);
     _onLibraryChanged();
   }
@@ -190,6 +198,31 @@ class CatalogSearch extends ChangeNotifier {
     _folded = !_folded;
     _writeSetting?.call(catalogFoldedSetting, _folded ? 'folded' : null);
     notifyListeners();
+  }
+
+  /// Whether your own songs in search are folded to their header (C4d).
+  bool get ownFolded => _ownFolded;
+  var _ownFolded = false;
+
+  void toggleOwnFolded() {
+    _ownFolded = !_ownFolded;
+    _writeSetting?.call(catalogOwnFoldedSetting, _ownFolded ? 'folded' : null);
+    notifyListeners();
+  }
+
+  /// Whether the header of your own songs is shown: with the part, when
+  /// any of them match (otherwise a line says none do).
+  bool get showsOwnHeader => active && library.visible.isNotEmpty;
+
+  /// Rows the list shows above your first song: the own songs' header.
+  int _rowsAbove() => showsOwnHeader ? 1 : 0;
+
+  /// A jump to one of your songs (typing on the list, Show in list) needs
+  /// it seen: unfolds them. Returns whether it did.
+  bool _unfoldOwnForReveal() {
+    if (!showsOwnHeader || !_ownFolded) return false;
+    toggleOwnFolded();
+    return true;
   }
 
   /// The found songs so far, in VK's order.
@@ -686,6 +719,10 @@ class CatalogSearch extends ChangeNotifier {
     _reload?.cancel();
     library.removeListener(_onLibraryChanged);
     if (library.outsideAlbumOf == albumOfFound) library.outsideAlbumOf = null;
+    if (library.countRowsAbove == _rowsAbove) library.countRowsAbove = null;
+    if (library.unfoldForReveal == _unfoldOwnForReveal) {
+      library.unfoldForReveal = null;
+    }
     _sources.removeListener(_onSourcesChanged);
     super.dispose();
   }

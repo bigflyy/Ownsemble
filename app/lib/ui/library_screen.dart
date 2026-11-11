@@ -1273,6 +1273,12 @@ class _LibraryScreenState extends State<LibraryScreen> {
       );
     }
     final own = library.visible.length;
+    // Your own songs' header above them while the On VK part shows (C4d);
+    // folded, it stands for them. LibraryController.rowsAbove counts it.
+    final ownHeader = part != null && part.showsOwnHeader;
+    final lead = ownHeader ? 1 : 0;
+    final shownOwn = ownHeader && part.ownFolded ? 0 : own;
+    final wide = listWidth >= filterChipsMinWidth;
     final extras = part == null
         ? const <Widget Function(bool, Track?)>[]
         : _catalogItems(
@@ -1280,7 +1286,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
             colors,
             showAlbum: showAlbum,
             playColumns: playColumns,
-            wide: listWidth >= filterChipsMinWidth,
+            wide: wide,
             ownEmpty: own == 0,
           );
     return StreamBuilder<Track?>(
@@ -1294,10 +1300,14 @@ class _LibraryScreenState extends State<LibraryScreen> {
             controller: library.scroll,
             padding: const EdgeInsets.fromLTRB(8, 0, 8, 12),
             itemExtent: rowHeight,
-            itemCount: own + extras.length,
-            itemBuilder: (context, index) {
-              if (index >= own) {
-                return extras[index - own](playing, current.data);
+            itemCount: lead + shownOwn + extras.length,
+            itemBuilder: (context, item) {
+              if (item < lead) {
+                return OwnResultsHeader(catalog: part!, count: own, wide: wide);
+              }
+              final index = item - lead;
+              if (index >= shownOwn) {
+                return extras[index - shownOwn](playing, current.data);
               }
               final track = library.visible[index];
               final entryId = library.entryIdAt(index);

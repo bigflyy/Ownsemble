@@ -473,6 +473,17 @@ class LibraryController extends ChangeNotifier {
   /// a song VK found in search (CatalogSearch.albumOfFound sets it, C4b).
   AlbumRef? Function(Track track)? outsideAlbumOf;
 
+  /// Rows the list shows above the first song (the own songs' header in
+  /// search, CatalogSearch sets it, C4d), so a row is scrolled to its
+  /// real place.
+  int Function()? countRowsAbove;
+  int get rowsAbove => countRowsAbove?.call() ?? 0;
+
+  /// Makes the songs seen before a row is scrolled to: unfolds folded own
+  /// songs in search (CatalogSearch). Returns whether it changed the list,
+  /// which then scrolls after its next layout.
+  bool Function()? unfoldForReveal;
+
   List<Track> get all => _all;
   LibraryView get view => _view;
 
@@ -854,7 +865,7 @@ class LibraryController extends ChangeNotifier {
   bool _rowInSight(int index) {
     if (!scroll.hasClients) return false;
     final position = scroll.position;
-    final top = index * rowHeight;
+    final top = (index + rowsAbove) * rowHeight;
     return top >= position.pixels &&
         top + rowHeight <= position.pixels + position.viewportDimension;
   }
@@ -862,10 +873,14 @@ class LibraryController extends ChangeNotifier {
   /// Scrolls row [index] into view: not at all if it is fully visible, else
   /// to a third of the way down, with the rows above it for orientation.
   void _revealRow(int index) {
+    if (unfoldForReveal?.call() ?? false) {
+      _afterLayout(() => _revealRow(index));
+      return;
+    }
     if (!scroll.hasClients || _rowInSight(index)) return;
     final position = scroll.position;
     scroll.jumpTo(
-      (index * rowHeight - position.viewportDimension / 3).clamp(
+      ((index + rowsAbove) * rowHeight - position.viewportDimension / 3).clamp(
         position.minScrollExtent,
         position.maxScrollExtent,
       ),

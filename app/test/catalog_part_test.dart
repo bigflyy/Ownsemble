@@ -174,6 +174,85 @@ void main() {
     expect(find.byKey(ValueKey('found-${first.track.id}')), findsOneWidget);
   });
 
+  testWidgets('your own songs have a header that folds them; the On VK part '
+      'stays (C4d)', (tester) async {
+    await pumpScreen(tester);
+    await search(tester, 'кино');
+    final own = library.visible.single;
+    final ownRow = find.byKey(ValueKey('song-${own.id}'));
+    expect(find.text('IN YOUR LIBRARY'), findsOneWidget);
+    expect(
+      tester.widget<Text>(find.byKey(const ValueKey('own-count'))).data,
+      '1 song',
+    );
+    expect(ownRow, findsOneWidget);
+    // The header is the first row, the own song the second.
+    expect(
+      tester.getTopLeft(find.byKey(const ValueKey('own-header'))).dy,
+      lessThan(tester.getTopLeft(ownRow).dy),
+    );
+    await tester.tap(find.byKey(const ValueKey('own-header')));
+    await tester.pump();
+    expect(catalog.ownFolded, isTrue);
+    expect(ownRow, findsNothing);
+    expect(find.text('IN YOUR LIBRARY'), findsOneWidget, reason: 'stays');
+    final first = catalog.songs.first;
+    expect(find.byKey(ValueKey('found-${first.track.id}')), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('own-header')));
+    await tester.pump();
+    expect(catalog.ownFolded, isFalse);
+    expect(ownRow, findsOneWidget);
+  });
+
+  testWidgets('folding your own songs is remembered: a new search and a new '
+      'start keep it, as for the On VK part', (tester) async {
+    final settings = <String, String?>{};
+    catalog.dispose();
+    CatalogSearch make() => CatalogSearch(
+      library: library,
+      store: store,
+      sources: sources,
+      apiOfSource: (id) => id == source ? vk.call : null,
+      onLibraryChanged: ({required severalAccounts}) {},
+      readSetting: (key) => settings[key],
+      writeSetting: (key, value) => settings[key] = value,
+    );
+    catalog = make();
+    await pumpScreen(tester);
+    await search(tester, 'кино');
+    await tester.tap(find.byKey(const ValueKey('own-header')));
+    await tester.pump();
+    expect(settings[catalogOwnFoldedSetting], 'folded');
+    await search(tester, 'сплин');
+    expect(catalog.ownFolded, isTrue, reason: 'a new search keeps it');
+    expect(find.text('Романс'), findsNothing);
+    // A new start reads it back.
+    catalog.dispose();
+    catalog = make();
+    expect(catalog.ownFolded, isTrue);
+    // Its search of the words in the box runs out.
+    await tester.pump(const Duration(seconds: 1));
+  });
+
+  testWidgets('no header when none of your songs match, and a jump to an '
+      'own song unfolds them', (tester) async {
+    await pumpScreen(tester);
+    await search(tester, 'кино');
+    expect(library.rowsAbove, 1, reason: 'the header row');
+    await tester.tap(find.byKey(const ValueKey('own-header')));
+    await tester.pump();
+    // Typing on the list jumps to an own song, which must be seen.
+    library.jump.type('г');
+    await tester.pump();
+    expect(library.jump.row, 0);
+    expect(catalog.ownFolded, isFalse, reason: 'a jump to a row unfolds');
+    await search(tester, 'кукушка');
+    expect(library.visible, isEmpty);
+    expect(find.byKey(const ValueKey('own-header')), findsNothing);
+    expect(find.byKey(const ValueKey('catalog-no-own')), findsOneWidget);
+    expect(library.rowsAbove, 0);
+  });
+
   testWidgets('when none of your songs match, VK still shows what it found', (
     tester,
   ) async {
