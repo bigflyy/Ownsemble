@@ -42,6 +42,15 @@ OWNSEMBLE_BACKGROUND_WINDOW=1 flutter test integration_test/accounts_test.dart \
     --dart-define=OWNSEMBLE_SESSION=<absolute path>/.local/v2-test/session.json \
     --dart-define=OWNSEMBLE_SESSION_2=<absolute path>/.local/v2-test/session-2.json
 
+# Search VK check (TEST ACCOUNT ONLY: adds one song and removes it again):
+# the real app on a copy of the library (<data dir>-catalog, replaced on
+# every run), off-screen and muted. Types a Cyrillic query, waits for the On
+# VK part, plays a found song (stream, decoded), adds it with +, syncs (one
+# row), then deletes it on VK, marks it removed and syncs back to the start.
+OWNSEMBLE_BACKGROUND_WINDOW=1 flutter test integration_test/catalog_test.dart \
+    -d windows --dart-define=OWNSEMBLE_DATA=<absolute path>/.local/v2-test/feel \
+    --dart-define=OWNSEMBLE_SESSION=<absolute path>/.local/v2-test/session.json
+
 # Check the "gone from VK" rule against real VK on a copy of a library (the
 # folder itself is not written).
 dart run tool/check_gone_marks.dart --data-dir ../.local/v2-test/feel \
