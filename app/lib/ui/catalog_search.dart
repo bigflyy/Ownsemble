@@ -37,10 +37,16 @@ const _answersKept = 12;
 /// outside the library (-1, -2, ...) and versions (-1e9 - n).
 const _firstFoundId = -2000000000;
 
-/// One song the catalog found, as its row and the player show it.
+/// One song outside the library that + can add, as its row and the player
+/// show it: a song the catalog found, an album's song the library does not
+/// have, or another upload in a song's Versions (C4).
 @immutable
 class FoundSong {
-  const FoundSong({required this.song, required this.track});
+  const FoundSong({
+    required this.song,
+    required this.track,
+    this.except = const {},
+  });
 
   /// The song as VK listed it, for adding.
   final NewTrack song;
@@ -48,6 +54,10 @@ class FoundSong {
   /// The same song as a track outside the library (negative id), streamed
   /// through the account that searched.
   final Track track;
+
+  /// Library songs that do not count as "already in the library" for this
+  /// one: in Versions, the song whose versions they are.
+  final Set<int> except;
 
   String get key => song.sourceKey;
 }
@@ -211,8 +221,48 @@ class CatalogSearch extends ChangeNotifier {
     return answer == null ? 0 : answer.total - answer.songs.length;
   }
 
-  /// The found song with id [id], if it was found in this run.
+  /// The found song with id [id], if it was found in this run (or shown
+  /// as an album's or a version's row: [outsideSong]).
   FoundSong? foundById(int id) => _byId[id];
+
+  /// [track], a song outside the library (an album's song, another upload
+  /// in a song's Versions), as a song + can add. The same song gives the
+  /// same object every time, so its + state and the player's + follow it.
+  /// [vkTrackId] and the album key go into the added row, as a sync would
+  /// write them; [except] as [FoundSong.except].
+  FoundSong outsideSong(
+    Track track, {
+    int? vkTrackId,
+    String? vkAlbumKey,
+    String? vkAlbumAccessKey,
+    Set<int> except = const {},
+  }) {
+    final kept = _byId[track.id];
+    if (kept != null && kept.key == track.sourceKey) return kept;
+    final found = FoundSong(
+      song: NewTrack(
+        artist: track.artist,
+        title: track.title,
+        album: track.album,
+        durationSec: track.durationSec,
+        addedAt: 0,
+        sourceKey: track.sourceKey ?? '',
+        accessKey: track.accessKey,
+        coverUrl: track.coverUrl,
+        coverLargeUrl: track.coverLargeUrl,
+        coverMidUrl: track.coverMidUrl,
+        coverFullUrl: track.coverFullUrl,
+        tint: track.tint,
+        vkTrackId: vkTrackId,
+        vkAlbumKey: vkAlbumKey,
+        vkAlbumAccessKey: vkAlbumAccessKey,
+      ),
+      track: track,
+      except: except,
+    );
+    _byId[track.id] = found;
+    return found;
+  }
 
   // ---- Accounts ----
 
@@ -306,7 +356,7 @@ class CatalogSearch extends ChangeNotifier {
       _matcher = FoundMatcher(store.songRows());
       _matcherOf = tracks;
     }
-    final id = _matcher!.listedIdOf(found.song);
+    final id = _matcher!.listedIdOf(found.song, except: found.except);
     return id == null ? null : library.byId(id);
   }
 
@@ -317,9 +367,71 @@ class CatalogSearch extends ChangeNotifier {
     if (stateOf(found) != FoundState.addable) return 'Already in your library';
     final to = targets;
     if (to.isEmpty) return 'Log in to VK to add songs';
-    _adding.add(found.key);
+    final clock = Stopwatch()..start();
+    final (added, refused) = await _addOne(found, to);
+    if (_disposed) return '';
+    _afterAdds(several: added.length > 1, any: added.isNotEmpty);
+    log?.call(
+      'catalog add: ${added.length} of ${to.length} accounts in '
+      '${clock.elapsedMilliseconds} ms',
+    );
+    final names = [for (final source in added) source.name].join(' and ');
+    final title = '"${found.song.title}"';
+    if (refused.isEmpty) return 'Added $title to $names';
+    if (added.isEmpty) return '$title not added: ${refused.join('; ')}';
+    return 'Added $title to $names. Not added: ${refused.join('; ')}';
+  }
+
+  /// Adds each of [songs] that + still offers, one after another (an
+  /// album's "Add the other N"): VK took 5 add rounds back to back without
+  /// a captcha (A2). Returns the note: how many went where, and what failed.
+  Future<String> addAll(List<FoundSong> songs) async {
+    final to = targets;
+    if (to.isEmpty) return 'Log in to VK to add songs';
+    final waiting = [
+      for (final found in songs)
+        if (stateOf(found) == FoundState.addable) found,
+    ];
+    if (waiting.isEmpty) return 'Already in your library';
+    // All of them show as being added at once, then turn one by one.
+    _adding.addAll([for (final found in waiting) found.key]);
     notifyListeners();
     final clock = Stopwatch()..start();
+    var addedSongs = 0;
+    var several = false;
+    final failed = <String>[];
+    for (final found in waiting) {
+      if (_disposed) return '';
+      final (added, refused) = await _addOne(found, to);
+      if (added.isNotEmpty) addedSongs++;
+      if (added.length > 1) several = true;
+      if (refused.isNotEmpty) {
+        failed.add('"${found.song.title}" (${refused.join('; ')})');
+      }
+      if (!_disposed) notifyListeners();
+    }
+    if (_disposed) return '';
+    _afterAdds(several: several, any: addedSongs > 0);
+    log?.call(
+      'catalog add all: $addedSongs of ${waiting.length} songs to '
+      '${to.length} accounts in ${clock.elapsedMilliseconds} ms',
+    );
+    final names = [for (final source in to) source.name].join(' and ');
+    final count = addedSongs == 1 ? '1 song' : '$addedSongs songs';
+    if (failed.isEmpty) return 'Added $count to $names';
+    if (addedSongs == 0) return 'Nothing added: ${failed.join('; ')}';
+    return 'Added $count to $names. Not added: ${failed.join('; ')}';
+  }
+
+  /// Adds [found] to each account of [to] and puts the account's copy into
+  /// the library. Returns the accounts that took it and why the others did
+  /// not. Does not reload the lists ([_afterAdds] does).
+  Future<(List<SourceInfo>, List<String>)> _addOne(
+    FoundSong found,
+    List<SourceInfo> to,
+  ) async {
+    _adding.add(found.key);
+    notifyListeners();
     final added = <SourceInfo>[];
     final refused = <String>[];
     try {
@@ -357,25 +469,22 @@ class CatalogSearch extends ChangeNotifier {
     } finally {
       _adding.remove(found.key);
     }
-    if (_disposed) return '';
     if (added.isNotEmpty) {
       _addedTo[found.key] = [for (final source in added) source.id];
+    }
+    return (added, refused);
+  }
+
+  /// Reloads the lists [reloadAfter] after the last add, when any song went
+  /// in.
+  void _afterAdds({required bool several, required bool any}) {
+    if (any) {
       _reload?.cancel();
-      final several = added.length > 1;
       _reload = Timer(reloadAfter, () {
         if (!_disposed) onLibraryChanged(severalAccounts: several);
       });
     }
-    log?.call(
-      'catalog add: ${added.length} of ${to.length} accounts in '
-      '${clock.elapsedMilliseconds} ms',
-    );
     notifyListeners();
-    final names = [for (final source in added) source.name].join(' and ');
-    final title = '"${found.song.title}"';
-    if (refused.isEmpty) return 'Added $title to $names';
-    if (added.isEmpty) return '$title not added: ${refused.join('; ')}';
-    return 'Added $title to $names. Not added: ${refused.join('; ')}';
   }
 
   // ---- Asking VK ----

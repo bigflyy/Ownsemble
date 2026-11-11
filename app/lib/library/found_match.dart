@@ -21,32 +21,43 @@ import 'same_song.dart';
 class FoundMatcher {
   FoundMatcher(Iterable<SongRow> rows) {
     for (final row in rows) {
-      _byKey.putIfAbsent(row.sourceKey, () => row);
+      (_byKey[row.sourceKey] ??= []).add(row);
       if (row.vkTrackId case final trackId?) {
-        _byTrackId.putIfAbsent(trackId, () => row);
+        (_byTrackId[trackId] ??= []).add(row);
       }
       if (row.text.isNotEmpty) (_byText[row.text] ??= []).add(row);
     }
   }
 
-  final _byKey = <String, SongRow>{};
-  final _byTrackId = <int, SongRow>{};
+  final _byKey = <String, List<SongRow>>{};
+  final _byTrackId = <int, List<SongRow>>{};
   final _byText = <String, List<SongRow>>{};
 
   /// The id of the listed song [found] is, or null when the library does not
   /// have it. A merged copy answers with the song it is listed under.
-  int? listedIdOf(NewTrack found) {
+  ///
+  /// Listed songs in [except] (and rows merged into them) are passed over:
+  /// in a song's Versions every other upload has that song's name and
+  /// often its length or VK track id, so the song itself must not count as
+  /// "already in the library" for them (C4).
+  int? listedIdOf(NewTrack found, {Set<int> except = const {}}) {
+    bool usable(SongRow row) =>
+        except.isEmpty || !except.contains(row.sameAs ?? row.id);
+    SongRow? firstOf(List<SongRow>? rows) => rows?.where(usable).firstOrNull;
     final row =
-        _byKey[found.sourceKey] ??
-        (found.vkTrackId == null ? null : _byTrackId[found.vkTrackId]) ??
-        _sameTextAndLength(found);
+        firstOf(_byKey[found.sourceKey]) ??
+        (found.vkTrackId == null
+            ? null
+            : firstOf(_byTrackId[found.vkTrackId])) ??
+        _sameTextAndLength(found, usable);
     return row == null ? null : row.sameAs ?? row.id;
   }
 
-  SongRow? _sameTextAndLength(NewTrack found) {
+  SongRow? _sameTextAndLength(NewTrack found, bool Function(SongRow) usable) {
     final rows = _byText[songMatchText(found.artist, found.title)];
     if (rows == null) return null;
     for (final row in rows) {
+      if (!usable(row)) continue;
       if ((row.seconds - found.durationSec).abs() <= sameSongLengthTolerance) {
         return row;
       }

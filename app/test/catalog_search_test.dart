@@ -288,6 +288,99 @@ void main() {
     });
   });
 
+  group('songs outside the library (album, Versions: C4)', () {
+    Track outside(
+      int id,
+      String key, {
+      String title = 'Пачка сигарет',
+      int duration = 268,
+    }) => Track(
+      id: id,
+      sourceId: first,
+      source: TrackSource.vk,
+      artist: 'Кино',
+      title: title,
+      durationSec: duration,
+      sourceKey: key,
+      accessKey: 'k$id',
+    );
+
+    test('another upload of a song counts as in the library, except in '
+        "that song's own Versions", () {
+      store.upsertAll(first, [
+        vkItemToTrack(vkAudio(42, 6, title: 'Пачка сигарет', duration: 268)),
+      ]);
+      final tracks = store.loadAll();
+      library.replaceTracks(tracks, SearchIndex(tracks));
+      final own = library.all.single;
+      final upload = outside(-1000000000, '-7_1', duration: 269);
+      expect(
+        catalog.stateOf(catalog.outsideSong(upload)),
+        FoundState.inLibrary,
+      );
+      final again = makeCatalog();
+      final asVersion = again.outsideSong(upload, except: {own.id});
+      expect(again.stateOf(asVersion), FoundState.addable);
+      expect(again.foundById(upload.id), same(asVersion));
+      again.dispose();
+    });
+
+    test('an added album song keeps its VK track id and album; the same '
+        'track gives the same song', () async {
+      final song = outside(-1, '-7_3', title: 'Кончится лето');
+      final found = catalog.outsideSong(
+        song,
+        vkTrackId: 77,
+        vkAlbumKey: '-5_9',
+        vkAlbumAccessKey: 'a',
+      );
+      expect(catalog.outsideSong(song), same(found));
+      expect(await catalog.add(found), 'Added "Кончится лето" to Мой VK');
+      expect(vk1.adds, ['-7_3 k-1']);
+      expect(store.listedIdsByVkTrackId([77]), hasLength(1));
+      expect(store.listedIdsInVkAlbum('-5_9'), hasLength(1));
+    });
+
+    test('Add all adds each song + still offers, one after another, and '
+        'reloads once', () async {
+      store.upsertAll(first, [
+        vkItemToTrack(vkAudio(42, 6, title: 'Пачка сигарет', duration: 268)),
+      ]);
+      final tracks = store.loadAll();
+      library.replaceTracks(tracks, SearchIndex(tracks));
+      final songs = [
+        catalog.outsideSong(outside(-1, '-7_1', title: 'Кукушка')),
+        // In the library already: skipped.
+        catalog.outsideSong(outside(-2, '-7_2')),
+        catalog.outsideSong(outside(-3, '-7_3', title: 'Кончится лето')),
+      ];
+      final adding = catalog.addAll(songs);
+      expect(catalog.stateOf(songs[0]), FoundState.adding);
+      expect(catalog.stateOf(songs[2]), FoundState.adding);
+      expect(await adding, 'Added 2 songs to Мой VK');
+      expect(vk1.adds, ['-7_1 k-1', '-7_3 k-3']);
+      expect(catalog.stateOf(songs[0]), FoundState.inLibrary);
+      expect(catalog.stateOf(songs[2]), FoundState.inLibrary);
+      await Future<void>.delayed(const Duration(milliseconds: 40));
+      expect(reloads, 1);
+      expect(library.all, hasLength(3));
+      expect(await catalog.addAll(songs), 'Already in your library');
+    });
+
+    test('Add all says which songs VK refused', () async {
+      final songs = [
+        catalog.outsideSong(outside(-1, '-7_1', title: 'Кукушка')),
+        catalog.outsideSong(outside(-3, '-7_3', title: 'Кончится лето')),
+      ];
+      vk1.refuseWith = '15;Access denied';
+      final note = await catalog.addAll(songs);
+      expect(note, startsWith('Added 1 song to Мой VK. Not added: "Кукушка"'));
+      expect(note, contains('no access'));
+      expect(catalog.stateOf(songs[0]), FoundState.addable);
+      expect(catalog.stateOf(songs[1]), FoundState.inLibrary);
+    });
+  });
+
   group('the account toggle', () {
     test('defaults to the first account; the last ticked one stays; All '
         'and back; kept in the settings', () {
