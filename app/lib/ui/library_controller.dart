@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart';
 
 import '../library/library_records.dart';
+import '../library/same_song.dart';
 import '../library/search_index.dart';
 import '../library/search_text.dart';
 import '../library/song_filter.dart';
@@ -582,12 +583,38 @@ class LibraryController extends ChangeNotifier {
     final owned = catalog.libraryIdsByVkTrackId([
       for (final song in listed) ?song.vkTrackId,
     ]);
+    // VK leaves track_id out on some album songs: the library's songs of
+    // this album the track ids did not place are matched by name and a
+    // length within 2 s instead, as + does (FoundMatcher). Without this a
+    // song added from the album would show twice: its album row and the
+    // copy at the end (C4).
+    final placed = owned.values.toSet();
+    final byText = <String, List<Track>>{};
+    for (final id in libraryIds) {
+      final track = _byId[id];
+      if (track == null || placed.contains(id)) continue;
+      (byText[songMatchText(track.artist, track.title)] ??= []).add(track);
+    }
+    Track? sameSongOf(Track song) {
+      final candidates = byText[songMatchText(song.artist, song.title)];
+      if (candidates == null) return null;
+      for (final (i, track) in candidates.indexed) {
+        if ((track.durationSec - song.durationSec).abs() <=
+            sameSongLengthTolerance) {
+          return candidates.removeAt(i);
+        }
+      }
+      return null;
+    }
+
     final shown = <int>{};
     final tracks = <Track>[];
     final covers = <int, Track>{};
     Track? firstCover;
     for (final song in listed) {
-      final own = _byId[owned[song.vkTrackId]];
+      final own =
+          _byId[owned[song.vkTrackId]] ??
+          (song.vkTrackId == null ? sameSongOf(song.track) : null);
       final track = own ?? song.track;
       if (!shown.add(track.id)) continue;
       tracks.add(track);

@@ -27,8 +27,10 @@ void main() {
   late CatalogSearch catalog;
   late ValueNotifier<List<SourceInfo>> sources;
 
+  late Map<String, Object> albumReply;
+
   /// VK's list of the album: the library's song and two it lacks.
-  final albumReply = {
+  Map<String, Object> makeReply() => {
     'count': 3,
     'items': [
       for (final (id, title, trackId) in [
@@ -49,6 +51,7 @@ void main() {
   };
 
   setUp(() {
+    albumReply = makeReply();
     store = LibraryStore.open(':memory:');
     source = store.ensureSource(TrackSource.vk, account: '42', name: 'Мой VK');
     store.upsertAll(source, [
@@ -181,6 +184,29 @@ void main() {
       contains('3 songs in your library'),
     );
     // Let the note's timer run out.
+    await tester.pump(const Duration(seconds: 5));
+  });
+
+  testWidgets('an added song VK lists without a track id takes its place in '
+      'the album, not a second row', (tester) async {
+    // VK leaves track_id out on some album songs: the copy is matched by
+    // name and length instead.
+    final items = albumReply['items']! as List;
+    (items[2] as Map).remove('track_id');
+    await openAlbum(tester);
+    await tester.tap(addOf(outside('Маяк')));
+    await tester.pump();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+    await tester.pump();
+    expect(store.loadAll(), hasLength(2));
+    expect(library.visible, hasLength(3), reason: 'no row twice');
+    expect(library.visible.map((t) => t.title), [
+      'Люди',
+      'Альтернатива',
+      'Маяк',
+    ], reason: "in the album's order");
+    expect(library.visible.last.inLibrary, isTrue);
     await tester.pump(const Duration(seconds: 5));
   });
 
