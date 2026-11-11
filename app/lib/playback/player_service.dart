@@ -221,6 +221,15 @@ class PlayerService {
     _restored = true;
   }
 
+  /// The song playing now was added to the library as [track] (the same
+  /// audio): shows it as that song from now on, without reloading the sound.
+  void adopt(Track track) {
+    final current = _current;
+    if (current == null || current.id == track.id) return;
+    _current = track;
+    _currentController.add(track);
+  }
+
   /// Every finished play request's timing, for the status line and logs.
   Stream<PlayTiming> get timings => _timingController.stream;
 

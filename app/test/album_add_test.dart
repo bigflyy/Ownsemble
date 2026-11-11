@@ -10,7 +10,6 @@ import 'package:ownsemble/library/library_store.dart';
 import 'package:ownsemble/library/search_index.dart';
 import 'package:ownsemble/library/track.dart';
 import 'package:ownsemble/playback/playback_controller.dart';
-import 'package:ownsemble/playback/player_service.dart';
 import 'package:ownsemble/ui/albums.dart';
 import 'package:ownsemble/ui/catalog_search.dart';
 import 'package:ownsemble/ui/library_controller.dart';
@@ -26,6 +25,7 @@ void main() {
   late LibraryController library;
   late CatalogSearch catalog;
   late ValueNotifier<List<SourceInfo>> sources;
+  late PlaybackController playback;
 
   late Map<String, Object> albumReply;
 
@@ -77,6 +77,7 @@ void main() {
       albums: LibraryAlbums(store: store, apiOfSource: (_) => call),
     );
     sources = ValueNotifier(store.sources());
+    playback = PlaybackController(player: ShowingPlayer());
     catalog = CatalogSearch(
       library: library,
       store: store,
@@ -86,6 +87,7 @@ void main() {
         final tracks = store.loadAll();
         library.replaceTracks(tracks, SearchIndex(tracks));
       },
+      onAdded: playback.adoptAdded,
     );
   });
 
@@ -104,9 +106,7 @@ void main() {
         child: MaterialApp(
           home: LibraryScreen(
             library: library,
-            playback: PlaybackController(
-              player: PlayerService(muted: true, dataDir: '.'),
-            ),
+            playback: playback,
             catalog: catalog,
           ),
         ),
@@ -207,6 +207,36 @@ void main() {
       'Маяк',
     ], reason: "in the album's order");
     expect(library.visible.last.inLibrary, isTrue);
+    await tester.pump(const Duration(seconds: 5));
+  });
+
+  testWidgets('a song + adds while it plays keeps its playing mark', (
+    tester,
+  ) async {
+    // User, 2026-11-12: "when i add the song that i listened to in the
+    // album its playing animation disappeared."
+    await openAlbum(tester);
+    final song = outside('Альтернатива');
+    await tester.tap(find.byKey(ValueKey('song-${song.id}')));
+    await tester.pump();
+    await tester.pump();
+    expect(playback.player.current?.id, song.id);
+    Finder markOf(Track track) => find.descendant(
+      of: find.byKey(ValueKey('song-${track.id}')),
+      matching: find.byKey(const ValueKey('playing-bars')),
+    );
+    expect(markOf(song), findsOneWidget);
+    await tester.tap(addOf(song));
+    await tester.pump();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+    await tester.pump();
+    final added = library.visible.firstWhere((t) => t.title == 'Альтернатива');
+    expect(added.inLibrary, isTrue);
+    expect(playback.player.current?.id, added.id);
+    expect(markOf(added), findsOneWidget);
+    // Stops the controller's periodic save of the place.
+    playback.player.playing.value = false;
     await tester.pump(const Duration(seconds: 5));
   });
 

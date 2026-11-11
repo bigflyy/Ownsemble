@@ -319,6 +319,8 @@ Future<void> main(List<String> args) async {
         unawaited(sync.syncAfterRunning());
       }
     },
+    // A song + added while it plays goes on as the library's song.
+    onAdded: playback.adoptAdded,
     readSetting: store.readSetting,
     writeSetting: store.writeSetting,
     log: logPerf,

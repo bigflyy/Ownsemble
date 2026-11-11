@@ -102,6 +102,7 @@ class CatalogSearch extends ChangeNotifier {
     required this._sources,
     required this.apiOfSource,
     required this.onLibraryChanged,
+    this.onAdded,
     String? Function(String key)? readSetting,
     this._writeSetting,
     this.pause = const Duration(milliseconds: 500),
@@ -128,6 +129,11 @@ class CatalogSearch extends ChangeNotifier {
   /// it reads the copies' files, which merges them into one listed song
   /// (Stage L), until then each account lists its own copy.
   final void Function({required bool severalAccounts}) onLibraryChanged;
+
+  /// After the reload: the songs outside the library just added, by their
+  /// outside id, with the library's copy of each (main.dart: the player and
+  /// the play list take the copies, see PlaybackController.adoptAdded).
+  final void Function(Map<int, Track> copies)? onAdded;
 
   final void Function(String key, String? value)? _writeSetting;
 
@@ -158,6 +164,9 @@ class CatalogSearch extends ChangeNotifier {
   /// Songs being added, and the accounts each song was added to in this run.
   final _adding = <String>{};
   final _addedTo = <String, List<int>>{};
+
+  /// Ids of the found or outside songs added since the last reload.
+  final _justAdded = <int>{};
 
   FoundMatcher? _matcher;
   List<Track>? _matcherOf;
@@ -224,6 +233,13 @@ class CatalogSearch extends ChangeNotifier {
   /// The found song with id [id], if it was found in this run (or shown
   /// as an album's or a version's row: [outsideSong]).
   FoundSong? foundById(int id) => _byId[id];
+
+  /// The library's song for the found or outside song with id [id], once
+  /// the library lists it; null otherwise.
+  Track? libraryCopyOf(int id) {
+    final found = _byId[id];
+    return found == null ? null : _listedOf(found);
+  }
 
   /// [track], a song outside the library (an album's song, another upload
   /// in a song's Versions), as a song + can add. The same song gives the
@@ -471,6 +487,7 @@ class CatalogSearch extends ChangeNotifier {
     }
     if (added.isNotEmpty) {
       _addedTo[found.key] = [for (final source in added) source.id];
+      _justAdded.add(found.track.id);
     }
     return (added, refused);
   }
@@ -481,7 +498,13 @@ class CatalogSearch extends ChangeNotifier {
     if (any) {
       _reload?.cancel();
       _reload = Timer(reloadAfter, () {
-        if (!_disposed) onLibraryChanged(severalAccounts: several);
+        if (_disposed) return;
+        onLibraryChanged(severalAccounts: several);
+        final copies = <int, Track>{
+          for (final id in _justAdded) id: ?libraryCopyOf(id),
+        };
+        _justAdded.clear();
+        onAdded?.call(copies);
       });
     }
     notifyListeners();

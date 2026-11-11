@@ -9,7 +9,6 @@ import 'package:ownsemble/library/library_store.dart';
 import 'package:ownsemble/library/search_index.dart';
 import 'package:ownsemble/library/track.dart';
 import 'package:ownsemble/playback/playback_controller.dart';
-import 'package:ownsemble/playback/player_service.dart';
 import 'package:ownsemble/ui/catalog_search.dart';
 import 'package:ownsemble/ui/library_controller.dart';
 import 'package:ownsemble/ui/library_screen.dart';
@@ -25,6 +24,8 @@ void main() {
   late LibraryController library;
   late CatalogSearch catalog;
   late ValueNotifier<List<SourceInfo>> sources;
+  late ShowingPlayer player;
+  late PlaybackController playback;
 
   setUp(() {
     store = LibraryStore.open(':memory:');
@@ -41,6 +42,8 @@ void main() {
       ]);
     library = LibraryController(store.loadAll());
     sources = ValueNotifier(store.sources());
+    player = ShowingPlayer();
+    playback = PlaybackController(player: player);
     catalog = CatalogSearch(
       library: library,
       store: store,
@@ -50,6 +53,7 @@ void main() {
         final tracks = store.loadAll();
         library.replaceTracks(tracks, SearchIndex(tracks));
       },
+      onAdded: playback.adoptAdded,
     );
   });
   tearDown(() {
@@ -67,9 +71,7 @@ void main() {
         child: MaterialApp(
           home: LibraryScreen(
             library: library,
-            playback: PlaybackController(
-              player: PlayerService(muted: true, dataDir: '.'),
-            ),
+            playback: playback,
             catalog: catalog,
           ),
         ),
@@ -127,6 +129,32 @@ void main() {
     await tester.pump(const Duration(milliseconds: 400));
     expect(library.visible.map((t) => t.title), contains('Кукушка'));
     expect(inRow(cuckoo, 'song-added'), findsOneWidget);
+    await tester.pump(const Duration(seconds: 5));
+  });
+
+  testWidgets('a found song + adds while it plays keeps its playing mark, '
+      'and a click on it still pauses', (tester) async {
+    await pumpScreen(tester);
+    await search(tester, 'кино');
+    final cuckoo = catalog.songs[1];
+    await tester.tap(find.byKey(ValueKey('found-${cuckoo.track.id}')));
+    await tester.pump();
+    await tester.pump();
+    expect(player.current?.id, cuckoo.track.id);
+    expect(inRow(cuckoo, 'playing-bars'), findsOneWidget);
+    await tester.tap(inRow(cuckoo, 'add-song'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 500));
+    await tester.pump();
+    // The player has the library's copy now, and the found row is still
+    // marked as playing.
+    expect(player.current?.inLibrary, isTrue);
+    expect(player.current?.title, 'Кукушка');
+    expect(inRow(cuckoo, 'playing-bars'), findsOneWidget);
+    await tester.tap(find.byKey(ValueKey('found-${cuckoo.track.id}')));
+    await tester.pump();
+    expect(player.pauseToggles, 1, reason: 'paused, not started again');
+    player.playing.value = false;
     await tester.pump(const Duration(seconds: 5));
   });
 

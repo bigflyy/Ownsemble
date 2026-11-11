@@ -1,5 +1,51 @@
 // A fake VK account for the On VK part's tests: what its searches find and
-// what its adds answer, in the shapes real VK gave on 2026-11-08 (C1).
+// what its adds answer, in the shapes real VK gave on 2026-11-08 (C1). And a
+// player that shows a song as playing without opening any audio.
+
+import 'dart:async';
+
+import 'package:ownsemble/library/track.dart';
+import 'package:ownsemble/playback/player_service.dart';
+
+/// A player that "plays" a song by showing it, without opening any audio.
+class ShowingPlayer extends PlayerService {
+  ShowingPlayer() : super(muted: true, dataDir: '.');
+
+  Track? _shown;
+  final _shows = StreamController<Track?>.broadcast();
+
+  @override
+  bool get isReady => true;
+  @override
+  Track? get current => _shown;
+  @override
+  bool get currentLoaded => _shown != null;
+  @override
+  Stream<Track?> get currentStream => _shows.stream;
+  @override
+  Stream<Duration> get positions => const Stream.empty();
+
+  @override
+  Future<PlayTiming> play(Track track, {Duration? from}) async {
+    _shown = track;
+    _shows.add(track);
+    playing.value = true;
+    return PlayTiming(ok: true, cached: false, resolveMs: 0, toSoundMs: 1);
+  }
+
+  @override
+  void adopt(Track track) {
+    if (_shown == null || _shown!.id == track.id) return;
+    _shown = track;
+    _shows.add(track);
+  }
+
+  /// Clicks that paused or resumed the song.
+  var pauseToggles = 0;
+
+  @override
+  Future<void> playOrPause() async => pauseToggles++;
+}
 
 /// One VK song as `audio.search` lists it.
 Map<String, dynamic> vkAudio(

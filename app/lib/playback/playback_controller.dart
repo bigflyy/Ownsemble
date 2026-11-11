@@ -339,6 +339,29 @@ class PlaybackController extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Songs outside the library that + just added ([copies]: the outside
+  /// song's id to the library's copy). The play list, the queue and the
+  /// player take the copies, so the song playing now goes on as the library's
+  /// song: its row keeps the playing mark and the rest of the listen goes
+  /// into History. The sound is not reloaded.
+  void adoptAdded(Map<int, Track> copies) {
+    if (copies.isEmpty) return;
+    final listSaved = identical(queue.context, _savedList);
+    queue.refreshTracks((id) => copies[id]);
+    _savedList = listSaved ? queue.context : null;
+    final current = player.current;
+    final copy = current == null ? null : copies[current.id];
+    if (copy != null) {
+      player.adopt(copy);
+      // An outside song has no play in History (see [_play]): one starts now.
+      if (player.currentLoaded && _open == null) {
+        _beginPlay(copy, PlayStart.chosen);
+      }
+      saveSession();
+    }
+    notifyListeners();
+  }
+
   /// Saves the current song and its place, so the next run can go on from
   /// there. A song that failed is left out: the last one that played stays.
   void saveSession() {

@@ -69,6 +69,11 @@ class FakePlayer implements PlayerService {
   }
 
   @override
+  void adopt(Track track) {
+    if (_current != null && _current!.id != track.id) _current = track;
+  }
+
+  @override
   Future<void> playOrPause() async => pauseToggles++;
   @override
   void restore(Track track, Duration position) {
@@ -974,4 +979,52 @@ void main() {
       expect(player.versionChecks, isEmpty);
     });
   });
+
+  test(
+    'a song outside the library that + added goes on as the library '
+    "song: the player, the play list and History take the library's copy",
+    () async {
+      Track outside(int id, String title) => Track(
+        id: id,
+        sourceId: 1,
+        source: TrackSource.vk,
+        artist: 'Дайте танк (!)',
+        title: title,
+        durationSec: 200,
+      );
+      final list = [outside(-1, 'Альтернатива'), outside(-2, 'Маяк')];
+      await playback.playFrom(list, 0);
+      // History points at library rows: an outside song has none.
+      expect(plays.trackIds, isEmpty);
+      nowMs = 5000;
+      final copy = Track(
+        id: 7,
+        sourceId: 1,
+        source: TrackSource.vk,
+        artist: 'Дайте танк (!)',
+        title: 'Альтернатива',
+        durationSec: 200,
+      );
+      playback.adoptAdded({-1: copy});
+      expect(player.current?.id, 7);
+      expect(playback.queue.current?.id, 7);
+      expect([for (final t in playback.queue.context) t.id], [7, -2]);
+      expect(plays.trackIds, [7], reason: 'the rest of the listen counts');
+      expect(player.played, [-1], reason: 'the sound goes on, not reloaded');
+      // A song not playing is only swapped in the list.
+      playback.adoptAdded({
+        -2: Track(
+          id: 8,
+          sourceId: 1,
+          source: TrackSource.vk,
+          artist: 'Дайте танк (!)',
+          title: 'Маяк',
+          durationSec: 200,
+        ),
+      });
+      expect([for (final t in playback.queue.context) t.id], [7, 8]);
+      expect(player.current?.id, 7);
+      expect(plays.trackIds, [7]);
+    },
+  );
 }

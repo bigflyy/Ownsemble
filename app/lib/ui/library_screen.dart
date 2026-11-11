@@ -428,7 +428,22 @@ class _LibraryScreenState extends State<LibraryScreen> {
   /// pauses or resumes it instead of restarting it.
   void _play(int index) {
     library.notePlayedFrom();
+    if (_pausesAddedCopy(library.visible[index])) return;
     widget.playback.playFrom(library.visible, index);
+  }
+
+  /// A click on a song outside the library that + added while it played:
+  /// the player has the library's copy now, so the click pauses or resumes
+  /// it, as on any loaded song. Returns whether it did.
+  bool _pausesAddedCopy(Track row) {
+    final player = widget.playback.player;
+    final current = player.current;
+    if (row.inLibrary || current == null || row.id == current.id) {
+      return false;
+    }
+    if (!_isPlaying(row, current)) return false;
+    widget.playback.playOrPause();
+    return true;
   }
 
   /// A Stats artist row: Songs with that artist's chip only, most played
@@ -1305,7 +1320,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
                 storage: _storage,
                 thumbnails: _settings.thumbnails,
                 showAlbum: showAlbum,
-                isCurrent: track.id == current.data?.id,
+                isCurrent: _isPlaying(track, current.data),
                 isJump: index == library.jump.row,
                 playing: playing,
                 onTap: () {
@@ -1407,11 +1422,22 @@ class _LibraryScreenState extends State<LibraryScreen> {
             i,
             showAlbum: showAlbum,
             playColumns: playColumns,
-            isCurrent: current?.id == found[i].track.id,
+            isCurrent: _isPlaying(found[i].track, current),
             playing: playing,
           ),
       if (status != null) (_, _) => status,
     ];
+  }
+
+  /// Whether [row] is the song the player has: the same song, or a song
+  /// outside the library that + added while it played (the player then has
+  /// the library's copy, see PlaybackController.adoptAdded).
+  bool _isPlaying(Track row, Track? current) {
+    if (current == null) return false;
+    if (row.id == current.id) return true;
+    return !row.inLibrary &&
+        current.inLibrary &&
+        widget.catalog?.libraryCopyOf(row.id)?.id == current.id;
   }
 
   /// A song VK found: plays with a click, the found songs as its list; +
@@ -1443,6 +1469,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
       playColumns: playColumns,
       onTap: () {
         library.jump.clear();
+        if (_pausesAddedCopy(track)) return;
         widget.playback.playFrom([
           for (final song in part.songs) song.track,
         ], index);
@@ -1491,8 +1518,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
     if (catalog == null || view.kind != ViewKind.album) return null;
     if (library.albumStatus?.load != AlbumLoad.loaded) return null;
     final songs = [
-      for (final track in library.visible)
-        ?_outsideSong(track, null),
+      for (final track in library.visible) ?_outsideSong(track, null),
     ];
     final addable = songs
         .where((found) => catalog.stateOf(found) == FoundState.addable)
