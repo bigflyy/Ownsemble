@@ -198,6 +198,8 @@ void main() {
     bool catalogPlays = false,
     bool catalogAdd = false,
     bool catalogFolded = false,
+    // Folds your own songs in search to their header (C4d).
+    bool catalogOwnFolded = false,
     bool catalogAll = false,
     bool catalogMenu = false,
     // An album's place (plan 06, C4): clicks "Add the other N".
@@ -487,6 +489,7 @@ void main() {
       );
       if (catalogAll) catalog.toggleAll();
       if (catalogFolded) catalog.toggleFolded();
+      if (catalogOwnFolded) catalog.toggleOwnFolded();
     }
     if (playingFirst && !saving) {
       await player.play(library.all.firstWhere((t) => t.id == ids[0]));
@@ -740,6 +743,31 @@ void main() {
       dark: false,
       catalogQuery: 'кукушка',
       catalogFolded: true,
+    ),
+  );
+
+  testWidgets(
+    'dark, your own songs in search folded, a found song playing',
+    (t) => shoot(
+      t,
+      'dark-catalog-own-folded',
+      dark: true,
+      catalogQuery: 'кино',
+      catalogPlays: true,
+      catalogOwnFolded: true,
+    ),
+  );
+  testWidgets(
+    'light, your own songs in search folded, narrow',
+    (t) => shoot(
+      t,
+      'light-catalog-own-folded-narrow',
+      dark: false,
+      size: const Size(700, 820),
+      dock: PlayerDock.bottom,
+      catalogQuery: 'кино',
+      catalogPlays: true,
+      catalogOwnFolded: true,
     ),
   );
 
