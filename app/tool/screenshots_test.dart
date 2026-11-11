@@ -200,6 +200,8 @@ void main() {
     bool catalogFolded = false,
     bool catalogAll = false,
     bool catalogMenu = false,
+    // An album's place (plan 06, C4): clicks "Add the other N".
+    bool albumAddAll = false,
   }) async {
     final store = LibraryStore.open(':memory:');
     addTearDown(store.close);
@@ -426,7 +428,7 @@ void main() {
     // A made-up VK: what the search finds and an add that always works.
     // Nothing leaves the test.
     CatalogSearch? catalog;
-    if (catalogQuery != null) {
+    if (catalogQuery != null || albumListed != null) {
       var newId = 700;
       Future<Object?> fakeVk(String method, Map<String, String> params) async {
         if (method == 'audio.add') {
@@ -599,8 +601,15 @@ void main() {
       await tester.pump();
       await tester.pump();
     }
-    if (catalog != null) {
-      library.searchText.text = catalogQuery!;
+    if (albumAddAll) {
+      await tester.tap(find.byKey(const ValueKey('album-add-all')));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 150));
+      await tester.pump(const Duration(milliseconds: 400));
+      await tester.pump();
+    }
+    if (catalog != null && catalogQuery != null) {
+      library.searchText.text = catalogQuery;
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 50));
       await tester.pumpAndSettle();
@@ -658,7 +667,9 @@ void main() {
     // Stops the playing timer of the controller before the tree goes.
     if (playingFirst || catalogPlays) player.playing.value = false;
     // Lets the note at the bottom time out, so no timer is left.
-    if (catalogAdd) await tester.pump(const Duration(seconds: 10));
+    if (catalogAdd || albumAddAll) {
+      await tester.pump(const Duration(seconds: 10));
+    }
     catalog?.dispose();
   }
 
@@ -740,6 +751,27 @@ void main() {
   testWidgets(
     'light, an album from VK',
     (t) => shoot(t, 'light-album', dark: false, albumListed: true),
+  );
+  testWidgets(
+    'dark, an album with + on the songs you lack, narrow',
+    (t) => shoot(
+      t,
+      'dark-album-add-narrow',
+      dark: true,
+      size: const Size(700, 820),
+      dock: PlayerDock.bottom,
+      albumListed: true,
+    ),
+  );
+  testWidgets(
+    'light, an album after Add the other N',
+    (t) => shoot(
+      t,
+      'light-album-added',
+      dark: false,
+      albumListed: true,
+      albumAddAll: true,
+    ),
   );
   testWidgets('light, side panel', (t) => shoot(t, 'light-side', dark: false));
   testWidgets(
