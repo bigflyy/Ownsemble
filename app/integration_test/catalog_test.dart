@@ -19,6 +19,8 @@
 // one song the library lacks, "Add the other N" for the rest, the album then
 // lists them as own songs, a sync adds nothing) and in a song's Versions (+ on
 // another upload, none on VK's own file), each removed again the same way.
+// Between them (C4b, changes nothing): a found song plays, the album name on
+// its row opens its album from VK, whose row of it keeps the playing mark.
 // Prints names, counts and times only: no link, key, token or id.
 
 import 'dart:io';
@@ -382,6 +384,126 @@ void main() {
     }
 
     await removeAdded('found song');
+
+    // 5b. A found song's album opens from search (C4b): the found song
+    // plays, a click on the album name on its row opens the album's place,
+    // VK lists the album through the link on the found song, and the
+    // album's row of the playing song keeps the playing mark. Changes
+    // nothing on VK.
+    library.searchText.text = query;
+    await tester.pump();
+    await waitUntil(
+      tester,
+      () => !catalog.searching,
+      timeout: const Duration(seconds: 30),
+      what: 'the On VK part again',
+    );
+    final withAlbum = [
+      for (final f in catalog.songs)
+        if (library.albumOf(f.track) != null &&
+            catalog.stateOf(f) == FoundState.addable &&
+            f.song.durationSec >= 60)
+          f,
+    ];
+    say(
+      'found songs with an album to open: ${withAlbum.length} of '
+      '${catalog.songs.length}',
+    );
+    expect(withAlbum, isNotEmpty);
+    var albumChecked = false;
+    for (final f in withAlbum.take(3)) {
+      final foundRow = find.byKey(ValueKey('found-${f.track.id}'));
+      while (foundRow.evaluate().isEmpty &&
+          scroll.offset < scroll.position.maxScrollExtent) {
+        scroll.jumpTo(
+          (scroll.offset + 300).clamp(0, scroll.position.maxScrollExtent),
+        );
+        await tester.pump();
+      }
+      await tester.ensureVisible(foundRow);
+      await tester.pump();
+      final foundTimings = <PlayTiming>[];
+      final foundListening = player.timings.listen(foundTimings.add);
+      await tester.tap(foundRow);
+      await tester.pump();
+      await waitUntil(
+        tester,
+        () => foundTimings.isNotEmpty,
+        timeout: const Duration(seconds: 60),
+        what: 'the found song to sound',
+      );
+      await foundListening.cancel();
+      expect(foundTimings.last.ok, isTrue);
+      expect(player.current?.id, f.track.id);
+      final albumName = find.descendant(
+        of: foundRow,
+        matching: find.text(f.song.album!),
+      );
+      expect(albumName, findsOneWidget, reason: 'the album name on the row');
+      clock = Stopwatch()..start();
+      await tester.tap(albumName);
+      await tester.pump();
+      expect(library.view.kind, ViewKind.album, reason: 'the album opened');
+      await waitUntil(
+        tester,
+        () => library.albumStatus?.load != AlbumLoad.loading,
+        timeout: const Duration(seconds: 30),
+        what: "the found song's album from VK",
+      );
+      final openMs = clock.elapsedMilliseconds;
+      final loaded = library.albumStatus?.load;
+      final songs = library.visible;
+      // The album's own file, or (mostly) the album's song of which the
+      // found song is an upload: the same VK recording.
+      final recording = f.song.vkTrackId;
+      final same = songs
+          .where(
+            (t) =>
+                t.sourceKey == f.key ||
+                recording != null && library.albumVkTrackIdOf(t) == recording,
+          )
+          .toList();
+      say(
+        'album "${f.song.album}" of "${f.song.title}": $loaded after '
+        '$openMs ms, ${songs.length} songs, ${songs.where((t) => t.inLibrary).length} '
+        'own, the found song listed: ${same.isNotEmpty} (same file: '
+        '${same.any((t) => t.sourceKey == f.key)}, VK track id known: '
+        '${recording != null})',
+      );
+      expect(loaded, AlbumLoad.loaded, reason: 'VK listed the album');
+      expect(songs, isNotEmpty);
+      if (same.isNotEmpty) {
+        final albumRow = find.byKey(ValueKey('song-${same.first.id}'));
+        // The list builds the rows on screen only: scroll to it first.
+        final at = library.visible.indexOf(same.first);
+        scroll.jumpTo(
+          (at * rowHeight).clamp(0, scroll.position.maxScrollExtent),
+        );
+        await tester.pump();
+        await tester.ensureVisible(albumRow);
+        await tester.pump();
+        expect(
+          find.descendant(
+            of: albumRow,
+            matching: find.byKey(const ValueKey('playing-bars')),
+          ),
+          findsOneWidget,
+          reason: "the playing mark on the album's row of the found song",
+        );
+        say('playing mark on its album row: yes');
+        albumChecked = true;
+      }
+      // Back: the search with its words.
+      library.goBack();
+      await tester.pump();
+      expect(library.view.kind, ViewKind.songs);
+      expect(library.searchText.text, query);
+      if (albumChecked) break;
+    }
+    expect(albumChecked, isTrue, reason: 'an album listed its found song');
+    await player.stop();
+    library.searchText.clear();
+    await tester.pump();
 
     // 6. An album's place (C4): + on a song the library lacks, then "Add
     // the other N" for the rest; the album then lists them as own songs.
