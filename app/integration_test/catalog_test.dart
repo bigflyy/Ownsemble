@@ -411,6 +411,33 @@ void main() {
       reason: 'Add the other N',
     );
     expect(find.text('Add the other ${lacking.length}'), findsOneWidget);
+    // The song plays first (user, 2026-11-12: "when i add the song that i
+    // listened to in the album its playing animation disappeared").
+    final albumTimings = <PlayTiming>[];
+    final albumListening = player.timings.listen(albumTimings.add);
+    addTearDown(albumListening.cancel);
+    await tester.tap(albumRow);
+    await tester.pump();
+    await waitUntil(
+      tester,
+      () => albumTimings.isNotEmpty,
+      timeout: const Duration(seconds: 60),
+      what: 'the album song to sound',
+    );
+    expect(albumTimings.last.ok, isTrue, reason: '${albumTimings.last.error}');
+    expect(albumTimings.last.sampleRate, isNotNull);
+    await waitUntil(
+      tester,
+      () => player.position >= const Duration(seconds: 2),
+      timeout: const Duration(seconds: 30),
+      what: 'the album song to move past 2 s',
+    );
+    Finder barsIn(Finder row) => find.descendant(
+      of: row,
+      matching: find.byKey(const ValueKey('playing-bars')),
+    );
+    expect(barsIn(albumRow), findsOneWidget, reason: 'marked while it plays');
+    final playedBefore = player.position;
     clock = Stopwatch()..start();
     await tester.tap(
       find.descendant(
@@ -434,6 +461,27 @@ void main() {
       '${clock.elapsedMilliseconds} ms',
     );
     expect(library.visible.length, albumSize, reason: 'no row twice');
+    await tester.pump(const Duration(milliseconds: 600));
+    final ownCopy = library.visible.firstWhere(
+      (t) => t.inLibrary && t.title == firstLacking.title,
+    );
+    final ownRow = find.byKey(ValueKey('song-${ownCopy.id}'));
+    await tester.ensureVisible(ownRow);
+    await tester.pump();
+    final markKept = barsIn(ownRow).evaluate().length;
+    final positionAfter = player.position;
+    say(
+      'album + while playing: player has the library copy '
+      '${player.current?.id == ownCopy.id}, mark on its row $markKept, '
+      'position ${playedBefore.inMilliseconds} -> '
+      '${positionAfter.inMilliseconds} ms, playing ${player.playing.value}',
+    );
+    expect(player.current?.id, ownCopy.id);
+    expect(markKept, 1, reason: 'the playing mark stays on the row');
+    expect(player.playing.value, isTrue, reason: 'the sound goes on');
+    expect(positionAfter, greaterThan(playedBefore), reason: 'not restarted');
+    await player.stop();
+    await tester.pump();
     final rest = lacking.length - 1;
     expect(find.text('Add the other $rest'), findsOneWidget);
     clock = Stopwatch()..start();
