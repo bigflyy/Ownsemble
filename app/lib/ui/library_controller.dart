@@ -605,6 +605,18 @@ class LibraryController extends ChangeNotifier {
     return tracks;
   }
 
+  /// The VK track id of [track], a song of the open album that the library
+  /// does not have, as VK's album list gave it; null when there is none.
+  /// The added copy keeps it, so the album finds the copy as its own (C4).
+  int? albumVkTrackIdOf(Track track) {
+    final album = _view.album;
+    if (_view.kind != ViewKind.album || album == null) return null;
+    for (final song in _albumLists[album] ?? const <AlbumSong>[]) {
+      if (song.track.id == track.id) return song.vkTrackId;
+    }
+    return null;
+  }
+
   /// Library songs of the album on screen, each with the album song whose
   /// cover its row shows. Set when the album's VK list is in.
   Map<int, Track> _albumCovers = const {};

@@ -946,6 +946,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
                         : _albumDetail(view),
                     actions: [
                       if (view.kind == ViewKind.versions) _versionsSearch(),
+                      ?_albumAddAll(view, tight: tight),
                       if (view.kind == ViewKind.yearReport &&
                           library.filters != null)
                         YearArrows(
@@ -1284,6 +1285,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
               final track = library.visible[index];
               final entryId = library.entryIdAt(index);
               final version = library.versionOf(track);
+              final outside = _outsideSong(track, version);
               return _SongRow(
                 key: ValueKey(
                   entryId == null ? 'song-${track.id}' : 'entry-$entryId',
@@ -1335,6 +1337,14 @@ class _LibraryScreenState extends State<LibraryScreen> {
                         compact: compact,
                       ),
                 tagsUnderTitle: version != null,
+                action: outside == null
+                    ? null
+                    : foundAddButton(
+                        context,
+                        widget.catalog!,
+                        outside,
+                        onAdd: _addFound,
+                      ),
                 outsideMeaning: version == null
                     ? null
                     : version.isCurrentFile
@@ -1442,6 +1452,95 @@ class _LibraryScreenState extends State<LibraryScreen> {
       action: foundAddButton(context, part, found, onAdd: _addFound),
       mark: foundMark(context, part, found),
     );
+  }
+
+  /// [track] as a song + can add, when it is outside the library in an
+  /// album's place or another upload in a song's Versions (C4); null for
+  /// every other row, and with no VK account to add to.
+  FoundSong? _outsideSong(Track track, SongVersion? version) {
+    final catalog = widget.catalog;
+    if (catalog == null || track.inLibrary || catalog.accounts.isEmpty) {
+      return null;
+    }
+    if (version != null) {
+      // VK's own file of the song is the song itself: nothing to add.
+      final row = library.versionsRow;
+      if (version.isCurrentFile || row == null) return null;
+      return catalog.outsideSong(
+        track,
+        vkTrackId: version.vkTrackId,
+        vkAlbumKey: version.albumKey,
+        vkAlbumAccessKey: version.albumAccessKey,
+        except: {row.id},
+      );
+    }
+    if (library.view.kind != ViewKind.album) return null;
+    final link = library.view.album?.link;
+    return catalog.outsideSong(
+      track,
+      vkTrackId: library.albumVkTrackIdOf(track),
+      vkAlbumKey: link?.key,
+      vkAlbumAccessKey: link?.accessKey,
+    );
+  }
+
+  /// "Add the other N" on an album whose VK list is in, while + still has
+  /// songs of it to add; null otherwise.
+  Widget? _albumAddAll(LibraryView view, {required bool tight}) {
+    final catalog = widget.catalog;
+    if (catalog == null || view.kind != ViewKind.album) return null;
+    if (library.albumStatus?.load != AlbumLoad.loaded) return null;
+    final songs = [
+      for (final track in library.visible)
+        ?_outsideSong(track, null),
+    ];
+    final addable = songs
+        .where((found) => catalog.stateOf(found) == FoundState.addable)
+        .toList();
+    final adding = songs.any(
+      (found) => catalog.stateOf(found) == FoundState.adding,
+    );
+    if (addable.isEmpty && !adding) return null;
+    final names = [for (final source in catalog.targets) source.name];
+    final count = addable.length;
+    final label = adding && count == 0
+        ? 'Adding...'
+        : count == 1
+        ? 'Add the other 1'
+        : 'Add the other $count';
+    final colors = targetColors(context, catalog);
+    return Padding(
+      padding: const EdgeInsets.only(left: 12),
+      child: Tooltip(
+        message:
+            'Add the album\'s songs you do not have to your library and to '
+            '${names.join(' and ')} on VK',
+        child: TextButton.icon(
+          key: const ValueKey('album-add-all'),
+          style: TextButton.styleFrom(
+            foregroundColor: colors.length == 1
+                ? colors.single
+                : OwnColors.of(context).accent,
+            visualDensity: tight ? VisualDensity.compact : null,
+          ),
+          onPressed: count == 0 ? null : () => _addAllFound(addable),
+          icon: const Icon(Icons.add_circle_outline, size: 20),
+          label: Text(label),
+        ),
+      ),
+    );
+  }
+
+  /// Adds [songs] one after another, then says how many went where.
+  Future<void> _addAllFound(List<FoundSong> songs) async {
+    final catalog = widget.catalog;
+    if (catalog == null) return;
+    final messenger = ScaffoldMessenger.of(context);
+    final note = await catalog.addAll(songs);
+    if (!mounted || note.isEmpty) return;
+    messenger
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(content: Text(note)));
   }
 
   /// Adds a found song, then says where it went (or why not) at the bottom.

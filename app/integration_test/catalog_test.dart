@@ -15,8 +15,11 @@
 // it); + on its row adds it (the check, the note, one more song in the
 // library and on VK); the next sync keeps one row for it; then the song is
 // deleted on VK and marked removed, and one more sync leaves the library and
-// the account as they were. Prints names, counts and times only: no link,
-// key, token or id.
+// the account as they were. Then the same + in an album's place (C4: + on
+// one song the library lacks, "Add the other N" for the rest, the album then
+// lists them as own songs, a sync adds nothing) and in a song's Versions (+ on
+// another upload, none on VK's own file), each removed again the same way.
+// Prints names, counts and times only: no link, key, token or id.
 
 import 'dart:io';
 
@@ -28,6 +31,7 @@ import 'package:ownsemble/library/library_store.dart';
 import 'package:ownsemble/main.dart' as app;
 import 'package:ownsemble/playback/player_service.dart';
 import 'package:ownsemble/ui/catalog_search.dart';
+import 'package:ownsemble/ui/library_controller.dart';
 import 'package:ownsemble/ui/library_screen.dart';
 import 'package:ownsemble/vk/vk_catalog.dart';
 import 'package:ownsemble/vk/vk_client.dart';
@@ -109,9 +113,7 @@ void main() {
     say('VK before: $vkBefore songs');
     // Whatever this run leaves on the account is removed at the end, even
     // when a step fails.
-    var cleaned = false;
     addTearDown(() async {
-      if (cleaned) return;
       final (_, keysNow) = await vkLibrary();
       for (final key in keysNow.difference(keysBefore)) {
         final ok = await deleteVkSong(client.call, key);
@@ -340,27 +342,222 @@ void main() {
 
     // 5. Removed again: off VK, marked removed, and the sync agrees.
     await player.stop();
-    final deleted = await deleteVkSong(client.call, newKey);
-    expect(deleted, isTrue, reason: 'VK removed the copy');
-    cleaned = true;
-    expect(catalog.store.markRemoved(account.id, [newKey]), 1);
-    catalog.onLibraryChanged(severalAccounts: false);
-    await tester.pump();
-    expect(library.all.length, listedBefore);
-    final last = await sync.syncNow().timeout(const Duration(minutes: 3));
-    await tester.pump();
-    final lastResult = last!.results.single;
-    final (vkAfter, _) = await vkLibrary();
-    say(
-      'after removal: VK $vkAfter songs, sync listed ${lastResult.listed}, '
-      'added ${lastResult.added}; library ${library.all.length} songs listed',
-    );
-    expect(vkAfter, vkBefore);
-    expect(lastResult.added, 0);
-    expect(library.all.length, listedBefore);
-    expect(library.all.where((t) => t.sourceKey == newKey), isEmpty);
     library.searchText.clear();
     await tester.pump();
+
+    /// Deletes every copy this run added from VK, marks them removed, and
+    /// syncs: the account and the library are as at the start.
+    Future<void> removeAdded(String what) async {
+      final keys = [
+        for (final t in library.all)
+          if (!keysListed.contains(t.sourceKey)) t.sourceKey!,
+      ];
+      for (final key in keys) {
+        expect(
+          await deleteVkSong(client.call, key),
+          isTrue,
+          reason: 'VK removed the copy',
+        );
+      }
+      expect(catalog.store.markRemoved(account.id, keys), keys.length);
+      catalog.onLibraryChanged(severalAccounts: false);
+      await tester.pump();
+      expect(library.all.length, listedBefore);
+      final last = await sync.syncNow().timeout(const Duration(minutes: 3));
+      await tester.pump();
+      final lastResult = last!.results.single;
+      final (vkAfter, _) = await vkLibrary();
+      say(
+        '$what removed (${keys.length}): VK $vkAfter songs, sync listed '
+        '${lastResult.listed}, added ${lastResult.added}; library '
+        '${library.all.length} songs listed',
+      );
+      expect(vkAfter, vkBefore);
+      expect(lastResult.added, 0);
+      expect(library.all.length, listedBefore);
+      expect(
+        library.all.where((t) => !keysListed.contains(t.sourceKey)),
+        isEmpty,
+      );
+    }
+
+    await removeAdded('found song');
+
+    // 6. An album's place (C4): + on a song the library lacks, then "Add
+    // the other N" for the rest; the album then lists them as own songs.
+    final albumSong = library.all.firstWhere((t) => t.album == 'Человеко-часы');
+    library.openAlbum(albumSong);
+    await tester.pump();
+    await waitUntil(
+      tester,
+      () => library.albumStatus?.load != AlbumLoad.loading,
+      what: 'the album from VK',
+    );
+    expect(library.albumStatus?.load, AlbumLoad.loaded);
+    final albumSize = library.visible.length;
+    final lacking = library.visible.where((t) => !t.inLibrary).toList();
+    say(
+      'album "Человеко-часы": $albumSize songs, ${lacking.length} not in the '
+      'library',
+    );
+    expect(lacking.length, greaterThanOrEqualTo(2));
+    final firstLacking = lacking.first;
+    final albumRow = find.byKey(ValueKey('song-${firstLacking.id}'));
+    await tester.ensureVisible(albumRow);
+    await tester.pump();
+    expect(
+      find.byKey(const ValueKey('album-add-all')),
+      findsOneWidget,
+      reason: 'Add the other N',
+    );
+    expect(find.text('Add the other ${lacking.length}'), findsOneWidget);
+    clock = Stopwatch()..start();
+    await tester.tap(
+      find.descendant(
+        of: albumRow,
+        matching: find.byKey(const ValueKey('add-song')),
+      ),
+    );
+    await tester.pump();
+    await waitUntil(
+      tester,
+      () =>
+          library.visible.any(
+            (t) => t.inLibrary && t.title == firstLacking.title,
+          ) &&
+          library.all.length == listedBefore + 1,
+      timeout: const Duration(seconds: 30),
+      what: 'the album to list the added song as its own',
+    );
+    say(
+      'album +: "${firstLacking.title}" added and listed as own after '
+      '${clock.elapsedMilliseconds} ms',
+    );
+    expect(library.visible.length, albumSize, reason: 'no row twice');
+    final rest = lacking.length - 1;
+    expect(find.text('Add the other $rest'), findsOneWidget);
+    clock = Stopwatch()..start();
+    await tester.tap(find.byKey(const ValueKey('album-add-all')));
+    await tester.pump();
+    await waitUntil(
+      tester,
+      () =>
+          library.visible.every((t) => t.inLibrary) &&
+          library.all.length == listedBefore + lacking.length,
+      timeout: const Duration(seconds: 60),
+      what: 'Add the other $rest',
+    );
+    await tester.pump(const Duration(milliseconds: 600));
+    say(
+      'album Add the other $rest: all listed as own after '
+      '${clock.elapsedMilliseconds} ms',
+    );
+    expect(library.visible.length, albumSize, reason: 'no row twice');
+    expect(find.byKey(const ValueKey('album-add-all')), findsNothing);
+    expect(find.text('Added $rest songs to ${account.name}'), findsOneWidget);
+    final (vkAlbum, _) = await vkLibrary();
+    expect(vkAlbum, vkBefore + lacking.length);
+    final albumSync = await sync.syncNow().timeout(const Duration(minutes: 3));
+    await tester.pump();
+    say(
+      'sync after the album: listed ${albumSync!.results.single.listed}, '
+      'added ${albumSync.results.single.added}; album '
+      '${library.visible.length} rows, all own: '
+      '${library.visible.every((t) => t.inLibrary)}',
+    );
+    expect(albumSync.results.single.added, 0);
+    expect(library.all.length, listedBefore + lacking.length);
+    expect(library.visible.length, albumSize);
+    expect(library.visible.every((t) => t.inLibrary), isTrue);
+    await tester.tap(find.byKey(const ValueKey('album-back')));
+    await tester.pump();
+    await removeAdded('album songs');
+
+    // 7. A song's Versions (C4): + on another upload, none on VK's own file.
+    final versionsOf = library.all.firstWhere(
+      (t) => t.title == 'Way Down We Go',
+    );
+    library.openVersions(
+      versionsOf,
+      player.ownRoutesFor(versionsOf).firstOrNull,
+    );
+    await tester.pump();
+    final list = library.versionList!;
+    await waitUntil(
+      tester,
+      () => !list.searching,
+      timeout: const Duration(seconds: 60),
+      what: 'the versions from VK',
+    );
+    await tester.pump();
+    final rows = library.visible;
+    final current = rows.firstWhere((t) => library.versionOf(t)!.isCurrentFile);
+    expect(
+      find.descendant(
+        of: find.byKey(ValueKey('song-${current.id}')),
+        matching: find.byKey(const ValueKey('add-song')),
+      ),
+      findsNothing,
+      reason: "no + on VK's own file",
+    );
+    final withAdd = [
+      for (final t in rows)
+        if (find
+            .descendant(
+              of: find.byKey(ValueKey('song-${t.id}')),
+              matching: find.byKey(const ValueKey('add-song')),
+            )
+            .evaluate()
+            .isNotEmpty)
+          t,
+    ];
+    say(
+      'versions of "${versionsOf.title}": ${rows.length} rows, + on '
+      '${withAdd.length} shown',
+    );
+    expect(withAdd, isNotEmpty);
+    final chosen = withAdd.first;
+    final chosenVersion = library.versionOf(chosen)!;
+    clock = Stopwatch()..start();
+    await tester.tap(
+      find.descendant(
+        of: find.byKey(ValueKey('song-${chosen.id}')),
+        matching: find.byKey(const ValueKey('add-song')),
+      ),
+    );
+    await tester.pump();
+    await waitUntil(
+      tester,
+      () =>
+          find
+              .descendant(
+                of: find.byKey(ValueKey('song-${chosen.id}')),
+                matching: find.byKey(const ValueKey('song-added')),
+              )
+              .evaluate()
+              .isNotEmpty &&
+          library.all.length == listedBefore + 1,
+      timeout: const Duration(seconds: 30),
+      what: 'the upload added',
+    );
+    await tester.pump(const Duration(milliseconds: 600));
+    say(
+      'versions +: upload of ${chosenVersion.listedSec} s added after '
+      '${clock.elapsedMilliseconds} ms; still on Versions: '
+      '${library.view.kind == ViewKind.versions}',
+    );
+    expect(library.view.kind, ViewKind.versions);
+    final (vkVersion, _) = await vkLibrary();
+    expect(vkVersion, vkBefore + 1);
+    final versionSync = await sync.syncNow().timeout(
+      const Duration(minutes: 3),
+    );
+    await tester.pump();
+    expect(versionSync!.results.single.added, 0);
+    expect(library.all.length, listedBefore + 1);
+    await tester.tap(find.byKey(const ValueKey('album-back')));
+    await tester.pump();
+    await removeAdded('upload');
     say('catalog check passed');
   });
 }
