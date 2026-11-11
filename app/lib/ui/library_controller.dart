@@ -469,6 +469,10 @@ class LibraryController extends ChangeNotifier {
   /// version can be freed.
   void Function(Track? Function(int id) find)? onTracksReplaced;
 
+  /// The album of a song outside the library that [albums] does not know:
+  /// a song VK found in search (CatalogSearch.albumOfFound sets it, C4b).
+  AlbumRef? Function(Track track)? outsideAlbumOf;
+
   List<Track> get all => _all;
   LibraryView get view => _view;
 
@@ -493,7 +497,11 @@ class LibraryController extends ChangeNotifier {
   /// versions are shown.
   AlbumRef? albumOf(Track track) {
     final version = versionOf(track);
-    if (version == null) return albums?.albumOf(track);
+    if (version == null) {
+      final album = albums?.albumOf(track);
+      if (album != null || track.inLibrary) return album;
+      return outsideAlbumOf?.call(track);
+    }
     // VK's file for the song is the song's own: its album as the list shows.
     final row = _versionsRow;
     if (version.isCurrentFile && row != null) return albums?.albumOf(row);

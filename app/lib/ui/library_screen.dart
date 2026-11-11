@@ -432,9 +432,11 @@ class _LibraryScreenState extends State<LibraryScreen> {
     widget.playback.playFrom(library.visible, index);
   }
 
-  /// A click on a song outside the library that + added while it played:
-  /// the player has the library's copy now, so the click pauses or resumes
-  /// it, as on any loaded song. Returns whether it did.
+  /// A click on a song outside the library that the player already has
+  /// under another id: + added it while it played (the player has the
+  /// library's copy now), or it plays from search and this is its album's
+  /// row. The click pauses or resumes it, as on any loaded song. Returns
+  /// whether it did.
   bool _pausesAddedCopy(Track row) {
     final player = widget.playback.player;
     final current = player.current;
@@ -1432,13 +1434,34 @@ class _LibraryScreenState extends State<LibraryScreen> {
   /// Whether [row] is the song the player has: the same song, or a song
   /// outside the library that + added while it played (the player then has
   /// the library's copy, see PlaybackController.adoptAdded).
+  ///
+  /// Two songs outside the library are the same song when they are the same
+  /// VK file through the same account, or the same recording (VK's track
+  /// id): a song found in search and its row in the album opened from it
+  /// have ids of their own, and the found song is mostly someone's upload
+  /// of the album's song, under another key (C4b, catalog-18.log).
   bool _isPlaying(Track row, Track? current) {
     if (current == null) return false;
     if (row.id == current.id) return true;
-    return !row.inLibrary &&
-        current.inLibrary &&
-        widget.catalog?.libraryCopyOf(row.id)?.id == current.id;
+    if (row.inLibrary) return false;
+    if (!current.inLibrary) {
+      if (row.sourceKey != null &&
+          row.sourceKey == current.sourceKey &&
+          row.sourceId == current.sourceId) {
+        return true;
+      }
+      final recording = _vkTrackIdOf(current);
+      return recording != null && recording == _vkTrackIdOf(row);
+    }
+    return widget.catalog?.libraryCopyOf(row.id)?.id == current.id;
   }
+
+  /// VK's id of the recording of [track], a song outside the library: as
+  /// search found it, or as the album on screen lists it; null when neither
+  /// knows it.
+  int? _vkTrackIdOf(Track track) =>
+      widget.catalog?.foundById(track.id)?.song.vkTrackId ??
+      library.albumVkTrackIdOf(track);
 
   /// A song VK found: plays with a click, the found songs as its list; +
   /// in the heart's slot.
@@ -1478,6 +1501,14 @@ class _LibraryScreenState extends State<LibraryScreen> {
       versionTag: (_) => const SizedBox.shrink(),
       action: foundAddButton(context, part, found, onAdd: _addFound),
       mark: foundMark(context, part, found),
+      // The album opens through VK's link on the found song (C4b); without
+      // one the name is plain text.
+      onOpenAlbum: library.albumOf(track) == null
+          ? null
+          : () {
+              library.jump.clear();
+              library.openAlbum(track);
+            },
     );
   }
 
@@ -1600,6 +1631,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
   /// A found song's right-click menu: what any song outside the library
   /// offers.
   Future<void> _showFoundMenu(Track track, Offset position) async {
+    final album = library.albumOf(track);
     final action = await showMenu<String>(
       context: context,
       position: RelativeRect.fromLTRB(
@@ -1619,6 +1651,12 @@ class _LibraryScreenState extends State<LibraryScreen> {
           value: 'add-to-queue',
           child: Text('Add to queue'),
         ),
+        if (album != null)
+          const PopupMenuItem(
+            key: ValueKey('menu-open-album'),
+            value: 'open-album',
+            child: Text('Open the album'),
+          ),
         if (track.hasCover)
           const PopupMenuItem(
             key: ValueKey('menu-view-cover'),
@@ -1633,6 +1671,9 @@ class _LibraryScreenState extends State<LibraryScreen> {
         await widget.playback.playNext(track);
       case 'add-to-queue':
         await widget.playback.addToQueue(track);
+      case 'open-album':
+        library.jump.clear();
+        library.openAlbum(track);
       case 'view-cover':
         await showCoverViewer(context, track);
     }

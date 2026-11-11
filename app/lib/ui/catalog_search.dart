@@ -18,6 +18,7 @@ import '../library/track.dart';
 import '../playback/version_book.dart' show searchFailure;
 import '../vk/vk_catalog.dart';
 import '../vk/vk_client.dart';
+import 'albums.dart';
 import 'library_controller.dart';
 
 /// Setting: the accounts + adds to, as source ids joined by commas, or
@@ -112,6 +113,7 @@ class CatalogSearch extends ChangeNotifier {
     _folded = readSetting?.call(catalogFoldedSetting) == 'folded';
     _targetsText = readSetting?.call(catalogTargetsSetting);
     library.addListener(_onLibraryChanged);
+    library.outsideAlbumOf = albumOfFound;
     _sources.addListener(_onSourcesChanged);
     _onLibraryChanged();
   }
@@ -233,6 +235,29 @@ class CatalogSearch extends ChangeNotifier {
   /// The found song with id [id], if it was found in this run (or shown
   /// as an album's or a version's row: [outsideSong]).
   FoundSong? foundById(int id) => _byId[id];
+
+  /// The VK album of the found song [track], opened through the account
+  /// that found it, as the album name on its row opens it (C4b). Null for
+  /// a song this run did not find, and without VK's link to the album:
+  /// the library alone rarely has a found song's album, so the place
+  /// would be empty.
+  AlbumRef? albumOfFound(Track track) {
+    final song = _byId[track.id]?.song;
+    final title = song?.album;
+    final key = song?.vkAlbumKey;
+    if (song == null || title == null || title.isEmpty || key == null) {
+      return null;
+    }
+    return AlbumRef(
+      title: title,
+      artist: song.artist,
+      link: (
+        sourceId: track.sourceId,
+        key: key,
+        accessKey: song.vkAlbumAccessKey,
+      ),
+    );
+  }
 
   /// The library's song for the found or outside song with id [id], once
   /// the library lists it; null otherwise.
@@ -660,6 +685,7 @@ class CatalogSearch extends ChangeNotifier {
     _wait?.cancel();
     _reload?.cancel();
     library.removeListener(_onLibraryChanged);
+    if (library.outsideAlbumOf == albumOfFound) library.outsideAlbumOf = null;
     _sources.removeListener(_onSourcesChanged);
     super.dispose();
   }
