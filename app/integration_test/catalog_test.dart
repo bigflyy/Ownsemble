@@ -20,7 +20,8 @@
 // lists them as own songs, a sync adds nothing) and in a song's Versions (+ on
 // another upload, none on VK's own file), each removed again the same way.
 // Between them (C4b, changes nothing): a found song plays, the album name on
-// its row opens its album from VK, whose row of it keeps the playing mark.
+// its row opens its album from VK, whose row of it keeps the playing mark;
+// then your own songs in search fold to their header and unfold (C4d).
 // Prints names, counts and times only: no link, key, token or id.
 
 import 'dart:io';
@@ -502,6 +503,43 @@ void main() {
     }
     expect(albumChecked, isTrue, reason: 'an album listed its found song');
     await player.stop();
+    library.searchText.clear();
+    await tester.pump();
+
+    // 5c. Your own songs in search fold to their header (C4d): an artist
+    // the test account has, so own songs and the On VK part both show.
+    library.searchText.text = 'дайте танк';
+    await tester.pump();
+    await waitUntil(
+      tester,
+      () => !catalog.searching,
+      timeout: const Duration(seconds: 30),
+      what: 'the On VK part for the artist',
+    );
+    final ownMatches = library.visible.length;
+    expect(ownMatches, greaterThan(0), reason: 'the test account has them');
+    expect(find.byKey(const ValueKey('own-header')), findsOneWidget);
+    final firstOwn = find.byKey(ValueKey('song-${library.visible.first.id}'));
+    expect(firstOwn, findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('own-header')));
+    await tester.pump();
+    expect(firstOwn, findsNothing, reason: 'folded');
+    expect(find.byKey(const ValueKey('catalog-header')), findsOneWidget);
+    expect(catalog.store.readSetting(catalogOwnFoldedSetting), 'folded');
+    // A new search keeps it folded.
+    library.searchText.text = 'дайте';
+    await tester.pump();
+    expect(catalog.ownFolded, isTrue);
+    expect(find.byKey(const ValueKey('own-header')), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('own-header')));
+    await tester.pump();
+    expect(
+      find.byKey(ValueKey('song-${library.visible.first.id}')),
+      findsOneWidget,
+      reason: 'unfolded again',
+    );
+    expect(catalog.store.readSetting(catalogOwnFoldedSetting), isNull);
+    say('own songs header: $ownMatches songs, folded and unfolded, kept');
     library.searchText.clear();
     await tester.pump();
 
