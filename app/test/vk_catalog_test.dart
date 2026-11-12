@@ -138,6 +138,111 @@ void main() {
     });
   });
 
+  group('searchVkSongs: an answer VK misread', () {
+    // Real VK 2026-11-12: 6 of 70 fresh searches for "Наутилус Помпилиус"
+    // came back as the songs a "?" query finds; asked again, VK answered
+    // right every time.
+    Map<String, dynamic> junk(int id) => {
+      ...audio(
+        1,
+        id,
+        artist: '4k\$ - ?4??4??4??4??1? ?4??4??4??6?',
+        title: '?4??1? (zaycev.net)',
+      ),
+      'release_audio_id': '-2001_$id',
+    };
+    final misread = {
+      'count': 20,
+      'items': [junk(1), junk(2), junk(3)],
+    };
+    final right = {
+      'count': 1234,
+      'items': [audio(-2000, 7, artist: 'Наутилус Помпилиус', title: 'Крылья')],
+    };
+
+    test('a page of question-mark songs without the words is asked for once '
+        'more and the second answer is used', () async {
+      var searches = 0;
+      final vk = fakeVk(
+        (method, _) => method == 'audio.search'
+            ? (++searches == 1 ? misread : right)
+            : fail('the misread page is not swapped for releases'),
+      );
+      final page = await searchVkSongs(vk.call, 'Наутилус Помпилиус');
+      expect(vk.sent, hasLength(2));
+      expect(page.askedAgain, isTrue);
+      expect([for (final s in page.songs) s.title], ['Крылья']);
+      expect(page.total, 1234);
+    });
+
+    test(
+      'asked once more only: a second misread answer is used as it is',
+      () async {
+        final vk = fakeVk(
+          (method, _) => method == 'audio.search' ? misread : <Object>[],
+        );
+        final page = await searchVkSongs(vk.call, 'Наутилус Помпилиус');
+        expect(
+          [for (final s in vk.sent) s.method],
+          ['audio.search', 'audio.search', 'audio.getById'],
+        );
+        expect(page.askedAgain, isTrue);
+      },
+    );
+
+    test('an ASCII query reads the same either way: asked once', () async {
+      final vk = fakeVk(
+        (method, _) => method == 'audio.search' ? misread : <Object>[],
+      );
+      final page = await searchVkSongs(vk.call, 'zaycev.net');
+      expect(vk.sent.where((s) => s.method == 'audio.search'), hasLength(1));
+      expect(page.askedAgain, isFalse);
+    });
+
+    test('a page with a song that has a word of the query is right', () async {
+      final vk = fakeVk(
+        (method, _) => method == 'audio.search'
+            ? {
+                'count': 4,
+                'items': [
+                  junk(1),
+                  junk(2),
+                  junk(3),
+                  audio(1, 4, artist: 'НАУТИЛУС', title: 'Ёлка'),
+                ],
+              }
+            : <Object>[],
+      );
+      await searchVkSongs(vk.call, 'наутилус помпилиус');
+      expect(vk.sent.where((s) => s.method == 'audio.search'), hasLength(1));
+    });
+
+    test('an empty first page for a Cyrillic query is asked for once more; '
+        'not for an ASCII query or a later page', () async {
+      Future<int> searchesFor(String words, {int offset = 0}) async {
+        final vk = fakeVk((_, _) => {'count': 0, 'items': <Object>[]});
+        await searchVkSongs(vk.call, words, offset: offset);
+        return vk.sent.length;
+      }
+
+      expect(await searchesFor('Наутилус'), 2);
+      expect(await searchesFor('qwzx'), 1);
+      expect(await searchesFor('Наутилус', offset: 50), 1);
+    });
+
+    test('searchLooksMisread', () {
+      expect(searchLooksMisread('Кино', [junk(1)]), isTrue);
+      expect(searchLooksMisread('Кино', const []), isFalse);
+      expect(searchLooksMisread('kino', [junk(1)]), isFalse);
+      expect(searchLooksMisread('Кино', [audio(1, 1, title: 'Кино')]), isFalse);
+      // Most songs readable: VK read the words, whatever it found.
+      expect(
+        searchLooksMisread('Кино', [junk(1), audio(1, 2), audio(1, 3)]),
+        isFalse,
+      );
+    });
+  });
+
   group('searchVkSongs: names VK has as question marks', () {
     // Real VK 2026-11-12: old zaycev.net uploads are stored with names like
     // "?4??4??1?"; each still links to VK's own release of the song

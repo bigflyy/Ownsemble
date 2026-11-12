@@ -687,7 +687,8 @@ class CatalogSearch extends ChangeNotifier {
       log?.call(
         'catalog search: page ${page.nextOffset ~/ vkSearchPageSize} '
         '${page.songs.length} songs of ${page.total} in '
-        '${clock.elapsedMilliseconds} ms',
+        '${clock.elapsedMilliseconds} ms'
+        '${page.askedAgain ? ' (asked twice: the first answer looked misread or was empty)' : ''}',
       );
     } catch (error) {
       answer.error = error;

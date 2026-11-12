@@ -19,6 +19,7 @@
 library;
 
 import '../library/library_store.dart';
+import '../library/same_song.dart';
 import 'vk_client.dart';
 import 'vk_sync.dart';
 
@@ -31,7 +32,12 @@ class VkSearchPage {
     required this.songs,
     required this.total,
     required this.nextOffset,
+    this.askedAgain = false,
   });
+
+  /// Whether VK's first answer looked misread ([searchLooksMisread]) or was
+  /// empty, so the page was asked for once more.
+  final bool askedAgain;
 
   /// The songs found on this page, in VK's order, each key once.
   final List<NewTrack> songs;
@@ -51,7 +57,10 @@ class VkSearchPage {
 /// Searches VK for [query] and returns the page that starts at [offset].
 ///
 /// An empty query asks nothing and finds nothing. VK's answer is read
-/// defensively: a missing or odd `items` list is an empty page.
+/// defensively: a missing or odd `items` list is an empty page. A first
+/// answer that looks misread ([searchLooksMisread]), or an empty one for a
+/// query with non-ASCII letters, is asked for once more, and the second
+/// answer is used as it is.
 Future<VkSearchPage> searchVkSongs(
   VkApiCall call,
   String query, {
@@ -62,15 +71,24 @@ Future<VkSearchPage> searchVkSongs(
   if (words.isEmpty) {
     return VkSearchPage(songs: const [], total: 0, nextOffset: offset);
   }
-  final reply = await call('audio.search', {
-    'q': words,
-    'count': '$count',
-    'offset': '$offset',
-  });
-  final map = reply is Map<String, dynamic> ? reply : const {};
-  final items = map['items'] is List
-      ? (map['items'] as List).whereType<Map<String, dynamic>>().toList()
-      : const <Map<String, dynamic>>[];
+  Future<(Map<dynamic, dynamic>, List<Map<String, dynamic>>)> ask() async {
+    final reply = await call('audio.search', {
+      'q': words,
+      'count': '$count',
+      'offset': '$offset',
+    });
+    final map = reply is Map<String, dynamic> ? reply : const {};
+    final items = map['items'] is List
+        ? (map['items'] as List).whereType<Map<String, dynamic>>().toList()
+        : const <Map<String, dynamic>>[];
+    return (map, items);
+  }
+
+  var (map, items) = await ask();
+  final askAgain =
+      searchLooksMisread(words, items) ||
+      items.isEmpty && offset == 0 && _hasNonAscii(words);
+  if (askAgain) (map, items) = await ask();
   final readable = await _withReleaseNames(call, items);
   final seen = <String>{};
   final songs = [
@@ -84,7 +102,36 @@ Future<VkSearchPage> searchVkSongs(
     songs: songs,
     total: map['count'] is int ? map['count'] as int : songs.length,
     nextOffset: offset + count,
+    askedAgain: askAgain,
   );
+}
+
+bool _hasNonAscii(String text) => text.runes.any((rune) => rune > 0x7F);
+
+/// Whether VK answered [words] as if it had read them as question marks:
+/// now and then (6 of 70 fresh searches for a Cyrillic band name, real VK
+/// 2026-11-12, tool/probe_search_charset.dart) `audio.search` answers a
+/// Cyrillic query with the songs a query of "?" finds, every one an old
+/// upload with a question-mark name ([isQuestionMarkName]) and about 1.8 s
+/// slow; asked again, VK answered right every time (33 of 33). Read on the
+/// raw page, before those songs are swapped for their releases' names.
+///
+/// True when [words] have a non-ASCII letter (an ASCII query reads the same
+/// either way), most songs on the page have question-mark names, and none
+/// has any word of [words] in its artist or title.
+bool searchLooksMisread(String words, List<Map<String, dynamic>> items) {
+  if (items.isEmpty || !_hasNonAscii(words)) return false;
+  final broken = items.where(_hasQuestionMarkName).length;
+  if (broken * 2 < items.length) return false;
+  final asked = songMatchText(words, '').split(' ').where((w) => w.length > 1);
+  if (asked.isEmpty) return false;
+  return !items.any((item) {
+    final text = songMatchText(
+      item['artist'] as String? ?? '',
+      item['title'] as String? ?? '',
+    );
+    return asked.any(text.contains);
+  });
 }
 
 /// Whether [name] is one of the names VK keeps as question marks: old
