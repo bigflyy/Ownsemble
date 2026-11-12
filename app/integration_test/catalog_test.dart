@@ -38,6 +38,7 @@ import 'package:ownsemble/playback/player_service.dart';
 import 'package:ownsemble/ui/catalog_search.dart';
 import 'package:ownsemble/ui/library_controller.dart';
 import 'package:ownsemble/ui/library_screen.dart';
+import 'package:ownsemble/ui/stat_text.dart';
 import 'package:ownsemble/vk/vk_catalog.dart';
 import 'package:ownsemble/vk/vk_client.dart';
 import 'package:ownsemble/vk/vk_sync.dart';
@@ -528,6 +529,34 @@ void main() {
     expect(firstOwn, findsNothing, reason: 'folded');
     expect(find.byKey(const ValueKey('catalog-header')), findsOneWidget);
     expect(catalog.store.readSetting(catalogOwnFoldedSetting), 'folded');
+    // With your own songs folded, the On VK rows are on screen: a found song
+    // the library has shows that copy's Last played and Added, not empty
+    // cells (user 2026-11-12: "added is not listed ... on songs that are ON
+    // VK in search, that i already have added").
+    final filters = library.filters!;
+    final haveIndex = catalog.songs
+        .take(6)
+        .toList()
+        .indexWhere((f) => catalog.stateOf(f) == FoundState.inLibrary);
+    expect(haveIndex, isNot(-1), reason: 'VK finds a song the account has');
+    final have = catalog.songs[haveIndex];
+    final haveCopy = catalog.libraryCopyOf(have.track.id)!;
+    Finder inFoundRow(String text) => find.descendant(
+      of: find.byKey(ValueKey('found-${have.track.id}')),
+      matching: find.text(text),
+    );
+    final lastPlayed = lastPlayedText(
+      filters.allTimePlays(haveCopy.id)?.lastMs,
+      filters.now,
+    );
+    expect(inFoundRow(lastPlayed), findsOneWidget, reason: 'Last played');
+    final addedShown = inFoundRow(dayText(haveCopy.addedAt))
+        .evaluate()
+        .isNotEmpty;
+    say(
+      'found song you have: row ${haveIndex + 1} shows Last played '
+      '"$lastPlayed"${addedShown ? ' and Added ${dayText(haveCopy.addedAt)}' : ' (window too narrow for Added)'}',
+    );
     // A new search keeps it folded.
     library.searchText.text = 'дайте';
     await tester.pump();
