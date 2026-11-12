@@ -268,6 +268,40 @@ void main() {
     expect(find.text('3 found'), findsOneWidget);
   });
 
+  for (final width in [1400.0, 640.0]) {
+    testWidgets('a found song you have as another recording says "you have '
+        'another version" and keeps + (${width.toInt()} wide)', (tester) async {
+      // User, 2026-11-12, "yes as you recommend": a hint, + stays (C4e).
+      vk.catalog.add(vkAudio(-7, 13, title: 'Группа крови', duration: 340));
+      await pumpScreen(tester, size: Size(width, 900));
+      await search(tester, 'кино');
+      final found = catalog.songs;
+      expect(found, hasLength(4));
+      final live = found[3];
+      expect(inRow(live, 'other-version-${live.track.id}'), findsOneWidget);
+      expect(inRow(live, 'add-song'), findsOneWidget);
+      // The same recording is yours (check), another song has no hint.
+      expect(inRow(found[0], 'song-added'), findsOneWidget);
+      expect(
+        inRow(found[0], 'other-version-${found[0].track.id}'),
+        findsNothing,
+      );
+      expect(
+        inRow(found[1], 'other-version-${found[1].track.id}'),
+        findsNothing,
+      );
+      // + adds it; then it is yours and the hint goes.
+      await tester.tap(inRow(live, 'add-song'));
+      await tester.pump();
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
+      await tester.pump();
+      expect(inRow(live, 'other-version-${live.track.id}'), findsNothing);
+      expect(store.loadAll(), hasLength(3));
+      await tester.pump(const Duration(seconds: 7));
+    });
+  }
+
   testWidgets('one letter shows no part', (tester) async {
     await pumpScreen(tester);
     await search(tester, 'к');

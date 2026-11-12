@@ -96,7 +96,14 @@ void main() {
     store.close();
   });
 
-  Future<void> openAlbum(WidgetTester tester) async {
+  /// Puts [songs] into the library after setUp, as a sync would.
+  void addToLibrary(List<NewTrack> songs) {
+    store.upsertAll(source, songs);
+    final tracks = store.loadAll();
+    library.replaceTracks(tracks, SearchIndex(tracks));
+  }
+
+  Future<void> openAlbum(WidgetTester tester, {int songs = 3}) async {
     tester.view.physicalSize = const Size(1400, 900);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
@@ -113,12 +120,12 @@ void main() {
       ),
     );
     await tester.pump();
-    await tester.tap(find.text('Человеко-часы'));
+    await tester.tap(find.text('Человеко-часы').first);
     await tester.pump();
     await tester.pump();
     await tester.pump();
     expect(library.view.kind, ViewKind.album);
-    expect(library.visible, hasLength(3));
+    expect(library.visible, hasLength(songs));
   }
 
   Track outside(String title) =>
@@ -208,6 +215,80 @@ void main() {
     ], reason: "in the album's order");
     expect(library.visible.last.inLibrary, isTrue);
     await tester.pump(const Duration(seconds: 5));
+  });
+
+  testWidgets('a song you have as another recording says so and keeps +', (
+    tester,
+  ) async {
+    // User, 2026-11-12: album songs did not show as theirs, "maybe i have
+    // other versions added"; a hint, and + still adds this one (C4e).
+    addToLibrary([
+      const NewTrack(
+        sourceKey: '42_2',
+        artist: 'Дайте танк (!)',
+        title: 'Маяк',
+        album: 'Live',
+        durationSec: 300,
+        addedAt: 3,
+      ),
+    ]);
+    await openAlbum(tester);
+    final lighthouse = outside('Маяк');
+    final tag = find.byKey(ValueKey('other-version-${lighthouse.id}'));
+    expect(tag, findsOneWidget);
+    expect(find.text('you have another version'), findsOneWidget);
+    expect(
+      tester
+          .widget<Tooltip>(
+            find.descendant(of: tag, matching: find.byType(Tooltip)),
+          )
+          .message,
+      'You have this song as another recording (5:00; this one is 3:40). '
+      '+ adds this one as well.',
+    );
+    expect(addOf(lighthouse), findsOneWidget);
+    // A song of another name has no tag.
+    expect(
+      find.byKey(ValueKey('other-version-${outside('Альтернатива').id}')),
+      findsNothing,
+    );
+
+    await tester.tap(addOf(lighthouse));
+    await tester.pump();
+    await tester.pump();
+    expect(vk.adds, ['-5_3 k3']);
+    await tester.pump(const Duration(milliseconds: 400));
+    await tester.pump();
+    expect(find.text('you have another version'), findsNothing);
+    expect(store.loadAll(), hasLength(3), reason: 'both recordings kept');
+    await tester.pump(const Duration(seconds: 5));
+  });
+
+  testWidgets('a song with a track id VK reused but another length does not '
+      'take an album row', (tester) async {
+    // Real VK, 2026-11-12: one track id on other songs (a 1380 s concert).
+    addToLibrary([
+      const NewTrack(
+        sourceKey: '42_7',
+        artist: 'Дайте танк (!)',
+        title: 'Концерт',
+        album: 'Человеко-часы',
+        durationSec: 1380,
+        addedAt: 4,
+        vkTrackId: 102,
+        vkAlbumKey: '-5_9',
+        vkAlbumAccessKey: 'a',
+      ),
+    ]);
+    await openAlbum(tester, songs: 4);
+    expect(library.visible.map((t) => t.title), [
+      'Люди',
+      'Альтернатива',
+      'Маяк',
+      'Концерт',
+    ]);
+    expect(outside('Альтернатива'), isNotNull);
+    expect(addOf(outside('Альтернатива')), findsOneWidget);
   });
 
   testWidgets('a song + adds while it plays keeps its playing mark', (

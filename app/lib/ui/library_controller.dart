@@ -599,15 +599,25 @@ class LibraryController extends ChangeNotifier {
       if (!_albumFailures.containsKey(album)) _fetchAlbum(album);
       return [for (final id in libraryIds) ?_byId[id]];
     }
-    final owned = catalog.libraryIdsByVkTrackId([
+    final byTrackId = catalog.libraryIdsByVkTrackId([
       for (final song in listed) ?song.vkTrackId,
     ]);
+    bool closeLength(Track a, Track b) =>
+        (a.durationSec - b.durationSec).abs() <= sameSongLengthTolerance;
+    // The library's song with an album song's track id takes its row only
+    // when the length agrees: VK reuses one id for other songs (C4e, seen
+    // on real VK), as FoundMatcher also checks.
+    Track? ownByTrackId(AlbumSong song) {
+      final own = _byId[byTrackId[song.vkTrackId]];
+      return own != null && closeLength(own, song.track) ? own : null;
+    }
+
     // VK leaves track_id out on some album songs: the library's songs of
     // this album the track ids did not place are matched by name and a
     // length within 2 s instead, as + does (FoundMatcher). Without this a
     // song added from the album would show twice: its album row and the
     // copy at the end (C4).
-    final placed = owned.values.toSet();
+    final placed = {for (final song in listed) ?ownByTrackId(song)?.id};
     final byText = <String, List<Track>>{};
     for (final id in libraryIds) {
       final track = _byId[id];
@@ -618,10 +628,7 @@ class LibraryController extends ChangeNotifier {
       final candidates = byText[songMatchText(song.artist, song.title)];
       if (candidates == null) return null;
       for (final (i, track) in candidates.indexed) {
-        if ((track.durationSec - song.durationSec).abs() <=
-            sameSongLengthTolerance) {
-          return candidates.removeAt(i);
-        }
+        if (closeLength(track, song)) return candidates.removeAt(i);
       }
       return null;
     }
@@ -631,9 +638,7 @@ class LibraryController extends ChangeNotifier {
     final covers = <int, Track>{};
     Track? firstCover;
     for (final song in listed) {
-      final own =
-          _byId[owned[song.vkTrackId]] ??
-          (song.vkTrackId == null ? sameSongOf(song.track) : null);
+      final own = ownByTrackId(song) ?? sameSongOf(song.track);
       final track = own ?? song.track;
       if (!shown.add(track.id)) continue;
       tracks.add(track);

@@ -425,13 +425,30 @@ class CatalogSearch extends ChangeNotifier {
 
   /// The library's song that [found] is, if the library has it.
   Track? _listedOf(FoundSong found) {
+    final id = _currentMatcher.listedIdOf(found.song, except: found.except);
+    return id == null ? null : library.byId(id);
+  }
+
+  /// The library's song with [found]'s name as another recording, while +
+  /// still offers [found]: the row says "you have another version" (C4e,
+  /// user 2026-11-12), and + adds this recording as well. Null otherwise.
+  Track? otherVersionOf(FoundSong found) {
+    if (stateOf(found) != FoundState.addable) return null;
+    final id = _currentMatcher.otherVersionIdOf(
+      found.song,
+      except: found.except,
+    );
+    return id == null ? null : library.byId(id);
+  }
+
+  /// [FoundMatcher] of the library as it is now, built again after a change.
+  FoundMatcher get _currentMatcher {
     final tracks = library.all;
     if (!identical(tracks, _matcherOf)) {
       _matcher = FoundMatcher(store.songRows());
       _matcherOf = tracks;
     }
-    final id = _matcher!.listedIdOf(found.song, except: found.except);
-    return id == null ? null : library.byId(id);
+    return _matcher!;
   }
 
   /// Adds [found] to the library and to each target account's VK library,

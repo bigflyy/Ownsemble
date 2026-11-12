@@ -286,8 +286,18 @@ void main() {
 
     test('another upload VK calls the same recording, by track id', () {
       expect(
-        match(vkAudio(-7, 9, title: 'Zvezda', duration: 300, trackId: 500)),
+        match(vkAudio(-7, 9, title: 'Zvezda', duration: 226, trackId: 500)),
         listed,
+      );
+    });
+
+    test('a track id VK reused on a song of another length is not the '
+        'same recording', () {
+      // Real VK, 2026-11-12: one track id on two titles, a 1380 s concert's
+      // id on many songs.
+      expect(
+        match(vkAudio(-7, 9, title: 'Концерт', duration: 1380, trackId: 500)),
+        isNull,
       );
     });
 
@@ -340,6 +350,66 @@ void main() {
       store.markRemoved(source, ['${me}_1']);
       expect(match(vkAudio(me, 1)), isNull);
       expect(match(vkAudio(-7, 9, trackId: 500)), isNull);
+    });
+
+    group('another version', () {
+      int? other(Map<String, dynamic> found, {Set<int> except = const {}}) =>
+          FoundMatcher(store.songRows())
+              .otherVersionIdOf(vkItemToTrack(found), except: except);
+
+      /// The listed song's name as another upload of [duration] seconds.
+      Map<String, dynamic> star(int duration, {int? trackId}) => vkAudio(
+        -7,
+        9,
+        artist: 'кино',
+        title: 'Звёзда по имени Солнце',
+        duration: duration,
+        trackId: trackId,
+      );
+
+      test('the same name as another recording names the song you have', () {
+        expect(match(star(260)), isNull);
+        expect(other(star(260)), listed);
+      });
+
+      test('the same recording is in the library, not another version', () {
+        expect(other(star(226)), isNull);
+        expect(other(star(225, trackId: 500)), isNull);
+      });
+
+      test('a reused track id with another length is another version', () {
+        expect(match(star(300, trackId: 500)), isNull);
+        expect(other(star(300, trackId: 500)), listed);
+      });
+
+      test('another name is no version of it', () {
+        expect(other(vkAudio(-7, 9, artist: 'Кино', title: 'Кукушка')), isNull);
+      });
+
+      test('of several recordings the closest in length', () {
+        final longer = store.upsertAll(source, [
+          vkItemToTrack(
+            vkAudio(
+              me,
+              2,
+              artist: 'Кино',
+              title: 'Звезда по имени Солнце',
+              duration: 400,
+            ),
+          ),
+        ]).single;
+        expect(other(star(380)), longer);
+        expect(other(star(250)), listed);
+      });
+
+      test('a song in except does not count', () {
+        expect(other(star(260), except: {listed}), isNull);
+      });
+
+      test('a removed song is no version any more', () {
+        store.markRemoved(source, ['${me}_1']);
+        expect(other(star(260)), isNull);
+      });
     });
 
     test('a copy in another account answers with the listed song', () {

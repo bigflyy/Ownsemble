@@ -1348,12 +1348,19 @@ class _LibraryScreenState extends State<LibraryScreen> {
                     ? null
                     : () => widget.collections!.toggleFavorite(track),
                 versionTag: (compact) => version == null
-                    ? VersionTag(
-                        playback: widget.playback,
-                        track: track,
-                        compact: compact,
-                        onOpen: _openVersions,
-                      )
+                    ? (outside == null
+                              ? null
+                              : _otherVersionTag(
+                                  widget.catalog!,
+                                  outside,
+                                  compact: compact,
+                                )) ??
+                          VersionTag(
+                            playback: widget.playback,
+                            track: track,
+                            compact: compact,
+                            onOpen: _openVersions,
+                          )
                     : _VersionTags(
                         version: version,
                         row: library.versionsRow!,
@@ -1363,7 +1370,12 @@ class _LibraryScreenState extends State<LibraryScreen> {
                         ),
                         compact: compact,
                       ),
-                tagsUnderTitle: version != null,
+                // The "another version" tag is too long for the album
+                // column: it goes under the title, as Versions tags do.
+                tagsUnderTitle:
+                    version != null ||
+                    outside != null &&
+                        widget.catalog!.otherVersionOf(outside) != null,
                 action: outside == null
                     ? null
                     : foundAddButton(
@@ -1515,7 +1527,10 @@ class _LibraryScreenState extends State<LibraryScreen> {
         ], index);
       },
       onMenu: (position) => _showFoundMenu(track, position),
-      versionTag: (_) => const SizedBox.shrink(),
+      versionTag: (compact) =>
+          _otherVersionTag(part, found, compact: compact) ??
+          const SizedBox.shrink(),
+      tagsUnderTitle: part.otherVersionOf(found) != null,
       action: foundAddButton(context, part, found, onAdd: _addFound),
       mark: foundMark(context, part, found),
       // The album opens through VK's link on the found song (C4b); without
@@ -1526,6 +1541,40 @@ class _LibraryScreenState extends State<LibraryScreen> {
               library.jump.clear();
               library.openAlbum(track);
             },
+    );
+  }
+
+  /// The tag "you have another version" on a found or album song the
+  /// library has under the same name as another recording (C4e); null when
+  /// it has this recording or no song of that name.
+  Widget? _otherVersionTag(
+    CatalogSearch catalog,
+    FoundSong found, {
+    required bool compact,
+  }) {
+    final yours = catalog.otherVersionOf(found);
+    if (yours == null) return null;
+    String length(int seconds) => formatDuration(Duration(seconds: seconds));
+    const label = 'you have another version';
+    // Next to the artist under the title; an icon when the label does not
+    // fit, as the Versions tags do (most of the line, as theirs).
+    return Flexible(
+      flex: 3,
+      child: LayoutBuilder(
+        builder: (context, box) => Padding(
+          padding: const EdgeInsets.only(left: 6),
+          child: _Tag(
+            key: ValueKey('other-version-${found.track.id}'),
+            label: label,
+            icon: Icons.library_music_outlined,
+            compact: compact || box.maxWidth < label.length * 6.2 + 26,
+            explanation:
+                'You have this song as another recording '
+                '(${length(yours.durationSec)}; this one is '
+                '${length(found.track.durationSec)}). + adds this one as well.',
+          ),
+        ),
+      ),
     );
   }
 
