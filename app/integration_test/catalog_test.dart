@@ -21,7 +21,9 @@
 // another upload, none on VK's own file), each removed again the same way.
 // Between them (C4b, changes nothing): a found song plays, the album name on
 // its row opens its album from VK, whose row of it keeps the playing mark;
-// then your own songs in search fold to their header and unfold (C4d).
+// then your own songs in search fold to their header and unfold (C4d); then
+// songs VK has with question-mark names show under their real names (the
+// names of VK's own release of each).
 // Prints names, counts and times only: no link, key, token or id.
 
 import 'dart:io';
@@ -540,6 +542,77 @@ void main() {
     );
     expect(catalog.store.readSetting(catalogOwnFoldedSetting), isNull);
     say('own songs header: $ownMatches songs, folded and unfolded, kept');
+    library.searchText.clear();
+    await tester.pump();
+
+    // 5d. Songs VK has with question-mark names (old zaycev.net uploads,
+    // "?4??4??1?") show as VK's own release of the song, with its real
+    // names. VK's raw first page for the same words is read alongside: it
+    // must hold such songs, or this step proves nothing.
+    const brokenQuery = 'zaycev.net';
+    final raw = await client.call('audio.search', {
+      'q': brokenQuery,
+      'count': '$vkSearchPageSize',
+      'offset': '0',
+    }) as Map<String, dynamic>;
+    bool rawBroken(Map<String, dynamic> item) =>
+        isQuestionMarkName(item['artist'] as String? ?? '') ||
+        isQuestionMarkName(item['title'] as String? ?? '');
+    final rawItems = (raw['items'] as List).cast<Map<String, dynamic>>();
+    final brokenTracks = {
+      for (final item in rawItems)
+        if (rawBroken(item) && item['track_id'] is int) item['track_id'] as int,
+    };
+    final rawBrokenCount = rawItems.where(rawBroken).length;
+    expect(rawBrokenCount, greaterThan(0), reason: 'VK still has such songs');
+    clock = Stopwatch()..start();
+    library.searchText.text = brokenQuery;
+    await tester.pump();
+    await waitUntil(
+      tester,
+      () => !catalog.searching,
+      timeout: const Duration(seconds: 30),
+      what: 'the On VK part for $brokenQuery',
+    );
+    expect(catalog.error, isNull, reason: 'VK answered');
+    final shown = catalog.songs;
+    bool shownBroken(FoundSong f) =>
+        isQuestionMarkName(f.song.artist) || isQuestionMarkName(f.song.title);
+    final stillBroken = shown.where(shownBroken).length;
+    final renamed = shown
+        .where(
+          (f) => !shownBroken(f) && brokenTracks.contains(f.song.vkTrackId),
+        )
+        .length;
+    // Any song VK gave no release for sits at the end.
+    final firstBroken = shown.indexWhere(shownBroken);
+    if (firstBroken >= 0) {
+      expect(
+        shown.skip(firstBroken).every(shownBroken),
+        isTrue,
+        reason: 'question-mark songs only at the end',
+      );
+    }
+    expect(renamed, greaterThan(0), reason: 'shown with their real names');
+    expect(stillBroken, lessThan(rawBrokenCount));
+    // The rows draw the real names (when the first such row is on screen:
+    // the list builds only the rows in view).
+    final firstRenamed = shown.indexWhere(
+      (f) => !shownBroken(f) && brokenTracks.contains(f.song.vkTrackId),
+    );
+    if (firstRenamed < 6) {
+      expect(
+        find.textContaining(shown[firstRenamed].song.title),
+        findsWidgets,
+        reason: 'the row shows the release title',
+      );
+    }
+    say(
+      'question-mark names: VK page has $rawBrokenCount, the app shows '
+      '$renamed under their real names and $stillBroken as VK has them '
+      '(${shown.length} songs, ${clock.elapsedMilliseconds} ms with the '
+      '0.5 s pause)',
+    );
     library.searchText.clear();
     await tester.pump();
 
