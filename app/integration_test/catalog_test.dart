@@ -23,7 +23,8 @@
 // its row opens its album from VK, whose row of it keeps the playing mark;
 // then your own songs in search fold to their header and unfold (C4d); then
 // songs VK has with question-mark names show under their real names (the
-// names of VK's own release of each).
+// names of VK's own release of each); then a song the account has, found as
+// another recording, says "you have another version" and keeps + (C4e).
 // Prints names, counts and times only: no link, key, token or id.
 
 import 'dart:io';
@@ -33,6 +34,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
 import 'package:media_kit/media_kit.dart' show NativePlayer;
 import 'package:ownsemble/library/library_store.dart';
+import 'package:ownsemble/library/same_song.dart';
 import 'package:ownsemble/main.dart' as app;
 import 'package:ownsemble/playback/player_service.dart';
 import 'package:ownsemble/ui/catalog_search.dart';
@@ -534,6 +536,14 @@ void main() {
     // cells (user 2026-11-12: "added is not listed ... on songs that are ON
     // VK in search, that i already have added").
     final filters = library.filters!;
+    // What the first rows are, so a failure here says why.
+    for (final (i, f) in catalog.songs.take(6).indexed) {
+      say(
+        'artist search row ${i + 1}: ${f.song.durationSec} s, '
+        '${catalog.stateOf(f).name}, track id ${f.song.vkTrackId == null ? 'none' : 'known'}'
+        '${catalog.otherVersionOf(f) == null ? '' : ', another version'}',
+      );
+    }
     final haveIndex = catalog.songs
         .take(6)
         .toList()
@@ -642,6 +652,105 @@ void main() {
       '(${shown.length} songs, ${clock.elapsedMilliseconds} ms with the '
       '0.5 s pause)',
     );
+    library.searchText.clear();
+    await tester.pump();
+
+    // 5e. A song the account has, found on VK as ANOTHER recording (same
+    // name, another length): its row says "you have another version" and
+    // keeps + (C4e, user 2026-11-12: "yes as you recommend"). VK is asked
+    // directly for the account's songs until one has such an upload, so the
+    // step knows the case is on the page before the app is checked.
+    String? versionQuery;
+    for (final own in library.all.where((t) => t.inLibrary).take(20)) {
+      final words = '${own.artist} ${own.title}';
+      final reply = await client.call('audio.search', {
+        'q': words,
+        'count': '$vkSearchPageSize',
+        'offset': '0',
+      }) as Map<String, dynamic>;
+      final items = (reply['items'] as List).cast<Map<String, dynamic>>();
+      final ownText = songMatchText(own.artist, own.title);
+      final other = items.any((item) {
+        final song = vkItemToTrack(item);
+        return songMatchText(song.artist, song.title) == ownText &&
+            (song.durationSec - own.durationSec).abs() > 10;
+      });
+      if (other) {
+        versionQuery = words;
+        break;
+      }
+    }
+    expect(
+      versionQuery,
+      isNotNull,
+      reason: 'VK has another recording of one of the first 20 songs',
+    );
+    library.searchText.text = versionQuery!;
+    await tester.pump();
+    await waitUntil(
+      tester,
+      () => !catalog.searching,
+      timeout: const Duration(seconds: 30),
+      what: 'the On VK part for another version',
+    );
+    expect(catalog.error, isNull, reason: 'VK answered');
+    final versionRows = catalog.songs;
+    final hinted = [
+      for (final (i, f) in versionRows.indexed)
+        if (catalog.otherVersionOf(f) != null) i,
+    ];
+    final owned = versionRows
+        .where((f) => catalog.stateOf(f) == FoundState.inLibrary)
+        .length;
+    expect(hinted, isNotEmpty, reason: 'a row says you have another version');
+    for (final i in hinted) {
+      expect(catalog.stateOf(versionRows[i]), FoundState.addable);
+    }
+    // The first such row on screen: the tag and + are drawn. Your own songs
+    // fold first, so the On VK rows sit at the top.
+    if (!catalog.ownFolded &&
+        find.byKey(const ValueKey('own-header')).evaluate().isNotEmpty) {
+      await tester.tap(find.byKey(const ValueKey('own-header')));
+      await tester.pump();
+    }
+    final firstHinted = versionRows[hinted.first];
+    scroll.jumpTo(
+      (hinted.first * rowHeight).clamp(0, scroll.position.maxScrollExtent),
+    );
+    await tester.pump();
+    final hintedRow = find.byKey(ValueKey('found-${firstHinted.track.id}'));
+    await tester.ensureVisible(hintedRow);
+    await tester.pump();
+    expect(
+      find.descendant(
+        of: hintedRow,
+        matching: find.byKey(ValueKey('other-version-${firstHinted.track.id}')),
+      ),
+      findsOneWidget,
+      reason: 'the tag on the row',
+    );
+    expect(
+      find.descendant(
+        of: hintedRow,
+        matching: find.byKey(const ValueKey('add-song')),
+      ),
+      findsOneWidget,
+      reason: '+ stays',
+    );
+    say(
+      'another version: ${versionRows.length} found, ${hinted.length} say '
+      '"you have another version" (first on row ${hinted.first + 1}, '
+      '${firstHinted.track.durationSec} s vs yours '
+      '${catalog.otherVersionOf(firstHinted)!.durationSec} s), $owned '
+      'marked as yours',
+    );
+    if (catalog.ownFolded) {
+      // The header is at the top of the list: back up there to unfold.
+      scroll.jumpTo(0);
+      await tester.pump();
+      await tester.tap(find.byKey(const ValueKey('own-header')));
+      await tester.pump();
+    }
     library.searchText.clear();
     await tester.pump();
 
