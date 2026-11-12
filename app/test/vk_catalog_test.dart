@@ -138,6 +138,112 @@ void main() {
     });
   });
 
+  group('searchVkSongs: names VK has as question marks', () {
+    // Real VK 2026-11-12: old zaycev.net uploads are stored with names like
+    // "?4??4??1?"; each still links to VK's own release of the song
+    // (release_audio_id), whose names are clean.
+    Map<String, dynamic> broken(int owner, int id, {String? release}) => {
+      ...audio(
+        owner,
+        id,
+        artist: '?4??4??1? ?6?',
+        title: '?4??1? (zaycev.net)',
+      ),
+      'release_audio_id': ?release,
+    };
+
+    test('a song with a question-mark name shows as its VK release, asked '
+        'for all such songs in one call', () async {
+      final vk = fakeVk(
+        (method, params) => switch (method) {
+          'audio.search' => {
+            'count': 3,
+            'items': [
+              broken(1, 1, release: '-2001_10'),
+              audio(1, 2, artist: 'Сплин', title: 'Why?'),
+              broken(1, 3, release: '-2001_30'),
+            ],
+          },
+          'audio.getById' => [
+            audio(-2001, 10, artist: 'Дайте танк (!)', title: 'Утро'),
+            audio(-2001, 30, artist: 'Дайте танк (!)', title: 'Люди'),
+          ],
+          _ => fail('unexpected $method'),
+        },
+      );
+      final page = await searchVkSongs(vk.call, 'x');
+      expect(
+        [for (final s in vk.sent) s.method],
+        ['audio.search', 'audio.getById'],
+      );
+      expect(vk.sent[1].params, {'audios': '-2001_10,-2001_30'});
+      expect(
+        [for (final s in page.songs) '${s.sourceKey} ${s.artist} - ${s.title}'],
+        [
+          '-2001_10 Дайте танк (!) - Утро',
+          '1_2 Сплин - Why?',
+          '-2001_30 Дайте танк (!) - Люди',
+        ],
+      );
+    });
+
+    test('a release already found on the page is listed once', () async {
+      final vk = fakeVk(
+        (method, _) => switch (method) {
+          'audio.search' => {
+            'count': 2,
+            'items': [
+              broken(1, 1, release: '-2001_10'),
+              audio(-2001, 10, title: 'Утро'),
+            ],
+          },
+          _ => [audio(-2001, 10, title: 'Утро')],
+        },
+      );
+      final page = await searchVkSongs(vk.call, 'x');
+      expect([for (final s in page.songs) s.sourceKey], ['-2001_10']);
+    });
+
+    test('readable names ask VK nothing more', () async {
+      final vk = fakeVk(
+        (_, _) => {
+          'count': 1,
+          'items': [audio(1, 2, title: 'Who are you???')],
+        },
+      );
+      await searchVkSongs(vk.call, 'x');
+      expect(vk.sent, hasLength(1));
+    });
+
+    test('a question-mark song with no release, or whose release VK does not '
+        'give, moves to the end of the page; a failed release call changes '
+        'nothing else', () async {
+      for (final failing in [false, true]) {
+        final vk = fakeVk(
+          (method, _) => switch (method) {
+            'audio.search' => {
+              'count': 3,
+              'items': [
+                broken(1, 1),
+                broken(1, 2, release: '-2001_20'),
+                audio(1, 3, title: 'Утро'),
+              ],
+            },
+            _ when failing => throw VkException('audio.getById error 10'),
+            _ => <Object?>[],
+          },
+        );
+        final page = await searchVkSongs(vk.call, 'x');
+        expect(
+          [for (final s in page.songs) s.sourceKey],
+          ['1_3', '1_1', '1_2'],
+          reason: 'failing: $failing',
+        );
+        expect(page.total, 3);
+      }
+    });
+  });
+
   group('addVkSong', () {
     test('sends the found song and reads the new copy from the batch '
         '(A1)', () async {

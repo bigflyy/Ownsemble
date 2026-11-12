@@ -69,11 +69,12 @@ Future<VkSearchPage> searchVkSongs(
   });
   final map = reply is Map<String, dynamic> ? reply : const {};
   final items = map['items'] is List
-      ? (map['items'] as List).whereType<Map<String, dynamic>>()
+      ? (map['items'] as List).whereType<Map<String, dynamic>>().toList()
       : const <Map<String, dynamic>>[];
+  final readable = await _withReleaseNames(call, items);
   final seen = <String>{};
   final songs = [
-    for (final item in items)
+    for (final item in readable)
       if (item['id'] is int &&
           item['owner_id'] is int &&
           seen.add(vkSourceKey(item)))
@@ -84,6 +85,78 @@ Future<VkSearchPage> searchVkSongs(
     total: map['count'] is int ? map['count'] as int : songs.length,
     nextOffset: offset + count,
   );
+}
+
+/// Whether [name] is one of the names VK keeps as question marks: old
+/// uploads (many from zaycev.net) whose Cyrillic tags broke on upload and
+/// are stored as "?4??4??1?" (real VK 2026-11-12). Three or more '?' that
+/// make up at least a third of the name; "Why?" and "Who are you???" stay.
+bool isQuestionMarkName(String name) {
+  final letters = name.runes.where((rune) => rune != 0x20).length;
+  final marks = name.runes.where((rune) => rune == 0x3F).length;
+  return marks >= 3 && marks * 3 >= letters;
+}
+
+bool _hasQuestionMarkName(Map<String, dynamic> item) =>
+    isQuestionMarkName(item['artist'] as String? ?? '') ||
+    isQuestionMarkName(item['title'] as String? ?? '');
+
+/// [items] with each question-mark song ([isQuestionMarkName]) swapped for
+/// VK's own release of it, which has the real names: such uploads still name
+/// that release in `release_audio_id` (7 of 7 on a real page, 2026-11-12).
+/// All the releases come in one `audio.getById` (about 0.3 s), asked only
+/// when the page has such a song. A song without a release, or whose
+/// release VK does not give, moves to the end of the page; a failed call
+/// moves them all there and changes nothing else, so the search still shows.
+Future<List<Map<String, dynamic>>> _withReleaseNames(
+  VkApiCall call,
+  List<Map<String, dynamic>> items,
+) async {
+  final broken = [
+    for (final item in items)
+      if (_hasQuestionMarkName(item)) item,
+  ];
+  if (broken.isEmpty) return items;
+  final releaseKeys = {
+    for (final item in broken)
+      if (item['release_audio_id'] case final String key when key.isNotEmpty)
+        key,
+  };
+  final releases = <String, Map<String, dynamic>>{};
+  if (releaseKeys.isNotEmpty) {
+    try {
+      final reply = await call('audio.getById', {
+        'audios': releaseKeys.join(','),
+      });
+      if (reply is List) {
+        for (final release in reply.whereType<Map<String, dynamic>>()) {
+          if (release['id'] is int &&
+              release['owner_id'] is int &&
+              !_hasQuestionMarkName(release)) {
+            releases[vkSourceKey(release)] = release;
+          }
+        }
+      }
+    } catch (_) {
+      // Any failure here, VK's or the network's: the page VK already gave
+      // still shows, and these songs keep VK's names, at the end.
+    }
+  }
+  final kept = <Map<String, dynamic>>[];
+  final unresolved = <Map<String, dynamic>>[];
+  for (final item in items) {
+    if (!_hasQuestionMarkName(item)) {
+      kept.add(item);
+      continue;
+    }
+    final release = releases[item['release_audio_id']];
+    if (release != null) {
+      kept.add(release);
+    } else {
+      unresolved.add(item);
+    }
+  }
+  return [...kept, ...unresolved];
 }
 
 /// VK's error code for a song the account may not have: "Access denied: no
