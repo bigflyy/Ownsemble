@@ -12,7 +12,9 @@ import 'package:ownsemble/playback/playback_controller.dart';
 import 'package:ownsemble/ui/catalog_search.dart';
 import 'package:ownsemble/ui/library_controller.dart';
 import 'package:ownsemble/ui/library_screen.dart';
+import 'package:ownsemble/ui/song_filters.dart';
 import 'package:ownsemble/ui/sources_scope.dart';
+import 'package:ownsemble/ui/stat_text.dart';
 import 'package:ownsemble/vk/vk_sync.dart';
 
 import 'catalog_support.dart';
@@ -61,8 +63,11 @@ void main() {
     store.close();
   });
 
-  Future<void> pumpScreen(WidgetTester tester) async {
-    tester.view.physicalSize = const Size(1400, 1000);
+  Future<void> pumpScreen(
+    WidgetTester tester, {
+    Size size = const Size(1400, 1000),
+  }) async {
+    tester.view.physicalSize = size;
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
     await tester.pumpWidget(
@@ -268,5 +273,62 @@ void main() {
     await search(tester, 'к');
     expect(find.text('ON VK'), findsNothing);
     expect(vk.searches, isEmpty);
+  });
+
+  testWidgets('a found song you have shows your copy\'s plays, last played '
+      'and Added date; a song you lack keeps those cells empty', (
+    tester,
+  ) async {
+    // Your copy of "Кукушка", added in 2021, played twice this month.
+    final added = DateTime(2021, 3, 4).millisecondsSinceEpoch ~/ 1000;
+    final copyId = store.upsertAll(source, [
+      NewTrack(
+        sourceKey: '42_3',
+        artist: 'Кино',
+        title: 'Кукушка',
+        durationSec: 400,
+        addedAt: added,
+      ),
+    ]).single;
+    final now = DateTime(2026, 11, 12, 12);
+    for (final day in [10, 11]) {
+      final play = store.beginPlay(
+        copyId,
+        start: PlayStart.chosen,
+        shuffle: false,
+        atMs: DateTime(2026, 11, day, 9).millisecondsSinceEpoch,
+      );
+      store.updatePlay(play, listenedMs: 300000, ended: PlayEnd.finished);
+    }
+    final filters = SongFilters(
+      store,
+      readSetting: (_) => null,
+      writeSetting: (_, _) {},
+      clock: () => now,
+    );
+    catalog.dispose();
+    library = LibraryController(store.loadAll(), filters: filters);
+    catalog = CatalogSearch(
+      library: library,
+      store: store,
+      sources: sources,
+      apiOfSource: (id) => id == source ? vk.call : null,
+      onLibraryChanged: ({required severalAccounts}) {},
+    );
+    // Wide enough for every play column, Added too.
+    await pumpScreen(tester, size: const Size(1800, 1000));
+    await tester.pump();
+    await search(tester, 'кино');
+    final cuckoo = catalog.songs[1];
+    final cigarettes = catalog.songs[2];
+    expect(catalog.stateOf(cuckoo), FoundState.inLibrary);
+    Finder textIn(FoundSong found, String text) => find.descendant(
+      of: find.byKey(ValueKey('found-${found.track.id}')),
+      matching: find.text(text),
+    );
+    expect(textIn(cuckoo, dayText(added)), findsOneWidget, reason: 'Added');
+    expect(textIn(cuckoo, '2'), findsOneWidget, reason: 'plays this month');
+    expect(textIn(cuckoo, 'Yesterday'), findsOneWidget, reason: 'last played');
+    expect(textIn(cigarettes, '-'), findsNothing, reason: 'cells stay empty');
   });
 }

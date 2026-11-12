@@ -1485,10 +1485,17 @@ class _LibraryScreenState extends State<LibraryScreen> {
   }) {
     final found = part.songs[index];
     final track = found.track;
+    // A song the library has shows that copy's plays and Added date.
+    final copy = part.libraryCopyOf(track.id);
+    final filters = library.filters;
     return _SongRow(
       key: ValueKey('found-${track.id}'),
       number: index + 1,
       track: track,
+      statsOf: copy,
+      periodPlays: copy == null ? null : filters?.periodPlays(copy.id),
+      allTimePlays: copy == null ? null : filters?.allTimePlays(copy.id),
+      now: filters?.now,
       cover: track,
       stored: (path: null, pinned: false),
       downloading: false,
@@ -2364,6 +2371,7 @@ class _SongRow extends StatelessWidget {
     this.periodPlays,
     this.allTimePlays,
     this.now,
+    this.statsOf,
     this.action,
     this.mark,
   });
@@ -2385,6 +2393,12 @@ class _SongRow extends StatelessWidget {
 
   /// Today, for "Last played".
   final DateTime? now;
+
+  /// The library song whose Added date fills the play cells, when that is
+  /// not [track] itself: a song VK found that the library has shows the
+  /// library copy's Added (and [periodPlays] / [allTimePlays] of that copy).
+  /// Null: [track]'s own, and empty cells for a song outside the library.
+  final Track? statsOf;
 
   /// The tags go after the artist, on the title's second line, instead of
   /// the Album column (a song's versions: the line has room for words).
@@ -2696,10 +2710,10 @@ class _SongRow extends StatelessWidget {
                       playColumns,
                       periodPlays: periodPlays,
                       allTimePlays: allTimePlays,
-                      addedAt: track.addedAt,
+                      addedAt: (statsOf ?? track).addedAt,
                       now: now ?? DateTime.now(),
                       colors: colors,
-                      blank: !track.inLibrary,
+                      blank: !(statsOf ?? track).inLibrary,
                     ),
                     const SizedBox(width: 14),
                     SizedBox(
