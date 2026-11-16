@@ -247,9 +247,10 @@ String _subtitle(String vkSubtitle) {
   };
 }
 
-/// Reads the music page's reply ([fetchVkMusicPage]); [me] is the
-/// account's VK id, the owner of its generated lists.
-VkMusicPage parseVkMusicPage(Object? reply, {required int me}) {
+/// Reads the music page's reply ([fetchVkMusicPage]). Only the account's
+/// own generated lists are on its page; [me], when given, also checks the
+/// owner.
+VkMusicPage parseVkMusicPage(Object? reply, {int? me}) {
   if (reply is! Map<String, dynamic>) {
     return const VkMusicPage(lists: [], similar: [], hasMix: false);
   }
@@ -257,7 +258,8 @@ VkMusicPage parseVkMusicPage(Object? reply, {required int me}) {
   final lists = <VkRecList>[];
   for (final item in reply['playlists'] as List? ?? const []) {
     if (item is! Map<String, dynamic>) continue;
-    if (item['type'] != 'generated' || item['owner_id'] != me) continue;
+    if (item['type'] != 'generated') continue;
+    if (me != null && item['owner_id'] != me) continue;
     if (item['id'] is! int) continue;
     final vkTitle = _plain(item['title']);
     final (kind, title) = _listName(vkTitle);
@@ -323,7 +325,7 @@ VkMusicPage parseVkMusicPage(Object? reply, {required int me}) {
 
 /// The music page as VK's web client loads it (2-3 s; once a 504 after
 /// 30 s, so callers keep the last page).
-Future<VkMusicPage> fetchVkMusicPage(VkApiCall call, {required int me}) async {
+Future<VkMusicPage> fetchVkMusicPage(VkApiCall call, {int? me}) async {
   final reply = await call('catalog.getAudio', {'need_blocks': '1'});
   return parseVkMusicPage(reply, me: me);
 }
