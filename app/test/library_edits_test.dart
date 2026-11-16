@@ -204,6 +204,36 @@ void main() {
       expect(listedTitles(), ['Мы сидели и курили']);
     });
 
+    test('the account\'s song count leaves a removed song out, and does '
+        'not count it as gone', () {
+      SourceInfo account() => store.sources().single;
+      expect((account().songCount, account().goneCount), (2, 0));
+      store.markRemoved(source, ['${me}_1']);
+      expect((account().songCount, account().goneCount), (1, 0));
+    });
+
+    test('Undo of a song VK no longer had brings it back still gone', () {
+      // Gone first (the account dropped it), then removed by the user.
+      store.markGone(source, ['${me}_1'], atMs: 1000);
+      store.markRemoved(source, ['${me}_1'], atMs: 2000);
+      expect(listedTitles(), ['Мы сидели и курили']);
+      expect(store.holdersOf(id), isEmpty);
+      expect(store.unmarkRemoved(source, '${me}_1'), isTrue);
+      final back = store.loadAll().firstWhere((t) => t.id == id);
+      expect(back.goneAtMs, 1000);
+      expect(store.loadRemoved(), isEmpty);
+      // Nothing to bring back a second time.
+      expect(store.unmarkRemoved(source, '${me}_1'), isFalse);
+    });
+
+    test('holdersOf names the account\'s copy with its gone mark', () {
+      expect(store.holdersOf(id), [
+        (sourceId: source, sourceKey: '${me}_1', gone: false),
+      ]);
+      store.markGone(source, ['${me}_1']);
+      expect(store.holdersOf(id).single.gone, isTrue);
+    });
+
     test('a removed song is no longer in its album', () {
       final row = vkItemToTrack(
         vkAudio(me, 3, title: 'Орбит без сахара', trackId: 77)
@@ -250,6 +280,19 @@ void main() {
       expect(row.goneAtMs, isNotNull);
       expect(row.copies.single.sourceKey, '43_1');
       expect(row.isGone, isFalse);
+    });
+
+    test('holdersOf lists both accounts, then only the one not '
+        'removed', () {
+      final id = store.loadAll().single.id;
+      expect(
+        [for (final h in store.holdersOf(id)) h.sourceKey],
+        ['${me}_1', '43_1'],
+      );
+      store.markRemoved(source, ['${me}_1']);
+      expect(store.holdersOf(id), [
+        (sourceId: other, sourceKey: '43_1', gone: false),
+      ]);
     });
 
     test('removed from both it is not listed', () {

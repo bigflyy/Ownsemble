@@ -52,11 +52,18 @@ class Track {
     this.pinned = false,
     this.copies = const [],
     this.addedAt = 0,
+    this.ownRemoved = false,
   });
+
+  /// Whether the user removed this row's own copy ([sourceId]'s) while
+  /// another account's copy keeps the song listed (plan 06, C5): that
+  /// account no longer has the song.
 
   /// When the song was added to its source, by the source's own date, Unix
   /// seconds (0: unknown).
   final int addedAt;
+
+  final bool ownRemoved;
 
   /// Library row id.
   final int id;
@@ -115,12 +122,13 @@ class Track {
 
   /// Every account's copy of this song, this row's own first.
   List<TrackCopy> get allCopies => [
-    TrackCopy(
-      sourceId: sourceId,
-      sourceKey: sourceKey,
-      accessKey: accessKey,
-      goneAtMs: goneAtMs,
-    ),
+    if (!ownRemoved || copies.isEmpty)
+      TrackCopy(
+        sourceId: sourceId,
+        sourceKey: sourceKey,
+        accessKey: accessKey,
+        goneAtMs: goneAtMs,
+      ),
     ...copies,
   ];
 
@@ -130,7 +138,8 @@ class Track {
 
   /// Whether [source] has this song, gone or not.
   bool isFrom(int source) =>
-      sourceId == source || copies.any((copy) => copy.sourceId == source);
+      sourceId == source && !(ownRemoved && copies.isNotEmpty) ||
+      copies.any((copy) => copy.sourceId == source);
 
   /// Stored audio file, relative to the data folder (or absolute), if any.
   final String? localPath;
@@ -177,5 +186,6 @@ class Track {
     pinned: pinned,
     copies: copies,
     addedAt: addedAt,
+    ownRemoved: ownRemoved,
   );
 }

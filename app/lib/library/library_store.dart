@@ -215,7 +215,8 @@ class LibraryStore implements PlayLog, PlayStatsSource {
       SELECT s.id, s.kind, s.account, s.name, s.color, s.last_sync_at_ms,
              s.last_sync_error,
              count(t.id) AS songs, count(t.gone_at_ms) AS gone
-      FROM sources s LEFT JOIN tracks t ON t.source_id = s.id
+      FROM sources s
+      LEFT JOIN tracks t ON t.source_id = s.id AND t.removed_at_ms IS NULL
       WHERE s.removed_at_ms IS NULL
       GROUP BY s.id ORDER BY s.id
     ''');
@@ -958,6 +959,38 @@ class LibraryStore implements PlayLog, PlayStatsSource {
     return id;
   }
 
+  /// Undo of [markRemoved] for a song VK no longer had when it was removed
+  /// (gone), so there is nothing to restore on VK: the row is listed again
+  /// and keeps its gone mark. Returns whether a removed row came back.
+  bool unmarkRemoved(int sourceId, String key) {
+    _db.execute(
+      'UPDATE tracks SET removed_at_ms = NULL '
+      'WHERE source_id = ? AND source_key = ? AND removed_at_ms IS NOT NULL',
+      [sourceId, key],
+    );
+    return _db.updatedRows > 0;
+  }
+
+  /// The accounts' copies of the listed song [id] that are not removed: its
+  /// own row first, then the rows merged into it, by row id. [gone]: the
+  /// account no longer has that copy, so removing it touches only the
+  /// library. Remove from library (plan 06, C5) removes these.
+  List<({int sourceId, String sourceKey, bool gone})> holdersOf(int id) => [
+    for (final row in _db.select(
+      '''
+      SELECT source_id, source_key, gone_at_ms FROM tracks
+      WHERE (id = ?1 OR same_as = ?1) AND removed_at_ms IS NULL
+      ORDER BY id = ?1 DESC, id
+    ''',
+      [id],
+    ))
+      (
+        sourceId: row['source_id'] as int,
+        sourceKey: row['source_key'] as String,
+        gone: row['gone_at_ms'] != null,
+      ),
+  ];
+
   /// Every row of the library that is not removed, as the same-song key reads
   /// it ([FoundMatcher] tells by these which found songs the library has).
   /// Gone rows are in: the listed song says it is gone, and the caller may
@@ -1025,7 +1058,7 @@ class LibraryStore implements PlayLog, PlayStatsSource {
       SELECT t.id, t.source_id, s.kind, t.source_key, t.access_key, t.artist,
              t.title, t.album, t.duration_sec, t.cover_url, t.cover_large_url,
              t.cover_mid_url, t.cover_full_url, t.tint, t.gone_at_ms, a.path,
-             a.pinned, t.added_at
+             a.pinned, t.added_at, t.removed_at_ms
       FROM tracks t
       JOIN sources s ON s.id = t.source_id
       LEFT JOIN audio_files a ON a.track_id = t.id
@@ -1054,6 +1087,7 @@ class LibraryStore implements PlayLog, PlayStatsSource {
           pinned: row['pinned'] == 1,
           copies: copies[row['id'] as int] ?? const [],
           addedAt: row['added_at'] as int,
+          ownRemoved: row['removed_at_ms'] != null,
         ),
     ];
   }

@@ -147,6 +147,7 @@ class LibraryController extends ChangeNotifier {
     this.albums,
     this.versions,
     this.filters,
+    this.removedSongs,
     String? Function(String key)? readSetting,
     this._writeSetting,
   }) : _index = SearchIndex(_all),
@@ -434,6 +435,26 @@ class LibraryController extends ChangeNotifier {
   SearchIndex _index;
   List<Track> _all;
   late Map<int, Track> _byId;
+
+  /// The songs the user removed from the library (LibraryStore.loadRemoved):
+  /// History and Stacks still show their entries (plan 06, C5). Favorites
+  /// does not: it is part of the library; the mark stays for an Undo.
+  /// Read on first need after each [replaceTracks].
+  final List<Track> Function()? removedSongs;
+  Map<int, Track>? _removedById;
+
+  /// The song an entry of History or a Stack points at: a listed song, or
+  /// one the user removed.
+  Track? _entryTrack(int id) {
+    final listed = _byId[id];
+    if (listed != null) return listed;
+    final removed = _removedById ??= {
+      for (final track in removedSongs?.call() ?? const <Track>[])
+        track.id: track,
+    };
+    return removed[id];
+  }
+
   LibraryView _view = LibraryView.songs;
 
   /// Library id of the source the lists are filtered to; null for all.
@@ -1014,7 +1035,7 @@ class LibraryController extends ChangeNotifier {
         final tracks = <Track>[];
         final ids = <int>[];
         for (final entry in entries) {
-          final track = _byId[entry.trackId];
+          final track = _entryTrack(entry.trackId);
           if (track == null) continue;
           tracks.add(track);
           ids.add(entry.id);
@@ -1080,10 +1101,16 @@ class LibraryController extends ChangeNotifier {
       return;
     }
     final wanted = {for (final track in matches) track.id};
+    // A removed song in History or a Stack is not in the index: its row is
+    // matched by its text.
+    final words = searchWords(_appliedQuery);
+    bool matchesRemoved(Track track) =>
+        !_byId.containsKey(track.id) &&
+        matchesAllWords(searchTextOf(track), words);
     final tracks = <Track>[];
     final ids = _baseEntryIds == null ? null : <int>[];
     for (var i = 0; i < base.length; i++) {
-      if (!wanted.contains(base[i].id)) continue;
+      if (!wanted.contains(base[i].id) && !matchesRemoved(base[i])) continue;
       tracks.add(base[i]);
       ids?.add(_baseEntryIds![i]);
     }
@@ -1098,6 +1125,7 @@ class LibraryController extends ChangeNotifier {
     _all = tracks;
     _index = index;
     _byId = {for (final track in _all) track.id: track};
+    _removedById = null;
     _changedCount = null;
     // A sync may merge songs, which moves their plays and favorites to one
     // row.

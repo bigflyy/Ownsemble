@@ -88,6 +88,12 @@ class FakeVk {
   /// The next search throws this.
   Object? searchFails;
 
+  /// Removes and restores asked (C5), as "method owner_id_audio_id".
+  final edits = <String>[];
+
+  /// The next audio.delete answers that VK removed nothing.
+  var refuseDelete = false;
+
   var _nextId = 900;
 
   Future<Object?> call(String method, Map<String, String> params) async {
@@ -138,7 +144,26 @@ class FakeVk {
           ],
           'errors': <Object>[],
         };
+      case 'audio.delete':
+        final key = '${params['owner_id']}_${params['audio_id']}';
+        edits.add('$method $key');
+        if (refuseDelete) {
+          refuseDelete = false;
+          return {'audio_ids': <Object>[]};
+        }
+        return {
+          'audio_ids': [key],
+        };
+      case 'audio.restore':
+        final owner = int.parse(params['owner_id']!);
+        final id = int.parse(params['audio_id']!);
+        edits.add('$method ${owner}_$id');
+        return vkAudio(owner, id, artist: restoredArtist, title: restoredTitle);
     }
     throw StateError('unexpected $method');
   }
+
+  /// The song audio.restore gives back.
+  String restoredArtist = 'Сплин';
+  String restoredTitle = 'Романс';
 }

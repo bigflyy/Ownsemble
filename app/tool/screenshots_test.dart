@@ -10,6 +10,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:ui' as ui;
 
+import 'package:flutter/gestures.dart' show kSecondaryMouseButton;
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
@@ -30,6 +31,7 @@ import 'package:ownsemble/ui/collections_controller.dart';
 import 'package:ownsemble/ui/library_controller.dart';
 import 'package:ownsemble/ui/library_screen.dart';
 import 'package:ownsemble/ui/song_filters.dart';
+import 'package:ownsemble/ui/song_remover.dart';
 import 'package:ownsemble/ui/shell_settings.dart';
 import 'package:ownsemble/ui/source_editor.dart';
 import 'package:ownsemble/ui/sources_scope.dart';
@@ -204,6 +206,11 @@ void main() {
     bool catalogMenu = false,
     // An album's place (plan 06, C4): clicks "Add the other N".
     bool albumAddAll = false,
+    // Remove from library (plan 06, C5) on "Выхода нет" (with two accounts
+    // on "Группа крови", in both): 'menu' opens its menu, 'sliding' clicks
+    // Remove and shoots mid-slide, 'note' after the list dropped it,
+    // 'flash' just after Undo.
+    String? removeStep,
   }) async {
     final store = LibraryStore.open(':memory:');
     addTearDown(store.close);
@@ -494,6 +501,39 @@ void main() {
       if (catalogFolded) catalog.toggleFolded();
       if (catalogOwnFolded) catalog.toggleOwnFolded();
     }
+    // A made-up VK that removes and restores. Nothing leaves the test.
+    SongRemover? remover;
+    if (removeStep != null) {
+      Future<Object?> removingVk(
+        String method,
+        Map<String, String> params,
+      ) async {
+        final key = '${params['owner_id']}_${params['audio_id']}';
+        if (method == 'audio.delete') {
+          return {
+            'audio_ids': [key],
+          };
+        }
+        return {
+          'owner_id': int.parse(params['owner_id']!),
+          'id': int.parse(params['audio_id']!),
+          'artist': 'Сплин',
+          'title': 'Выхода нет',
+          'duration': 214,
+          'date': 998,
+        };
+      }
+
+      remover = SongRemover(
+        store: store,
+        sources: sources,
+        apiOfSource: (id) => removingVk,
+        onLibraryChanged: () {
+          final tracks = store.loadAll();
+          library.replaceTracks(tracks, SearchIndex(tracks));
+        },
+      );
+    }
     if (playingFirst && !saving) {
       await player.play(library.all.firstWhere((t) => t.id == ids[0]));
     }
@@ -529,6 +569,7 @@ void main() {
               account: accounts,
               sources: editor,
               catalog: catalog,
+              remover: remover,
             ),
           ),
         ),
@@ -649,6 +690,35 @@ void main() {
       player.playing.value = true;
       await tester.pump(const Duration(milliseconds: 300));
     }
+    if (removeStep != null) {
+      final target = ids[twoAccounts ? 0 : 2];
+      await tester.tap(
+        find.byKey(ValueKey('song-$target')),
+        buttons: kSecondaryMouseButton,
+      );
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 300));
+      if (removeStep != 'menu') {
+        await tester.tap(
+          find.byKey(const ValueKey('menu-remove-from-library')),
+        );
+        await tester.pump();
+        // Halfway through the slide.
+        await tester.pump(const Duration(milliseconds: 120));
+        if (removeStep != 'sliding') {
+          await tester.pump(const Duration(milliseconds: 200));
+          for (var i = 0; i < 10; i++) {
+            await tester.pump(const Duration(milliseconds: 50));
+          }
+          if (removeStep == 'flash') {
+            await tester.tap(find.byKey(const ValueKey('note-undo')));
+            await tester.pump();
+            await tester.pump();
+            await tester.pump(const Duration(milliseconds: 120));
+          }
+        }
+      }
+    }
     // Text without the app's font shows here as solid boxes and in the real
     // app in the system font; icons have their own font.
     for (final paragraph
@@ -673,12 +743,56 @@ void main() {
     // Stops the playing timer of the controller before the tree goes.
     if (playingFirst || catalogPlays) player.playing.value = false;
     // Lets the note at the bottom time out, so no timer is left.
-    if (catalogAdd || albumAddAll) {
+    if (catalogAdd || albumAddAll || removeStep != null) {
+      if (removeStep == 'menu') {
+        await tester.tapAt(const Offset(5, 5));
+      }
       await tester.pump(const Duration(seconds: 10));
     }
     catalog?.dispose();
+    remover?.dispose();
   }
 
+  for (final (step, dark) in [
+    ('menu', true),
+    ('sliding', false),
+    ('note', true),
+    ('flash', false),
+  ]) {
+    testWidgets(
+      'Remove from library: $step',
+      (t) => shoot(
+        t,
+        '${dark ? 'dark' : 'light'}-remove-$step',
+        dark: dark,
+        playingFirst: true,
+        removeStep: step,
+      ),
+    );
+  }
+  testWidgets(
+    'dark, Remove from library of a song in two accounts',
+    (t) => shoot(
+      t,
+      'dark-remove-menu-two',
+      dark: true,
+      twoAccounts: true,
+      playingFirst: true,
+      removeStep: 'menu',
+    ),
+  );
+  testWidgets(
+    'light, narrow, the note after Remove from library',
+    (t) => shoot(
+      t,
+      'light-remove-note-narrow',
+      dark: false,
+      size: const Size(640, 900),
+      dock: PlayerDock.bottom,
+      playingFirst: true,
+      removeStep: 'note',
+    ),
+  );
   testWidgets(
     'dark, search with the On VK part, a found song playing',
     (t) => shoot(

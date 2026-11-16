@@ -27,6 +27,7 @@ import 'ui/library_controller.dart';
 import 'ui/library_screen.dart';
 import 'ui/shell_settings.dart';
 import 'ui/song_filters.dart';
+import 'ui/song_remover.dart';
 import 'ui/source_editor.dart';
 import 'ui/sources_scope.dart';
 import 'ui/sync_controller.dart';
@@ -218,6 +219,7 @@ Future<void> main(List<String> args) async {
       store: store,
       apiOfSource: (sourceId) => clientOfSource(sourceId)?.call,
     ),
+    removedSongs: store.loadRemoved,
     readSetting: store.readSetting,
     writeSetting: store.writeSetting,
   );
@@ -306,15 +308,19 @@ Future<void> main(List<String> args) async {
   // runs is confirmed by one more sync right after it: the running one
   // listed the account before the add. A song added to several accounts
   // gets a sync at once, which merges its copies.
+  void reloadLibrary() {
+    final tracks = store.loadAll();
+    library.replaceTracks(tracks, SearchIndex(tracks));
+    sync.updateSources(store.sources());
+  }
+
   final catalog = CatalogSearch(
     library: library,
     store: store,
     sources: sync.sourceList,
     apiOfSource: (sourceId) => clientOfSource(sourceId)?.call,
     onLibraryChanged: ({required severalAccounts}) {
-      final tracks = store.loadAll();
-      library.replaceTracks(tracks, SearchIndex(tracks));
-      sync.updateSources(store.sources());
+      reloadLibrary();
       if (sync.running || severalAccounts) {
         unawaited(sync.syncAfterRunning());
       }
@@ -323,6 +329,17 @@ Future<void> main(List<String> args) async {
     onAdded: playback.adoptAdded,
     readSetting: store.readSetting,
     writeSetting: store.writeSetting,
+    log: logPerf,
+  );
+  // Remove from library and its Undo (plan 06, C5).
+  final remover = SongRemover(
+    store: store,
+    sources: sync.sourceList,
+    apiOfSource: (sourceId) => clientOfSource(sourceId)?.call,
+    onLibraryChanged: reloadLibrary,
+    onRestored: () {
+      if (sync.running) unawaited(sync.syncAfterRunning());
+    },
     log: logPerf,
   );
   // A new login is synced at once, so the library fills without another step.
@@ -367,6 +384,7 @@ Future<void> main(List<String> args) async {
       sources: sourceEditor,
       collections: collections,
       catalog: catalog,
+      remover: remover,
       settings: settings,
     ),
   );
@@ -574,6 +592,7 @@ class OwnsembleApp extends StatelessWidget {
     this.account,
     this.sources,
     this.catalog,
+    this.remover,
   });
 
   final CoverStore covers;
@@ -585,6 +604,7 @@ class OwnsembleApp extends StatelessWidget {
   final VkAccounts? account;
   final SourceEditor? sources;
   final CatalogSearch? catalog;
+  final SongRemover? remover;
 
   @override
   Widget build(BuildContext context) {
@@ -604,6 +624,7 @@ class OwnsembleApp extends StatelessWidget {
             sources: sources,
             collections: collections,
             catalog: catalog,
+            remover: remover,
             settings: settings,
           ),
         ),

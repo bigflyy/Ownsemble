@@ -28,6 +28,7 @@ import 'shell_settings.dart';
 import 'shortcuts_help.dart';
 import 'sidebar.dart';
 import 'song_filters.dart';
+import 'song_remover.dart';
 import 'source_editor.dart';
 import 'sources_scope.dart';
 import 'stats_page.dart';
@@ -100,6 +101,7 @@ class LibraryScreen extends StatefulWidget {
     this.sources,
     this.collections,
     this.catalog,
+    this.remover,
     this._settings,
   });
 
@@ -122,6 +124,9 @@ class LibraryScreen extends StatefulWidget {
 
   /// The On VK part under the search results; none when null.
   final CatalogSearch? catalog;
+
+  /// Remove from library and its Undo; no Remove in the menus when null.
+  final SongRemover? remover;
 
   final ShellSettings? _settings;
 
@@ -656,10 +661,13 @@ class _LibraryScreenState extends State<LibraryScreen> {
           const PopupMenuDivider(),
           ...stackMenuItems(collections),
         ],
+        ..._removeMenuItems(track),
       ],
     );
     if (!mounted || choice == null) return;
     switch (choice) {
+      case _RemoveFrom(:final sourceId):
+        await _removeSong(track, onlySource: sourceId);
       case 'open-album':
         library.openAlbum(track);
       case 'versions':
@@ -909,6 +917,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
               ?widget.player.versions,
               ?library.filters,
               ?widget.catalog,
+              ?widget.remover,
             ]),
             builder: (context, _) {
               final view = library.view;
@@ -1313,96 +1322,107 @@ class _LibraryScreenState extends State<LibraryScreen> {
               final entryId = library.entryIdAt(index);
               final version = library.versionOf(track);
               final outside = _outsideSong(track, version);
-              return _SongRow(
+              final remover = widget.remover;
+              // History and Stacks keep a removed song: its row stays.
+              final keepsRemoved =
+                  library.view.kind == ViewKind.history ||
+                  library.view.kind == ViewKind.stack;
+              return LeavingRow(
                 key: ValueKey(
                   entryId == null ? 'song-${track.id}' : 'entry-$entryId',
                 ),
-                number: index + 1,
-                track: track,
-                playColumns: playColumns,
-                periodPlays: filters?.periodPlays(track.id),
-                allTimePlays: filters?.allTimePlays(track.id),
-                now: filters?.now,
-                cover: library.rowCover(track),
-                stored:
-                    _storage?.stateOf(track) ??
-                    (path: track.localPath, pinned: track.pinned),
-                downloading: _storage?.isDownloading(track) ?? false,
-                saving: _storage?.isSaving(track) ?? false,
-                storage: _storage,
-                thumbnails: _settings.thumbnails,
-                showAlbum: showAlbum,
-                isCurrent: _isPlaying(track, current.data),
-                isJump: index == library.jump.row,
-                playing: playing,
-                onTap: () {
-                  library.jump.clear();
-                  _play(index);
-                },
-                onMenu: (position) => _showSongMenu(index, position),
-                favorite: widget.collections?.isFavorite(track.id) ?? false,
-                onFavorite:
-                    widget.collections == null ||
-                        !track.inLibrary ||
-                        version != null
-                    ? null
-                    : () => widget.collections!.toggleFavorite(track),
-                versionTag: (compact) => version == null
-                    ? (outside == null
-                              ? null
-                              : _otherVersionTag(
-                                  widget.catalog!,
-                                  outside,
-                                  compact: compact,
-                                )) ??
-                          VersionTag(
-                            playback: widget.playback,
-                            track: track,
-                            compact: compact,
-                            onOpen: _openVersions,
-                          )
-                    : _VersionTags(
-                        version: version,
-                        row: library.versionsRow!,
-                        list: library.versionList,
-                        choice: widget.playback.player.versions?.choiceFor(
-                          library.versionsRow!,
+                leaving:
+                    !keepsRemoved &&
+                    (remover?.leaving.contains(track.id) ?? false),
+                flashing: remover?.flashing == track.id,
+                child: _SongRow(
+                  number: index + 1,
+                  track: track,
+                  playColumns: playColumns,
+                  periodPlays: filters?.periodPlays(track.id),
+                  allTimePlays: filters?.allTimePlays(track.id),
+                  now: filters?.now,
+                  cover: library.rowCover(track),
+                  stored:
+                      _storage?.stateOf(track) ??
+                      (path: track.localPath, pinned: track.pinned),
+                  downloading: _storage?.isDownloading(track) ?? false,
+                  saving: _storage?.isSaving(track) ?? false,
+                  storage: _storage,
+                  thumbnails: _settings.thumbnails,
+                  showAlbum: showAlbum,
+                  isCurrent: _isPlaying(track, current.data),
+                  isJump: index == library.jump.row,
+                  playing: playing,
+                  onTap: () {
+                    library.jump.clear();
+                    _play(index);
+                  },
+                  onMenu: (position) => _showSongMenu(index, position),
+                  favorite: widget.collections?.isFavorite(track.id) ?? false,
+                  onFavorite:
+                      widget.collections == null ||
+                          !track.inLibrary ||
+                          version != null
+                      ? null
+                      : () => widget.collections!.toggleFavorite(track),
+                  versionTag: (compact) => version == null
+                      ? (outside == null
+                                ? null
+                                : _otherVersionTag(
+                                    widget.catalog!,
+                                    outside,
+                                    compact: compact,
+                                  )) ??
+                            VersionTag(
+                              playback: widget.playback,
+                              track: track,
+                              compact: compact,
+                              onOpen: _openVersions,
+                            )
+                      : _VersionTags(
+                          version: version,
+                          row: library.versionsRow!,
+                          list: library.versionList,
+                          choice: widget.playback.player.versions?.choiceFor(
+                            library.versionsRow!,
+                          ),
+                          compact: compact,
                         ),
-                        compact: compact,
-                      ),
-                // The "another version" tag is too long for the album
-                // column: it goes under the title, as Versions tags do.
-                tagsUnderTitle:
-                    version != null ||
-                    outside != null &&
-                        widget.catalog!.otherVersionOf(outside) != null,
-                action: outside == null
-                    ? null
-                    : foundAddButton(
-                        context,
-                        widget.catalog!,
-                        outside,
-                        onAdd: _addFound,
-                      ),
-                outsideMeaning: version == null
-                    ? null
-                    : version.isCurrentFile
-                    ? "VK's file for your song: streams, nothing is saved "
-                          'while you listen here'
-                    : 'Another upload of the song on VK: streams, nothing '
-                          'is saved while you listen here',
-                // An upload VK gives no album link for shows its album as
-                // plain text. Asked only for those rows: for a library song
-                // it costs a database read per row.
-                // In an album's place the name is that album: nothing to open.
-                onOpenAlbum:
-                    library.view.kind == ViewKind.album ||
-                        version != null && library.albumOf(track) == null
-                    ? null
-                    : () {
-                        library.jump.clear();
-                        library.openAlbum(track);
-                      },
+                  // The "another version" tag is too long for the album
+                  // column: it goes under the title, as Versions tags do.
+                  tagsUnderTitle:
+                      version != null ||
+                      outside != null &&
+                          widget.catalog!.otherVersionOf(outside) != null,
+                  action: outside == null
+                      ? null
+                      : foundAddButton(
+                          context,
+                          widget.catalog!,
+                          outside,
+                          onAdd: _addFound,
+                        ),
+                  outsideMeaning: version == null
+                      ? null
+                      : version.isCurrentFile
+                      ? "VK's file for your song: streams, nothing is saved "
+                            'while you listen here'
+                      : 'Another upload of the song on VK: streams, nothing '
+                            'is saved while you listen here',
+                  // An upload VK gives no album link for shows its album as
+                  // plain text. Asked only for those rows: for a library song
+                  // it costs a database read per row.
+                  // In an album's place the name is that album: nothing to open.
+                  onOpenAlbum:
+                      library.view.kind == ViewKind.album ||
+                          version != null && library.albumOf(track) == null
+                      ? null
+                      : () {
+                          library.jump.clear();
+                          library.openAlbum(track);
+                        },
+                ),
               );
             },
           ),
@@ -1694,11 +1714,75 @@ class _LibraryScreenState extends State<LibraryScreen> {
     );
   }
 
+  /// Remove from library at the end of a song's menu: from every account
+  /// that has it, and for a song in several accounts also from each one
+  /// alone (plan 06, C5). None for a song Remove does not apply to.
+  List<PopupMenuEntry<Object>> _removeMenuItems(Track track) {
+    final accounts = widget.remover?.accountsOf(track) ?? const [];
+    if (accounts.isEmpty) return const [];
+    return [
+      const PopupMenuDivider(),
+      const PopupMenuItem(
+        key: ValueKey('menu-remove-from-library'),
+        value: _RemoveFrom(null),
+        child: Text('Remove from library'),
+      ),
+      if (accounts.length > 1)
+        for (final source in accounts)
+          PopupMenuItem(
+            key: ValueKey('menu-remove-from-${source.id}'),
+            value: _RemoveFrom(source.id),
+            child: Text('Remove from ${source.name} only'),
+          ),
+    ];
+  }
+
+  /// Removes [track] (from [onlySource] alone when given): the row slides
+  /// out, then a note says what happened and offers Undo for 6 s.
+  Future<void> _removeSong(Track track, {int? onlySource}) async {
+    final remover = widget.remover;
+    if (remover == null) return;
+    final messenger = ScaffoldMessenger.of(context);
+    final result = await remover.remove(track, onlySource: onlySource);
+    if (!mounted || result.note.isEmpty) return;
+    messenger
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        SnackBar(
+          content: Text(result.note),
+          duration: removeUndoTime,
+          // A note with an action stays until closed unless told not to.
+          persist: false,
+          action: result.canUndo
+              ? SnackBarAction(
+                  key: const ValueKey('note-undo'),
+                  label: 'Undo',
+                  onPressed: () => unawaited(_undoRemove(result)),
+                )
+              : null,
+        ),
+      );
+  }
+
+  /// Puts back what [result] removed; a note only when that fails.
+  Future<void> _undoRemove(RemoveResult result) async {
+    final remover = widget.remover;
+    if (remover == null) return;
+    final messenger = ScaffoldMessenger.of(context);
+    final note = await remover.undo(result);
+    if (!mounted || note == null) return;
+    messenger
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(content: Text(note)));
+  }
+
   /// A found song's right-click menu: what any song outside the library
   /// offers.
   Future<void> _showFoundMenu(Track track, Offset position) async {
     final album = library.albumOf(track);
-    final action = await showMenu<String>(
+    // A found song the library has removes the library's copy.
+    final copy = widget.catalog?.libraryCopyOf(track.id);
+    final action = await showMenu<Object>(
       context: context,
       position: RelativeRect.fromLTRB(
         position.dx,
@@ -1729,10 +1813,13 @@ class _LibraryScreenState extends State<LibraryScreen> {
             value: 'view-cover',
             child: Text('View cover'),
           ),
+        if (copy != null) ..._removeMenuItems(copy),
       ],
     );
     if (!mounted || action == null) return;
     switch (action) {
+      case _RemoveFrom(:final sourceId):
+        await _removeSong(copy!, onlySource: sourceId);
       case 'play-next':
         await widget.playback.playNext(track);
       case 'add-to-queue':
@@ -2972,6 +3059,104 @@ class _Tag extends StatelessWidget {
                 style: TextStyle(fontSize: 11, color: colors.dim),
               ),
       ),
+    );
+  }
+}
+
+/// How long the note after Remove from library offers Undo (plan 06, B3).
+const removeUndoTime = Duration(seconds: 6);
+
+/// A Remove choice in a song's menu: every account, or only [sourceId].
+class _RemoveFrom {
+  const _RemoveFrom(this.sourceId);
+  final int? sourceId;
+}
+
+/// A song row that slides out to the side while it is being removed
+/// ([leaving]; back in if the remove failed), and flashes in the accent
+/// colour when Undo brought it back ([flashing]).
+class LeavingRow extends StatefulWidget {
+  const LeavingRow({
+    super.key,
+    required this.leaving,
+    required this.flashing,
+    required this.child,
+  });
+
+  final bool leaving;
+  final bool flashing;
+  final Widget child;
+
+  static const slide = Duration(milliseconds: 250);
+  static const flash = Duration(milliseconds: 900);
+
+  @override
+  State<LeavingRow> createState() => _LeavingRowState();
+}
+
+class _LeavingRowState extends State<LeavingRow>
+    with SingleTickerProviderStateMixin {
+  /// Made only for a flash: most rows never flash.
+  AnimationController? _flash;
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.flashing) _startFlash();
+  }
+
+  @override
+  void didUpdateWidget(LeavingRow old) {
+    super.didUpdateWidget(old);
+    if (widget.flashing && !old.flashing) _startFlash();
+  }
+
+  void _startFlash() {
+    (_flash ??= AnimationController(
+      vsync: this,
+      duration: LeavingRow.flash,
+    )).forward(from: 0);
+  }
+
+  @override
+  void dispose() {
+    _flash?.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final accent = OwnColors.of(context).accent;
+    final leaving = widget.leaving;
+    final row = IgnorePointer(
+      ignoring: leaving,
+      child: AnimatedSlide(
+        offset: leaving ? const Offset(0.4, 0) : Offset.zero,
+        duration: LeavingRow.slide,
+        curve: Curves.easeIn,
+        child: AnimatedOpacity(
+          opacity: leaving ? 0 : 1,
+          duration: LeavingRow.slide,
+          child: widget.child,
+        ),
+      ),
+    );
+    final flash = _flash;
+    if (flash == null) return row;
+    return AnimatedBuilder(
+      animation: flash,
+      builder: (context, child) => DecoratedBox(
+        decoration: BoxDecoration(
+          color: flash.isAnimating
+              ? accent.withValues(
+                  alpha: 0.28 * Curves.easeOut.transform(1 - flash.value),
+                )
+              : null,
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: child,
+      ),
+      child: row,
     );
   }
 }
