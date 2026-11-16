@@ -70,6 +70,17 @@ abstract interface class AlbumCatalog {
   Future<List<AlbumSong>> fetch(AlbumRef album);
 }
 
+/// An album catalog for lists that are not albums (VK's recommended lists):
+/// their songs may be at hand already, and each song names its library copy.
+abstract interface class ListCatalog implements AlbumCatalog {
+  /// The songs of [list] when they are at hand without asking anyone.
+  List<AlbumSong>? cached(AlbumRef list);
+
+  /// The library's song that [song] of a list is (same key, the same VK
+  /// recording, or the same name and length), or null.
+  Track? libraryCopyOf(AlbumSong song);
+}
+
 /// The album catalog of the running app: the library database for the songs
 /// at hand and the song's VK account for the whole album, read-only.
 class LibraryAlbums implements AlbumCatalog {

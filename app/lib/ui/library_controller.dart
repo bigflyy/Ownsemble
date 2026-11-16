@@ -50,6 +50,13 @@ enum ViewKind {
 
   /// The uploads of one song on VK, to listen to and choose from (plan 03).
   versions,
+
+  /// What VK recommends: VK Mix, VK's lists, similar songs (plan 07).
+  forYou,
+
+  /// One recommended list (a VK list, "Similar to", VK Mix), opened from
+  /// For you or a song's "Similar songs" (plan 07).
+  vkList,
 }
 
 /// One view: its kind and, for a Stack, an album or a song's versions,
@@ -78,7 +85,14 @@ class LibraryView {
 
   /// Whether the view lists songs outside the library (an album's, a
   /// song's versions), which the search index does not hold.
-  bool get listsOutside => kind == ViewKind.album || kind == ViewKind.versions;
+  bool get listsOutside =>
+      kind == ViewKind.album ||
+      kind == ViewKind.versions ||
+      kind == ViewKind.vkList;
+
+  /// Whether the view is an album or a recommended list: a list of songs
+  /// from VK with the library's own song in place of each one it has.
+  bool get listsVkSongs => kind == ViewKind.album || kind == ViewKind.vkList;
 
   /// Whether this view is a page planned for later, without songs yet.
   bool get isLater => switch (kind) {
@@ -89,7 +103,10 @@ class LibraryView {
   /// Whether the view is a page instead of a song list: a later page,
   /// Stats or a year report.
   bool get isPage =>
-      isLater || kind == ViewKind.stats || kind == ViewKind.yearReport;
+      isLater ||
+      kind == ViewKind.stats ||
+      kind == ViewKind.yearReport ||
+      kind == ViewKind.forYou;
 
   /// Whether the view is opened from another one and shows a Back button.
   bool get hasBack => listsOutside || kind == ViewKind.yearReport;
@@ -195,7 +212,10 @@ class LibraryController extends ChangeNotifier {
     if (text == null) return null;
     final parts = text.split(':');
     final kind = ViewKind.values.asNameMap()[parts.first];
-    if (kind == null || kind == ViewKind.album || kind == ViewKind.versions) {
+    if (kind == null ||
+        kind == ViewKind.album ||
+        kind == ViewKind.versions ||
+        kind == ViewKind.vkList) {
       return null;
     }
     // A year report opens from Stats, and Back has nothing to return to
@@ -269,6 +289,10 @@ class LibraryController extends ChangeNotifier {
 
   /// Albums' songs; without it no album opens.
   final AlbumCatalog? albums;
+
+  /// Recommended lists' songs (the For you place, plan 07); without it no
+  /// such list opens.
+  ListCatalog? vkLists;
 
   /// The versions chosen for swapped songs, for the Changed on VK view.
   final VersionBook? versions;
@@ -532,7 +556,7 @@ class LibraryController extends ChangeNotifier {
     if (version == null) {
       final album = albums?.albumOf(track);
       if (album != null || track.inLibrary) return album;
-      return outsideAlbumOf?.call(track);
+      return vkLists?.albumOf(track) ?? outsideAlbumOf?.call(track);
     }
     // VK's file for the song is the song's own: its album as the list shows.
     final row = _versionsRow;
@@ -570,6 +594,34 @@ class LibraryController extends ChangeNotifier {
     if (scroll.hasClients) scroll.jumpTo(0);
   }
 
+  /// Opens a recommended list (plan 07) as a new place: its songs at once
+  /// when they are at hand, else once VK lists them.
+  void openList(AlbumRef list) {
+    final view = LibraryView(ViewKind.vkList, album: list);
+    final cached = vkLists?.cached(list);
+    if (cached != null) _albumLists[list] = cached;
+    if (view == _view && _appliedQuery.isEmpty && _source == null) {
+      listChanged(list);
+      return;
+    }
+    _albumFailures.remove(list);
+    _places.leave(_here);
+    _showList(view, '', null);
+    if (scroll.hasClients) scroll.jumpTo(0);
+  }
+
+  /// The songs of the recommended list [list] changed (VK Mix played on,
+  /// VK gave more similar songs): the place shows them if it is open.
+  void listChanged(AlbumRef list) {
+    final cached = vkLists?.cached(list);
+    if (cached == null) return;
+    _albumLists[list] = cached;
+    if (_view.kind != ViewKind.vkList || _view.album != list) return;
+    _rebuildBase();
+    _applySearch();
+    notifyListeners();
+  }
+
   /// Opens the report of [year] as a new place (from Stats; Back returns).
   void openYearReport(int year) {
     final view = LibraryView(ViewKind.yearReport, year: year);
@@ -588,7 +640,7 @@ class LibraryController extends ChangeNotifier {
   /// What the open album's heading says; null when no album is shown.
   AlbumStatus? get albumStatus {
     final album = _view.album;
-    if (_view.kind != ViewKind.album || album == null) return null;
+    if (!_view.listsVkSongs || album == null) return null;
     final base = _base ?? const <Track>[];
     final inLibrary = base.where((track) => track.inLibrary).length;
     if (_albumLists.containsKey(album)) {
@@ -611,7 +663,7 @@ class LibraryController extends ChangeNotifier {
   /// unless the last ask failed: the rebuild after a failure lands here too,
   /// and must not ask VK again and again.
   List<Track> _albumSongs(AlbumRef album) {
-    final catalog = albums;
+    final catalog = _catalogOf(_view);
     if (catalog == null) return const [];
     final libraryIds = catalog.libraryIds(album);
     final listed = _albumLists[album];
@@ -620,6 +672,7 @@ class LibraryController extends ChangeNotifier {
       if (!_albumFailures.containsKey(album)) _fetchAlbum(album);
       return [for (final id in libraryIds) ?_byId[id]];
     }
+    if (catalog is ListCatalog) return _listSongs(catalog, listed);
     final byTrackId = catalog.libraryIdsByVkTrackId([
       for (final song in listed) ?song.vkTrackId,
     ]);
@@ -677,12 +730,34 @@ class LibraryController extends ChangeNotifier {
     return tracks;
   }
 
+  /// The songs of a recommended list in its order, the library's own song
+  /// in place of each one it has (same key, the same VK recording, or the
+  /// same name and length: [ListCatalog.libraryCopyOf]), each song once.
+  /// Every row keeps its own cover and album.
+  List<Track> _listSongs(ListCatalog catalog, List<AlbumSong> listed) {
+    final shown = <int>{};
+    return [
+      for (final song in listed)
+        if (_ownOrOutside(catalog, song) case final track
+            when shown.add(track.id))
+          track,
+    ];
+  }
+
+  Track _ownOrOutside(ListCatalog catalog, AlbumSong song) {
+    final own = catalog.libraryCopyOf(song);
+    return own == null ? song.track : _byId[own.id] ?? song.track;
+  }
+
+  AlbumCatalog? _catalogOf(LibraryView view) =>
+      view.kind == ViewKind.vkList ? vkLists : albums;
+
   /// The VK track id of [track], a song of the open album that the library
   /// does not have, as VK's album list gave it; null when there is none.
   /// The added copy keeps it, so the album finds the copy as its own (C4).
   int? albumVkTrackIdOf(Track track) {
     final album = _view.album;
-    if (_view.kind != ViewKind.album || album == null) return null;
+    if (!_view.listsVkSongs || album == null) return null;
     for (final song in _albumLists[album] ?? const <AlbumSong>[]) {
       if (song.track.id == track.id) return song.vkTrackId;
     }
@@ -711,7 +786,7 @@ class LibraryController extends ChangeNotifier {
   /// there is nothing to ask. The list shows when it arrives, if the album
   /// is still on screen.
   void _fetchAlbum(AlbumRef album) {
-    final catalog = albums;
+    final catalog = _catalogOf(_view);
     if (catalog == null || _albumsLoading.contains(album)) return;
     if (!catalog.canFetch(album)) {
       _albumFailures[album] = album.link == null
@@ -1042,7 +1117,7 @@ class LibraryController extends ChangeNotifier {
         }
         _base = tracks;
         _baseEntryIds = ids;
-      case ViewKind.album:
+      case ViewKind.album || ViewKind.vkList:
         final album = _view.album;
         _base = album == null ? const [] : _albumSongs(album);
       case ViewKind.versions:
@@ -1050,7 +1125,8 @@ class LibraryController extends ChangeNotifier {
       case ViewKind.artists ||
           ViewKind.playlists ||
           ViewKind.stats ||
-          ViewKind.yearReport:
+          ViewKind.yearReport ||
+          ViewKind.forYou:
         _base = const [];
     }
     _filterBaseBySource();

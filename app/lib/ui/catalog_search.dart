@@ -434,6 +434,14 @@ class CatalogSearch extends ChangeNotifier {
     return id == null ? null : library.byId(id);
   }
 
+  /// The library's song that the VK song [song] is (same key, the same
+  /// recording, or the same name and length), or null: a recommended
+  /// song's row shows the library's song instead (plan 07).
+  Track? libraryCopyOfSong(NewTrack song) {
+    final id = _currentMatcher.listedIdOf(song);
+    return id == null ? null : library.byId(id);
+  }
+
   /// The library's song with [found]'s name as another recording, while +
   /// still offers [found]: the row says "you have another version" (C4e,
   /// user 2026-11-12), and + adds this recording as well. Null otherwise.
