@@ -21,6 +21,7 @@ import '../playback/stream_proxy.dart' show ProxyRequestLog;
 import '../storage/cover_store.dart';
 import '../ui/collections_controller.dart';
 import '../ui/cover_tile.dart';
+import '../ui/for_you.dart';
 import '../ui/library_controller.dart';
 import '../ui/song_filters.dart';
 import '../vk/vk_client.dart';
@@ -39,6 +40,7 @@ class SpeedBench {
     required this.vk,
     required this.covers,
     this.collections,
+    this.forYou,
     this.resultFile,
     this.volume = 100,
   });
@@ -57,6 +59,9 @@ class SpeedBench {
 
   /// History, for the restart check; null when not needed.
   final CollectionsController? collections;
+
+  /// The For you place (plan 07), for the forYou part; null when not needed.
+  final ForYou? forYou;
 
   /// The result file; the restart check writes it while the app stays open.
   final String? resultFile;
@@ -127,6 +132,12 @@ class SpeedBench {
     }
     if (parts?.contains('playEachSource') ?? false) {
       result['playEachSource'] = await _playEachSource();
+    }
+    if (parts?.contains('forYou') ?? false) {
+      result['forYou'] = await _forYouBench();
+    }
+    if (parts?.contains('forYouMix') ?? false) {
+      result['forYouMix'] = await _forYouMixCheck();
     }
     await player.setVolume(volume);
     result['volume'] = volume;
@@ -873,6 +884,157 @@ class SpeedBench {
       };
     }
     return result;
+  }
+
+  /// Plan 07 C4: the For you place as the user opens it. Shows the place
+  /// (the lists come from <data>/for-you.json when an earlier run saved
+  /// them, else from VK), opens each list the way a card's click does and
+  /// times it to its first frame, then streams up to six recommended songs
+  /// the library does not have, as a row's click does. Times and counts
+  /// only: no names, links or keys.
+  Future<Map<String, Object?>> _forYouBench() async {
+    final forYou = this.forYou;
+    if (forYou == null || forYou.account == null) {
+      return {'skipped': 'no VK account'};
+    }
+    final page = Stopwatch()..start();
+    library.showView(const LibraryView(ViewKind.forYou));
+    await WidgetsBinding.instance.endOfFrame;
+    final pageMs = page.elapsedMilliseconds;
+    final fromCache = forYou.hasLists;
+    int? refreshMs;
+    if (!fromCache) {
+      final clock = Stopwatch()..start();
+      await forYou.refresh();
+      refreshMs = clock.elapsedMilliseconds;
+    }
+    if (!forYou.hasLists) return {'error': 'no lists: ${forYou.error}'};
+    final opens = <Map<String, Object?>>[];
+    for (final list in forYou.lists) {
+      library.showView(const LibraryView(ViewKind.forYou));
+      await WidgetsBinding.instance.endOfFrame;
+      await Future<void>.delayed(const Duration(milliseconds: 200));
+      final clock = Stopwatch()..start();
+      library.openList(forYou.refOf(list));
+      await WidgetsBinding.instance.endOfFrame;
+      opens.add({
+        'kind': list.kind.name,
+        'rows': library.visible.length,
+        'toFrameMs': clock.elapsedMilliseconds,
+      });
+    }
+    // Songs the library does not have, from every list, in a fixed order.
+    final seen = <String>{};
+    final picks = <Track>[];
+    for (final list in forYou.lists) {
+      for (final song in forYou.songsOf(list.key)) {
+        if (!song.playable || song.song.durationSec < 60) continue;
+        if (!seen.add(song.key)) continue;
+        final track = forYou.trackOf(song);
+        if (forYou.libraryCopyOf((track: track, vkTrackId: null)) != null) {
+          continue;
+        }
+        picks.add(track);
+      }
+    }
+    picks.shuffle(Random(17));
+    final samples = <Map<String, Object?>>[];
+    for (final track in picks.take(6)) {
+      final timing = await player.play(track);
+      samples.add({
+        'ok': timing.ok,
+        'resolveMs': timing.resolveMs,
+        'toSoundMs': timing.toSoundMs,
+        'networkFirstChunkMs': timing.networkFirstChunkMs,
+        'overheadMs': timing.appOverheadMs,
+        'sampleRate': timing.sampleRate,
+        'stillPlayingAfter1s': timing.ok && await _keepsPlaying(),
+        if (timing.error != null) 'error': timing.error,
+      });
+      await player.stop();
+      await Future<void>.delayed(const Duration(milliseconds: 300));
+    }
+    List<double> values(String key) => [
+      for (final s in samples)
+        if (s['ok'] == true && s[key] != null) (s[key] as num).toDouble(),
+    ];
+    return {
+      'pageToFrameMs': pageMs,
+      'listsFromCache': fromCache,
+      'refreshMs': ?refreshMs,
+      'lists': forYou.lists.length,
+      'listOpens': opens,
+      'listToFrameMs': _stats([
+        for (final o in opens) (o['toFrameMs'] as int).toDouble(),
+      ]),
+      'outsideSongs': picks.length,
+      'samples': samples,
+      'toSoundMs': _stats(values('toSoundMs')),
+      'networkFirstChunkMs': _stats(values('networkFirstChunkMs')),
+      'overheadMs': _stats(values('overheadMs')),
+    };
+  }
+
+  /// Plan 07: VK Mix keeps adding songs while it plays. Starts the mix as
+  /// its card's Play does (VK gives 2-3 songs a call), then presses Next
+  /// [steps] times through the real queue, so the app's own listener (in
+  /// main.dart) has to ask VK for more before the list runs out. Each step
+  /// waits up to 8 s for the list to grow past the playing song, and
+  /// records the list's length and whether the song played. Counts only.
+  Future<Map<String, Object?>> _forYouMixCheck({int steps = 8}) async {
+    final forYou = this.forYou;
+    if (forYou == null || forYou.account == null) {
+      return {'skipped': 'no VK account'};
+    }
+    forYou.open();
+    if (!forYou.hasLists) await forYou.refresh();
+    if (!forYou.hasMix) return {'skipped': 'no VK Mix'};
+    final first = await forYou.moreMix();
+    if (first.isEmpty) return {'error': 'VK Mix gave no songs'};
+    final firstTiming = await playback.playFrom(first, 0);
+    final keys = <String>{?player.current?.sourceKey};
+    final stepsOut = <Map<String, Object?>>[
+      {
+        'listLength': playback.queue.context.length,
+        'ok': firstTiming?.ok,
+        'sampleRate': firstTiming?.sampleRate,
+      },
+    ];
+    var wrapped = false;
+    for (var i = 0; i < steps; i++) {
+      final at = playback.queue.context.indexWhere(
+        (t) => t.id == player.current?.id,
+      );
+      final deadline = DateTime.now().add(const Duration(seconds: 8));
+      while (playback.queue.context.length <= at + 1 &&
+          DateTime.now().isBefore(deadline)) {
+        await Future<void>.delayed(const Duration(milliseconds: 100));
+      }
+      final timing = await playback.next();
+      final key = player.current?.sourceKey;
+      final index = playback.queue.context.indexWhere(
+        (t) => t.id == player.current?.id,
+      );
+      if (index <= at) wrapped = true;
+      stepsOut.add({
+        'listLength': playback.queue.context.length,
+        'index': index,
+        'newSong': key != null && keys.add(key),
+        'ok': timing?.ok,
+        'sampleRate': timing?.sampleRate,
+        'stillPlayingAfter1s': (timing?.ok ?? false) && await _keepsPlaying(),
+        if (timing?.error != null) 'error': timing!.error,
+      });
+    }
+    await player.stop();
+    return {
+      'firstSongs': first.length,
+      'finalListLength': playback.queue.context.length,
+      'distinctSongsPlayed': keys.length,
+      'stillMixList': forYou.isMixList(playback.queue.context),
+      'wrappedToStart': wrapped,
+      'steps': stepsOut,
+    };
   }
 
   /// Seeks streamed songs to three quarters as soon as their sound starts,

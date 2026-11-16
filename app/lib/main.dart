@@ -399,6 +399,7 @@ Future<void> main(List<String> args) async {
         collections: collections,
         storage: storage,
         store: store,
+        forYou: forYou,
       ),
     );
   });
@@ -434,6 +435,7 @@ Future<void> _afterFirstFrame({
   required CollectionsController collections,
   required AudioStorage storage,
   required LibraryStore store,
+  required ForYou forYou,
 }) async {
   final firstFrameAt = DateTime.now();
   if (options.metricsFile != null) {
@@ -482,6 +484,7 @@ Future<void> _afterFirstFrame({
       vk: account.client,
       covers: covers,
       collections: collections,
+      forYou: forYou,
       resultFile: options.benchFile,
       volume: options.benchVolume,
     ).run(parts: options.benchParts);
