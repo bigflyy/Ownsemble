@@ -122,6 +122,25 @@ void main() {
       );
     }
 
+    // A made-up song the account does not have: the start sync marks it
+    // gone, and step 5 removes it and brings it back (user, 2026-11-16: Undo
+    // failed on songs already gone from VK).
+    const goneTitle = 'Песня, которой нет в VK';
+    final goneStore = LibraryStore.open(p.join(copy.path, 'library.db'));
+    final vkSource = goneStore.sources().firstWhere(
+      (s) => s.account == '${client.userId}',
+    );
+    goneStore.upsertAll(vkSource.id, [
+      NewTrack(
+        sourceKey: '${client.userId}_999999999',
+        artist: 'Проверка',
+        title: goneTitle,
+        durationSec: 180,
+        addedAt: 0,
+      ),
+    ]);
+    goneStore.close();
+
     final (vkBefore, keysBefore) = await vkLibrary();
     say('VK before: $vkBefore songs');
     // Whatever this run leaves on the account is removed at the end, even
@@ -150,6 +169,8 @@ void main() {
     await waitUntil(tester, () => player.isReady, what: 'player ready');
     await sync.synced.timeout(const Duration(minutes: 3));
     await tester.pump();
+    final goneSong = library.all.firstWhere((t) => t.title == goneTitle);
+    expect(goneSong.isGone, isTrue, reason: 'the start sync marked it gone');
     final listedBefore = library.all.length;
     final keysListed = {for (final t in library.all) t.sourceKey};
     say('library before: $listedBefore songs listed');
@@ -567,6 +588,46 @@ void main() {
     expect(vkEnd, vkBefore);
     expect(afterResult.added, 0, reason: 'the removed song stays removed');
     expect(library.all.length, listedBefore);
+    await tester.pump(const Duration(seconds: 7));
+
+    // 5a. A song already gone from VK: Remove leaves only the library, and
+    // Undo lists it again, still gone.
+    final goneRow = find.byKey(ValueKey('song-${goneSong.id}'));
+    library.showView(LibraryView.songs);
+    library.goToSong(goneSong);
+    await tester.pump();
+    await tester.pump();
+    expect(goneRow, findsOneWidget, reason: "the gone song's row");
+    await chooseInMenu(goneRow, 'menu-remove-from-library');
+    await waitUntil(
+      tester,
+      () => library.byId(goneSong.id) == null,
+      timeout: const Duration(seconds: 10),
+      what: 'the gone song to leave the list',
+    );
+    await tester.pump();
+    expect(
+      find.text('Removed "$goneTitle" from ${account.name}'),
+      findsOneWidget,
+    );
+    await tester.pump(const Duration(milliseconds: 600));
+    await tester.tap(find.byKey(const ValueKey('note-undo')));
+    await tester.pump();
+    await waitUntil(
+      tester,
+      () => library.byId(goneSong.id) != null,
+      timeout: const Duration(seconds: 10),
+      what: 'Undo to list the gone song again',
+    );
+    final goneBack = library.byId(goneSong.id)!;
+    final (vkGone, _) = await vkLibrary();
+    say(
+      'gone song: removed and brought back by Undo, still gone: '
+      '${goneBack.isGone}; VK $vkGone songs',
+    );
+    expect(goneBack.isGone, isTrue);
+    expect(vkGone, vkBefore);
+    expect(find.textContaining('Could not bring back'), findsNothing);
     await tester.pump(const Duration(seconds: 7));
 
     // 5b. A found song's album opens from search (C4b): the found song
