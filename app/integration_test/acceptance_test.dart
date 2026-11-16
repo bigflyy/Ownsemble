@@ -26,6 +26,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:image/image.dart' as img;
 import 'package:integration_test/integration_test.dart';
 import 'package:media_kit/media_kit.dart' show NativePlayer;
+import 'package:ownsemble/library/song_version.dart';
+import 'package:ownsemble/playback/version_book.dart' show versionMark;
 import 'package:ownsemble/library/day_range.dart';
 import 'package:ownsemble/library/library_store.dart';
 import 'package:ownsemble/library/play_period.dart';
@@ -693,6 +695,7 @@ void main() {
     final problems = <String>[];
     // Songs that did not play, named so a failure is never just a number.
     final notPlayed = <String>[];
+    final playedMarked = <String>[];
     final foundAtPlay = <String>[];
     var slowRetries = 0;
     for (final (index, track)
@@ -761,6 +764,27 @@ void main() {
       // least 3 s); another song would almost always be far off.
       final length = await loadedLength(tester);
       final tolerance = max(3.0, track.durationSec * 0.03);
+      // VK lists a length no file of the song has (seen 2026-11-16 on
+      // Shovel - Gap: 162 s listed, 336 s file, no other upload): the file
+      // check marks it "different recording" before any play, and it plays
+      // VK's file. The user, 2026-11-16: "we want to be able to listen to it
+      // i guess but mark as you usually do".
+      final choice = player.versions?.choiceFor(track);
+      final mark = versionMark(choice);
+      if (choice != null &&
+          choice.state == VersionState.none &&
+          mark != null &&
+          length != null &&
+          (length - choice.ownSeconds).abs() <=
+              max(3.0, choice.ownSeconds * 0.03)) {
+        playedMarked.add(
+          '${songName(track)}: ${length.round()} s, listed '
+          '${track.durationSec} s, marked "${mark.label}"',
+        );
+        played++;
+        playedOk.add(track.id);
+        continue;
+      }
       if (length == null || (length - track.durationSec).abs() > tolerance) {
         problems.add(
           '${songName(track)}: loaded audio is ${length?.round()} s, '
@@ -782,6 +806,11 @@ void main() {
     );
     // ignore: avoid_print
     print('not played: ${notPlayed.isEmpty ? 'none' : notPlayed.join('; ')}');
+    // ignore: avoid_print
+    print(
+      "played VK's only file, marked: "
+      '${playedMarked.isEmpty ? 'none' : playedMarked.join('; ')}',
+    );
     // Stage K: songs whose VK file was another recording, each named with
     // what plays instead, so a swap the length check above accepts (3%)
     // is still traced to its song.
