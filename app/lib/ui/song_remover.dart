@@ -100,9 +100,9 @@ class SongRemover extends ChangeNotifier {
   }
 
   /// Removes [track] from the library and from VK: from every account that
-  /// holds it, or only from [onlySource]. A copy a sync found gone leaves
-  /// the library whatever VK answers (VK is still asked, in case an Undo put
-  /// it back after that sync read VK). An account that fails keeps its copy, and
+  /// holds it, or only from [onlySource]. A copy a sync found gone (VK no
+  /// longer has it) leaves only the library, and its Undo only lists it
+  /// again. An account that fails keeps its copy, and
   /// the note says why; when no account removed it, nothing changed.
   Future<RemoveResult> remove(Track track, {int? onlySource}) async {
     final holders = [
@@ -120,25 +120,17 @@ class SongRemover extends ChangeNotifier {
     final refused = <String>[];
     for (final holder in holders) {
       final name = _nameOf(holder.sourceId);
-      final call = apiOfSource(holder.sourceId);
-      var deleted = false;
-      if (holder.gone) {
-        // A copy a sync found gone is asked about too: the sync may have
-        // read VK before an Undo put it back. Whatever VK says, it leaves
-        // the library.
-        if (call != null) {
-          try {
-            deleted = await deleteVkSong(call, holder.sourceKey);
-          } catch (_) {}
-        }
-      } else {
+      // A copy a sync found gone leaves only the library: VK answers
+      // "removed" even for a song the account does not have (probe
+      // 2026-11-16), so its answer says nothing, and a restore of it fails.
+      if (!holder.gone) {
+        final call = apiOfSource(holder.sourceId);
         if (call == null) {
           refused.add('$name: not logged in');
           continue;
         }
         try {
-          deleted = await deleteVkSong(call, holder.sourceKey);
-          if (!deleted) {
+          if (!await deleteVkSong(call, holder.sourceKey)) {
             refused.add('$name: VK did not remove it');
             continue;
           }
@@ -151,7 +143,7 @@ class SongRemover extends ChangeNotifier {
       removed.add((
         sourceId: holder.sourceId,
         sourceKey: holder.sourceKey,
-        wasGone: !deleted,
+        wasGone: holder.gone,
       ));
       if (fromIds.add(holder.sourceId)) from.add(name);
     }

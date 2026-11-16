@@ -197,30 +197,20 @@ void main() {
       expect(remover.flashing, isNull);
     });
 
-    test('a song VK no longer has leaves the library though VK removes '
-        'nothing, and Undo only lists it again', () async {
+    // The user, 2026-11-16: "on the ones that already were removed from VK
+    // side undo doesnt work". VK answers "removed" for a song it does not
+    // have, then cannot restore it: such a song never goes to VK.
+    test('a song VK no longer has leaves only the library, and Undo lists '
+        'it again without asking VK', () async {
       store.markGone(first, ['42_1'], atMs: 1000);
-      vk1.refuseNext = true;
       final result = await remover.remove(listed('Романс'));
-      expect(vk1.asked, ['audio.delete 42_1']);
+      expect(vk1.asked, isEmpty);
       expect(listedTitles(), ['Выхода нет']);
       expect(result.note, 'Removed "Романс" from Мой VK');
       expect(await remover.undo(result), isNull);
-      expect(vk1.asked, ['audio.delete 42_1']);
+      expect(vk1.asked, isEmpty);
       expect(listed('Романс').goneAtMs, 1000);
-    });
-
-    // Codex review, 2026-11-16: a sync that read VK while the song was
-    // removed marks it gone after Undo put it back; Remove must still take
-    // it off VK.
-    test('a copy marked gone that VK still has is removed on VK too, and '
-        'Undo restores it there', () async {
-      store.markGone(first, ['42_1'], atMs: 1000);
-      final result = await remover.remove(listed('Романс'));
-      expect(vk1.asked, ['audio.delete 42_1']);
-      expect(result.removed.single.wasGone, isFalse);
-      await remover.undo(result);
-      expect(vk1.asked, ['audio.delete 42_1', 'audio.restore 42_1']);
+      expect(remover.flashing, listed('Романс').id);
     });
 
     test('Undo asks for a sync after the running one', () async {
