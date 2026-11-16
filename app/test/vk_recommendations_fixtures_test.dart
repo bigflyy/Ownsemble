@@ -5,7 +5,8 @@
 // names came through as UTF-8.
 //
 // The files come from tool/probe_recommendations.dart --fixtures on the
-// test account, 2026-11-16.
+// test account, 2026-11-16, and tool/probe_recs_feedback.dart --fixtures,
+// 2026-11-17.
 
 import 'dart:convert';
 import 'dart:io';
@@ -56,6 +57,12 @@ void main() {
         'audio_get_stream_mix_audios',
         'audio_get_by_id_restricted_1',
         'audio_get_by_id_restricted_2',
+        // tool/probe_recs_feedback.dart, 2026-11-17 (A6, C5).
+        'audio_get_recommendations_target_found',
+        'audio_get_recommendations_target_no_track_id',
+        'audio_get_recommendations_target_missing',
+        'audio_add_dislike',
+        'audio_remove_dislike',
       ]),
     );
   });

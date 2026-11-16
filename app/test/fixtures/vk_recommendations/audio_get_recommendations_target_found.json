@@ -1,0 +1,1220 @@
+{
+ "count": 30,
+ "items": [
+  {
+   "artist": "Дайте танк (!)",
+   "id": 10000,
+   "owner_id": -10001,
+   "title": "Волна",
+   "duration": 216,
+   "access_key": "opaque-1",
+   "ads": {
+    "content_id": "-10001_10000",
+    "duration": "216",
+    "account_age_type": "3",
+    "puid22": "8"
+   },
+   "is_explicit": false,
+   "is_focus_track": false,
+   "is_licensed": true,
+   "track_code": "opaque-2",
+   "url": "https://example.invalid/3",
+   "audio_streams": [
+    {
+     "type": "aac",
+     "url": "https://example.invalid/4",
+     "fallback_url": "https://example.invalid/5"
+    },
+    {
+     "type": "aac_low",
+     "url": "https://example.invalid/6",
+     "fallback_url": "https://example.invalid/7"
+    },
+    {
+     "type": "dash",
+     "url": "https://example.invalid/8",
+     "fallback_url": "https://example.invalid/9"
+    },
+    {
+     "type": "hls_range",
+     "url": "https://example.invalid/10.m3u8",
+     "fallback_url": "https://example.invalid/11.m3u8"
+    },
+    {
+     "type": "hls_ts",
+     "url": "https://example.invalid/12.m3u8",
+     "fallback_url": "https://example.invalid/13.m3u8"
+    },
+    {
+     "type": "opaque-14",
+     "url": "https://example.invalid/15",
+     "fallback_url": "https://example.invalid/3"
+    }
+   ],
+   "date": 1601909618,
+   "like": true,
+   "album": {
+    "id": 10002,
+    "title": "Глаза боятся",
+    "owner_id": -10003,
+    "access_key": "opaque-16",
+    "thumb": {
+     "width": 300,
+     "height": 300,
+     "id": "10004",
+     "photo_34": "https://example.invalid/17.jpg",
+     "photo_68": "https://example.invalid/18.jpg",
+     "photo_135": "https://example.invalid/19.jpg",
+     "photo_270": "https://example.invalid/20.jpg",
+     "photo_300": "https://example.invalid/21.jpg",
+     "photo_600": "https://example.invalid/22.jpg",
+     "photo_1200": "https://example.invalid/23.jpg"
+    },
+    "main_color": "#014D41"
+   },
+   "track_id": 10005,
+   "main_artists": [
+    {
+     "name": "Дайте танк (!)",
+     "domain": "10006",
+     "id": "10006",
+     "is_followed": false,
+     "can_follow": false
+    }
+   ],
+   "is_official": true,
+   "release_audio_id": "-10001_10000",
+   "main_color": "#014D41",
+   "thumb": {
+    "width": 300,
+    "height": 300,
+    "id": "10004",
+    "photo_34": "https://example.invalid/17.jpg",
+    "photo_68": "https://example.invalid/18.jpg",
+    "photo_135": "https://example.invalid/19.jpg",
+    "photo_270": "https://example.invalid/20.jpg",
+    "photo_300": "https://example.invalid/21.jpg",
+    "photo_600": "https://example.invalid/22.jpg",
+    "photo_1200": "https://example.invalid/23.jpg"
+   },
+   "file_id": "opaque-24"
+  },
+  {
+   "artist": "Земфира",
+   "id": 10007,
+   "owner_id": -10008,
+   "title": "Прогулка",
+   "duration": 255,
+   "legal_notices_type": 4,
+   "access_key": "opaque-25",
+   "ads": {
+    "content_id": "-10008_10007",
+    "duration": "255",
+    "account_age_type": "3",
+    "puid22": "4"
+   },
+   "is_explicit": false,
+   "is_focus_track": false,
+   "is_licensed": true,
+   "track_code": "opaque-26",
+   "url": "https://example.invalid/27",
+   "audio_streams": [
+    {
+     "type": "aac",
+     "url": "https://example.invalid/28",
+     "fallback_url": "https://example.invalid/29"
+    },
+    {
+     "type": "aac_low",
+     "url": "https://example.invalid/30",
+     "fallback_url": "https://example.invalid/31"
+    },
+    {
+     "type": "dash",
+     "url": "https://example.invalid/32",
+     "fallback_url": "https://example.invalid/33"
+    },
+    {
+     "type": "hls_range",
+     "url": "https://example.invalid/34.m3u8",
+     "fallback_url": "https://example.invalid/35.m3u8"
+    },
+    {
+     "type": "hls_ts",
+     "url": "https://example.invalid/36.m3u8",
+     "fallback_url": "https://example.invalid/37.m3u8"
+    },
+    {
+     "type": "opaque-14",
+     "url": "https://example.invalid/38",
+     "fallback_url": "https://example.invalid/27"
+    }
+   ],
+   "date": 1760520954,
+   "has_lyrics": true,
+   "album": {
+    "id": 10009,
+    "title": "unnamed",
+    "owner_id": -10010,
+    "access_key": "opaque-39",
+    "thumb": {
+     "width": 300,
+     "height": 300,
+     "id": "10011",
+     "photo_34": "https://example.invalid/40.jpg",
+     "photo_68": "https://example.invalid/41.jpg",
+     "photo_135": "https://example.invalid/42.jpg",
+     "photo_270": "https://example.invalid/43.jpg",
+     "photo_300": "https://example.invalid/44.jpg",
+     "photo_600": "https://example.invalid/45.jpg",
+     "photo_1200": "https://example.invalid/46.jpg"
+    },
+    "main_color": "#982926"
+   },
+   "track_id": 10012,
+   "main_artists": [
+    {
+     "name": "Земфира",
+     "domain": "10013",
+     "id": "10013",
+     "is_followed": false,
+     "can_follow": false
+    }
+   ],
+   "is_official": true,
+   "release_audio_id": "-10008_10007",
+   "main_color": "#982926",
+   "thumb": {
+    "width": 300,
+    "height": 300,
+    "id": "10011",
+    "photo_34": "https://example.invalid/40.jpg",
+    "photo_68": "https://example.invalid/41.jpg",
+    "photo_135": "https://example.invalid/42.jpg",
+    "photo_270": "https://example.invalid/43.jpg",
+    "photo_300": "https://example.invalid/44.jpg",
+    "photo_600": "https://example.invalid/45.jpg",
+    "photo_1200": "https://example.invalid/46.jpg"
+   },
+   "file_id": "opaque-47"
+  },
+  {
+   "artist": "Сплин",
+   "id": 10014,
+   "owner_id": -10015,
+   "title": "Мы сидели и курили",
+   "duration": 199,
+   "legal_notices_type": 2,
+   "access_key": "opaque-48",
+   "ads": {
+    "content_id": "-10015_10014",
+    "duration": "199",
+    "account_age_type": "3",
+    "puid22": "4"
+   },
+   "is_explicit": true,
+   "is_focus_track": false,
+   "is_licensed": true,
+   "track_code": "opaque-49",
+   "url": "https://example.invalid/50",
+   "audio_streams": [
+    {
+     "type": "aac",
+     "url": "https://example.invalid/51",
+     "fallback_url": "https://example.invalid/52"
+    },
+    {
+     "type": "aac_low",
+     "url": "https://example.invalid/53",
+     "fallback_url": "https://example.invalid/54"
+    },
+    {
+     "type": "dash",
+     "url": "https://example.invalid/55",
+     "fallback_url": "https://example.invalid/56"
+    },
+    {
+     "type": "hls_range",
+     "url": "https://example.invalid/57.m3u8",
+     "fallback_url": "https://example.invalid/58.m3u8"
+    },
+    {
+     "type": "hls_ts",
+     "url": "https://example.invalid/59.m3u8",
+     "fallback_url": "https://example.invalid/60.m3u8"
+    },
+    {
+     "type": "opaque-14",
+     "url": "https://example.invalid/61",
+     "fallback_url": "https://example.invalid/50"
+    }
+   ],
+   "date": 1556032487,
+   "has_lyrics": true,
+   "album": {
+    "id": 10016,
+    "title": "Реверсивная хроника событий",
+    "owner_id": -10017,
+    "access_key": "opaque-62",
+    "thumb": {
+     "width": 300,
+     "height": 300,
+     "id": "10018",
+     "photo_34": "https://example.invalid/63.jpg",
+     "photo_68": "https://example.invalid/64.jpg",
+     "photo_135": "https://example.invalid/65.jpg",
+     "photo_270": "https://example.invalid/66.jpg",
+     "photo_300": "https://example.invalid/67.jpg",
+     "photo_600": "https://example.invalid/68.jpg",
+     "photo_1200": "https://example.invalid/69.jpg"
+    },
+    "main_color": "#F05A21"
+   },
+   "track_id": 10019,
+   "main_artists": [
+    {
+     "name": "Сплин",
+     "domain": "10020",
+     "id": "10020",
+     "is_followed": false,
+     "can_follow": false
+    }
+   ],
+   "is_official": true,
+   "release_audio_id": "-10015_10014",
+   "main_color": "#F05A21",
+   "thumb": {
+    "width": 300,
+    "height": 300,
+    "id": "10018",
+    "photo_34": "https://example.invalid/63.jpg",
+    "photo_68": "https://example.invalid/64.jpg",
+    "photo_135": "https://example.invalid/65.jpg",
+    "photo_270": "https://example.invalid/66.jpg",
+    "photo_300": "https://example.invalid/67.jpg",
+    "photo_600": "https://example.invalid/68.jpg",
+    "photo_1200": "https://example.invalid/69.jpg"
+   },
+   "file_id": "opaque-70"
+  },
+  {
+   "artist": "Noize MC",
+   "id": 10021,
+   "owner_id": -10022,
+   "title": "Yes Future!",
+   "duration": 189,
+   "legal_notices_type": 6,
+   "access_key": "opaque-71",
+   "ads": {
+    "content_id": "-10022_10021",
+    "duration": "189",
+    "account_age_type": "3",
+    "puid22": "14"
+   },
+   "is_explicit": true,
+   "is_focus_track": false,
+   "is_licensed": true,
+   "track_code": "opaque-72",
+   "url": "https://example.invalid/73",
+   "audio_streams": [
+    {
+     "type": "aac",
+     "url": "https://example.invalid/74",
+     "fallback_url": "https://example.invalid/75"
+    },
+    {
+     "type": "aac_low",
+     "url": "https://example.invalid/76",
+     "fallback_url": "https://example.invalid/77"
+    },
+    {
+     "type": "dash",
+     "url": "https://example.invalid/78",
+     "fallback_url": "https://example.invalid/79"
+    },
+    {
+     "type": "flac",
+     "url": "https://example.invalid/80",
+     "fallback_url": "https://example.invalid/81"
+    },
+    {
+     "type": "hls_range",
+     "url": "https://example.invalid/82.m3u8",
+     "fallback_url": "https://example.invalid/83.m3u8"
+    },
+    {
+     "type": "hls_ts",
+     "url": "https://example.invalid/84.m3u8",
+     "fallback_url": "https://example.invalid/85.m3u8"
+    },
+    {
+     "type": "opaque-14",
+     "url": "https://example.invalid/86",
+     "fallback_url": "https://example.invalid/73"
+    }
+   ],
+   "date": 1680641095,
+   "album": {
+    "id": 10023,
+    "title": "Новый альбом",
+    "owner_id": -10024,
+    "access_key": "opaque-87",
+    "thumb": {
+     "width": 300,
+     "height": 300,
+     "id": "10025",
+     "photo_34": "https://example.invalid/88.jpg",
+     "photo_68": "https://example.invalid/89.jpg",
+     "photo_135": "https://example.invalid/90.jpg",
+     "photo_270": "https://example.invalid/91.jpg",
+     "photo_300": "https://example.invalid/92.jpg",
+     "photo_600": "https://example.invalid/93.jpg",
+     "photo_1200": "https://example.invalid/94.jpg"
+    },
+    "main_color": "#FAC031"
+   },
+   "track_id": 10026,
+   "main_artists": [
+    {
+     "name": "Noize MC",
+     "domain": "10027",
+     "id": "10027",
+     "is_followed": false,
+     "can_follow": false
+    }
+   ],
+   "is_official": true,
+   "release_audio_id": "-10022_10021",
+   "main_color": "#FAC031",
+   "thumb": {
+    "width": 300,
+    "height": 300,
+    "id": "10025",
+    "photo_34": "https://example.invalid/88.jpg",
+    "photo_68": "https://example.invalid/89.jpg",
+    "photo_135": "https://example.invalid/90.jpg",
+    "photo_270": "https://example.invalid/91.jpg",
+    "photo_300": "https://example.invalid/92.jpg",
+    "photo_600": "https://example.invalid/93.jpg",
+    "photo_1200": "https://example.invalid/94.jpg"
+   },
+   "file_id": "opaque-95"
+  },
+  {
+   "artist": "Электрофорез",
+   "id": 10028,
+   "owner_id": -10029,
+   "title": "Русская принцесса",
+   "duration": 232,
+   "access_key": "opaque-96",
+   "ads": {
+    "content_id": "-10029_10028",
+    "duration": "232",
+    "account_age_type": "3",
+    "puid22": "18"
+   },
+   "is_explicit": false,
+   "is_focus_track": false,
+   "is_licensed": true,
+   "track_code": "opaque-97",
+   "url": "https://example.invalid/98",
+   "audio_streams": [
+    {
+     "type": "aac",
+     "url": "https://example.invalid/99",
+     "fallback_url": "https://example.invalid/100"
+    },
+    {
+     "type": "aac_low",
+     "url": "https://example.invalid/101",
+     "fallback_url": "https://example.invalid/102"
+    },
+    {
+     "type": "dash",
+     "url": "https://example.invalid/103",
+     "fallback_url": "https://example.invalid/104"
+    },
+    {
+     "type": "flac",
+     "url": "https://example.invalid/105",
+     "fallback_url": "https://example.invalid/106"
+    },
+    {
+     "type": "hls_range",
+     "url": "https://example.invalid/107.m3u8",
+     "fallback_url": "https://example.invalid/108.m3u8"
+    },
+    {
+     "type": "hls_ts",
+     "url": "https://example.invalid/109.m3u8",
+     "fallback_url": "https://example.invalid/110.m3u8"
+    },
+    {
+     "type": "opaque-14",
+     "url": "https://example.invalid/111",
+     "fallback_url": "https://example.invalid/98"
+    }
+   ],
+   "date": 1652444377,
+   "album": {
+    "id": 10030,
+    "title": "unnamed",
+    "owner_id": -10031,
+    "access_key": "opaque-112",
+    "thumb": {
+     "width": 300,
+     "height": 300,
+     "id": "10032",
+     "photo_34": "https://example.invalid/113.jpg",
+     "photo_68": "https://example.invalid/114.jpg",
+     "photo_135": "https://example.invalid/115.jpg",
+     "photo_270": "https://example.invalid/116.jpg",
+     "photo_300": "https://example.invalid/117.jpg",
+     "photo_600": "https://example.invalid/118.jpg",
+     "photo_1200": "https://example.invalid/119.jpg"
+    },
+    "main_color": "#5F1E26"
+   },
+   "track_id": 10033,
+   "main_artists": [
+    {
+     "name": "Электрофорез",
+     "domain": "10034",
+     "id": "10034",
+     "is_followed": false,
+     "can_follow": false
+    }
+   ],
+   "short_videos_allowed": true,
+   "stories_allowed": true,
+   "is_official": true,
+   "release_audio_id": "-10029_10028",
+   "main_color": "#5F1E26",
+   "thumb": {
+    "width": 300,
+    "height": 300,
+    "id": "10032",
+    "photo_34": "https://example.invalid/113.jpg",
+    "photo_68": "https://example.invalid/114.jpg",
+    "photo_135": "https://example.invalid/115.jpg",
+    "photo_270": "https://example.invalid/116.jpg",
+    "photo_300": "https://example.invalid/117.jpg",
+    "photo_600": "https://example.invalid/118.jpg",
+    "photo_1200": "https://example.invalid/119.jpg"
+   },
+   "file_id": "opaque-120"
+  },
+  {
+   "artist": "АлоэВера",
+   "id": 10035,
+   "owner_id": -10036,
+   "title": "Георгины",
+   "duration": 221,
+   "access_key": "opaque-121",
+   "ads": {
+    "content_id": "-10036_10035",
+    "duration": "221",
+    "account_age_type": "3",
+    "puid22": "14"
+   },
+   "is_explicit": false,
+   "is_focus_track": false,
+   "is_licensed": true,
+   "track_code": "opaque-122",
+   "url": "https://example.invalid/123",
+   "audio_streams": [
+    {
+     "type": "aac",
+     "url": "https://example.invalid/124",
+     "fallback_url": "https://example.invalid/125"
+    },
+    {
+     "type": "aac_low",
+     "url": "https://example.invalid/126",
+     "fallback_url": "https://example.invalid/127"
+    },
+    {
+     "type": "dash",
+     "url": "https://example.invalid/128",
+     "fallback_url": "https://example.invalid/129"
+    },
+    {
+     "type": "flac",
+     "url": "https://example.invalid/130",
+     "fallback_url": "https://example.invalid/131"
+    },
+    {
+     "type": "hls_range",
+     "url": "https://example.invalid/132.m3u8",
+     "fallback_url": "https://example.invalid/133.m3u8"
+    },
+    {
+     "type": "hls_ts",
+     "url": "https://example.invalid/134.m3u8",
+     "fallback_url": "https://example.invalid/135.m3u8"
+    },
+    {
+     "type": "opaque-14",
+     "url": "https://example.invalid/136",
+     "fallback_url": "https://example.invalid/123"
+    }
+   ],
+   "date": 1677598306,
+   "album": {
+    "id": 10037,
+    "title": "Стыд",
+    "owner_id": -10038,
+    "access_key": "opaque-137",
+    "thumb": {
+     "width": 300,
+     "height": 300,
+     "id": "10039",
+     "photo_34": "https://example.invalid/138.jpg",
+     "photo_68": "https://example.invalid/139.jpg",
+     "photo_135": "https://example.invalid/140.jpg",
+     "photo_270": "https://example.invalid/141.jpg",
+     "photo_300": "https://example.invalid/142.jpg",
+     "photo_600": "https://example.invalid/143.jpg",
+     "photo_1200": "https://example.invalid/144.jpg"
+    },
+    "main_color": "#EE2F35"
+   },
+   "track_id": 10040,
+   "main_artists": [
+    {
+     "name": "АлоэВера",
+     "domain": "10041",
+     "id": "10041",
+     "is_followed": false,
+     "can_follow": false
+    }
+   ],
+   "is_official": true,
+   "release_audio_id": "-10036_10035",
+   "main_color": "#EE2F35",
+   "thumb": {
+    "width": 300,
+    "height": 300,
+    "id": "10039",
+    "photo_34": "https://example.invalid/138.jpg",
+    "photo_68": "https://example.invalid/139.jpg",
+    "photo_135": "https://example.invalid/140.jpg",
+    "photo_270": "https://example.invalid/141.jpg",
+    "photo_300": "https://example.invalid/142.jpg",
+    "photo_600": "https://example.invalid/143.jpg",
+    "photo_1200": "https://example.invalid/144.jpg"
+   },
+   "file_id": "opaque-145"
+  },
+  {
+   "artist": "The Uchpochmack",
+   "id": 10042,
+   "owner_id": -10043,
+   "title": "Someday",
+   "duration": 167,
+   "access_key": "opaque-146",
+   "ads": {
+    "content_id": "-10043_10042",
+    "duration": "167",
+    "account_age_type": "3",
+    "puid22": "4"
+   },
+   "is_explicit": false,
+   "is_focus_track": false,
+   "is_licensed": true,
+   "track_code": "opaque-147",
+   "url": "https://example.invalid/148",
+   "audio_streams": [
+    {
+     "type": "aac",
+     "url": "https://example.invalid/149",
+     "fallback_url": "https://example.invalid/150"
+    },
+    {
+     "type": "aac_low",
+     "url": "https://example.invalid/151",
+     "fallback_url": "https://example.invalid/152"
+    },
+    {
+     "type": "dash",
+     "url": "https://example.invalid/153",
+     "fallback_url": "https://example.invalid/154"
+    },
+    {
+     "type": "hls_range",
+     "url": "https://example.invalid/155.m3u8",
+     "fallback_url": "https://example.invalid/156.m3u8"
+    },
+    {
+     "type": "hls_ts",
+     "url": "https://example.invalid/157.m3u8",
+     "fallback_url": "https://example.invalid/158.m3u8"
+    },
+    {
+     "type": "opaque-14",
+     "url": "https://example.invalid/159",
+     "fallback_url": "https://example.invalid/148"
+    }
+   ],
+   "date": 1637028276,
+   "album": {
+    "id": 10044,
+    "title": "unnamed",
+    "owner_id": -10045,
+    "access_key": "opaque-160",
+    "thumb": {
+     "width": 300,
+     "height": 300,
+     "id": "10046",
+     "photo_34": "https://example.invalid/161.jpg",
+     "photo_68": "https://example.invalid/162.jpg",
+     "photo_135": "https://example.invalid/163.jpg",
+     "photo_270": "https://example.invalid/164.jpg",
+     "photo_300": "https://example.invalid/165.jpg",
+     "photo_600": "https://example.invalid/166.jpg",
+     "photo_1200": "https://example.invalid/167.jpg"
+    },
+    "main_color": "#A94E46"
+   },
+   "track_id": 10047,
+   "main_artists": [
+    {
+     "name": "The Uchpochmack",
+     "domain": "10048",
+     "id": "10048",
+     "is_followed": false,
+     "can_follow": false
+    }
+   ],
+   "short_videos_allowed": true,
+   "stories_allowed": true,
+   "is_official": true,
+   "release_audio_id": "-10043_10042",
+   "main_color": "#A94E46",
+   "thumb": {
+    "width": 300,
+    "height": 300,
+    "id": "10046",
+    "photo_34": "https://example.invalid/161.jpg",
+    "photo_68": "https://example.invalid/162.jpg",
+    "photo_135": "https://example.invalid/163.jpg",
+    "photo_270": "https://example.invalid/164.jpg",
+    "photo_300": "https://example.invalid/165.jpg",
+    "photo_600": "https://example.invalid/166.jpg",
+    "photo_1200": "https://example.invalid/167.jpg"
+   },
+   "file_id": "opaque-168"
+  },
+  {
+   "artist": "Би-2",
+   "id": 10049,
+   "owner_id": -10050,
+   "title": "Шамбала",
+   "duration": 218,
+   "legal_notices_type": 4,
+   "access_key": "opaque-169",
+   "ads": {
+    "content_id": "-10050_10049",
+    "duration": "218",
+    "account_age_type": "3",
+    "puid22": "4"
+   },
+   "is_explicit": false,
+   "is_focus_track": false,
+   "is_licensed": true,
+   "track_code": "opaque-170",
+   "url": "https://example.invalid/171",
+   "audio_streams": [
+    {
+     "type": "aac",
+     "url": "https://example.invalid/172",
+     "fallback_url": "https://example.invalid/173"
+    },
+    {
+     "type": "aac_low",
+     "url": "https://example.invalid/174",
+     "fallback_url": "https://example.invalid/175"
+    },
+    {
+     "type": "dash",
+     "url": "https://example.invalid/176",
+     "fallback_url": "https://example.invalid/177"
+    },
+    {
+     "type": "hls_range",
+     "url": "https://example.invalid/178.m3u8",
+     "fallback_url": "https://example.invalid/179.m3u8"
+    },
+    {
+     "type": "hls_ts",
+     "url": "https://example.invalid/180.m3u8",
+     "fallback_url": "https://example.invalid/181.m3u8"
+    },
+    {
+     "type": "opaque-14",
+     "url": "https://example.invalid/182",
+     "fallback_url": "https://example.invalid/171"
+    }
+   ],
+   "date": 1567596246,
+   "album": {
+    "id": 10051,
+    "title": "Лунапарк",
+    "owner_id": -10052,
+    "access_key": "opaque-183",
+    "thumb": {
+     "width": 300,
+     "height": 300,
+     "id": "10053",
+     "photo_34": "https://example.invalid/184.jpg",
+     "photo_68": "https://example.invalid/185.jpg",
+     "photo_135": "https://example.invalid/186.jpg",
+     "photo_270": "https://example.invalid/187.jpg",
+     "photo_300": "https://example.invalid/188.jpg",
+     "photo_600": "https://example.invalid/189.jpg",
+     "photo_1200": "https://example.invalid/190.jpg"
+    },
+    "main_color": "#F2F3F5"
+   },
+   "track_id": 10054,
+   "main_artists": [
+    {
+     "name": "Би-2",
+     "domain": "10055",
+     "id": "10055",
+     "is_followed": false,
+     "can_follow": false
+    }
+   ],
+   "short_videos_allowed": true,
+   "stories_allowed": true,
+   "stories_cover_allowed": true,
+   "is_official": true,
+   "release_audio_id": "-10050_10049",
+   "main_color": "#F2F3F5",
+   "thumb": {
+    "width": 300,
+    "height": 300,
+    "id": "10053",
+    "photo_34": "https://example.invalid/184.jpg",
+    "photo_68": "https://example.invalid/185.jpg",
+    "photo_135": "https://example.invalid/186.jpg",
+    "photo_270": "https://example.invalid/187.jpg",
+    "photo_300": "https://example.invalid/188.jpg",
+    "photo_600": "https://example.invalid/189.jpg",
+    "photo_1200": "https://example.invalid/190.jpg"
+   },
+   "file_id": "opaque-191"
+  },
+  {
+   "artist": "ЩЕНКИ",
+   "id": 10056,
+   "owner_id": -10057,
+   "title": "Ненависть",
+   "duration": 182,
+   "legal_notices_type": 2,
+   "access_key": "opaque-192",
+   "ads": {
+    "content_id": "-10057_10056",
+    "duration": "182",
+    "account_age_type": "3",
+    "puid22": "4"
+   },
+   "is_explicit": true,
+   "is_focus_track": false,
+   "is_licensed": true,
+   "track_code": "opaque-193",
+   "url": "https://example.invalid/194",
+   "audio_streams": [
+    {
+     "type": "aac",
+     "url": "https://example.invalid/195",
+     "fallback_url": "https://example.invalid/196"
+    },
+    {
+     "type": "aac_low",
+     "url": "https://example.invalid/197",
+     "fallback_url": "https://example.invalid/198"
+    },
+    {
+     "type": "dash",
+     "url": "https://example.invalid/199",
+     "fallback_url": "https://example.invalid/200"
+    },
+    {
+     "type": "hls_range",
+     "url": "https://example.invalid/201.m3u8",
+     "fallback_url": "https://example.invalid/202.m3u8"
+    },
+    {
+     "type": "hls_ts",
+     "url": "https://example.invalid/203.m3u8",
+     "fallback_url": "https://example.invalid/204.m3u8"
+    },
+    {
+     "type": "opaque-14",
+     "url": "https://example.invalid/205",
+     "fallback_url": "https://example.invalid/194"
+    }
+   ],
+   "date": 1660845833,
+   "has_lyrics": true,
+   "album": {
+    "id": 10058,
+    "title": "Цвет времени",
+    "owner_id": -10059,
+    "access_key": "opaque-206",
+    "thumb": {
+     "width": 300,
+     "height": 300,
+     "id": "10060",
+     "photo_34": "https://example.invalid/207.jpg",
+     "photo_68": "https://example.invalid/208.jpg",
+     "photo_135": "https://example.invalid/209.jpg",
+     "photo_270": "https://example.invalid/210.jpg",
+     "photo_300": "https://example.invalid/211.jpg",
+     "photo_600": "https://example.invalid/212.jpg",
+     "photo_1200": "https://example.invalid/213.jpg"
+    },
+    "main_color": "#FAB627"
+   },
+   "track_id": 10061,
+   "main_artists": [
+    {
+     "name": "ЩЕНКИ",
+     "domain": "10062",
+     "id": "10062",
+     "is_followed": false,
+     "can_follow": false
+    }
+   ],
+   "stories_cover_allowed": true,
+   "is_official": true,
+   "release_audio_id": "-10057_10056",
+   "main_color": "#FAB627",
+   "thumb": {
+    "width": 300,
+    "height": 300,
+    "id": "10060",
+    "photo_34": "https://example.invalid/207.jpg",
+    "photo_68": "https://example.invalid/208.jpg",
+    "photo_135": "https://example.invalid/209.jpg",
+    "photo_270": "https://example.invalid/210.jpg",
+    "photo_300": "https://example.invalid/211.jpg",
+    "photo_600": "https://example.invalid/212.jpg",
+    "photo_1200": "https://example.invalid/213.jpg"
+   },
+   "file_id": "opaque-214"
+  },
+  {
+   "artist": "Ежовы Рукавицы",
+   "id": 10063,
+   "owner_id": -10064,
+   "title": "Любовь",
+   "duration": 236,
+   "access_key": "opaque-215",
+   "ads": {
+    "content_id": "-10064_10063",
+    "duration": "236",
+    "account_age_type": "3",
+    "puid22": "14"
+   },
+   "is_explicit": false,
+   "is_focus_track": false,
+   "is_licensed": true,
+   "track_code": "opaque-216",
+   "url": "https://example.invalid/217",
+   "audio_streams": [
+    {
+     "type": "aac",
+     "url": "https://example.invalid/218",
+     "fallback_url": "https://example.invalid/219"
+    },
+    {
+     "type": "aac_low",
+     "url": "https://example.invalid/220",
+     "fallback_url": "https://example.invalid/221"
+    },
+    {
+     "type": "dash",
+     "url": "https://example.invalid/222",
+     "fallback_url": "https://example.invalid/223"
+    },
+    {
+     "type": "flac",
+     "url": "https://example.invalid/224",
+     "fallback_url": "https://example.invalid/225"
+    },
+    {
+     "type": "hls_range",
+     "url": "https://example.invalid/226.m3u8",
+     "fallback_url": "https://example.invalid/227.m3u8"
+    },
+    {
+     "type": "hls_ts",
+     "url": "https://example.invalid/228.m3u8",
+     "fallback_url": "https://example.invalid/229.m3u8"
+    },
+    {
+     "type": "opaque-14",
+     "url": "https://example.invalid/230",
+     "fallback_url": "https://example.invalid/217"
+    }
+   ],
+   "date": 1675444438,
+   "like": true,
+   "album": {
+    "id": 10065,
+    "title": "Понаехали!",
+    "owner_id": -10066,
+    "access_key": "opaque-231",
+    "thumb": {
+     "width": 300,
+     "height": 300,
+     "id": "10067",
+     "photo_34": "https://example.invalid/232.jpg",
+     "photo_68": "https://example.invalid/233.jpg",
+     "photo_135": "https://example.invalid/234.jpg",
+     "photo_270": "https://example.invalid/235.jpg",
+     "photo_300": "https://example.invalid/236.jpg",
+     "photo_600": "https://example.invalid/237.jpg",
+     "photo_1200": "https://example.invalid/238.jpg"
+    },
+    "main_color": "#D1CFC3"
+   },
+   "track_id": 10068,
+   "main_artists": [
+    {
+     "name": "Ежовы Рукавицы",
+     "domain": "10069",
+     "id": "10069",
+     "is_followed": false,
+     "can_follow": false
+    }
+   ],
+   "short_videos_allowed": true,
+   "stories_allowed": true,
+   "is_official": true,
+   "release_audio_id": "-10064_10063",
+   "main_color": "#D1CFC3",
+   "thumb": {
+    "width": 300,
+    "height": 300,
+    "id": "10067",
+    "photo_34": "https://example.invalid/232.jpg",
+    "photo_68": "https://example.invalid/233.jpg",
+    "photo_135": "https://example.invalid/234.jpg",
+    "photo_270": "https://example.invalid/235.jpg",
+    "photo_300": "https://example.invalid/236.jpg",
+    "photo_600": "https://example.invalid/237.jpg",
+    "photo_1200": "https://example.invalid/238.jpg"
+   },
+   "file_id": "opaque-239"
+  },
+  {
+   "artist": "Нежное Это",
+   "id": 10070,
+   "owner_id": -10071,
+   "title": "Будущее прекрасно",
+   "duration": 153,
+   "access_key": "opaque-240",
+   "ads": {
+    "content_id": "-10071_10070",
+    "duration": "153",
+    "account_age_type": "3",
+    "puid22": "14"
+   },
+   "is_explicit": false,
+   "is_focus_track": false,
+   "is_licensed": true,
+   "track_code": "opaque-241",
+   "url": "https://example.invalid/242",
+   "audio_streams": [
+    {
+     "type": "aac",
+     "url": "https://example.invalid/243",
+     "fallback_url": "https://example.invalid/244"
+    },
+    {
+     "type": "aac_low",
+     "url": "https://example.invalid/245",
+     "fallback_url": "https://example.invalid/246"
+    },
+    {
+     "type": "dash",
+     "url": "https://example.invalid/247",
+     "fallback_url": "https://example.invalid/248"
+    },
+    {
+     "type": "hls_range",
+     "url": "https://example.invalid/249.m3u8",
+     "fallback_url": "https://example.invalid/250.m3u8"
+    },
+    {
+     "type": "hls_ts",
+     "url": "https://example.invalid/251.m3u8",
+     "fallback_url": "https://example.invalid/252.m3u8"
+    },
+    {
+     "type": "opaque-14",
+     "url": "https://example.invalid/253",
+     "fallback_url": "https://example.invalid/242"
+    }
+   ],
+   "date": 1722937183,
+   "has_lyrics": true,
+   "album": {
+    "id": 10072,
+    "title": "Снежное лето",
+    "owner_id": -10073,
+    "access_key": "opaque-254",
+    "thumb": {
+     "width": 1500,
+     "height": 1500,
+     "id": "10074",
+     "photo_34": "https://example.invalid/255.jpg",
+     "photo_68": "https://example.invalid/256.jpg",
+     "photo_135": "https://example.invalid/257.jpg",
+     "photo_270": "https://example.invalid/258.jpg",
+     "photo_300": "https://example.invalid/259.jpg",
+     "photo_600": "https://example.invalid/260.jpg",
+     "photo_1200": "https://example.invalid/261.jpg"
+    },
+    "main_color": "#E3BF3F"
+   },
+   "track_id": 10075,
+   "main_artists": [
+    {
+     "name": "Нежное Это",
+     "domain": "10076",
+     "id": "10076",
+     "is_followed": false,
+     "can_follow": false
+    }
+   ],
+   "short_videos_allowed": true,
+   "stories_allowed": true,
+   "stories_cover_allowed": true,
+   "is_official": true,
+   "release_audio_id": "-10071_10070",
+   "main_color": "#E3BF3F",
+   "thumb": {
+    "width": 1500,
+    "height": 1500,
+    "id": "10074",
+    "photo_34": "https://example.invalid/255.jpg",
+    "photo_68": "https://example.invalid/256.jpg",
+    "photo_135": "https://example.invalid/257.jpg",
+    "photo_270": "https://example.invalid/258.jpg",
+    "photo_300": "https://example.invalid/259.jpg",
+    "photo_600": "https://example.invalid/260.jpg",
+    "photo_1200": "https://example.invalid/261.jpg"
+   },
+   "file_id": "opaque-262"
+  },
+  {
+   "artist": "Монеточка",
+   "id": 10077,
+   "owner_id": -10078,
+   "title": "Расстрел / The Shooting",
+   "duration": 112,
+   "legal_notices_type": 4,
+   "access_key": "opaque-263",
+   "ads": {
+    "content_id": "-10078_10077",
+    "duration": "112",
+    "account_age_type": "3",
+    "puid22": "14"
+   },
+   "is_explicit": false,
+   "is_focus_track": false,
+   "is_licensed": true,
+   "track_code": "opaque-264",
+   "url": "https://example.invalid/265",
+   "audio_streams": [
+    {
+     "type": "aac",
+     "url": "https://example.invalid/266",
+     "fallback_url": "https://example.invalid/267"
+    },
+    {
+     "type": "aac_low",
+     "url": "https://example.invalid/268",
+     "fallback_url": "https://example.invalid/269"
+    },
+    {
+     "type": "dash",
+     "url": "https://example.invalid/270",
+     "fallback_url": "https://example.invalid/271"
+    },
+    {
+     "type": "flac",
+     "url": "https://example.invalid/272",
+     "fallback_url": "https://example.invalid/273"
+    },
+    {
+     "type": "hls_range",
+     "url": "https://example.invalid/274.m3u8",
+     "fallback_url": "https://example.invalid/275.m3u8"
+    },
+    {
+     "type": "hls_ts",
+     "url": "https://example.invalid/276.m3u8",
+     "fallback_url": "https://example.invalid/277.m3u8"
+    },
+    {
+     "type": "opaque-14",
+     "url": "https://example.invalid/278",
+     "fallback_url": "https://example.invalid/265"
+    }
+   ],
+   "date": 1673335688,
+   "has_lyrics": true,
+   "album": {
+    "id": 10079,
+    "title": "После России / After Russia",
+    "owner_id": -10080,
+    "access_key": "opaque-279",
+    "thumb": {
+     "width": 300,
+     "height": 300,
+     "id": "10011",
+     "photo_34": "https://example.invalid/280.jpg",
+     "photo_68": "https://example.invalid/281.jpg",
+     "photo_135": "https://example.invalid/282.jpg",
+     "photo_270": "https://example.invalid/283.jpg",
+     "photo_300": "https://example.invalid/284.jpg",
+     "photo_600": "https://example.invalid/285.jpg",
+     "photo_1200": "https://example.invalid/286.jpg"
+    },
+    "main_color": "#5516C5"
+   },
+   "track_id": 10081,
+   "main_artists": [
+    {
+     "name": "Монеточка",
+     "domain": "10082",
+     "id": "10082",
+     "is_followed": false,
+     "can_follow": false
+    }
+   ],
+   "is_official": true,
+   "release_audio_id": "-10078_10077",
+   "main_color": "#5516C5",
+   "thumb": {
+    "width": 300,
+    "height": 300,
+    "id": "10011",
+    "photo_34": "https://example.invalid/280.jpg",
+    "photo_68": "https://example.invalid/281.jpg",
+    "photo_135": "https://example.invalid/282.jpg",
+    "photo_270": "https://example.invalid/283.jpg",
+    "photo_300": "https://example.invalid/284.jpg",
+    "photo_600": "https://example.invalid/285.jpg",
+    "photo_1200": "https://example.invalid/286.jpg"
+   },
+   "file_id": "opaque-287"
+  }
+ ]
+}
