@@ -178,6 +178,12 @@ class CatalogSearch extends ChangeNotifier {
   /// Ids of the found or outside songs added since the last reload.
   final _justAdded = <int>{};
 
+  /// Keys of the songs VK took since the last reload: the library does not
+  /// list them yet, so [_addedTo] says what VK did. After the reload the
+  /// library decides, so a song added and then removed offers + again
+  /// (catalog-21c, 2026-11-16).
+  final _waitingReload = <String>{};
+
   FoundMatcher? _matcher;
   List<Track>? _matcherOf;
   Timer? _reload;
@@ -409,15 +415,14 @@ class CatalogSearch extends ChangeNotifier {
 
   FoundState stateOf(FoundSong found) {
     if (_adding.contains(found.key)) return FoundState.adding;
-    if (_addedTo.containsKey(found.key)) return FoundState.inLibrary;
+    if (_waitingReload.contains(found.key)) return FoundState.inLibrary;
     return _listedOf(found) == null ? FoundState.addable : FoundState.inLibrary;
   }
 
-  /// The accounts that have [found] (added in this run, or listed in the
-  /// library), for the check's colours; empty for a song not in the library.
+  /// The accounts that have [found] (just added, or listed in the library),
+  /// for the check's colours; empty for a song not in the library.
   List<int> haveSources(FoundSong found) {
-    final added = _addedTo[found.key];
-    if (added != null) return added;
+    if (_waitingReload.contains(found.key)) return _addedTo[found.key]!;
     final listed = _listedOf(found);
     if (listed == null) return const [];
     return {for (final copy in listed.allCopies) copy.sourceId}.toList();
@@ -562,6 +567,7 @@ class CatalogSearch extends ChangeNotifier {
     }
     if (added.isNotEmpty) {
       _addedTo[found.key] = [for (final source in added) source.id];
+      _waitingReload.add(found.key);
       _justAdded.add(found.track.id);
     }
     return (added, refused);
@@ -575,6 +581,7 @@ class CatalogSearch extends ChangeNotifier {
       _reload = Timer(reloadAfter, () {
         if (_disposed) return;
         onLibraryChanged(severalAccounts: several);
+        _waitingReload.clear();
         final copies = <int, Track>{
           for (final id in _justAdded) id: ?libraryCopyOf(id),
         };

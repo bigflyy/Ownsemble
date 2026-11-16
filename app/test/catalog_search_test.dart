@@ -241,6 +241,24 @@ void main() {
       expect(vk1.adds, hasLength(1));
     });
 
+    // Found by the real check (catalog-21c, 2026-11-16): after + and then
+    // Remove from library, the found row kept its check for the rest of the
+    // run, so the song could not be added again.
+    test('a song added and then removed offers + again', () async {
+      vk1.catalog.add(vkAudio(-7, 3, title: 'Кончится лето', trackId: 77));
+      await type('кино');
+      await settle();
+      final found = catalog.songs.single;
+      await catalog.add(found);
+      await Future<void>.delayed(const Duration(milliseconds: 40));
+      expect(catalog.stateOf(found), FoundState.inLibrary);
+      store.markRemoved(first, [library.all.single.sourceKey!]);
+      final tracks = store.loadAll();
+      library.replaceTracks(tracks, SearchIndex(tracks));
+      expect(catalog.stateOf(found), FoundState.addable);
+      expect(catalog.haveSources(found), isEmpty);
+    });
+
     test('a refused add stores nothing and says why', () async {
       vk1.catalog.add(vkAudio(-7, 3));
       vk1.refuseWith = '15;Access denied';
@@ -365,6 +383,24 @@ void main() {
       expect(reloads, 1);
       expect(library.all, hasLength(3));
       expect(await catalog.addAll(songs), 'Already in your library');
+    });
+
+    // Codex review, 2026-11-16: between two songs of "Add the other N" the
+    // first one, already on VK, must not offer + again (a second add would
+    // make a second VK copy).
+    test('Add all: a song VK took keeps its check while the next one is '
+        'being added', () async {
+      final songs = [
+        catalog.outsideSong(outside(-1, '-7_1', title: 'Кукушка')),
+        catalog.outsideSong(outside(-3, '-7_3', title: 'Кончится лето')),
+      ];
+      final seen = <FoundState>[];
+      void watch() => seen.add(catalog.stateOf(songs[0]));
+      catalog.addListener(watch);
+      await catalog.addAll(songs);
+      catalog.removeListener(watch);
+      expect(seen, isNot(contains(FoundState.addable)));
+      expect(catalog.stateOf(songs[0]), FoundState.inLibrary);
     });
 
     test('Add all says which songs VK refused', () async {
