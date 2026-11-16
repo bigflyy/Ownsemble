@@ -21,6 +21,8 @@ import 'cover_tile.dart';
 import 'cover_viewer.dart';
 import 'filling_icon.dart';
 import 'filter_bar.dart';
+import 'for_you.dart';
+import 'for_you_page.dart';
 import 'library_controller.dart';
 import 'playing_mark.dart';
 import 'player_bar.dart';
@@ -102,6 +104,7 @@ class LibraryScreen extends StatefulWidget {
     this.collections,
     this.catalog,
     this.remover,
+    this.forYou,
     this._settings,
   });
 
@@ -127,6 +130,9 @@ class LibraryScreen extends StatefulWidget {
 
   /// Remove from library and its Undo; no Remove in the menus when null.
   final SongRemover? remover;
+
+  /// What VK recommends (plan 07); no For you place when null.
+  final ForYou? forYou;
 
   final ShellSettings? _settings;
 
@@ -619,6 +625,12 @@ class _LibraryScreenState extends State<LibraryScreen> {
             value: 'versions',
             child: Text('Versions'),
           ),
+        if (canFindSimilar(widget.forYou, track))
+          const PopupMenuItem(
+            key: ValueKey('menu-similar'),
+            value: 'similar',
+            child: Text('Similar songs'),
+          ),
         if (collections != null && inLibrary)
           collections.isFavorite(track.id)
               ? const PopupMenuItem(
@@ -672,6 +684,8 @@ class _LibraryScreenState extends State<LibraryScreen> {
         library.openAlbum(track);
       case 'versions':
         _openVersions(track);
+      case 'similar':
+        await openSimilar(context, widget.forYou!, library, track);
       case 'play-next':
         await widget.playback.playNext(track);
       case 'add-to-queue':
@@ -784,6 +798,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
                                 downloads: counts.downloaded,
                                 stored: counts.stored,
                                 changed: library.changedCount,
+                                showForYou: widget.forYou != null,
                                 rail: rail,
                                 canExpand: roomForSidebar,
                                 onToggleRail: _settings.toggleRail,
@@ -918,6 +933,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
               ?library.filters,
               ?widget.catalog,
               ?widget.remover,
+              ?widget.forYou,
             ]),
             builder: (context, _) {
               final view = library.view;
@@ -973,6 +989,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
                     actions: [
                       if (view.kind == ViewKind.versions) _versionsSearch(),
                       ?_albumAddAll(view, tight: tight),
+                      ?_listActions(view),
                       if (view.kind == ViewKind.yearReport &&
                           library.filters != null)
                         YearArrows(
@@ -1060,6 +1077,17 @@ class _LibraryScreenState extends State<LibraryScreen> {
                               onOpenArtist: _openArtist,
                             ),
                           )
+                        : view.kind == ViewKind.forYou && widget.forYou != null
+                        ? NowPlayingScope(
+                            playback: widget.playback,
+                            child: ForYouPage(
+                              forYou: widget.forYou!,
+                              library: library,
+                              playback: widget.playback,
+                              catalog: widget.catalog,
+                              onAdd: _addFound,
+                            ),
+                          )
                         : view.isLater
                         ? _LaterPage(view: view)
                         : _songList(
@@ -1090,9 +1118,13 @@ class _LibraryScreenState extends State<LibraryScreen> {
 
   /// The line under an album's title: its artist and how far its list got.
   String? _albumDetail(LibraryView view) {
+    if (view.kind == ViewKind.forYou) return forYouDetail(widget.forYou);
     final status = library.albumStatus;
     final album = view.album;
     if (status == null || album == null) return null;
+    if (view.kind == ViewKind.vkList) {
+      return listDetail(widget.forYou, album, status);
+    }
     final artist = album.artist == null || album.artist!.isEmpty
         ? ''
         : '${album.artist}  -  ';
@@ -1194,6 +1226,8 @@ class _LibraryScreenState extends State<LibraryScreen> {
     ViewKind.album => view.album?.title ?? 'Album',
     ViewKind.versions =>
       'Versions of ${library.versionsRow?.title ?? 'a song'}',
+    ViewKind.forYou => 'For you',
+    ViewKind.vkList => view.album?.title ?? 'From VK',
   };
 
   Widget _songList(
@@ -1246,6 +1280,12 @@ class _LibraryScreenState extends State<LibraryScreen> {
                 _ => 'No songs of this album to show.',
               },
               ViewKind.versions => 'No versions of this song to show.',
+              ViewKind.vkList => switch (library.albumStatus?.load) {
+                AlbumLoad.loading => 'Getting the songs from VK...',
+                AlbumLoad.failed =>
+                  library.albumStatus?.reason ?? 'VK did not list the songs.',
+                _ => 'VK gave no songs for this list.',
+              },
               _ => 'No songs yet.',
             };
       final message = Text(
@@ -1367,7 +1407,8 @@ class _LibraryScreenState extends State<LibraryScreen> {
                       ? null
                       : () => widget.collections!.toggleFavorite(track),
                   versionTag: (compact) => version == null
-                      ? (outside == null
+                      ? restrictedTag(widget.forYou, track, compact: compact) ??
+                            (outside == null
                                 ? null
                                 : _otherVersionTag(
                                     widget.catalog!,
@@ -1393,6 +1434,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
                   // column: it goes under the title, as Versions tags do.
                   tagsUnderTitle:
                       version != null ||
+                      (widget.forYou?.restrictionOf(track.id) != null) ||
                       outside != null &&
                           widget.catalog!.otherVersionOf(outside) != null,
                   action: outside == null
@@ -1618,6 +1660,9 @@ class _LibraryScreenState extends State<LibraryScreen> {
         except: {row.id},
       );
     }
+    if (library.view.kind == ViewKind.vkList) {
+      return recFoundSong(widget.forYou, catalog, track);
+    }
     if (library.view.kind != ViewKind.album) return null;
     final link = library.view.album?.link;
     return catalog.outsideSong(
@@ -1698,20 +1743,107 @@ class _LibraryScreenState extends State<LibraryScreen> {
       ..showSnackBar(SnackBar(content: Text(note)));
   }
 
-  /// The player's + for a found song that plays; null for any other song.
+  /// The heading's buttons of a recommended list: Play, and for similar
+  /// songs "More" (VK gives a few new ones each time it is asked).
+  Widget? _listActions(LibraryView view) {
+    final forYou = widget.forYou;
+    final ref = view.album;
+    if (forYou == null || ref == null || view.kind != ViewKind.vkList) {
+      return null;
+    }
+    final similar = ref.link?.key.startsWith('similar:') ?? false;
+    final songs = [
+      for (final track in library.visible)
+        if (forYou.restrictionOf(track.id) == null) track,
+    ];
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        if (similar)
+          TextButton.icon(
+            key: const ValueKey('list-more'),
+            onPressed: () async {
+              final messenger = ScaffoldMessenger.of(context);
+              final count = await forYou.moreSimilar(ref);
+              library.listChanged(ref);
+              messenger.showSnackBar(
+                SnackBar(
+                  content: Text(
+                    count == 0
+                        ? 'VK had no new similar songs this time'
+                        : count == 1
+                        ? '1 more song from VK'
+                        : '$count more songs from VK',
+                  ),
+                ),
+              );
+            },
+            icon: const Icon(Icons.add, size: 18),
+            label: const Text('More'),
+          ),
+        if (songs.isNotEmpty)
+          TextButton.icon(
+            key: const ValueKey('list-play'),
+            onPressed: () => widget.playback.playFrom(songs, 0),
+            icon: const Icon(Icons.play_arrow, size: 18),
+            label: const Text('Play'),
+          ),
+      ],
+    );
+  }
+
+  /// The player's + for a found song that plays, and for a song VK
+  /// recommended also the thumb-down (and the VK Mix tag while the mix
+  /// plays, plan 07); null for any other song.
   Widget? _playerAdd(Track track) {
     final catalog = widget.catalog;
-    if (catalog == null || catalog.foundById(track.id) == null) return null;
-    return ListenableBuilder(
-      listenable: catalog,
-      builder: (context, _) => foundAddButton(
-        context,
-        catalog,
-        catalog.foundById(track.id)!,
-        onAdd: _addFound,
-        large: true,
-      ),
+    final forYou = widget.forYou;
+    if (catalog != null && catalog.foundById(track.id) == null) {
+      recFoundSong(forYou, catalog, track);
+    }
+    final add = catalog == null || catalog.foundById(track.id) == null
+        ? null
+        : ListenableBuilder(
+            listenable: catalog,
+            builder: (context, _) => foundAddButton(
+              context,
+              catalog,
+              catalog.foundById(track.id)!,
+              onAdd: _addFound,
+              large: true,
+            ),
+          );
+    final recommended = forYou != null && forYou.isRec(track.id);
+    final mix = recommended && forYou.isMixList(widget.playback.queue.context);
+    if (!recommended) return add;
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        if (mix) const MixTag(),
+        IconButton(
+          key: const ValueKey('player-dislike'),
+          visualDensity: VisualDensity.compact,
+          tooltip: "Don't like it: skip, and tell VK",
+          icon: const Icon(Icons.thumb_down_outlined, size: 20),
+          onPressed: () => _dislike(track),
+        ),
+        ?add,
+      ],
     );
+  }
+
+  /// The thumb-down: the next song plays at once; the dislike is recorded
+  /// and sent to VK meanwhile (A6).
+  Future<void> _dislike(Track track) async {
+    final forYou = widget.forYou;
+    if (forYou == null) return;
+    final messenger = ScaffoldMessenger.of(context);
+    unawaited(widget.playback.next());
+    final note = await forYou.dislike(track);
+    if (!mounted) return;
+    messenger
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(content: Text(note)));
   }
 
   /// Remove from library at the end of a song's menu: from every account

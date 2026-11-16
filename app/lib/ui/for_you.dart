@@ -27,17 +27,6 @@ import '../vk/vk_recommendations.dart';
 import '../vk/vk_sync.dart' show describeSyncError;
 import 'albums.dart';
 
-/// An album catalog for lists that are not albums (VK's recommended lists):
-/// their songs may be at hand already, and each song names its library copy.
-abstract interface class ListCatalog implements AlbumCatalog {
-  /// The songs of [list] when they are at hand without asking anyone.
-  List<AlbumSong>? cached(AlbumRef list);
-
-  /// The library's song that [song] of a list is (same key, the same VK
-  /// recording, or the same name and length), or null.
-  Track? libraryCopyOf(AlbumSong song);
-}
-
 /// Keys of the lists that are not one of VK's own lists.
 const forYouMixKey = 'mix';
 const _similarKeyPrefix = 'similar:';
@@ -122,7 +111,8 @@ class ForYou extends ChangeNotifier implements ListCatalog {
         fetched == null ||
         _now().difference(fetched) > staleAfter ||
         _sourceId != account?.id;
-    if (stale) unawaited(refresh());
+    // Started after the caller's build: refresh tells its listeners.
+    if (stale) scheduleMicrotask(() => unawaited(refresh()));
   }
 
   /// Asks VK for the music page and the lists whose update time moved.
@@ -386,46 +376,53 @@ class ForYou extends ChangeNotifier implements ListCatalog {
 
   // ---- Similar songs (C5) ----
 
-  /// Songs VK finds similar to the VK song [sourceKey] (or to [artist] -
-  /// [title] when VK has no recording id for it), as a place; null when VK
-  /// knows nothing similar. Asked again, the place gets the new ones.
+  /// Songs VK finds similar to [artist] - [title] (the VK song [sourceKey]
+  /// when it is one), as a place; null when VK knows nothing similar. VK
+  /// is asked with the song's own key first; an upload VK has no recording
+  /// id for gives nothing, so then a same-name copy that has one stands in
+  /// (C5 probe: 7 of 11 such uploads). The account of [sourceId] asks, or
+  /// the first account for a song from elsewhere.
   Future<AlbumRef?> similarTo({
     required int sourceId,
     required String artist,
     required String title,
     String? sourceKey,
-    bool hasTrackId = false,
   }) async {
-    final call = apiOfSource(sourceId);
-    if (call == null) return null;
+    final own = apiOfSource(sourceId);
+    final asker = own != null ? sourceId : account?.id;
+    final call = own ?? (asker == null ? null : apiOfSource(asker));
+    if (call == null || asker == null) return null;
     final clock = Stopwatch()..start();
-    final target = await similarTargetOf(
-      call,
-      artist: artist,
-      title: title,
-      sourceKey: sourceKey,
-      hasTrackId: hasTrackId,
-    );
-    if (target == null) return null;
-    final key = '$_similarKeyPrefix$target';
-    final known = {for (final song in songsOf(key)) song.key};
-    final songs = [
-      ...songsOf(key),
-      for (final song in await fetchVkSimilarSongs(call, target))
-        if (known.add(song.key)) song,
-    ];
+    var target = own == null ? null : sourceKey;
+    var found = target == null
+        ? const <VkRecSong>[]
+        : await fetchVkSimilarSongs(call, target);
+    if (found.isEmpty) {
+      final copy = await similarTargetOf(call, artist: artist, title: title);
+      if (copy != null && copy != target) {
+        target = copy;
+        found = await fetchVkSimilarSongs(call, copy);
+      }
+    }
     log?.call(
-      'for-you similar: ${songs.length} songs in '
+      'for-you similar: ${found.length} songs in '
       '${clock.elapsedMilliseconds} ms',
     );
-    if (songs.isEmpty) return null;
-    _songs[key] = songs;
-    for (final song in songs) {
-      trackOf(song, sourceId);
+    if (found.isEmpty || target == null) return null;
+    final key = '$_similarKeyPrefix$target';
+    final known = {for (final song in songsOf(key)) song.key};
+    _songs[key] = [
+      ...songsOf(key),
+      for (final song in found)
+        if (known.add(song.key)) song,
+    ];
+    for (final song in _songs[key]!) {
+      trackOf(song, asker);
     }
     return AlbumRef(
-      title: 'Similar to $artist - $title',
-      link: (sourceId: sourceId, key: key, accessKey: null),
+      title: 'Similar to $title',
+      artist: artist,
+      link: (sourceId: asker, key: key, accessKey: null),
     );
   }
 

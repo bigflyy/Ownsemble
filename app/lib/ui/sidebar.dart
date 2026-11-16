@@ -20,6 +20,7 @@ class Sidebar extends StatelessWidget {
     required this.downloads,
     required this.stored,
     this.changed = 0,
+    this.showForYou = false,
     required this.rail,
     required this.canExpand,
     required this.onToggleRail,
@@ -36,6 +37,9 @@ class Sidebar extends StatelessWidget {
 
   /// How many songs VK swapped, for the Changed on VK count.
   final int changed;
+
+  /// Whether the For you place is offered (plan 07).
+  final bool showForYou;
 
   /// Shown as an icon rail.
   final bool rail;
@@ -115,6 +119,14 @@ class Sidebar extends StatelessWidget {
             child: ListView(
               padding: EdgeInsets.zero,
               children: [
+                if (showForYou) ...[
+                  item(
+                    'For you',
+                    Icons.auto_awesome_outlined,
+                    const LibraryView(ViewKind.forYou),
+                  ),
+                  const SizedBox(height: 6),
+                ],
                 if (!rail) const _Section('Library'),
                 item(
                   'Songs',

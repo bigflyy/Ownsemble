@@ -23,6 +23,7 @@ import 'ui/albums.dart';
 import 'ui/catalog_search.dart';
 import 'ui/collections_controller.dart';
 import 'ui/cover_tile.dart';
+import 'ui/for_you.dart';
 import 'ui/library_controller.dart';
 import 'ui/library_screen.dart';
 import 'ui/shell_settings.dart';
@@ -340,6 +341,24 @@ Future<void> main(List<String> args) async {
     writeSetting: store.writeSetting,
     log: logPerf,
   );
+  // The For you place (plan 07): what VK recommends to the first account.
+  final forYou = ForYou(
+    accounts: () => catalog.accounts,
+    apiOfSource: (sourceId) => clientOfSource(sourceId)?.call,
+    libraryCopyOfSong: catalog.libraryCopyOfSong,
+    cacheDir: options.dataDir,
+    log: logPerf,
+  );
+  library.vkLists = forYou;
+  // VK Mix never ends: near the end of its songs the next ones are asked.
+  player.currentStream.listen((track) async {
+    if (track == null || !forYou.isMixList(playback.queue.context)) return;
+    final list = playback.queue.context;
+    if (list.indexWhere((t) => t.id == track.id) < list.length - 2) return;
+    final more = await forYou.moreMix();
+    playback.extendList(forYou.isMixList, more);
+    library.listChanged(forYou.mixRef);
+  });
   // Remove from library and its Undo (plan 06, C5).
   final remover = SongRemover(
     store: store,
@@ -394,6 +413,7 @@ Future<void> main(List<String> args) async {
       collections: collections,
       catalog: catalog,
       remover: remover,
+      forYou: forYou,
       settings: settings,
     ),
   );
@@ -602,6 +622,7 @@ class OwnsembleApp extends StatelessWidget {
     this.sources,
     this.catalog,
     this.remover,
+    this.forYou,
   });
 
   final CoverStore covers;
@@ -614,6 +635,7 @@ class OwnsembleApp extends StatelessWidget {
   final SourceEditor? sources;
   final CatalogSearch? catalog;
   final SongRemover? remover;
+  final ForYou? forYou;
 
   @override
   Widget build(BuildContext context) {
@@ -634,6 +656,7 @@ class OwnsembleApp extends StatelessWidget {
             collections: collections,
             catalog: catalog,
             remover: remover,
+            forYou: forYou,
             settings: settings,
           ),
         ),

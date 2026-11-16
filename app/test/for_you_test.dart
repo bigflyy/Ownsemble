@@ -51,6 +51,7 @@ void main() {
   test('the first open asks VK: the page and the seven lists', () async {
     final forYou = make();
     forYou.open();
+    await Future<void>.microtask(() {});
     expect(forYou.refreshing, isTrue);
     expect(forYou.hasLists, isFalse);
     await forYou.refresh();
@@ -90,6 +91,7 @@ void main() {
     generated[3]['update_time'] = (generated[3]['update_time'] as int) + 86400;
     final again = RecsVk(overrides: {'catalog.getAudio': (_) => page});
     final next = make(fake: again)..open();
+    await Future<void>.microtask(() {});
     expect(next.refreshing, isTrue);
     await next.refresh();
     expect(listReads(again), hasLength(1));
@@ -197,22 +199,55 @@ void main() {
         artist: 'Кино',
         title: 'Звезда',
         sourceKey: '5_6',
-        hasTrackId: true,
       );
-      expect(ref!.title, 'Similar to Кино - Звезда');
+      expect(ref!.title, 'Similar to Звезда');
+      expect(vk.calls.single, contains('target_audio=5_6'));
       expect(forYou.cached(ref), hasLength(12));
       expect(await forYou.moreSimilar(ref), 0, reason: 'same reply');
     });
 
+    test(
+      'an upload VK gives nothing for: a same-name copy stands in',
+      () async {
+        final copyVk = RecsVk(
+          overrides: {
+            'audio.getRecommendations': (p) => p['target_audio'] == '5_6'
+                ? recFixture('audio_get_recommendations_target_no_track_id')
+                : recFixture('audio_get_recommendations_target_found'),
+            'audio.search': (_) => {
+              'count': 1,
+              'items': [recSong(7, 8, artist: 'a', title: 'b', trackId: 9)],
+            },
+          },
+        );
+        final forYou = make(fake: copyVk);
+        final ref = await forYou.similarTo(
+          sourceId: 3,
+          artist: 'a',
+          title: 'b',
+          sourceKey: '5_6',
+        );
+        expect(forYou.cached(ref!), hasLength(12));
+        expect(copyVk.calls.last, contains('target_audio=7_8'));
+      },
+    );
+
     test('nothing similar: no place', () async {
       final none = RecsVk(
         overrides: {
+          'audio.getRecommendations': (_) =>
+              recFixture('audio_get_recommendations_target_missing'),
           'audio.search': (_) => {'count': 0, 'items': []},
         },
       );
       final forYou = make(fake: none);
       expect(
-        await forYou.similarTo(sourceId: 3, artist: 'a', title: 'b'),
+        await forYou.similarTo(
+          sourceId: 3,
+          artist: 'a',
+          title: 'b',
+          sourceKey: '5_6',
+        ),
         isNull,
       );
     });
@@ -256,6 +291,7 @@ void main() {
       cacheDir: dir.path,
       now: () => now,
     )..open();
+    await Future<void>.microtask(() {});
     expect(other.refreshing, isTrue, reason: 'cache of account 3');
   });
 }
