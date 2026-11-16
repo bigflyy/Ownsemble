@@ -28,6 +28,7 @@ import 'package:ownsemble/storage/audio_storage.dart';
 import 'package:ownsemble/ui/albums.dart';
 import 'package:ownsemble/ui/catalog_search.dart';
 import 'package:ownsemble/ui/collections_controller.dart';
+import 'package:ownsemble/ui/for_you.dart';
 import 'package:ownsemble/ui/library_controller.dart';
 import 'package:ownsemble/ui/library_screen.dart';
 import 'package:ownsemble/ui/song_filters.dart';
@@ -211,6 +212,11 @@ void main() {
     // Remove and shoots mid-slide, 'note' after the list dropped it,
     // 'flash' just after Undo.
     String? removeStep,
+    // The For you place (plan 07) from VK's recorded replies
+    // (test/fixtures/vk_recommendations): 'page', 'list' (For you opened,
+    // its second song playing), 'mix' (VK Mix playing), 'loading' (the very
+    // first open), 'banner' (VK not answering, the lists from before).
+    String? forYouStep,
   }) async {
     final store = LibraryStore.open(':memory:');
     addTearDown(store.close);
@@ -293,6 +299,20 @@ void main() {
           row.trackId: const FilePrint(bytes: 1, sample: 1, seconds: 200),
       });
       store.mergeSameSongs();
+    }
+    // The library has the first song of the recorded For you list (another
+    // upload, same name and length): its row there is the library's.
+    if (forYouStep != null) {
+      store.upsertAll(vk, [
+        const NewTrack(
+          sourceKey: '1_60',
+          artist: 'Кино',
+          title: 'Закрой за мной дверь',
+          album: 'Ночь',
+          durationSec: 205,
+          addedAt: 400,
+        ),
+      ]);
     }
     store.saveAudioFile(ids[1], 'cache/a.mp3', 10, pinned: true);
     store.saveAudioFile(ids[3], 'cache/b.mp3', 10);
@@ -431,13 +451,13 @@ void main() {
 
     // A song playing while it is saved, and another one downloading.
     final storage = AudioStorage(dataDir: '.', store: store);
-    final player = saving || playingFirst || catalogPlays
+    final player = saving || playingFirst || catalogPlays || forYouStep != null
         ? _ShownPlayer(storage)
         : PlayerService(muted: true, dataDir: '.');
     // A made-up VK: what the search finds and an add that always works.
     // Nothing leaves the test.
     CatalogSearch? catalog;
-    if (catalogQuery != null || albumListed != null) {
+    if (catalogQuery != null || albumListed != null || forYouStep != null) {
       var newId = 700;
       Future<Object?> fakeVk(String method, Map<String, String> params) async {
         if (method == 'audio.add') {
@@ -500,6 +520,62 @@ void main() {
       if (catalogAll) catalog.toggleAll();
       if (catalogFolded) catalog.toggleFolded();
       if (catalogOwnFolded) catalog.toggleOwnFolded();
+    }
+    // VK's recorded recommendation replies. Nothing leaves the test.
+    ForYou? forYou;
+    var vkDown = false;
+    if (forYouStep != null) {
+      Object? recorded(String name) => jsonDecode(
+        File('test/fixtures/vk_recommendations/$name.json').readAsStringSync(),
+      );
+      final never = Completer<Object?>();
+      Future<Object?> recsVk(String method, Map<String, String> params) async {
+        if (vkDown) throw VkException('$method error 10', transient: true);
+        switch (method) {
+          case 'catalog.getAudio':
+            if (forYouStep == 'loading') return never.future;
+            return recorded('catalog_get_audio');
+          case 'audio.get':
+            final reply = recorded(
+              'audio_get_generated_playlist',
+            ) as Map<String, dynamic>;
+            return <String, dynamic>{
+              ...reply,
+              'items': [
+                ...(reply['items'] as List),
+                for (final (id, code) in [(70, 2), (71, 3)])
+                  {
+                    'owner_id': -7,
+                    'id': id,
+                    'artist': 'Земфира',
+                    'title': code == 2
+                        ? 'Не в этом регионе'
+                        : 'Только по подписке',
+                    'duration': 200,
+                    'url': '',
+                    'content_restricted': code,
+                  },
+              ],
+            };
+          case 'audio.getStreamMixAudios':
+            return recorded('audio_get_stream_mix_audios');
+          default:
+            return recorded('audio_get_recommendations_target_found');
+        }
+      }
+
+      final found = catalog!;
+      forYou = ForYou(
+        accounts: () => found.accounts,
+        apiOfSource: (_) => recsVk,
+        libraryCopyOfSong: found.libraryCopyOfSong,
+      );
+      library.vkLists = forYou;
+      if (forYouStep != 'loading') await forYou.refresh();
+      if (forYouStep == 'banner') {
+        vkDown = true;
+        await forYou.refresh();
+      }
     }
     // A made-up VK that removes and restores. Nothing leaves the test.
     SongRemover? remover;
@@ -570,12 +646,18 @@ void main() {
               sources: editor,
               catalog: catalog,
               remover: remover,
+              forYou: forYou,
             ),
           ),
         ),
       ),
     );
-    await tester.pumpAndSettle();
+    if (forYouStep == 'loading') {
+      await tester.pump();
+      await tester.pump();
+    } else {
+      await tester.pumpAndSettle();
+    }
     jump.split('').forEach(library.jump.type);
     await tester.pump();
     if (accountsDialog) {
@@ -690,6 +772,20 @@ void main() {
       player.playing.value = true;
       await tester.pump(const Duration(milliseconds: 300));
     }
+    if (forYou != null && forYouStep == 'list') {
+      await tester.tap(find.byKey(const ValueKey('list-card-For you')));
+      await tester.pumpAndSettle();
+      await playback.playFrom(library.visible, 1);
+      player.playing.value = true;
+      await tester.pump(const Duration(milliseconds: 300));
+    }
+    if (forYou != null && forYouStep == 'mix') {
+      await tester.tap(find.byKey(const ValueKey('vk-mix-play')));
+      await tester.pump();
+      await tester.pump();
+      player.playing.value = true;
+      await tester.pump(const Duration(milliseconds: 300));
+    }
     if (removeStep != null) {
       final target = ids[twoAccounts ? 0 : 2];
       await tester.tap(
@@ -741,7 +837,9 @@ void main() {
     });
     library.jump.clear();
     // Stops the playing timer of the controller before the tree goes.
-    if (playingFirst || catalogPlays) player.playing.value = false;
+    if (playingFirst || catalogPlays || forYouStep != null) {
+      player.playing.value = false;
+    }
     // Lets the note at the bottom time out, so no timer is left.
     if (catalogAdd || albumAddAll || removeStep != null) {
       if (removeStep == 'menu') {
@@ -751,6 +849,33 @@ void main() {
     }
     catalog?.dispose();
     remover?.dispose();
+    forYou?.dispose();
+  }
+
+  for (final (step, dark, size) in [
+    ('page', false, const Size(1440, 900)),
+    ('page', true, const Size(1440, 900)),
+    ('page', false, const Size(760, 900)),
+    ('list', true, const Size(1440, 900)),
+    ('list', false, const Size(760, 900)),
+    ('mix', false, const Size(1440, 900)),
+    ('mix', true, const Size(760, 900)),
+    ('loading', false, const Size(1440, 900)),
+    ('banner', true, const Size(1440, 900)),
+  ]) {
+    final width = size.width < 1000 ? 'narrow' : 'wide';
+    testWidgets(
+      'For you: $step, ${dark ? 'dark' : 'light'}, $width',
+      (t) => shoot(
+        t,
+        '${dark ? 'dark' : 'light'}-for-you-$step-$width',
+        dark: dark,
+        size: size,
+        dock: size.width < 1000 ? PlayerDock.bottom : PlayerDock.side,
+        view: const LibraryView(ViewKind.forYou),
+        forYouStep: step,
+      ),
+    );
   }
 
   for (final (step, dark) in [
