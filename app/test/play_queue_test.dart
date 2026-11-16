@@ -30,6 +30,42 @@ void main() {
     expect(queue.current?.id, 3);
   });
 
+  group('a list that grows while it plays (VK Mix)', () {
+    test('the added songs play after the list, then it stops', () {
+      final list = songs(5);
+      queue.start(list.sublist(0, 2), 1);
+      queue.extend(list.sublist(2));
+      expect(ids([for (var i = 0; i < 3; i++) queue.next(auto: true)]), [
+        2,
+        3,
+        4,
+      ]);
+      expect(queue.next(auto: true), isNull);
+    });
+
+    test('a queued song that already played stays in its place', () {
+      final list = songs(6);
+      queue.start(list.sublist(0, 2), 0);
+      queue.playNext(list[5]);
+      expect(queue.next(auto: true)!.id, 5);
+      queue.extend(list.sublist(2, 4));
+      // Back over the queued song, then on through the grown list.
+      expect(queue.previous(Duration.zero)!.id, 0);
+      expect(ids([queue.next(auto: true), queue.next(auto: true)]), [1, 2]);
+      expect(queue.next(auto: true)!.id, 3);
+    });
+
+    test('with shuffle on, the new songs come after the old ones', () {
+      final list = songs(6);
+      queue.shuffle = true;
+      queue.start(list.sublist(0, 3), 0);
+      queue.extend(list.sublist(3));
+      final heard = [for (var i = 0; i < 5; i++) queue.next(auto: true)!.id];
+      expect(heard.take(2).toSet(), {1, 2});
+      expect(heard.skip(2).toSet(), {3, 4, 5});
+    });
+  });
+
   test('a manual next at the end wraps, an automatic one stops', () {
     queue.start(songs(3), 2);
     expect(queue.next(auto: true), isNull);

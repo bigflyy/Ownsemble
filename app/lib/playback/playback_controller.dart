@@ -339,6 +339,20 @@ class PlaybackController extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Adds [more] at the end of the play list when [isFor] says the list
+  /// playing is its own (VK Mix keeps adding songs while it plays, plan 07).
+  /// Returns whether it did.
+  bool extendList(bool Function(List<Track> list) isFor, List<Track> more) {
+    if (more.isEmpty || queue.current == null || !isFor(queue.context)) {
+      return false;
+    }
+    final listSaved = identical(queue.context, _savedList);
+    queue.extend(more);
+    _savedList = listSaved ? queue.context : null;
+    notifyListeners();
+    return true;
+  }
+
   /// Songs outside the library that + just added ([copies]: the outside
   /// song's id to the library's copy). The play list, the queue and the
   /// player take the copies, so the song playing now goes on as the library's

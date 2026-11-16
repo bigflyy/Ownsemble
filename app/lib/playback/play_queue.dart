@@ -93,6 +93,21 @@ class PlayQueue {
     }
   }
 
+  /// Adds [more] at the end of the play list, for a list that never ends
+  /// (VK Mix, plan 07): they play after the songs already in it, also with
+  /// shuffle on. The current song and the queue stay as they are.
+  void extend(List<Track> more) {
+    if (more.isEmpty) return;
+    final oldLength = _context.length;
+    _context = List.unmodifiable([..._context, ...more]);
+    // Entries past the list name songs of [_played]: they move up with it.
+    _order = [
+      for (final entry in _order)
+        entry >= oldLength ? entry + more.length : entry,
+      for (var i = 0; i < more.length; i++) oldLength + i,
+    ];
+  }
+
   /// Puts [track] right after the current song, ahead of the queue.
   void playNext(Track track) => _queued.insert(0, track);
 
