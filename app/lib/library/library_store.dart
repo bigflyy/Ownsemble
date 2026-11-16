@@ -971,6 +971,21 @@ class LibraryStore implements PlayLog, PlayStatsSource {
     return _db.updatedRows > 0;
   }
 
+  /// Brings back every song removed at or after [sinceMs] that a sync had
+  /// already found gone before it was removed: build 6511BD13D982 asked VK
+  /// to delete such songs, VK said yes for songs it did not have, and Undo
+  /// then failed (user, 2026-11-16: "restore them"). A song removed while
+  /// VK had it has its gone mark set at the same moment, so it stays
+  /// removed. Returns how many came back.
+  int restoreGoneRemovedSince(int sinceMs) {
+    _db.execute(
+      'UPDATE tracks SET removed_at_ms = NULL '
+      'WHERE removed_at_ms >= ? AND gone_at_ms < removed_at_ms',
+      [sinceMs],
+    );
+    return _db.updatedRows;
+  }
+
   /// The accounts' copies of the listed song [id] that are not removed: its
   /// own row first, then the rows merged into it, by row id. [gone]: the
   /// account no longer has that copy, so removing it touches only the

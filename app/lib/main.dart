@@ -143,6 +143,15 @@ Future<void> main(List<String> args) async {
   final loadClock = Stopwatch()..start();
   final dbPath = p.join(options.dataDir, 'library.db');
   final store = LibraryStore.open(dbPath);
+  // Once: songs already gone from VK that build 6511BD13D982 removed, whose
+  // Undo failed, come back (user, 2026-11-16: "restore them").
+  const restoredGone = 'fix.restored_gone_removed_2026_11_16';
+  if (store.readSetting(restoredGone) == null) {
+    final back = store.restoreGoneRemovedSince(
+      DateTime(2026, 11, 16).millisecondsSinceEpoch,
+    );
+    store.writeSetting(restoredGone, '$back');
+  }
   final tracks = store.loadAll();
   final sources = store.sources();
   final loadMs = loadClock.elapsedMilliseconds;

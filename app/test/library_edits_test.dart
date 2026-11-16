@@ -226,6 +226,24 @@ void main() {
       expect(store.unmarkRemoved(source, '${me}_1'), isFalse);
     });
 
+    // The user, 2026-11-16: songs already gone from VK that build
+    // 6511BD13D982 removed could not be brought back by Undo: "restore them".
+    test('songs that were gone before they were removed since a time come '
+        'back, other removed songs stay removed', () {
+      store.upsertAll(source, [vkItemToTrack(vkAudio(me, 3, title: 'Орбит'))]);
+      store.markGone(source, ['${me}_1'], atMs: 1000);
+      store.markRemoved(source, ['${me}_1'], atMs: 5000);
+      // Removed while VK still had it: stays removed.
+      store.markRemoved(source, ['${me}_2'], atMs: 5000);
+      // Gone and removed before the time: stays removed.
+      store.markGone(source, ['${me}_3'], atMs: 100);
+      store.markRemoved(source, ['${me}_3'], atMs: 200);
+      expect(store.restoreGoneRemovedSince(4000), 1);
+      expect(listedTitles(), ['Романс']);
+      expect(store.loadAll().single.goneAtMs, 1000);
+      expect(store.restoreGoneRemovedSince(4000), 0);
+    });
+
     test('holdersOf names the account\'s copy with its gone mark', () {
       expect(store.holdersOf(id), [
         (sourceId: source, sourceKey: '${me}_1', gone: false),
