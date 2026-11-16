@@ -138,29 +138,6 @@ class RestrictedTag extends StatelessWidget {
   }
 }
 
-/// "VK Mix" beside the player's buttons while the mix plays.
-class MixTag extends StatelessWidget {
-  const MixTag({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = OwnColors.of(context);
-    return Tooltip(
-      message: 'Playing VK Mix: VK keeps adding songs while you listen',
-      child: Container(
-        key: const ValueKey('vk-mix-tag'),
-        margin: const EdgeInsets.only(right: 4),
-        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-        decoration: BoxDecoration(
-          color: colors.accentBg,
-          borderRadius: BorderRadius.circular(6),
-        ),
-        child: Icon(Icons.all_inclusive, size: 15, color: colors.accent),
-      ),
-    );
-  }
-}
-
 /// Whether "Similar songs" is offered for [track]: a VK account is logged
 /// in (any song: one without a VK key is looked up by name).
 bool canFindSimilar(ForYou? forYou, Track track) =>
@@ -234,13 +211,40 @@ class _ForYouPageState extends State<ForYouPage> {
   @override
   void initState() {
     super.initState();
+    final clock = Stopwatch()..start();
     forYou.open();
+    final cached = forYou.hasLists;
+    // C4: from the click to the first frame of the place (times only).
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      forYou.log?.call(
+        'for-you page: first frame in ${clock.elapsedMilliseconds} ms, '
+        'lists ${cached ? 'from the cache' : 'not yet in'}',
+      );
+    });
   }
 
-  /// The songs of [list] as tracks, in VK's order.
+  /// Opens [ref] as a song list and logs how long its rows took (C4).
+  void _open(AlbumRef ref) {
+    final clock = Stopwatch()..start();
+    widget.library.openList(ref);
+    final count = widget.library.visible.length;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      forYou.log?.call(
+        'for-you list open: $count rows in ${clock.elapsedMilliseconds} ms',
+      );
+    });
+  }
+
+  /// The songs of [list] as tracks, in VK's order: the library's own song
+  /// in place of each one it has, so its plays count as the library's.
   List<Track> _tracksOf(List<VkRecSong> songs) => [
-    for (final song in songs) forYou.trackOf(song),
+    for (final song in songs) _ownOr(forYou.trackOf(song)),
   ];
+
+  Track _ownOr(Track track) {
+    final own = forYou.libraryCopyOf((track: track, vkTrackId: null));
+    return own == null ? track : widget.library.byId(own.id) ?? own;
+  }
 
   /// Plays [songs] from [index], skipping songs VK gives no file for.
   Future<void> _play(List<Track> songs, int index) async {
@@ -259,7 +263,12 @@ class _ForYouPageState extends State<ForYouPage> {
       await playback.playOrPause();
       return;
     }
-    var songs = _tracksOf(forYou.mixSongs.where((s) => s.playable).toList());
+    // VK Mix's own tracks, even for a song the library has: the mix is
+    // told apart by them, to keep adding songs.
+    var songs = [
+      for (final song in forYou.mixSongs)
+        if (song.playable) forYou.trackOf(song),
+    ];
     if (songs.isEmpty) songs = await forYou.moreMix();
     if (songs.isEmpty) {
       if (!mounted) return;
@@ -311,7 +320,7 @@ class _ForYouPageState extends State<ForYouPage> {
                 onPlay: _playMix,
                 onOpen: forYou.mixSongs.isEmpty
                     ? null
-                    : () => widget.library.openList(forYou.mixRef),
+                    : () => _open(forYou.mixRef),
                 colors: colors,
               ),
             if (forYou.lists.isNotEmpty) ...[
@@ -333,7 +342,7 @@ class _ForYouPageState extends State<ForYouPage> {
                           if (song.playable) song,
                       ]),
                       onPlay: _play,
-                      onOpen: () => widget.library.openList(forYou.refOf(list)),
+                      onOpen: () => _open(forYou.refOf(list)),
                       colors: colors,
                     ),
                 ],
@@ -344,7 +353,7 @@ class _ForYouPageState extends State<ForYouPage> {
                 shelf.title,
                 colors: colors,
                 onAll: shelf.songs.length > similarRowsShown
-                    ? () => widget.library.openList(forYou.refOfShelf(shelf))
+                    ? () => _open(forYou.refOfShelf(shelf))
                     : null,
               ),
               for (final (i, track) in _tracksOf(
@@ -828,6 +837,19 @@ class _ShelfRow extends StatelessWidget {
                   ),
                 ),
               if (restricted != null) RestrictedTag(code: restricted!),
+              if (track.inLibrary)
+                Tooltip(
+                  message: 'In your library',
+                  child: Padding(
+                    padding: const EdgeInsets.all(8),
+                    child: Icon(
+                      Icons.check_circle,
+                      key: const ValueKey('shelf-owned'),
+                      size: 20,
+                      color: colors.accent,
+                    ),
+                  ),
+                ),
               if (add != null && catalog != null)
                 foundAddButton(context, catalog!, add!, onAdd: onAdd),
               SizedBox(

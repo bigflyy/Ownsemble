@@ -1792,9 +1792,11 @@ class _LibraryScreenState extends State<LibraryScreen> {
     );
   }
 
-  /// The player's + for a found song that plays, and for a song VK
-  /// recommended also the thumb-down (and the VK Mix tag while the mix
-  /// plays, plan 07); null for any other song.
+  /// The player's + for a found song that plays, for a song VK recommended
+  /// also the thumb-down, and Similar songs for other songs (plan 07). No
+  /// VK Mix tag: in the narrow bottom bar it pushed the title out (shot
+  /// 2026-11-17); the VK Mix card says "Playing now".
+  /// Null when none applies.
   Widget? _playerAdd(Track track) {
     final catalog = widget.catalog;
     final forYou = widget.forYou;
@@ -1814,19 +1816,29 @@ class _LibraryScreenState extends State<LibraryScreen> {
             ),
           );
     final recommended = forYou != null && forYou.isRec(track.id);
-    final mix = recommended && forYou.isMixList(widget.playback.queue.context);
-    if (!recommended) return add;
+    // A recommended song has the thumb-down there instead (a narrow bar
+    // has room for two buttons beside +); its row menu offers Similar.
+    final similar = !recommended && canFindSimilar(forYou, track);
+    if (!recommended && !similar) return add;
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        if (mix) const MixTag(),
-        IconButton(
-          key: const ValueKey('player-dislike'),
-          visualDensity: VisualDensity.compact,
-          tooltip: "Don't like it: skip, and tell VK",
-          icon: const Icon(Icons.thumb_down_outlined, size: 20),
-          onPressed: () => _dislike(track),
-        ),
+        if (similar)
+          IconButton(
+            key: const ValueKey('player-similar'),
+            visualDensity: VisualDensity.compact,
+            tooltip: 'Similar songs',
+            icon: const Icon(Icons.auto_awesome_outlined, size: 20),
+            onPressed: () => openSimilar(context, forYou!, library, track),
+          ),
+        if (recommended)
+          IconButton(
+            key: const ValueKey('player-dislike'),
+            visualDensity: VisualDensity.compact,
+            tooltip: "Don't like it: skip, and tell VK",
+            icon: const Icon(Icons.thumb_down_outlined, size: 20),
+            onPressed: () => _dislike(track),
+          ),
         ?add,
       ],
     );

@@ -190,7 +190,6 @@ void main() {
     await tester.pumpAndSettle();
     expect(player.current?.title, 'Микс 1');
     expect(forYou.isMixList(playback.queue.context), isTrue);
-    expect(find.byKey(const ValueKey('vk-mix-tag')), findsOneWidget);
     // The app asks for more near the end (main.dart does it on every new
     // song); here by hand.
     playback.extendList(forYou.isMixList, await forYou.moreMix());
@@ -225,6 +224,22 @@ void main() {
     expect(library.visible, hasLength(12));
     expect(recs.calls.last, contains('target_audio=42_1'));
     expect(find.byKey(const ValueKey('list-more')), findsOneWidget);
+  });
+
+  testWidgets('the player offers Similar songs for the song playing', (
+    tester,
+  ) async {
+    await openForYou(tester);
+    await tester.tap(find.byKey(const ValueKey('list-play-For you')));
+    await tester.pumpAndSettle();
+    // The first song is the library's own: Similar, no thumb-down.
+    expect(find.byKey(const ValueKey('player-dislike')), findsNothing);
+    await tester.tap(find.byKey(const ValueKey('player-similar')));
+    await tester.pumpAndSettle();
+    expect(library.view.kind, ViewKind.vkList);
+    expect(library.view.album?.title, 'Similar to Закрой за мной дверь');
+    player.playing.value = false;
+    await tester.pump(const Duration(seconds: 5));
   });
 
   testWidgets('narrow: the cards wrap and nothing overflows', (tester) async {
