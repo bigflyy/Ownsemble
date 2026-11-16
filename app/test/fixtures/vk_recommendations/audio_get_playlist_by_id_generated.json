@@ -1,0 +1,43 @@
+{
+ "id": -21,
+ "owner_id": 10000,
+ "type": "generated",
+ "title": "Для вас",
+ "description": "",
+ "count": 100,
+ "followers": 0,
+ "plays": 0,
+ "create_time": 1720106141,
+ "update_time": 1794846702,
+ "genres": [],
+ "is_following": false,
+ "photo": {
+  "width": 594,
+  "height": 594,
+  "id": "10550",
+  "photo_34": "https://example.invalid/2170.jpg",
+  "photo_68": "https://example.invalid/2171.jpg",
+  "photo_135": "https://example.invalid/2172.jpg",
+  "photo_270": "https://example.invalid/2173.jpg",
+  "photo_300": "https://example.invalid/2174.jpg",
+  "photo_600": "https://example.invalid/2175.jpg",
+  "photo_1200": "https://example.invalid/2175.jpg"
+ },
+ "permissions": {
+  "play": true,
+  "share": false,
+  "edit": false,
+  "follow": false,
+  "delete": false,
+  "boom_download": false,
+  "save_as_copy": true
+ },
+ "subtitle_badge": false,
+ "play_button": true,
+ "access_key": "opaque-1388",
+ "subtitle": "Кино, Наутилус Помпилиус, Дайте танк (!) и другие",
+ "meta": {
+  "view": "compact"
+ },
+ "main_color": "#0077FF"
+}

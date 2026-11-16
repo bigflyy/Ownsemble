@@ -1,0 +1,1212 @@
+{
+ "count": 30,
+ "items": [
+  {
+   "artist": "Fall Out Boy",
+   "id": 10397,
+   "owner_id": -10398,
+   "title": "Centuries",
+   "duration": 229,
+   "access_key": "opaque-1535",
+   "ads": {
+    "content_id": "-10398_10397",
+    "duration": "229",
+    "account_age_type": "3",
+    "puid22": "14"
+   },
+   "is_explicit": false,
+   "is_focus_track": false,
+   "is_licensed": true,
+   "track_code": "opaque-1536",
+   "url": "https://example.invalid/1537",
+   "audio_streams": [
+    {
+     "type": "aac",
+     "url": "https://example.invalid/1538",
+     "fallback_url": "https://example.invalid/1539"
+    },
+    {
+     "type": "aac_low",
+     "url": "https://example.invalid/1540",
+     "fallback_url": "https://example.invalid/1541"
+    },
+    {
+     "type": "dash",
+     "url": "https://example.invalid/1542",
+     "fallback_url": "https://example.invalid/1543"
+    },
+    {
+     "type": "hls_range",
+     "url": "https://example.invalid/1544.m3u8",
+     "fallback_url": "https://example.invalid/1545.m3u8"
+    },
+    {
+     "type": "hls_ts",
+     "url": "https://example.invalid/1546.m3u8",
+     "fallback_url": "https://example.invalid/1547.m3u8"
+    },
+    {
+     "type": "opaque-208",
+     "url": "https://example.invalid/1548",
+     "fallback_url": "https://example.invalid/1537"
+    }
+   ],
+   "date": 1616169856,
+   "no_search": 1,
+   "album": {
+    "id": 10399,
+    "title": "American Beauty/American Psycho",
+    "owner_id": -10400,
+    "access_key": "opaque-1549",
+    "thumb": {
+     "width": 300,
+     "height": 300,
+     "id": "10119",
+     "photo_34": "https://example.invalid/1550.jpg",
+     "photo_68": "https://example.invalid/1551.jpg",
+     "photo_135": "https://example.invalid/1552.jpg",
+     "photo_270": "https://example.invalid/1553.jpg",
+     "photo_300": "https://example.invalid/1554.jpg",
+     "photo_600": "https://example.invalid/1555.jpg",
+     "photo_1200": "https://example.invalid/1556.jpg"
+    },
+    "main_color": "#3C491E"
+   },
+   "track_id": 10401,
+   "main_artists": [
+    {
+     "name": "Fall Out Boy",
+     "domain": "10402",
+     "id": "10402",
+     "is_followed": false,
+     "can_follow": false
+    }
+   ],
+   "is_official": true,
+   "release_audio_id": "-10398_10397",
+   "main_color": "#3C491E",
+   "thumb": {
+    "width": 300,
+    "height": 300,
+    "id": "10119",
+    "photo_34": "https://example.invalid/1550.jpg",
+    "photo_68": "https://example.invalid/1551.jpg",
+    "photo_135": "https://example.invalid/1552.jpg",
+    "photo_270": "https://example.invalid/1553.jpg",
+    "photo_300": "https://example.invalid/1554.jpg",
+    "photo_600": "https://example.invalid/1555.jpg",
+    "photo_1200": "https://example.invalid/1556.jpg"
+   },
+   "file_id": "opaque-1557"
+  },
+  {
+   "artist": "Звери",
+   "id": 10403,
+   "owner_id": -10404,
+   "title": "Районы-кварталы",
+   "duration": 199,
+   "access_key": "opaque-1558",
+   "ads": {
+    "content_id": "-10404_10403",
+    "duration": "199",
+    "account_age_type": "3",
+    "puid22": "4"
+   },
+   "is_explicit": false,
+   "is_focus_track": false,
+   "is_licensed": true,
+   "track_code": "opaque-1559",
+   "url": "https://example.invalid/1560",
+   "audio_streams": [
+    {
+     "type": "aac",
+     "url": "https://example.invalid/1561",
+     "fallback_url": "https://example.invalid/1562"
+    },
+    {
+     "type": "aac_low",
+     "url": "https://example.invalid/1563",
+     "fallback_url": "https://example.invalid/1564"
+    },
+    {
+     "type": "dash",
+     "url": "https://example.invalid/1565",
+     "fallback_url": "https://example.invalid/1566"
+    },
+    {
+     "type": "flac",
+     "url": "https://example.invalid/1567",
+     "fallback_url": "https://example.invalid/1568"
+    },
+    {
+     "type": "hls_range",
+     "url": "https://example.invalid/1569.m3u8",
+     "fallback_url": "https://example.invalid/1570.m3u8"
+    },
+    {
+     "type": "hls_ts",
+     "url": "https://example.invalid/1571.m3u8",
+     "fallback_url": "https://example.invalid/1572.m3u8"
+    },
+    {
+     "type": "opaque-208",
+     "url": "https://example.invalid/1573",
+     "fallback_url": "https://example.invalid/1560"
+    }
+   ],
+   "date": 1706711696,
+   "has_lyrics": true,
+   "album": {
+    "id": 10405,
+    "title": "unnamed",
+    "owner_id": -10406,
+    "access_key": "opaque-1574",
+    "thumb": {
+     "width": 1500,
+     "height": 1500,
+     "id": "10205",
+     "photo_34": "https://example.invalid/1575.jpg",
+     "photo_68": "https://example.invalid/1576.jpg",
+     "photo_135": "https://example.invalid/1577.jpg",
+     "photo_270": "https://example.invalid/1578.jpg",
+     "photo_300": "https://example.invalid/1579.jpg",
+     "photo_600": "https://example.invalid/1580.jpg",
+     "photo_1200": "https://example.invalid/1581.jpg"
+    },
+    "main_color": "#1C1C1A"
+   },
+   "track_id": 10407,
+   "main_artists": [
+    {
+     "name": "Звери",
+     "domain": "10408",
+     "id": "10408",
+     "is_followed": false,
+     "can_follow": false
+    }
+   ],
+   "short_videos_allowed": true,
+   "stories_allowed": true,
+   "is_official": true,
+   "release_audio_id": "-10404_10403",
+   "main_color": "#1C1C1A",
+   "thumb": {
+    "width": 1500,
+    "height": 1500,
+    "id": "10205",
+    "photo_34": "https://example.invalid/1575.jpg",
+    "photo_68": "https://example.invalid/1576.jpg",
+    "photo_135": "https://example.invalid/1577.jpg",
+    "photo_270": "https://example.invalid/1578.jpg",
+    "photo_300": "https://example.invalid/1579.jpg",
+    "photo_600": "https://example.invalid/1580.jpg",
+    "photo_1200": "https://example.invalid/1581.jpg"
+   },
+   "file_id": "opaque-1582"
+  },
+  {
+   "artist": "Наутилус Помпилиус",
+   "id": 10409,
+   "owner_id": -10410,
+   "title": "Черные птицы",
+   "duration": 204,
+   "access_key": "opaque-1583",
+   "ads": {
+    "content_id": "-10410_10409",
+    "duration": "204",
+    "account_age_type": "3",
+    "puid22": "4"
+   },
+   "is_explicit": false,
+   "is_focus_track": false,
+   "is_licensed": true,
+   "track_code": "opaque-1584",
+   "url": "https://example.invalid/1585",
+   "audio_streams": [
+    {
+     "type": "aac",
+     "url": "https://example.invalid/1586",
+     "fallback_url": "https://example.invalid/1587"
+    },
+    {
+     "type": "aac_low",
+     "url": "https://example.invalid/1588",
+     "fallback_url": "https://example.invalid/1589"
+    },
+    {
+     "type": "dash",
+     "url": "https://example.invalid/1590",
+     "fallback_url": "https://example.invalid/1591"
+    },
+    {
+     "type": "hls_range",
+     "url": "https://example.invalid/1592.m3u8",
+     "fallback_url": "https://example.invalid/1593.m3u8"
+    },
+    {
+     "type": "hls_ts",
+     "url": "https://example.invalid/1594.m3u8",
+     "fallback_url": "https://example.invalid/1595.m3u8"
+    },
+    {
+     "type": "opaque-208",
+     "url": "https://example.invalid/1596",
+     "fallback_url": "https://example.invalid/1585"
+    }
+   ],
+   "date": 1743787313,
+   "album": {
+    "id": 10411,
+    "title": "Наугад",
+    "owner_id": -10412,
+    "access_key": "opaque-1597",
+    "thumb": {
+     "width": 300,
+     "height": 300,
+     "id": "10214",
+     "photo_34": "https://example.invalid/1598.jpg",
+     "photo_68": "https://example.invalid/1599.jpg",
+     "photo_135": "https://example.invalid/1600.jpg",
+     "photo_270": "https://example.invalid/1601.jpg",
+     "photo_300": "https://example.invalid/1602.jpg",
+     "photo_600": "https://example.invalid/1603.jpg",
+     "photo_1200": "https://example.invalid/1604.jpg"
+    },
+    "main_color": "#1D3920"
+   },
+   "track_id": 10413,
+   "main_artists": [
+    {
+     "name": "Наутилус Помпилиус",
+     "domain": "10414",
+     "id": "10414",
+     "is_followed": false,
+     "can_follow": false
+    }
+   ],
+   "short_videos_allowed": true,
+   "stories_allowed": true,
+   "stories_cover_allowed": true,
+   "is_official": true,
+   "release_audio_id": "-10410_10409",
+   "main_color": "#1D3920",
+   "thumb": {
+    "width": 300,
+    "height": 300,
+    "id": "10214",
+    "photo_34": "https://example.invalid/1598.jpg",
+    "photo_68": "https://example.invalid/1599.jpg",
+    "photo_135": "https://example.invalid/1600.jpg",
+    "photo_270": "https://example.invalid/1601.jpg",
+    "photo_300": "https://example.invalid/1602.jpg",
+    "photo_600": "https://example.invalid/1603.jpg",
+    "photo_1200": "https://example.invalid/1604.jpg"
+   },
+   "file_id": "opaque-1605"
+  },
+  {
+   "artist": "Coolio feat. L.V.",
+   "id": 10415,
+   "owner_id": -10416,
+   "title": "Gangsta's Paradise (feat. L.V.)",
+   "duration": 241,
+   "access_key": "opaque-1606",
+   "ads": {
+    "content_id": "-10416_10415",
+    "duration": "241",
+    "account_age_type": "3",
+    "puid22": "14"
+   },
+   "is_explicit": false,
+   "is_focus_track": false,
+   "is_licensed": true,
+   "track_code": "opaque-1607",
+   "url": "https://example.invalid/1608",
+   "audio_streams": [
+    {
+     "type": "aac",
+     "url": "https://example.invalid/1609",
+     "fallback_url": "https://example.invalid/1610"
+    },
+    {
+     "type": "aac_low",
+     "url": "https://example.invalid/1611",
+     "fallback_url": "https://example.invalid/1612"
+    },
+    {
+     "type": "dash",
+     "url": "https://example.invalid/1613",
+     "fallback_url": "https://example.invalid/1614"
+    },
+    {
+     "type": "hls_range",
+     "url": "https://example.invalid/1615.m3u8",
+     "fallback_url": "https://example.invalid/1616.m3u8"
+    },
+    {
+     "type": "hls_ts",
+     "url": "https://example.invalid/1617.m3u8",
+     "fallback_url": "https://example.invalid/1618.m3u8"
+    },
+    {
+     "type": "opaque-208",
+     "url": "https://example.invalid/1619",
+     "fallback_url": "https://example.invalid/1608"
+    }
+   ],
+   "date": 1757656417,
+   "no_search": 1,
+   "album": {
+    "id": 10417,
+    "title": "Gangsta's Paradise",
+    "owner_id": -10418,
+    "access_key": "opaque-1620",
+    "thumb": {
+     "width": 300,
+     "height": 300,
+     "id": "10283",
+     "photo_34": "https://example.invalid/1621.jpg",
+     "photo_68": "https://example.invalid/1622.jpg",
+     "photo_135": "https://example.invalid/1623.jpg",
+     "photo_270": "https://example.invalid/1624.jpg",
+     "photo_300": "https://example.invalid/1625.jpg",
+     "photo_600": "https://example.invalid/1626.jpg",
+     "photo_1200": "https://example.invalid/1627.jpg"
+    },
+    "main_color": "#422045"
+   },
+   "track_id": 10419,
+   "main_artists": [
+    {
+     "name": "Coolio",
+     "domain": "10420",
+     "id": "10420",
+     "is_followed": false,
+     "can_follow": false
+    }
+   ],
+   "featured_artists": [
+    {
+     "name": "L.V.",
+     "domain": "10421",
+     "id": "10421",
+     "is_followed": false,
+     "can_follow": false
+    }
+   ],
+   "is_official": true,
+   "release_audio_id": "-10416_10415",
+   "main_color": "#422045",
+   "thumb": {
+    "width": 300,
+    "height": 300,
+    "id": "10283",
+    "photo_34": "https://example.invalid/1621.jpg",
+    "photo_68": "https://example.invalid/1622.jpg",
+    "photo_135": "https://example.invalid/1623.jpg",
+    "photo_270": "https://example.invalid/1624.jpg",
+    "photo_300": "https://example.invalid/1625.jpg",
+    "photo_600": "https://example.invalid/1626.jpg",
+    "photo_1200": "https://example.invalid/1627.jpg"
+   },
+   "file_id": "opaque-1628"
+  },
+  {
+   "artist": "Группа Виктор",
+   "id": 10422,
+   "owner_id": -10423,
+   "title": "Пачка сигарет",
+   "duration": 266,
+   "access_key": "opaque-1629",
+   "ads": {
+    "content_id": "-10423_10422",
+    "duration": "266",
+    "account_age_type": "3",
+    "puid22": "4"
+   },
+   "is_explicit": false,
+   "is_focus_track": false,
+   "is_licensed": true,
+   "track_code": "opaque-1630",
+   "url": "https://example.invalid/1631",
+   "audio_streams": [
+    {
+     "type": "aac",
+     "url": "https://example.invalid/1632",
+     "fallback_url": "https://example.invalid/1633"
+    },
+    {
+     "type": "aac_low",
+     "url": "https://example.invalid/1634",
+     "fallback_url": "https://example.invalid/1635"
+    },
+    {
+     "type": "dash",
+     "url": "https://example.invalid/1636",
+     "fallback_url": "https://example.invalid/1637"
+    },
+    {
+     "type": "hls_range",
+     "url": "https://example.invalid/1638.m3u8",
+     "fallback_url": "https://example.invalid/1639.m3u8"
+    },
+    {
+     "type": "hls_ts",
+     "url": "https://example.invalid/1640.m3u8",
+     "fallback_url": "https://example.invalid/1641.m3u8"
+    },
+    {
+     "type": "opaque-208",
+     "url": "https://example.invalid/1642",
+     "fallback_url": "https://example.invalid/1631"
+    }
+   ],
+   "date": 1571861512,
+   "no_search": 1,
+   "album": {
+    "id": 10424,
+    "title": "Звезда по имени Солнце",
+    "owner_id": -10425,
+    "access_key": "opaque-1643",
+    "thumb": {
+     "width": 300,
+     "height": 300,
+     "id": "10426",
+     "photo_34": "https://example.invalid/1644.jpg",
+     "photo_68": "https://example.invalid/1645.jpg",
+     "photo_135": "https://example.invalid/1646.jpg",
+     "photo_270": "https://example.invalid/1647.jpg",
+     "photo_300": "https://example.invalid/1648.jpg",
+     "photo_600": "https://example.invalid/1649.jpg",
+     "photo_1200": "https://example.invalid/1650.jpg"
+    },
+    "main_color": "#0C0112"
+   },
+   "track_id": 10427,
+   "main_artists": [
+    {
+     "name": "Группа Виктор",
+     "domain": "10428",
+     "id": "10428",
+     "is_followed": false,
+     "can_follow": false
+    }
+   ],
+   "is_official": true,
+   "release_audio_id": "-10423_10422",
+   "main_color": "#0C0112",
+   "thumb": {
+    "width": 300,
+    "height": 300,
+    "id": "10426",
+    "photo_34": "https://example.invalid/1644.jpg",
+    "photo_68": "https://example.invalid/1645.jpg",
+    "photo_135": "https://example.invalid/1646.jpg",
+    "photo_270": "https://example.invalid/1647.jpg",
+    "photo_300": "https://example.invalid/1648.jpg",
+    "photo_600": "https://example.invalid/1649.jpg",
+    "photo_1200": "https://example.invalid/1650.jpg"
+   },
+   "file_id": "opaque-1651"
+  },
+  {
+   "artist": "Сектор Газа",
+   "id": 10429,
+   "owner_id": -10430,
+   "title": "Туман",
+   "duration": 223,
+   "access_key": "opaque-1652",
+   "ads": {
+    "content_id": "-10430_10429",
+    "duration": "223",
+    "account_age_type": "3",
+    "puid22": "4"
+   },
+   "is_explicit": false,
+   "is_focus_track": false,
+   "is_licensed": true,
+   "track_code": "opaque-1653",
+   "url": "https://example.invalid/1654",
+   "audio_streams": [
+    {
+     "type": "aac",
+     "url": "https://example.invalid/1655",
+     "fallback_url": "https://example.invalid/1656"
+    },
+    {
+     "type": "aac_low",
+     "url": "https://example.invalid/1657",
+     "fallback_url": "https://example.invalid/1658"
+    },
+    {
+     "type": "dash",
+     "url": "https://example.invalid/1659",
+     "fallback_url": "https://example.invalid/1660"
+    },
+    {
+     "type": "hls_range",
+     "url": "https://example.invalid/1661.m3u8",
+     "fallback_url": "https://example.invalid/1662.m3u8"
+    },
+    {
+     "type": "hls_ts",
+     "url": "https://example.invalid/1663.m3u8",
+     "fallback_url": "https://example.invalid/1664.m3u8"
+    },
+    {
+     "type": "opaque-208",
+     "url": "https://example.invalid/1665",
+     "fallback_url": "https://example.invalid/1654"
+    }
+   ],
+   "date": 1772645751,
+   "has_lyrics": true,
+   "album": {
+    "id": 10431,
+    "title": "Gazovaja Ataka",
+    "owner_id": -10432,
+    "access_key": "opaque-1666",
+    "thumb": {
+     "width": 1500,
+     "height": 1500,
+     "id": "10196",
+     "photo_34": "https://example.invalid/1667.jpg",
+     "photo_68": "https://example.invalid/1668.jpg",
+     "photo_135": "https://example.invalid/1669.jpg",
+     "photo_270": "https://example.invalid/1670.jpg",
+     "photo_300": "https://example.invalid/1671.jpg",
+     "photo_600": "https://example.invalid/1672.jpg",
+     "photo_1200": "https://example.invalid/1673.jpg"
+    },
+    "main_color": "#000000"
+   },
+   "track_id": 10433,
+   "main_artists": [
+    {
+     "name": "Сектор Газа",
+     "domain": "10434",
+     "id": "10434",
+     "is_followed": false,
+     "can_follow": false
+    }
+   ],
+   "is_official": true,
+   "release_audio_id": "-10430_10429",
+   "main_color": "#000000",
+   "thumb": {
+    "width": 1500,
+    "height": 1500,
+    "id": "10196",
+    "photo_34": "https://example.invalid/1667.jpg",
+    "photo_68": "https://example.invalid/1668.jpg",
+    "photo_135": "https://example.invalid/1669.jpg",
+    "photo_270": "https://example.invalid/1670.jpg",
+    "photo_300": "https://example.invalid/1671.jpg",
+    "photo_600": "https://example.invalid/1672.jpg",
+    "photo_1200": "https://example.invalid/1673.jpg"
+   },
+   "file_id": "opaque-1674"
+  },
+  {
+   "artist": "алёна швец.",
+   "id": 10435,
+   "owner_id": -10436,
+   "title": "Ведьм у нас сжигают",
+   "duration": 141,
+   "access_key": "opaque-1675",
+   "ads": {
+    "content_id": "-10436_10435",
+    "duration": "141",
+    "account_age_type": "3",
+    "puid22": "14"
+   },
+   "is_explicit": false,
+   "is_focus_track": false,
+   "is_licensed": true,
+   "track_code": "opaque-1676",
+   "url": "https://example.invalid/1677",
+   "audio_streams": [
+    {
+     "type": "aac",
+     "url": "https://example.invalid/1678",
+     "fallback_url": "https://example.invalid/1679"
+    },
+    {
+     "type": "aac_low",
+     "url": "https://example.invalid/1680",
+     "fallback_url": "https://example.invalid/1681"
+    },
+    {
+     "type": "dash",
+     "url": "https://example.invalid/1682",
+     "fallback_url": "https://example.invalid/1683"
+    },
+    {
+     "type": "flac",
+     "url": "https://example.invalid/1684",
+     "fallback_url": "https://example.invalid/1685"
+    },
+    {
+     "type": "hls_range",
+     "url": "https://example.invalid/1686.m3u8",
+     "fallback_url": "https://example.invalid/1687.m3u8"
+    },
+    {
+     "type": "hls_ts",
+     "url": "https://example.invalid/1688.m3u8",
+     "fallback_url": "https://example.invalid/1689.m3u8"
+    },
+    {
+     "type": "opaque-208",
+     "url": "https://example.invalid/1690",
+     "fallback_url": "https://example.invalid/1677"
+    }
+   ],
+   "date": 1788995033,
+   "has_lyrics": true,
+   "album": {
+    "id": 10437,
+    "title": "unnamed",
+    "owner_id": -10438,
+    "access_key": "opaque-1691",
+    "thumb": {
+     "width": 1500,
+     "height": 1500,
+     "id": "10289",
+     "photo_34": "https://example.invalid/1692.jpg",
+     "photo_68": "https://example.invalid/1693.jpg",
+     "photo_135": "https://example.invalid/1694.jpg",
+     "photo_270": "https://example.invalid/1695.jpg",
+     "photo_300": "https://example.invalid/1696.jpg",
+     "photo_600": "https://example.invalid/1697.jpg",
+     "photo_1200": "https://example.invalid/1698.jpg"
+    },
+    "main_color": "#FFFFFF"
+   },
+   "track_id": 10439,
+   "main_artists": [
+    {
+     "name": "алёна швец.",
+     "domain": "10440",
+     "id": "10440",
+     "is_followed": false,
+     "can_follow": false
+    }
+   ],
+   "short_videos_allowed": true,
+   "stories_allowed": true,
+   "is_official": true,
+   "release_audio_id": "-10436_10435",
+   "main_color": "#FFFFFF",
+   "thumb": {
+    "width": 1500,
+    "height": 1500,
+    "id": "10289",
+    "photo_34": "https://example.invalid/1692.jpg",
+    "photo_68": "https://example.invalid/1693.jpg",
+    "photo_135": "https://example.invalid/1694.jpg",
+    "photo_270": "https://example.invalid/1695.jpg",
+    "photo_300": "https://example.invalid/1696.jpg",
+    "photo_600": "https://example.invalid/1697.jpg",
+    "photo_1200": "https://example.invalid/1698.jpg"
+   },
+   "file_id": "opaque-1699"
+  },
+  {
+   "artist": "Eminem",
+   "id": 10441,
+   "owner_id": -10442,
+   "title": "The Real Slim Shady",
+   "duration": 284,
+   "legal_notices_type": 2,
+   "access_key": "opaque-1700",
+   "ads": {
+    "content_id": "-10442_10441",
+    "duration": "284",
+    "account_age_type": "3",
+    "puid22": "14"
+   },
+   "is_explicit": true,
+   "is_focus_track": false,
+   "is_licensed": true,
+   "track_code": "opaque-1701",
+   "url": "https://example.invalid/1702",
+   "audio_streams": [
+    {
+     "type": "aac",
+     "url": "https://example.invalid/1703",
+     "fallback_url": "https://example.invalid/1704"
+    },
+    {
+     "type": "aac_low",
+     "url": "https://example.invalid/1705",
+     "fallback_url": "https://example.invalid/1706"
+    },
+    {
+     "type": "dash",
+     "url": "https://example.invalid/1707",
+     "fallback_url": "https://example.invalid/1708"
+    },
+    {
+     "type": "hls_range",
+     "url": "https://example.invalid/1709.m3u8",
+     "fallback_url": "https://example.invalid/1710.m3u8"
+    },
+    {
+     "type": "hls_ts",
+     "url": "https://example.invalid/1711.m3u8",
+     "fallback_url": "https://example.invalid/1712.m3u8"
+    },
+    {
+     "type": "opaque-208",
+     "url": "https://example.invalid/1713",
+     "fallback_url": "https://example.invalid/1702"
+    }
+   ],
+   "date": 1551064625,
+   "no_search": 1,
+   "album": {
+    "id": 10443,
+    "title": "The Marshall Mathers LP",
+    "owner_id": -10444,
+    "access_key": "opaque-1714",
+    "thumb": {
+     "width": 300,
+     "height": 300,
+     "id": "10445",
+     "photo_34": "https://example.invalid/1715.jpg",
+     "photo_68": "https://example.invalid/1716.jpg",
+     "photo_135": "https://example.invalid/1717.jpg",
+     "photo_270": "https://example.invalid/1718.jpg",
+     "photo_300": "https://example.invalid/1719.jpg",
+     "photo_600": "https://example.invalid/1720.jpg",
+     "photo_1200": "https://example.invalid/1721.jpg"
+    },
+    "main_color": "#363E31"
+   },
+   "track_id": 10446,
+   "main_artists": [
+    {
+     "name": "Eminem",
+     "domain": "10447",
+     "id": "10447",
+     "is_followed": false,
+     "can_follow": false
+    }
+   ],
+   "is_official": true,
+   "release_audio_id": "-10442_10441",
+   "main_color": "#363E31",
+   "thumb": {
+    "width": 300,
+    "height": 300,
+    "id": "10445",
+    "photo_34": "https://example.invalid/1715.jpg",
+    "photo_68": "https://example.invalid/1716.jpg",
+    "photo_135": "https://example.invalid/1717.jpg",
+    "photo_270": "https://example.invalid/1718.jpg",
+    "photo_300": "https://example.invalid/1719.jpg",
+    "photo_600": "https://example.invalid/1720.jpg",
+    "photo_1200": "https://example.invalid/1721.jpg"
+   },
+   "file_id": "opaque-1722"
+  },
+  {
+   "artist": "Twenty One Pilots",
+   "id": 10448,
+   "owner_id": -10449,
+   "title": "Stressed Out",
+   "duration": 202,
+   "access_key": "opaque-1723",
+   "ads": {
+    "content_id": "-10449_10448",
+    "duration": "202",
+    "account_age_type": "3",
+    "puid22": "14"
+   },
+   "is_explicit": false,
+   "is_focus_track": false,
+   "is_licensed": true,
+   "track_code": "opaque-1724",
+   "url": "https://example.invalid/1725",
+   "audio_streams": [
+    {
+     "type": "aac",
+     "url": "https://example.invalid/1726",
+     "fallback_url": "https://example.invalid/1727"
+    },
+    {
+     "type": "aac_low",
+     "url": "https://example.invalid/1728",
+     "fallback_url": "https://example.invalid/1729"
+    },
+    {
+     "type": "dash",
+     "url": "https://example.invalid/1730",
+     "fallback_url": "https://example.invalid/1731"
+    },
+    {
+     "type": "hls_range",
+     "url": "https://example.invalid/1732.m3u8",
+     "fallback_url": "https://example.invalid/1733.m3u8"
+    },
+    {
+     "type": "hls_ts",
+     "url": "https://example.invalid/1734.m3u8",
+     "fallback_url": "https://example.invalid/1735.m3u8"
+    },
+    {
+     "type": "opaque-208",
+     "url": "https://example.invalid/1736",
+     "fallback_url": "https://example.invalid/1725"
+    }
+   ],
+   "date": 1757658736,
+   "no_search": 1,
+   "album": {
+    "id": 10450,
+    "title": "Blurryface",
+    "owner_id": -10451,
+    "access_key": "opaque-1737",
+    "thumb": {
+     "width": 1425,
+     "height": 1425,
+     "id": "10452",
+     "photo_34": "https://example.invalid/1738.jpg",
+     "photo_68": "https://example.invalid/1739.jpg",
+     "photo_135": "https://example.invalid/1740.jpg",
+     "photo_270": "https://example.invalid/1741.jpg",
+     "photo_300": "https://example.invalid/1742.jpg",
+     "photo_600": "https://example.invalid/1743.jpg",
+     "photo_1200": "https://example.invalid/1744.jpg"
+    },
+    "main_color": "#FFFFFF"
+   },
+   "track_id": 10453,
+   "main_artists": [
+    {
+     "name": "Twenty One Pilots",
+     "domain": "10454",
+     "id": "10454",
+     "is_followed": false,
+     "can_follow": false
+    }
+   ],
+   "is_official": true,
+   "release_audio_id": "-10449_10448",
+   "main_color": "#FFFFFF",
+   "thumb": {
+    "width": 1425,
+    "height": 1425,
+    "id": "10452",
+    "photo_34": "https://example.invalid/1738.jpg",
+    "photo_68": "https://example.invalid/1739.jpg",
+    "photo_135": "https://example.invalid/1740.jpg",
+    "photo_270": "https://example.invalid/1741.jpg",
+    "photo_300": "https://example.invalid/1742.jpg",
+    "photo_600": "https://example.invalid/1743.jpg",
+    "photo_1200": "https://example.invalid/1744.jpg"
+   },
+   "file_id": "opaque-1745"
+  },
+  {
+   "artist": "Дайте танк (!)",
+   "id": 10455,
+   "owner_id": -10456,
+   "title": "Монополия",
+   "duration": 224,
+   "legal_notices_type": 2,
+   "access_key": "opaque-1746",
+   "ads": {
+    "content_id": "-10456_10455",
+    "duration": "224",
+    "account_age_type": "3",
+    "puid22": "8"
+   },
+   "is_explicit": true,
+   "is_focus_track": false,
+   "is_licensed": true,
+   "track_code": "opaque-1747",
+   "url": "https://example.invalid/1748",
+   "audio_streams": [
+    {
+     "type": "aac",
+     "url": "https://example.invalid/1749",
+     "fallback_url": "https://example.invalid/1750"
+    },
+    {
+     "type": "aac_low",
+     "url": "https://example.invalid/1751",
+     "fallback_url": "https://example.invalid/1752"
+    },
+    {
+     "type": "dash",
+     "url": "https://example.invalid/1753",
+     "fallback_url": "https://example.invalid/1754"
+    },
+    {
+     "type": "hls_range",
+     "url": "https://example.invalid/1755.m3u8",
+     "fallback_url": "https://example.invalid/1756.m3u8"
+    },
+    {
+     "type": "hls_ts",
+     "url": "https://example.invalid/1757.m3u8",
+     "fallback_url": "https://example.invalid/1758.m3u8"
+    },
+    {
+     "type": "opaque-208",
+     "url": "https://example.invalid/1759",
+     "fallback_url": "https://example.invalid/1748"
+    }
+   ],
+   "date": 1601910003,
+   "has_lyrics": true,
+   "album": {
+    "id": 10457,
+    "title": "См. рис. 2",
+    "owner_id": -10458,
+    "access_key": "opaque-1760",
+    "thumb": {
+     "width": 300,
+     "height": 300,
+     "id": "10160",
+     "photo_34": "https://example.invalid/1761.jpg",
+     "photo_68": "https://example.invalid/1762.jpg",
+     "photo_135": "https://example.invalid/1763.jpg",
+     "photo_270": "https://example.invalid/1764.jpg",
+     "photo_300": "https://example.invalid/1765.jpg",
+     "photo_600": "https://example.invalid/1766.jpg",
+     "photo_1200": "https://example.invalid/1767.jpg"
+    },
+    "main_color": "#FD0035"
+   },
+   "track_id": 10459,
+   "main_artists": [
+    {
+     "name": "Дайте танк (!)",
+     "domain": "10080",
+     "id": "10080",
+     "is_followed": false,
+     "can_follow": false
+    }
+   ],
+   "is_official": true,
+   "release_audio_id": "-10456_10455",
+   "main_color": "#FD0035",
+   "thumb": {
+    "width": 300,
+    "height": 300,
+    "id": "10160",
+    "photo_34": "https://example.invalid/1761.jpg",
+    "photo_68": "https://example.invalid/1762.jpg",
+    "photo_135": "https://example.invalid/1763.jpg",
+    "photo_270": "https://example.invalid/1764.jpg",
+    "photo_300": "https://example.invalid/1765.jpg",
+    "photo_600": "https://example.invalid/1766.jpg",
+    "photo_1200": "https://example.invalid/1767.jpg"
+   },
+   "file_id": "opaque-1768"
+  },
+  {
+   "artist": "Земфира",
+   "id": 10460,
+   "owner_id": -10461,
+   "title": "В МЕТРО",
+   "duration": 172,
+   "legal_notices_type": 4,
+   "access_key": "opaque-1769",
+   "ads": {
+    "content_id": "-10461_10460",
+    "duration": "172",
+    "account_age_type": "3",
+    "puid22": "4"
+   },
+   "is_explicit": false,
+   "is_focus_track": false,
+   "is_licensed": true,
+   "track_code": "opaque-1770",
+   "url": "https://example.invalid/1771",
+   "audio_streams": [
+    {
+     "type": "aac",
+     "url": "https://example.invalid/1772",
+     "fallback_url": "https://example.invalid/1773"
+    },
+    {
+     "type": "aac_low",
+     "url": "https://example.invalid/1774",
+     "fallback_url": "https://example.invalid/1775"
+    },
+    {
+     "type": "dash",
+     "url": "https://example.invalid/1776",
+     "fallback_url": "https://example.invalid/1777"
+    },
+    {
+     "type": "hls_range",
+     "url": "https://example.invalid/1778.m3u8",
+     "fallback_url": "https://example.invalid/1779.m3u8"
+    },
+    {
+     "type": "hls_ts",
+     "url": "https://example.invalid/1780.m3u8",
+     "fallback_url": "https://example.invalid/1781.m3u8"
+    },
+    {
+     "type": "opaque-208",
+     "url": "https://example.invalid/1782",
+     "fallback_url": "https://example.invalid/1771"
+    }
+   ],
+   "date": 1760520954,
+   "has_lyrics": true,
+   "album": {
+    "id": 10462,
+    "title": "unnamed",
+    "owner_id": -10463,
+    "access_key": "opaque-1783",
+    "thumb": {
+     "width": 300,
+     "height": 300,
+     "id": "10321",
+     "photo_34": "https://example.invalid/1784.jpg",
+     "photo_68": "https://example.invalid/1785.jpg",
+     "photo_135": "https://example.invalid/1786.jpg",
+     "photo_270": "https://example.invalid/1787.jpg",
+     "photo_300": "https://example.invalid/1788.jpg",
+     "photo_600": "https://example.invalid/1789.jpg",
+     "photo_1200": "https://example.invalid/1790.jpg"
+    },
+    "main_color": "#BABAB7"
+   },
+   "track_id": 10464,
+   "main_artists": [
+    {
+     "name": "Земфира",
+     "domain": "10465",
+     "id": "10465",
+     "is_followed": false,
+     "can_follow": false
+    }
+   ],
+   "is_official": true,
+   "release_audio_id": "-10461_10460",
+   "main_color": "#BABAB7",
+   "thumb": {
+    "width": 300,
+    "height": 300,
+    "id": "10321",
+    "photo_34": "https://example.invalid/1784.jpg",
+    "photo_68": "https://example.invalid/1785.jpg",
+    "photo_135": "https://example.invalid/1786.jpg",
+    "photo_270": "https://example.invalid/1787.jpg",
+    "photo_300": "https://example.invalid/1788.jpg",
+    "photo_600": "https://example.invalid/1789.jpg",
+    "photo_1200": "https://example.invalid/1790.jpg"
+   },
+   "file_id": "opaque-1791"
+  },
+  {
+   "artist": "Король и Шут",
+   "id": 10466,
+   "owner_id": -10467,
+   "title": "Кукла колдуна (Из сериала «Король и Шут»)",
+   "duration": 206,
+   "access_key": "opaque-1792",
+   "ads": {
+    "content_id": "-10467_10466",
+    "duration": "206",
+    "account_age_type": "3",
+    "puid22": "4"
+   },
+   "is_explicit": false,
+   "is_focus_track": false,
+   "is_licensed": true,
+   "track_code": "opaque-1793",
+   "url": "https://example.invalid/1794",
+   "audio_streams": [
+    {
+     "type": "aac",
+     "url": "https://example.invalid/1795",
+     "fallback_url": "https://example.invalid/1796"
+    },
+    {
+     "type": "aac_low",
+     "url": "https://example.invalid/1797",
+     "fallback_url": "https://example.invalid/1798"
+    },
+    {
+     "type": "dash",
+     "url": "https://example.invalid/1799",
+     "fallback_url": "https://example.invalid/1800"
+    },
+    {
+     "type": "hls_range",
+     "url": "https://example.invalid/1801.m3u8",
+     "fallback_url": "https://example.invalid/1802.m3u8"
+    },
+    {
+     "type": "hls_ts",
+     "url": "https://example.invalid/1803.m3u8",
+     "fallback_url": "https://example.invalid/1804.m3u8"
+    },
+    {
+     "type": "opaque-208",
+     "url": "https://example.invalid/1805",
+     "fallback_url": "https://example.invalid/1794"
+    }
+   ],
+   "date": 1685992132,
+   "has_lyrics": true,
+   "album": {
+    "id": 10468,
+    "title": "Король и Шут (Официальный саундтрек), Часть 1",
+    "owner_id": -10469,
+    "access_key": "opaque-1806",
+    "thumb": {
+     "width": 1500,
+     "height": 1500,
+     "id": "10154",
+     "photo_34": "https://example.invalid/1807.jpg",
+     "photo_68": "https://example.invalid/1808.jpg",
+     "photo_135": "https://example.invalid/1809.jpg",
+     "photo_270": "https://example.invalid/1810.jpg",
+     "photo_300": "https://example.invalid/1811.jpg",
+     "photo_600": "https://example.invalid/1812.jpg",
+     "photo_1200": "https://example.invalid/1813.jpg"
+    },
+    "main_color": "#FBDE19"
+   },
+   "track_id": 10470,
+   "main_artists": [
+    {
+     "name": "Король и Шут",
+     "domain": "10471",
+     "id": "10471",
+     "is_followed": false,
+     "can_follow": false
+    }
+   ],
+   "short_videos_allowed": true,
+   "stories_allowed": true,
+   "stories_cover_allowed": true,
+   "is_official": true,
+   "release_audio_id": "-10467_10466",
+   "main_color": "#FBDE19",
+   "thumb": {
+    "width": 1500,
+    "height": 1500,
+    "id": "10154",
+    "photo_34": "https://example.invalid/1807.jpg",
+    "photo_68": "https://example.invalid/1808.jpg",
+    "photo_135": "https://example.invalid/1809.jpg",
+    "photo_270": "https://example.invalid/1810.jpg",
+    "photo_300": "https://example.invalid/1811.jpg",
+    "photo_600": "https://example.invalid/1812.jpg",
+    "photo_1200": "https://example.invalid/1813.jpg"
+   },
+   "file_id": "opaque-1814"
+  }
+ ]
+}

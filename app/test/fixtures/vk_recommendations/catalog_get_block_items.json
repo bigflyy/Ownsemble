@@ -1,0 +1,1926 @@
+{
+ "block": {
+  "id": "opaque-7",
+  "data_type": "music_audios",
+  "layout": {
+   "name": "triple_stacked_slider",
+   "owner_id": 10000
+  },
+  "next_from": "opaque-2460",
+  "listen_events": [
+   "music_audios_add",
+   "music_audios_edit",
+   "music_audios_upload"
+  ],
+  "meta": {
+   "show_all_info": {
+    "title": "Мои треки",
+    "section_id": "opaque-7"
+   }
+  },
+  "audios_ids": [
+   "10000_10619",
+   "10000_10620",
+   "10000_10621",
+   "10000_10622",
+   "10000_10623",
+   "10000_10624",
+   "10000_10625",
+   "10000_10626",
+   "10000_10627",
+   "10000_10628",
+   "10000_10629",
+   "10000_10630",
+   "10000_10631",
+   "10000_10632",
+   "10000_10633",
+   "10000_10634",
+   "10000_10635",
+   "10000_10636",
+   "10000_10637",
+   "10000_10638"
+  ],
+  "title": "Мои треки"
+ },
+ "audios": [
+  {
+   "artist": "Дайте танк (!)",
+   "id": 10619,
+   "owner_id": 10000,
+   "title": "Лучшее",
+   "duration": 249,
+   "access_key": "opaque-2461",
+   "ads": {
+    "content_id": "10000_10619",
+    "duration": "249",
+    "account_age_type": "3",
+    "puid22": "8"
+   },
+   "is_explicit": false,
+   "is_focus_track": false,
+   "is_licensed": true,
+   "track_code": "opaque-2462",
+   "url": "https://example.invalid/2463",
+   "audio_streams": [
+    {
+     "type": "aac",
+     "url": "https://example.invalid/2464",
+     "fallback_url": "https://example.invalid/2465"
+    },
+    {
+     "type": "aac_low",
+     "url": "https://example.invalid/2466",
+     "fallback_url": "https://example.invalid/2467"
+    },
+    {
+     "type": "dash",
+     "url": "https://example.invalid/2468",
+     "fallback_url": "https://example.invalid/2469"
+    },
+    {
+     "type": "hls_range",
+     "url": "https://example.invalid/2470.m3u8",
+     "fallback_url": "https://example.invalid/2471.m3u8"
+    },
+    {
+     "type": "hls_ts",
+     "url": "https://example.invalid/2472.m3u8",
+     "fallback_url": "https://example.invalid/2473.m3u8"
+    },
+    {
+     "type": "opaque-208",
+     "url": "https://example.invalid/2474",
+     "fallback_url": "https://example.invalid/2463"
+    }
+   ],
+   "date": 1662624955,
+   "like": true,
+   "album": {
+    "id": 10189,
+    "title": "Человеко-часы",
+    "owner_id": -10190,
+    "access_key": "opaque-561",
+    "thumb": {
+     "width": 300,
+     "height": 300,
+     "id": "10171",
+     "photo_34": "https://example.invalid/562.jpg",
+     "photo_68": "https://example.invalid/563.jpg",
+     "photo_135": "https://example.invalid/564.jpg",
+     "photo_270": "https://example.invalid/565.jpg",
+     "photo_300": "https://example.invalid/566.jpg",
+     "photo_600": "https://example.invalid/567.jpg",
+     "photo_1200": "https://example.invalid/568.jpg"
+    },
+    "main_color": "#EF154F"
+   },
+   "track_id": 10639,
+   "main_artists": [
+    {
+     "name": "Дайте танк (!)",
+     "domain": "10080",
+     "id": "10080",
+     "is_followed": false,
+     "can_follow": false
+    }
+   ],
+   "is_official": true,
+   "release_audio_id": "-10640_10641",
+   "main_color": "#EF154F",
+   "thumb": {
+    "width": 300,
+    "height": 300,
+    "id": "10171",
+    "photo_34": "https://example.invalid/562.jpg",
+    "photo_68": "https://example.invalid/563.jpg",
+    "photo_135": "https://example.invalid/564.jpg",
+    "photo_270": "https://example.invalid/565.jpg",
+    "photo_300": "https://example.invalid/566.jpg",
+    "photo_600": "https://example.invalid/567.jpg",
+    "photo_1200": "https://example.invalid/568.jpg"
+   },
+   "file_id": "opaque-2475",
+   "permissions": {
+    "edit": false
+   }
+  },
+  {
+   "artist": "Дайте танк (!)",
+   "id": 10620,
+   "owner_id": 10000,
+   "title": "Бесы",
+   "duration": 140,
+   "access_key": "opaque-2476",
+   "ads": {
+    "content_id": "10000_10620",
+    "duration": "140",
+    "account_age_type": "3",
+    "puid22": "8"
+   },
+   "is_explicit": false,
+   "is_focus_track": false,
+   "is_licensed": true,
+   "track_code": "opaque-2477",
+   "url": "https://example.invalid/2478",
+   "audio_streams": [
+    {
+     "type": "aac",
+     "url": "https://example.invalid/2479",
+     "fallback_url": "https://example.invalid/2480"
+    },
+    {
+     "type": "aac_low",
+     "url": "https://example.invalid/2481",
+     "fallback_url": "https://example.invalid/2482"
+    },
+    {
+     "type": "dash",
+     "url": "https://example.invalid/2483",
+     "fallback_url": "https://example.invalid/2484"
+    },
+    {
+     "type": "hls_range",
+     "url": "https://example.invalid/2485.m3u8",
+     "fallback_url": "https://example.invalid/2486.m3u8"
+    },
+    {
+     "type": "hls_ts",
+     "url": "https://example.invalid/2487.m3u8",
+     "fallback_url": "https://example.invalid/2488.m3u8"
+    },
+    {
+     "type": "opaque-208",
+     "url": "https://example.invalid/2489",
+     "fallback_url": "https://example.invalid/2478"
+    }
+   ],
+   "date": 1662624954,
+   "has_lyrics": true,
+   "like": true,
+   "album": {
+    "id": 10642,
+    "title": "См. рис. 1",
+    "owner_id": -10643,
+    "access_key": "opaque-2490",
+    "thumb": {
+     "width": 1500,
+     "height": 1500,
+     "id": "10555",
+     "photo_34": "https://example.invalid/2491.jpg",
+     "photo_68": "https://example.invalid/2492.jpg",
+     "photo_135": "https://example.invalid/2493.jpg",
+     "photo_270": "https://example.invalid/2494.jpg",
+     "photo_300": "https://example.invalid/2495.jpg",
+     "photo_600": "https://example.invalid/2496.jpg",
+     "photo_1200": "https://example.invalid/2497.jpg"
+    },
+    "main_color": "#00CC41"
+   },
+   "track_id": 10644,
+   "main_artists": [
+    {
+     "name": "Дайте танк (!)",
+     "domain": "10080",
+     "id": "10080",
+     "is_followed": false,
+     "can_follow": false
+    }
+   ],
+   "is_official": true,
+   "release_audio_id": "-10645_10646",
+   "main_color": "#00CC41",
+   "thumb": {
+    "width": 1500,
+    "height": 1500,
+    "id": "10555",
+    "photo_34": "https://example.invalid/2491.jpg",
+    "photo_68": "https://example.invalid/2492.jpg",
+    "photo_135": "https://example.invalid/2493.jpg",
+    "photo_270": "https://example.invalid/2494.jpg",
+    "photo_300": "https://example.invalid/2495.jpg",
+    "photo_600": "https://example.invalid/2496.jpg",
+    "photo_1200": "https://example.invalid/2497.jpg"
+   },
+   "file_id": "opaque-2498",
+   "permissions": {
+    "edit": false
+   }
+  },
+  {
+   "artist": "Три дня дождя",
+   "id": 10621,
+   "owner_id": 10000,
+   "title": "Я и одиночество",
+   "duration": 229,
+   "access_key": "opaque-2499",
+   "ads": {
+    "content_id": "10000_10621",
+    "duration": "229",
+    "account_age_type": "3",
+    "puid22": "4"
+   },
+   "is_explicit": false,
+   "is_focus_track": false,
+   "is_licensed": true,
+   "track_code": "opaque-2500",
+   "url": "https://example.invalid/2501",
+   "audio_streams": [
+    {
+     "type": "aac",
+     "url": "https://example.invalid/2502",
+     "fallback_url": "https://example.invalid/2503"
+    },
+    {
+     "type": "aac_low",
+     "url": "https://example.invalid/2504",
+     "fallback_url": "https://example.invalid/2505"
+    },
+    {
+     "type": "dash",
+     "url": "https://example.invalid/2506",
+     "fallback_url": "https://example.invalid/2507"
+    },
+    {
+     "type": "flac",
+     "url": "https://example.invalid/2508",
+     "fallback_url": "https://example.invalid/2509"
+    },
+    {
+     "type": "hls_range",
+     "url": "https://example.invalid/2510.m3u8",
+     "fallback_url": "https://example.invalid/2511.m3u8"
+    },
+    {
+     "type": "hls_ts",
+     "url": "https://example.invalid/2512.m3u8",
+     "fallback_url": "https://example.invalid/2513.m3u8"
+    },
+    {
+     "type": "opaque-208",
+     "url": "https://example.invalid/2514",
+     "fallback_url": "https://example.invalid/2501"
+    }
+   ],
+   "date": 1662624948,
+   "has_lyrics": true,
+   "like": true,
+   "album": {
+    "id": 10647,
+    "title": "unnamed",
+    "owner_id": -10648,
+    "access_key": "opaque-2515",
+    "thumb": {
+     "width": 1500,
+     "height": 1500,
+     "id": "10105",
+     "photo_34": "https://example.invalid/2516.jpg",
+     "photo_68": "https://example.invalid/2517.jpg",
+     "photo_135": "https://example.invalid/2518.jpg",
+     "photo_270": "https://example.invalid/2519.jpg",
+     "photo_300": "https://example.invalid/2520.jpg",
+     "photo_600": "https://example.invalid/2521.jpg",
+     "photo_1200": "https://example.invalid/2522.jpg"
+    },
+    "main_color": "#0D0D0D"
+   },
+   "track_id": 10649,
+   "main_artists": [
+    {
+     "name": "Три дня дождя",
+     "domain": "10650",
+     "id": "10650",
+     "is_followed": false,
+     "can_follow": false
+    }
+   ],
+   "short_videos_allowed": true,
+   "stories_allowed": true,
+   "stories_cover_allowed": true,
+   "is_official": true,
+   "release_audio_id": "-10651_10652",
+   "main_color": "#0D0D0D",
+   "thumb": {
+    "width": 1500,
+    "height": 1500,
+    "id": "10105",
+    "photo_34": "https://example.invalid/2516.jpg",
+    "photo_68": "https://example.invalid/2517.jpg",
+    "photo_135": "https://example.invalid/2518.jpg",
+    "photo_270": "https://example.invalid/2519.jpg",
+    "photo_300": "https://example.invalid/2520.jpg",
+    "photo_600": "https://example.invalid/2521.jpg",
+    "photo_1200": "https://example.invalid/2522.jpg"
+   },
+   "file_id": "opaque-2523",
+   "permissions": {
+    "edit": false
+   }
+  },
+  {
+   "artist": "Дайте танк (!)",
+   "id": 10622,
+   "owner_id": 10000,
+   "title": "Альтернатива",
+   "duration": 230,
+   "access_key": "opaque-2524",
+   "ads": {
+    "content_id": "10000_10622",
+    "duration": "230",
+    "account_age_type": "3",
+    "puid22": "8"
+   },
+   "is_explicit": false,
+   "is_focus_track": false,
+   "is_licensed": true,
+   "track_code": "opaque-2525",
+   "url": "https://example.invalid/2526",
+   "audio_streams": [
+    {
+     "type": "aac",
+     "url": "https://example.invalid/2527",
+     "fallback_url": "https://example.invalid/2528"
+    },
+    {
+     "type": "aac_low",
+     "url": "https://example.invalid/2529",
+     "fallback_url": "https://example.invalid/2530"
+    },
+    {
+     "type": "dash",
+     "url": "https://example.invalid/2531",
+     "fallback_url": "https://example.invalid/2532"
+    },
+    {
+     "type": "hls_range",
+     "url": "https://example.invalid/2533.m3u8",
+     "fallback_url": "https://example.invalid/2534.m3u8"
+    },
+    {
+     "type": "hls_ts",
+     "url": "https://example.invalid/2535.m3u8",
+     "fallback_url": "https://example.invalid/2536.m3u8"
+    },
+    {
+     "type": "opaque-208",
+     "url": "https://example.invalid/2537",
+     "fallback_url": "https://example.invalid/2526"
+    }
+   ],
+   "date": 1662624947,
+   "like": true,
+   "album": {
+    "id": 10189,
+    "title": "Человеко-часы",
+    "owner_id": -10190,
+    "access_key": "opaque-561",
+    "thumb": {
+     "width": 300,
+     "height": 300,
+     "id": "10171",
+     "photo_34": "https://example.invalid/562.jpg",
+     "photo_68": "https://example.invalid/563.jpg",
+     "photo_135": "https://example.invalid/564.jpg",
+     "photo_270": "https://example.invalid/565.jpg",
+     "photo_300": "https://example.invalid/566.jpg",
+     "photo_600": "https://example.invalid/567.jpg",
+     "photo_1200": "https://example.invalid/568.jpg"
+    },
+    "main_color": "#EF154F"
+   },
+   "track_id": 10653,
+   "main_artists": [
+    {
+     "name": "Дайте танк (!)",
+     "domain": "10080",
+     "id": "10080",
+     "is_followed": false,
+     "can_follow": false
+    }
+   ],
+   "is_official": true,
+   "release_audio_id": "-10654_10655",
+   "main_color": "#EF154F",
+   "thumb": {
+    "width": 300,
+    "height": 300,
+    "id": "10171",
+    "photo_34": "https://example.invalid/562.jpg",
+    "photo_68": "https://example.invalid/563.jpg",
+    "photo_135": "https://example.invalid/564.jpg",
+    "photo_270": "https://example.invalid/565.jpg",
+    "photo_300": "https://example.invalid/566.jpg",
+    "photo_600": "https://example.invalid/567.jpg",
+    "photo_1200": "https://example.invalid/568.jpg"
+   },
+   "file_id": "opaque-2538",
+   "permissions": {
+    "edit": false
+   }
+  },
+  {
+   "artist": "Дайте танк (!)",
+   "id": 10623,
+   "owner_id": 10000,
+   "title": "Вуаля",
+   "duration": 212,
+   "access_key": "opaque-2539",
+   "ads": {
+    "content_id": "10000_10623",
+    "duration": "212",
+    "account_age_type": "3",
+    "puid22": "8"
+   },
+   "is_explicit": false,
+   "is_focus_track": false,
+   "is_licensed": true,
+   "track_code": "opaque-2540",
+   "url": "https://example.invalid/2541.mp3",
+   "date": 1662624945,
+   "like": true,
+   "album": {
+    "id": 10656,
+    "title": "Глаза боятся",
+    "owner_id": -10657,
+    "access_key": "opaque-2542",
+    "thumb": {
+     "width": 300,
+     "height": 300,
+     "id": "10112",
+     "photo_34": "https://example.invalid/2543.jpg",
+     "photo_68": "https://example.invalid/2544.jpg",
+     "photo_135": "https://example.invalid/2545.jpg",
+     "photo_270": "https://example.invalid/2546.jpg",
+     "photo_300": "https://example.invalid/2547.jpg",
+     "photo_600": "https://example.invalid/2548.jpg",
+     "photo_1200": "https://example.invalid/2549.jpg"
+    },
+    "main_color": "#014D41"
+   },
+   "track_id": 10658,
+   "main_artists": [
+    {
+     "name": "Дайте танк (!)",
+     "domain": "10080",
+     "id": "10080",
+     "is_followed": false,
+     "can_follow": false
+    }
+   ],
+   "is_official": true,
+   "release_audio_id": "-10659_10660",
+   "main_color": "#014D41",
+   "thumb": {
+    "width": 300,
+    "height": 300,
+    "id": "10112",
+    "photo_34": "https://example.invalid/2543.jpg",
+    "photo_68": "https://example.invalid/2544.jpg",
+    "photo_135": "https://example.invalid/2545.jpg",
+    "photo_270": "https://example.invalid/2546.jpg",
+    "photo_300": "https://example.invalid/2547.jpg",
+    "photo_600": "https://example.invalid/2548.jpg",
+    "photo_1200": "https://example.invalid/2549.jpg"
+   },
+   "file_id": "opaque-2550",
+   "permissions": {
+    "edit": false
+   }
+  },
+  {
+   "artist": "Дайте танк (!)",
+   "id": 10624,
+   "owner_id": 10000,
+   "title": "Во рту",
+   "duration": 216,
+   "access_key": "opaque-2551",
+   "ads": {
+    "content_id": "10000_10624",
+    "duration": "216",
+    "account_age_type": "3",
+    "puid22": "8"
+   },
+   "is_explicit": false,
+   "is_focus_track": false,
+   "is_licensed": true,
+   "track_code": "opaque-2552",
+   "url": "https://example.invalid/2553.mp3",
+   "date": 1662624944,
+   "like": true,
+   "album": {
+    "id": 10656,
+    "title": "Глаза боятся",
+    "owner_id": -10657,
+    "access_key": "opaque-2542",
+    "thumb": {
+     "width": 300,
+     "height": 300,
+     "id": "10112",
+     "photo_34": "https://example.invalid/2543.jpg",
+     "photo_68": "https://example.invalid/2544.jpg",
+     "photo_135": "https://example.invalid/2545.jpg",
+     "photo_270": "https://example.invalid/2546.jpg",
+     "photo_300": "https://example.invalid/2547.jpg",
+     "photo_600": "https://example.invalid/2548.jpg",
+     "photo_1200": "https://example.invalid/2549.jpg"
+    },
+    "main_color": "#014D41"
+   },
+   "track_id": 10661,
+   "main_artists": [
+    {
+     "name": "Дайте танк (!)",
+     "domain": "10080",
+     "id": "10080",
+     "is_followed": false,
+     "can_follow": false
+    }
+   ],
+   "is_official": true,
+   "release_audio_id": "-10662_10663",
+   "main_color": "#014D41",
+   "thumb": {
+    "width": 300,
+    "height": 300,
+    "id": "10112",
+    "photo_34": "https://example.invalid/2543.jpg",
+    "photo_68": "https://example.invalid/2544.jpg",
+    "photo_135": "https://example.invalid/2545.jpg",
+    "photo_270": "https://example.invalid/2546.jpg",
+    "photo_300": "https://example.invalid/2547.jpg",
+    "photo_600": "https://example.invalid/2548.jpg",
+    "photo_1200": "https://example.invalid/2549.jpg"
+   },
+   "file_id": "opaque-2554",
+   "permissions": {
+    "edit": false
+   }
+  },
+  {
+   "artist": "Дайте танк (!)",
+   "id": 10625,
+   "owner_id": 10000,
+   "title": "Оплачено",
+   "duration": 244,
+   "access_key": "opaque-2555",
+   "ads": {
+    "content_id": "10000_10625",
+    "duration": "244",
+    "account_age_type": "3",
+    "puid22": "8"
+   },
+   "is_explicit": false,
+   "is_focus_track": false,
+   "is_licensed": true,
+   "track_code": "opaque-2556",
+   "url": "https://example.invalid/2557",
+   "audio_streams": [
+    {
+     "type": "aac",
+     "url": "https://example.invalid/2558",
+     "fallback_url": "https://example.invalid/2559"
+    },
+    {
+     "type": "aac_low",
+     "url": "https://example.invalid/2560",
+     "fallback_url": "https://example.invalid/2561"
+    },
+    {
+     "type": "dash",
+     "url": "https://example.invalid/2562",
+     "fallback_url": "https://example.invalid/2563"
+    },
+    {
+     "type": "hls_range",
+     "url": "https://example.invalid/2564.m3u8",
+     "fallback_url": "https://example.invalid/2565.m3u8"
+    },
+    {
+     "type": "hls_ts",
+     "url": "https://example.invalid/2566.m3u8",
+     "fallback_url": "https://example.invalid/2567.m3u8"
+    },
+    {
+     "type": "opaque-208",
+     "url": "https://example.invalid/2568",
+     "fallback_url": "https://example.invalid/2557"
+    }
+   ],
+   "date": 1662624942,
+   "has_lyrics": true,
+   "like": true,
+   "album": {
+    "id": 10642,
+    "title": "См. рис. 1",
+    "owner_id": -10643,
+    "access_key": "opaque-2490",
+    "thumb": {
+     "width": 1500,
+     "height": 1500,
+     "id": "10555",
+     "photo_34": "https://example.invalid/2491.jpg",
+     "photo_68": "https://example.invalid/2492.jpg",
+     "photo_135": "https://example.invalid/2493.jpg",
+     "photo_270": "https://example.invalid/2494.jpg",
+     "photo_300": "https://example.invalid/2495.jpg",
+     "photo_600": "https://example.invalid/2496.jpg",
+     "photo_1200": "https://example.invalid/2497.jpg"
+    },
+    "main_color": "#00CC41"
+   },
+   "track_id": 10664,
+   "main_artists": [
+    {
+     "name": "Дайте танк (!)",
+     "domain": "10080",
+     "id": "10080",
+     "is_followed": false,
+     "can_follow": false
+    }
+   ],
+   "is_official": true,
+   "release_audio_id": "-10665_10666",
+   "main_color": "#00CC41",
+   "thumb": {
+    "width": 1500,
+    "height": 1500,
+    "id": "10555",
+    "photo_34": "https://example.invalid/2491.jpg",
+    "photo_68": "https://example.invalid/2492.jpg",
+    "photo_135": "https://example.invalid/2493.jpg",
+    "photo_270": "https://example.invalid/2494.jpg",
+    "photo_300": "https://example.invalid/2495.jpg",
+    "photo_600": "https://example.invalid/2496.jpg",
+    "photo_1200": "https://example.invalid/2497.jpg"
+   },
+   "file_id": "opaque-2569",
+   "permissions": {
+    "edit": false
+   }
+  },
+  {
+   "artist": "Дайте танк (!)",
+   "id": 10626,
+   "owner_id": 10000,
+   "title": "Следы",
+   "duration": 129,
+   "access_key": "opaque-2570",
+   "ads": {
+    "content_id": "10000_10626",
+    "duration": "129",
+    "account_age_type": "3",
+    "puid22": "8"
+   },
+   "is_explicit": false,
+   "is_focus_track": false,
+   "is_licensed": true,
+   "track_code": "opaque-2571",
+   "url": "https://example.invalid/2572",
+   "audio_streams": [
+    {
+     "type": "aac",
+     "url": "https://example.invalid/2573",
+     "fallback_url": "https://example.invalid/2574"
+    },
+    {
+     "type": "aac_low",
+     "url": "https://example.invalid/2575",
+     "fallback_url": "https://example.invalid/2576"
+    },
+    {
+     "type": "dash",
+     "url": "https://example.invalid/2577",
+     "fallback_url": "https://example.invalid/2578"
+    },
+    {
+     "type": "hls_range",
+     "url": "https://example.invalid/2579.m3u8",
+     "fallback_url": "https://example.invalid/2580.m3u8"
+    },
+    {
+     "type": "hls_ts",
+     "url": "https://example.invalid/2581.m3u8",
+     "fallback_url": "https://example.invalid/2582.m3u8"
+    },
+    {
+     "type": "opaque-208",
+     "url": "https://example.invalid/2583",
+     "fallback_url": "https://example.invalid/2572"
+    }
+   ],
+   "date": 1662624938,
+   "like": true,
+   "album": {
+    "id": 10667,
+    "title": "Время собирать щебень",
+    "owner_id": -10668,
+    "access_key": "opaque-2584",
+    "thumb": {
+     "width": 300,
+     "height": 300,
+     "id": "10283",
+     "photo_34": "https://example.invalid/2585.jpg",
+     "photo_68": "https://example.invalid/2586.jpg",
+     "photo_135": "https://example.invalid/2587.jpg",
+     "photo_270": "https://example.invalid/2588.jpg",
+     "photo_300": "https://example.invalid/2589.jpg",
+     "photo_600": "https://example.invalid/2590.jpg",
+     "photo_1200": "https://example.invalid/2591.jpg"
+    },
+    "main_color": "#021D6E"
+   },
+   "track_id": 10669,
+   "main_artists": [
+    {
+     "name": "Дайте танк (!)",
+     "domain": "10080",
+     "id": "10080",
+     "is_followed": false,
+     "can_follow": false
+    }
+   ],
+   "is_official": true,
+   "release_audio_id": "-10670_10671",
+   "main_color": "#021D6E",
+   "thumb": {
+    "width": 300,
+    "height": 300,
+    "id": "10283",
+    "photo_34": "https://example.invalid/2585.jpg",
+    "photo_68": "https://example.invalid/2586.jpg",
+    "photo_135": "https://example.invalid/2587.jpg",
+    "photo_270": "https://example.invalid/2588.jpg",
+    "photo_300": "https://example.invalid/2589.jpg",
+    "photo_600": "https://example.invalid/2590.jpg",
+    "photo_1200": "https://example.invalid/2591.jpg"
+   },
+   "file_id": "opaque-2592",
+   "permissions": {
+    "edit": false
+   }
+  },
+  {
+   "artist": "Дайте танк (!)",
+   "id": 10627,
+   "owner_id": 10000,
+   "title": "Гореть",
+   "duration": 181,
+   "access_key": "opaque-2593",
+   "ads": {
+    "content_id": "10000_10627",
+    "duration": "181",
+    "account_age_type": "3",
+    "puid22": "8"
+   },
+   "is_explicit": false,
+   "is_focus_track": false,
+   "is_licensed": true,
+   "track_code": "opaque-2594",
+   "url": "https://example.invalid/2595",
+   "audio_streams": [
+    {
+     "type": "aac",
+     "url": "https://example.invalid/2596",
+     "fallback_url": "https://example.invalid/2597"
+    },
+    {
+     "type": "aac_low",
+     "url": "https://example.invalid/2598",
+     "fallback_url": "https://example.invalid/2599"
+    },
+    {
+     "type": "dash",
+     "url": "https://example.invalid/2600",
+     "fallback_url": "https://example.invalid/2601"
+    },
+    {
+     "type": "hls_range",
+     "url": "https://example.invalid/2602.m3u8",
+     "fallback_url": "https://example.invalid/2603.m3u8"
+    },
+    {
+     "type": "hls_ts",
+     "url": "https://example.invalid/2604.m3u8",
+     "fallback_url": "https://example.invalid/2605.m3u8"
+    },
+    {
+     "type": "opaque-208",
+     "url": "https://example.invalid/2606",
+     "fallback_url": "https://example.invalid/2595"
+    }
+   ],
+   "date": 1662624936,
+   "has_lyrics": true,
+   "like": true,
+   "album": {
+    "id": 10672,
+    "title": "Радио огонь",
+    "owner_id": -10673,
+    "access_key": "opaque-2607",
+    "thumb": {
+     "width": 300,
+     "height": 300,
+     "id": "10258",
+     "photo_34": "https://example.invalid/2608.jpg",
+     "photo_68": "https://example.invalid/2609.jpg",
+     "photo_135": "https://example.invalid/2610.jpg",
+     "photo_270": "https://example.invalid/2611.jpg",
+     "photo_300": "https://example.invalid/2612.jpg",
+     "photo_600": "https://example.invalid/2613.jpg",
+     "photo_1200": "https://example.invalid/2614.jpg"
+    },
+    "main_color": "#EDC549"
+   },
+   "track_id": 10674,
+   "main_artists": [
+    {
+     "name": "Дайте танк (!)",
+     "domain": "10080",
+     "id": "10080",
+     "is_followed": false,
+     "can_follow": false
+    }
+   ],
+   "is_official": true,
+   "release_audio_id": "-10675_10676",
+   "main_color": "#EDC549",
+   "thumb": {
+    "width": 300,
+    "height": 300,
+    "id": "10258",
+    "photo_34": "https://example.invalid/2608.jpg",
+    "photo_68": "https://example.invalid/2609.jpg",
+    "photo_135": "https://example.invalid/2610.jpg",
+    "photo_270": "https://example.invalid/2611.jpg",
+    "photo_300": "https://example.invalid/2612.jpg",
+    "photo_600": "https://example.invalid/2613.jpg",
+    "photo_1200": "https://example.invalid/2614.jpg"
+   },
+   "file_id": "opaque-2615",
+   "permissions": {
+    "edit": false
+   }
+  },
+  {
+   "artist": "Дайте танк (!)",
+   "id": 10628,
+   "owner_id": 10000,
+   "title": "Клад",
+   "duration": 161,
+   "access_key": "opaque-2616",
+   "ads": {
+    "content_id": "10000_10628",
+    "duration": "161",
+    "account_age_type": "3",
+    "puid22": "8"
+   },
+   "is_explicit": false,
+   "is_focus_track": false,
+   "is_licensed": true,
+   "track_code": "opaque-2617",
+   "url": "https://example.invalid/2618",
+   "audio_streams": [
+    {
+     "type": "aac",
+     "url": "https://example.invalid/2619",
+     "fallback_url": "https://example.invalid/2620"
+    },
+    {
+     "type": "aac_low",
+     "url": "https://example.invalid/2621",
+     "fallback_url": "https://example.invalid/2622"
+    },
+    {
+     "type": "dash",
+     "url": "https://example.invalid/2623",
+     "fallback_url": "https://example.invalid/2624"
+    },
+    {
+     "type": "hls_range",
+     "url": "https://example.invalid/2625.m3u8",
+     "fallback_url": "https://example.invalid/2626.m3u8"
+    },
+    {
+     "type": "hls_ts",
+     "url": "https://example.invalid/2627.m3u8",
+     "fallback_url": "https://example.invalid/2628.m3u8"
+    },
+    {
+     "type": "opaque-208",
+     "url": "https://example.invalid/2629",
+     "fallback_url": "https://example.invalid/2618"
+    }
+   ],
+   "date": 1662624935,
+   "like": true,
+   "album": {
+    "id": 10152,
+    "title": "Интим",
+    "owner_id": -10153,
+    "access_key": "opaque-443",
+    "thumb": {
+     "width": 300,
+     "height": 300,
+     "id": "10154",
+     "photo_34": "https://example.invalid/444.jpg",
+     "photo_68": "https://example.invalid/445.jpg",
+     "photo_135": "https://example.invalid/446.jpg",
+     "photo_270": "https://example.invalid/447.jpg",
+     "photo_300": "https://example.invalid/448.jpg",
+     "photo_600": "https://example.invalid/449.jpg",
+     "photo_1200": "https://example.invalid/450.jpg"
+    },
+    "main_color": "#8E002A"
+   },
+   "track_id": 10677,
+   "main_artists": [
+    {
+     "name": "Дайте танк (!)",
+     "domain": "10080",
+     "id": "10080",
+     "is_followed": false,
+     "can_follow": false
+    }
+   ],
+   "is_official": true,
+   "release_audio_id": "-10678_10679",
+   "main_color": "#8E002A",
+   "thumb": {
+    "width": 300,
+    "height": 300,
+    "id": "10154",
+    "photo_34": "https://example.invalid/444.jpg",
+    "photo_68": "https://example.invalid/445.jpg",
+    "photo_135": "https://example.invalid/446.jpg",
+    "photo_270": "https://example.invalid/447.jpg",
+    "photo_300": "https://example.invalid/448.jpg",
+    "photo_600": "https://example.invalid/449.jpg",
+    "photo_1200": "https://example.invalid/450.jpg"
+   },
+   "file_id": "opaque-2630",
+   "permissions": {
+    "edit": false
+   }
+  },
+  {
+   "artist": "Дайте танк (!)",
+   "id": 10629,
+   "owner_id": 10000,
+   "title": "Мишура",
+   "duration": 144,
+   "access_key": "opaque-2631",
+   "ads": {
+    "content_id": "10000_10629",
+    "duration": "144",
+    "account_age_type": "3",
+    "puid22": "8"
+   },
+   "is_explicit": false,
+   "is_focus_track": false,
+   "is_licensed": true,
+   "track_code": "opaque-2632",
+   "url": "https://example.invalid/2633",
+   "audio_streams": [
+    {
+     "type": "aac",
+     "url": "https://example.invalid/2634",
+     "fallback_url": "https://example.invalid/2635"
+    },
+    {
+     "type": "aac_low",
+     "url": "https://example.invalid/2636",
+     "fallback_url": "https://example.invalid/2637"
+    },
+    {
+     "type": "dash",
+     "url": "https://example.invalid/2638",
+     "fallback_url": "https://example.invalid/2639"
+    },
+    {
+     "type": "hls_range",
+     "url": "https://example.invalid/2640.m3u8",
+     "fallback_url": "https://example.invalid/2641.m3u8"
+    },
+    {
+     "type": "hls_ts",
+     "url": "https://example.invalid/2642.m3u8",
+     "fallback_url": "https://example.invalid/2643.m3u8"
+    },
+    {
+     "type": "opaque-208",
+     "url": "https://example.invalid/2644",
+     "fallback_url": "https://example.invalid/2633"
+    }
+   ],
+   "date": 1662624934,
+   "like": true,
+   "album": {
+    "id": 10680,
+    "title": "Универсамка",
+    "owner_id": -10681,
+    "access_key": "opaque-2645",
+    "thumb": {
+     "width": 300,
+     "height": 300,
+     "id": "10112",
+     "photo_34": "https://example.invalid/2646.jpg",
+     "photo_68": "https://example.invalid/2647.jpg",
+     "photo_135": "https://example.invalid/2648.jpg",
+     "photo_270": "https://example.invalid/2649.jpg",
+     "photo_300": "https://example.invalid/2650.jpg",
+     "photo_600": "https://example.invalid/2651.jpg",
+     "photo_1200": "https://example.invalid/2652.jpg"
+    },
+    "main_color": "#B97D59"
+   },
+   "track_id": 10682,
+   "main_artists": [
+    {
+     "name": "Дайте танк (!)",
+     "domain": "10080",
+     "id": "10080",
+     "is_followed": false,
+     "can_follow": false
+    }
+   ],
+   "is_official": true,
+   "release_audio_id": "-10683_10684",
+   "main_color": "#B97D59",
+   "thumb": {
+    "width": 300,
+    "height": 300,
+    "id": "10112",
+    "photo_34": "https://example.invalid/2646.jpg",
+    "photo_68": "https://example.invalid/2647.jpg",
+    "photo_135": "https://example.invalid/2648.jpg",
+    "photo_270": "https://example.invalid/2649.jpg",
+    "photo_300": "https://example.invalid/2650.jpg",
+    "photo_600": "https://example.invalid/2651.jpg",
+    "photo_1200": "https://example.invalid/2652.jpg"
+   },
+   "file_id": "opaque-2653",
+   "permissions": {
+    "edit": false
+   }
+  },
+  {
+   "artist": "Дайте танк (!)",
+   "id": 10630,
+   "owner_id": 10000,
+   "title": "Хомилия (С придыханием)",
+   "duration": 188,
+   "legal_notices_type": 2,
+   "access_key": "opaque-2654",
+   "ads": {
+    "content_id": "10000_10630",
+    "duration": "188",
+    "account_age_type": "3",
+    "puid22": "8"
+   },
+   "is_explicit": true,
+   "is_focus_track": false,
+   "is_licensed": true,
+   "track_code": "opaque-2655",
+   "url": "https://example.invalid/2656",
+   "audio_streams": [
+    {
+     "type": "aac",
+     "url": "https://example.invalid/2657",
+     "fallback_url": "https://example.invalid/2658"
+    },
+    {
+     "type": "aac_low",
+     "url": "https://example.invalid/2659",
+     "fallback_url": "https://example.invalid/2660"
+    },
+    {
+     "type": "dash",
+     "url": "https://example.invalid/2661",
+     "fallback_url": "https://example.invalid/2662"
+    },
+    {
+     "type": "hls_range",
+     "url": "https://example.invalid/2663.m3u8",
+     "fallback_url": "https://example.invalid/2664.m3u8"
+    },
+    {
+     "type": "hls_ts",
+     "url": "https://example.invalid/2665.m3u8",
+     "fallback_url": "https://example.invalid/2666.m3u8"
+    },
+    {
+     "type": "opaque-208",
+     "url": "https://example.invalid/2667",
+     "fallback_url": "https://example.invalid/2656"
+    }
+   ],
+   "date": 1662624932,
+   "like": true,
+   "album": {
+    "id": 10667,
+    "title": "Время собирать щебень",
+    "owner_id": -10668,
+    "access_key": "opaque-2584",
+    "thumb": {
+     "width": 300,
+     "height": 300,
+     "id": "10283",
+     "photo_34": "https://example.invalid/2585.jpg",
+     "photo_68": "https://example.invalid/2586.jpg",
+     "photo_135": "https://example.invalid/2587.jpg",
+     "photo_270": "https://example.invalid/2588.jpg",
+     "photo_300": "https://example.invalid/2589.jpg",
+     "photo_600": "https://example.invalid/2590.jpg",
+     "photo_1200": "https://example.invalid/2591.jpg"
+    },
+    "main_color": "#021D6E"
+   },
+   "track_id": 10685,
+   "main_artists": [
+    {
+     "name": "Дайте танк (!)",
+     "domain": "10080",
+     "id": "10080",
+     "is_followed": false,
+     "can_follow": false
+    }
+   ],
+   "is_official": true,
+   "release_audio_id": "-10686_10687",
+   "main_color": "#021D6E",
+   "thumb": {
+    "width": 300,
+    "height": 300,
+    "id": "10283",
+    "photo_34": "https://example.invalid/2585.jpg",
+    "photo_68": "https://example.invalid/2586.jpg",
+    "photo_135": "https://example.invalid/2587.jpg",
+    "photo_270": "https://example.invalid/2588.jpg",
+    "photo_300": "https://example.invalid/2589.jpg",
+    "photo_600": "https://example.invalid/2590.jpg",
+    "photo_1200": "https://example.invalid/2591.jpg"
+   },
+   "file_id": "opaque-2668",
+   "permissions": {
+    "edit": false
+   }
+  },
+  {
+   "artist": "Дайте танк (!)",
+   "id": 10631,
+   "owner_id": 10000,
+   "title": "Грех",
+   "duration": 125,
+   "legal_notices_type": 2,
+   "access_key": "opaque-2669",
+   "ads": {
+    "content_id": "10000_10631",
+    "duration": "125",
+    "account_age_type": "3",
+    "puid22": "8"
+   },
+   "is_explicit": true,
+   "is_focus_track": false,
+   "is_licensed": true,
+   "track_code": "opaque-2670",
+   "url": "https://example.invalid/2671",
+   "audio_streams": [
+    {
+     "type": "aac",
+     "url": "https://example.invalid/2672",
+     "fallback_url": "https://example.invalid/2673"
+    },
+    {
+     "type": "aac_low",
+     "url": "https://example.invalid/2674",
+     "fallback_url": "https://example.invalid/2675"
+    },
+    {
+     "type": "dash",
+     "url": "https://example.invalid/2676",
+     "fallback_url": "https://example.invalid/2677"
+    },
+    {
+     "type": "hls_range",
+     "url": "https://example.invalid/2678.m3u8",
+     "fallback_url": "https://example.invalid/2679.m3u8"
+    },
+    {
+     "type": "hls_ts",
+     "url": "https://example.invalid/2680.m3u8",
+     "fallback_url": "https://example.invalid/2681.m3u8"
+    },
+    {
+     "type": "opaque-208",
+     "url": "https://example.invalid/2682",
+     "fallback_url": "https://example.invalid/2671"
+    }
+   ],
+   "date": 1662624931,
+   "like": true,
+   "album": {
+    "id": 10656,
+    "title": "Глаза боятся",
+    "owner_id": -10657,
+    "access_key": "opaque-2542",
+    "thumb": {
+     "width": 300,
+     "height": 300,
+     "id": "10112",
+     "photo_34": "https://example.invalid/2543.jpg",
+     "photo_68": "https://example.invalid/2544.jpg",
+     "photo_135": "https://example.invalid/2545.jpg",
+     "photo_270": "https://example.invalid/2546.jpg",
+     "photo_300": "https://example.invalid/2547.jpg",
+     "photo_600": "https://example.invalid/2548.jpg",
+     "photo_1200": "https://example.invalid/2549.jpg"
+    },
+    "main_color": "#014D41"
+   },
+   "track_id": 10688,
+   "main_artists": [
+    {
+     "name": "Дайте танк (!)",
+     "domain": "10080",
+     "id": "10080",
+     "is_followed": false,
+     "can_follow": false
+    }
+   ],
+   "is_official": true,
+   "release_audio_id": "-10689_10690",
+   "main_color": "#014D41",
+   "thumb": {
+    "width": 300,
+    "height": 300,
+    "id": "10112",
+    "photo_34": "https://example.invalid/2543.jpg",
+    "photo_68": "https://example.invalid/2544.jpg",
+    "photo_135": "https://example.invalid/2545.jpg",
+    "photo_270": "https://example.invalid/2546.jpg",
+    "photo_300": "https://example.invalid/2547.jpg",
+    "photo_600": "https://example.invalid/2548.jpg",
+    "photo_1200": "https://example.invalid/2549.jpg"
+   },
+   "file_id": "opaque-2683",
+   "permissions": {
+    "edit": false
+   }
+  },
+  {
+   "artist": "Shovel",
+   "id": 10632,
+   "owner_id": 10000,
+   "title": "Gap",
+   "duration": 162,
+   "access_key": "opaque-2684",
+   "ads": {
+    "content_id": "10000_10632",
+    "duration": "162",
+    "account_age_type": "3",
+    "puid22": "150"
+   },
+   "is_explicit": false,
+   "is_focus_track": false,
+   "is_licensed": true,
+   "track_code": "opaque-2685",
+   "url": "https://example.invalid/2686",
+   "audio_streams": [
+    {
+     "type": "aac",
+     "url": "https://example.invalid/2687",
+     "fallback_url": "https://example.invalid/2688"
+    },
+    {
+     "type": "aac_low",
+     "url": "https://example.invalid/2689",
+     "fallback_url": "https://example.invalid/2690"
+    },
+    {
+     "type": "dash",
+     "url": "https://example.invalid/2691",
+     "fallback_url": "https://example.invalid/2692"
+    },
+    {
+     "type": "hls_range",
+     "url": "https://example.invalid/2693.m3u8",
+     "fallback_url": "https://example.invalid/2694.m3u8"
+    },
+    {
+     "type": "hls_ts",
+     "url": "https://example.invalid/2695.m3u8",
+     "fallback_url": "https://example.invalid/2696.m3u8"
+    },
+    {
+     "type": "opaque-208",
+     "url": "https://example.invalid/2697",
+     "fallback_url": "https://example.invalid/2686"
+    }
+   ],
+   "date": 1662624930,
+   "like": true,
+   "album": {
+    "id": 10691,
+    "title": "Latitude 60° Low",
+    "owner_id": -10692,
+    "access_key": "opaque-2698",
+    "thumb": {
+     "width": 1500,
+     "height": 1500,
+     "id": "10693",
+     "photo_34": "https://example.invalid/2699.jpg",
+     "photo_68": "https://example.invalid/2700.jpg",
+     "photo_135": "https://example.invalid/2701.jpg",
+     "photo_270": "https://example.invalid/2702.jpg",
+     "photo_300": "https://example.invalid/2703.jpg",
+     "photo_600": "https://example.invalid/2704.jpg",
+     "photo_1200": "https://example.invalid/2705.jpg"
+    },
+    "main_color": "#F6F6F6"
+   },
+   "track_id": 10694,
+   "main_artists": [
+    {
+     "name": "Shovel",
+     "domain": "10695",
+     "id": "10695",
+     "is_followed": false,
+     "can_follow": false
+    }
+   ],
+   "is_official": true,
+   "release_audio_id": "-10696_10697",
+   "main_color": "#F6F6F6",
+   "thumb": {
+    "width": 1500,
+    "height": 1500,
+    "id": "10693",
+    "photo_34": "https://example.invalid/2699.jpg",
+    "photo_68": "https://example.invalid/2700.jpg",
+    "photo_135": "https://example.invalid/2701.jpg",
+    "photo_270": "https://example.invalid/2702.jpg",
+    "photo_300": "https://example.invalid/2703.jpg",
+    "photo_600": "https://example.invalid/2704.jpg",
+    "photo_1200": "https://example.invalid/2705.jpg"
+   },
+   "file_id": "opaque-2706",
+   "permissions": {
+    "edit": false
+   }
+  },
+  {
+   "artist": "Дайте танк (!)",
+   "id": 10633,
+   "owner_id": 10000,
+   "title": "Да",
+   "duration": 124,
+   "legal_notices_type": 2,
+   "access_key": "opaque-2707",
+   "ads": {
+    "content_id": "10000_10633",
+    "duration": "124",
+    "account_age_type": "3",
+    "puid22": "8"
+   },
+   "is_explicit": true,
+   "is_focus_track": false,
+   "is_licensed": true,
+   "track_code": "opaque-2708",
+   "url": "https://example.invalid/2709",
+   "audio_streams": [
+    {
+     "type": "aac",
+     "url": "https://example.invalid/2710",
+     "fallback_url": "https://example.invalid/2711"
+    },
+    {
+     "type": "aac_low",
+     "url": "https://example.invalid/2712",
+     "fallback_url": "https://example.invalid/2713"
+    },
+    {
+     "type": "dash",
+     "url": "https://example.invalid/2714",
+     "fallback_url": "https://example.invalid/2715"
+    },
+    {
+     "type": "hls_range",
+     "url": "https://example.invalid/2716.m3u8",
+     "fallback_url": "https://example.invalid/2717.m3u8"
+    },
+    {
+     "type": "hls_ts",
+     "url": "https://example.invalid/2718.m3u8",
+     "fallback_url": "https://example.invalid/2719.m3u8"
+    },
+    {
+     "type": "opaque-208",
+     "url": "https://example.invalid/2720",
+     "fallback_url": "https://example.invalid/2709"
+    }
+   ],
+   "date": 1662624930,
+   "like": true,
+   "album": {
+    "id": 10667,
+    "title": "Время собирать щебень",
+    "owner_id": -10668,
+    "access_key": "opaque-2584",
+    "thumb": {
+     "width": 300,
+     "height": 300,
+     "id": "10283",
+     "photo_34": "https://example.invalid/2585.jpg",
+     "photo_68": "https://example.invalid/2586.jpg",
+     "photo_135": "https://example.invalid/2587.jpg",
+     "photo_270": "https://example.invalid/2588.jpg",
+     "photo_300": "https://example.invalid/2589.jpg",
+     "photo_600": "https://example.invalid/2590.jpg",
+     "photo_1200": "https://example.invalid/2591.jpg"
+    },
+    "main_color": "#021D6E"
+   },
+   "track_id": 10698,
+   "main_artists": [
+    {
+     "name": "Дайте танк (!)",
+     "domain": "10080",
+     "id": "10080",
+     "is_followed": false,
+     "can_follow": false
+    }
+   ],
+   "is_official": true,
+   "release_audio_id": "-10699_10700",
+   "main_color": "#021D6E",
+   "thumb": {
+    "width": 300,
+    "height": 300,
+    "id": "10283",
+    "photo_34": "https://example.invalid/2585.jpg",
+    "photo_68": "https://example.invalid/2586.jpg",
+    "photo_135": "https://example.invalid/2587.jpg",
+    "photo_270": "https://example.invalid/2588.jpg",
+    "photo_300": "https://example.invalid/2589.jpg",
+    "photo_600": "https://example.invalid/2590.jpg",
+    "photo_1200": "https://example.invalid/2591.jpg"
+   },
+   "file_id": "opaque-2721",
+   "permissions": {
+    "edit": false
+   }
+  },
+  {
+   "artist": "Дайте танк (!)",
+   "id": 10634,
+   "owner_id": 10000,
+   "title": "Крепость",
+   "duration": 197,
+   "access_key": "opaque-2722",
+   "ads": {
+    "content_id": "10000_10634",
+    "duration": "197",
+    "account_age_type": "3",
+    "puid22": "8"
+   },
+   "is_explicit": false,
+   "is_focus_track": false,
+   "is_licensed": true,
+   "track_code": "opaque-2723",
+   "url": "https://example.invalid/2724",
+   "audio_streams": [
+    {
+     "type": "aac",
+     "url": "https://example.invalid/2725",
+     "fallback_url": "https://example.invalid/2726"
+    },
+    {
+     "type": "aac_low",
+     "url": "https://example.invalid/2727",
+     "fallback_url": "https://example.invalid/2728"
+    },
+    {
+     "type": "dash",
+     "url": "https://example.invalid/2729",
+     "fallback_url": "https://example.invalid/2730"
+    },
+    {
+     "type": "hls_range",
+     "url": "https://example.invalid/2731.m3u8",
+     "fallback_url": "https://example.invalid/2732.m3u8"
+    },
+    {
+     "type": "hls_ts",
+     "url": "https://example.invalid/2733.m3u8",
+     "fallback_url": "https://example.invalid/2734.m3u8"
+    },
+    {
+     "type": "opaque-208",
+     "url": "https://example.invalid/2735",
+     "fallback_url": "https://example.invalid/2724"
+    }
+   ],
+   "date": 1662624928,
+   "like": true,
+   "album": {
+    "id": 10701,
+    "title": "Крепость (Single Version)",
+    "owner_id": -10702,
+    "access_key": "opaque-2736",
+    "thumb": {
+     "width": 1500,
+     "height": 1500,
+     "id": "10154",
+     "photo_34": "https://example.invalid/2737.jpg",
+     "photo_68": "https://example.invalid/2738.jpg",
+     "photo_135": "https://example.invalid/2739.jpg",
+     "photo_270": "https://example.invalid/2740.jpg",
+     "photo_300": "https://example.invalid/2741.jpg",
+     "photo_600": "https://example.invalid/2742.jpg",
+     "photo_1200": "https://example.invalid/2743.jpg"
+    },
+    "main_color": "#2D0543"
+   },
+   "track_id": 10703,
+   "main_artists": [
+    {
+     "name": "Дайте танк (!)",
+     "domain": "10080",
+     "id": "10080",
+     "is_followed": false,
+     "can_follow": false
+    }
+   ],
+   "subtitle": "Single Version",
+   "is_official": true,
+   "release_audio_id": "-10704_10705",
+   "main_color": "#2D0543",
+   "thumb": {
+    "width": 1500,
+    "height": 1500,
+    "id": "10154",
+    "photo_34": "https://example.invalid/2737.jpg",
+    "photo_68": "https://example.invalid/2738.jpg",
+    "photo_135": "https://example.invalid/2739.jpg",
+    "photo_270": "https://example.invalid/2740.jpg",
+    "photo_300": "https://example.invalid/2741.jpg",
+    "photo_600": "https://example.invalid/2742.jpg",
+    "photo_1200": "https://example.invalid/2743.jpg"
+   },
+   "file_id": "opaque-2744",
+   "permissions": {
+    "edit": false
+   }
+  },
+  {
+   "artist": "Дайте танк (!) feat. Рита Вихрия",
+   "id": 10635,
+   "owner_id": 10000,
+   "title": "В гостях",
+   "duration": 148,
+   "access_key": "opaque-2745",
+   "ads": {
+    "content_id": "10000_10635",
+    "duration": "148",
+    "account_age_type": "3",
+    "puid22": "8"
+   },
+   "is_explicit": false,
+   "is_focus_track": false,
+   "is_licensed": true,
+   "track_code": "opaque-2746",
+   "url": "https://example.invalid/2747",
+   "audio_streams": [
+    {
+     "type": "aac",
+     "url": "https://example.invalid/2748",
+     "fallback_url": "https://example.invalid/2749"
+    },
+    {
+     "type": "aac_low",
+     "url": "https://example.invalid/2750",
+     "fallback_url": "https://example.invalid/2751"
+    },
+    {
+     "type": "dash",
+     "url": "https://example.invalid/2752",
+     "fallback_url": "https://example.invalid/2753"
+    },
+    {
+     "type": "hls_range",
+     "url": "https://example.invalid/2754.m3u8",
+     "fallback_url": "https://example.invalid/2755.m3u8"
+    },
+    {
+     "type": "hls_ts",
+     "url": "https://example.invalid/2756.m3u8",
+     "fallback_url": "https://example.invalid/2757.m3u8"
+    },
+    {
+     "type": "opaque-208",
+     "url": "https://example.invalid/2758",
+     "fallback_url": "https://example.invalid/2747"
+    }
+   ],
+   "date": 1662624927,
+   "has_lyrics": true,
+   "like": true,
+   "album": {
+    "id": 10672,
+    "title": "Радио огонь",
+    "owner_id": -10673,
+    "access_key": "opaque-2607",
+    "thumb": {
+     "width": 300,
+     "height": 300,
+     "id": "10258",
+     "photo_34": "https://example.invalid/2608.jpg",
+     "photo_68": "https://example.invalid/2609.jpg",
+     "photo_135": "https://example.invalid/2610.jpg",
+     "photo_270": "https://example.invalid/2611.jpg",
+     "photo_300": "https://example.invalid/2612.jpg",
+     "photo_600": "https://example.invalid/2613.jpg",
+     "photo_1200": "https://example.invalid/2614.jpg"
+    },
+    "main_color": "#EDC549"
+   },
+   "track_id": 10706,
+   "main_artists": [
+    {
+     "name": "Дайте танк (!)",
+     "domain": "10080",
+     "id": "10080",
+     "is_followed": false,
+     "can_follow": false
+    }
+   ],
+   "featured_artists": [
+    {
+     "name": "Рита Вихрия",
+     "domain": "10707",
+     "id": "10707",
+     "is_followed": false,
+     "can_follow": false
+    }
+   ],
+   "is_official": true,
+   "release_audio_id": "-10708_10709",
+   "main_color": "#EDC549",
+   "thumb": {
+    "width": 300,
+    "height": 300,
+    "id": "10258",
+    "photo_34": "https://example.invalid/2608.jpg",
+    "photo_68": "https://example.invalid/2609.jpg",
+    "photo_135": "https://example.invalid/2610.jpg",
+    "photo_270": "https://example.invalid/2611.jpg",
+    "photo_300": "https://example.invalid/2612.jpg",
+    "photo_600": "https://example.invalid/2613.jpg",
+    "photo_1200": "https://example.invalid/2614.jpg"
+   },
+   "file_id": "opaque-2759",
+   "permissions": {
+    "edit": false
+   }
+  },
+  {
+   "artist": "Дайте танк (!)",
+   "id": 10636,
+   "owner_id": 10000,
+   "title": "Следы",
+   "duration": 127,
+   "access_key": "opaque-2760",
+   "ads": {
+    "content_id": "10000_10636",
+    "duration": "127",
+    "account_age_type": "3",
+    "puid22": "8"
+   },
+   "is_explicit": false,
+   "is_focus_track": false,
+   "is_licensed": true,
+   "track_code": "opaque-2761",
+   "url": "https://example.invalid/2762",
+   "audio_streams": [
+    {
+     "type": "aac",
+     "url": "https://example.invalid/2763",
+     "fallback_url": "https://example.invalid/2764"
+    },
+    {
+     "type": "aac_low",
+     "url": "https://example.invalid/2765",
+     "fallback_url": "https://example.invalid/2766"
+    },
+    {
+     "type": "dash",
+     "url": "https://example.invalid/2767",
+     "fallback_url": "https://example.invalid/2768"
+    },
+    {
+     "type": "hls_range",
+     "url": "https://example.invalid/2769.m3u8",
+     "fallback_url": "https://example.invalid/2770.m3u8"
+    },
+    {
+     "type": "hls_ts",
+     "url": "https://example.invalid/2771.m3u8",
+     "fallback_url": "https://example.invalid/2772.m3u8"
+    },
+    {
+     "type": "opaque-208",
+     "url": "https://example.invalid/2773",
+     "fallback_url": "https://example.invalid/2762"
+    }
+   ],
+   "date": 1662624926,
+   "like": true,
+   "album": {
+    "id": 10152,
+    "title": "Интим",
+    "owner_id": -10153,
+    "access_key": "opaque-443",
+    "thumb": {
+     "width": 300,
+     "height": 300,
+     "id": "10154",
+     "photo_34": "https://example.invalid/444.jpg",
+     "photo_68": "https://example.invalid/445.jpg",
+     "photo_135": "https://example.invalid/446.jpg",
+     "photo_270": "https://example.invalid/447.jpg",
+     "photo_300": "https://example.invalid/448.jpg",
+     "photo_600": "https://example.invalid/449.jpg",
+     "photo_1200": "https://example.invalid/450.jpg"
+    },
+    "main_color": "#8E002A"
+   },
+   "track_id": 10710,
+   "main_artists": [
+    {
+     "name": "Дайте танк (!)",
+     "domain": "10080",
+     "id": "10080",
+     "is_followed": false,
+     "can_follow": false
+    }
+   ],
+   "is_official": true,
+   "release_audio_id": "-10711_10712",
+   "main_color": "#8E002A",
+   "thumb": {
+    "width": 300,
+    "height": 300,
+    "id": "10154",
+    "photo_34": "https://example.invalid/444.jpg",
+    "photo_68": "https://example.invalid/445.jpg",
+    "photo_135": "https://example.invalid/446.jpg",
+    "photo_270": "https://example.invalid/447.jpg",
+    "photo_300": "https://example.invalid/448.jpg",
+    "photo_600": "https://example.invalid/449.jpg",
+    "photo_1200": "https://example.invalid/450.jpg"
+   },
+   "file_id": "opaque-2774",
+   "permissions": {
+    "edit": false
+   }
+  },
+  {
+   "artist": "System Of A Down",
+   "id": 10637,
+   "owner_id": 10000,
+   "title": "Chop Suey!",
+   "duration": 210,
+   "access_key": "opaque-2775",
+   "ads": {
+    "content_id": "10000_10637",
+    "duration": "210",
+    "account_age_type": "3",
+    "puid22": "14"
+   },
+   "is_explicit": false,
+   "is_focus_track": false,
+   "is_licensed": false,
+   "track_code": "opaque-2776",
+   "url": "",
+   "date": 1662624925,
+   "like": true,
+   "no_search": 1,
+   "album": {
+    "id": 0,
+    "title": "",
+    "owner_id": 0,
+    "access_key": "opaque-2777",
+    "main_color": "#F134FF"
+   },
+   "track_id": 10713,
+   "content_restricted": 1,
+   "main_artists": [
+    {
+     "name": "System Of A Down",
+     "domain": "10714",
+     "id": "10714",
+     "is_followed": false,
+     "can_follow": false
+    }
+   ],
+   "is_official": true,
+   "main_color": "#F134FF",
+   "thumb": {
+    "width": 750,
+    "height": 750,
+    "id": "10124",
+    "photo_34": "https://example.invalid/329.jpg",
+    "photo_68": "https://example.invalid/330.jpg",
+    "photo_135": "https://example.invalid/331.jpg",
+    "photo_270": "https://example.invalid/332.jpg",
+    "photo_300": "https://example.invalid/333.jpg",
+    "photo_600": "https://example.invalid/334.jpg",
+    "photo_1200": "https://example.invalid/335.jpg"
+   },
+   "file_id": "opaque-2778",
+   "permissions": {
+    "edit": false
+   }
+  },
+  {
+   "artist": "Soil",
+   "id": 10638,
+   "owner_id": 10000,
+   "title": "Nightmare",
+   "duration": 227,
+   "access_key": "opaque-2779",
+   "ads": {
+    "content_id": "10000_10638",
+    "duration": "227",
+    "account_age_type": "3",
+    "puid22": "11"
+   },
+   "is_explicit": false,
+   "is_focus_track": false,
+   "is_licensed": true,
+   "track_code": "opaque-2780",
+   "url": "https://example.invalid/2781.mp3",
+   "date": 1662624924,
+   "like": true,
+   "genre_id": 18,
+   "is_official": false,
+   "main_color": "#B5FE59",
+   "thumb": {
+    "width": 750,
+    "height": 750,
+    "id": "10715",
+    "photo_34": "https://example.invalid/2782.jpg",
+    "photo_68": "https://example.invalid/2783.jpg",
+    "photo_135": "https://example.invalid/2784.jpg",
+    "photo_270": "https://example.invalid/2785.jpg",
+    "photo_300": "https://example.invalid/2786.jpg",
+    "photo_600": "https://example.invalid/2787.jpg",
+    "photo_1200": "https://example.invalid/2788.jpg"
+   },
+   "file_id": "opaque-2789",
+   "permissions": {
+    "edit": true
+   }
+  }
+ ],
+ "ux_polls": []
+}

@@ -1,0 +1,43 @@
+[
+ {
+  "artist": "Дома Молчат",
+  "id": 10716,
+  "owner_id": 10063,
+  "title": "Люди надоели",
+  "duration": 179,
+  "access_key": "opaque-2802",
+  "ads": {
+   "content_id": "10063_10716",
+   "duration": "179",
+   "account_age_type": "3",
+   "puid22": "11"
+  },
+  "is_explicit": false,
+  "is_focus_track": false,
+  "is_licensed": false,
+  "track_code": "opaque-2803",
+  "url": "",
+  "date": 1727718533,
+  "genre_id": 1001,
+  "track_id": 10717,
+  "content_restricted": 2,
+  "is_official": false,
+  "main_color": "#C0C1C5",
+  "thumb": {
+   "width": 375,
+   "height": 375,
+   "id": "10313",
+   "photo_34": "https://example.invalid/1128.jpg",
+   "photo_68": "https://example.invalid/1129.jpg",
+   "photo_135": "https://example.invalid/1130.jpg",
+   "photo_270": "https://example.invalid/1131.jpg",
+   "photo_300": "https://example.invalid/1132.jpg",
+   "photo_600": "https://example.invalid/1133.jpg",
+   "photo_1200": "https://example.invalid/1133.jpg"
+  },
+  "file_id": "opaque-2804",
+  "permissions": {
+   "edit": false
+  }
+ }
+]

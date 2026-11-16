@@ -1,0 +1,1227 @@
+{
+ "count": 30,
+ "items": [
+  {
+   "artist": "Дайте танк (!)",
+   "id": 10472,
+   "owner_id": -10473,
+   "title": "Три четверти",
+   "duration": 211,
+   "access_key": "opaque-1815",
+   "ads": {
+    "content_id": "-10473_10472",
+    "duration": "211",
+    "account_age_type": "3",
+    "puid22": "8"
+   },
+   "is_explicit": false,
+   "is_focus_track": false,
+   "is_licensed": true,
+   "track_code": "opaque-1816",
+   "url": "https://example.invalid/1817",
+   "audio_streams": [
+    {
+     "type": "aac",
+     "url": "https://example.invalid/1818",
+     "fallback_url": "https://example.invalid/1819"
+    },
+    {
+     "type": "aac_low",
+     "url": "https://example.invalid/1820",
+     "fallback_url": "https://example.invalid/1821"
+    },
+    {
+     "type": "dash",
+     "url": "https://example.invalid/1822",
+     "fallback_url": "https://example.invalid/1823"
+    },
+    {
+     "type": "hls_range",
+     "url": "https://example.invalid/1824.m3u8",
+     "fallback_url": "https://example.invalid/1825.m3u8"
+    },
+    {
+     "type": "hls_ts",
+     "url": "https://example.invalid/1826.m3u8",
+     "fallback_url": "https://example.invalid/1827.m3u8"
+    },
+    {
+     "type": "opaque-208",
+     "url": "https://example.invalid/1828",
+     "fallback_url": "https://example.invalid/1817"
+    }
+   ],
+   "date": 1601910003,
+   "has_lyrics": true,
+   "album": {
+    "id": 10457,
+    "title": "См. рис. 2",
+    "owner_id": -10458,
+    "access_key": "opaque-1760",
+    "thumb": {
+     "width": 300,
+     "height": 300,
+     "id": "10160",
+     "photo_34": "https://example.invalid/1829.jpg",
+     "photo_68": "https://example.invalid/1830.jpg",
+     "photo_135": "https://example.invalid/1831.jpg",
+     "photo_270": "https://example.invalid/1832.jpg",
+     "photo_300": "https://example.invalid/1833.jpg",
+     "photo_600": "https://example.invalid/1834.jpg",
+     "photo_1200": "https://example.invalid/1835.jpg"
+    },
+    "main_color": "#FD0035"
+   },
+   "track_id": 10474,
+   "main_artists": [
+    {
+     "name": "Дайте танк (!)",
+     "domain": "10080",
+     "id": "10080",
+     "is_followed": false,
+     "can_follow": false
+    }
+   ],
+   "is_official": true,
+   "release_audio_id": "-10473_10472",
+   "main_color": "#FD0035",
+   "thumb": {
+    "width": 300,
+    "height": 300,
+    "id": "10160",
+    "photo_34": "https://example.invalid/1829.jpg",
+    "photo_68": "https://example.invalid/1830.jpg",
+    "photo_135": "https://example.invalid/1831.jpg",
+    "photo_270": "https://example.invalid/1832.jpg",
+    "photo_300": "https://example.invalid/1833.jpg",
+    "photo_600": "https://example.invalid/1834.jpg",
+    "photo_1200": "https://example.invalid/1835.jpg"
+   },
+   "file_id": "opaque-1836"
+  },
+  {
+   "artist": "ТВОИ КОШМАРЫ",
+   "id": 10475,
+   "owner_id": -10476,
+   "title": "Машинистам",
+   "duration": 150,
+   "access_key": "opaque-1837",
+   "ads": {
+    "content_id": "-10476_10475",
+    "duration": "150",
+    "account_age_type": "3",
+    "puid22": "4"
+   },
+   "is_explicit": false,
+   "is_focus_track": false,
+   "is_licensed": true,
+   "track_code": "opaque-1838",
+   "url": "https://example.invalid/1839",
+   "audio_streams": [
+    {
+     "type": "aac",
+     "url": "https://example.invalid/1840",
+     "fallback_url": "https://example.invalid/1841"
+    },
+    {
+     "type": "aac_low",
+     "url": "https://example.invalid/1842",
+     "fallback_url": "https://example.invalid/1843"
+    },
+    {
+     "type": "dash",
+     "url": "https://example.invalid/1844",
+     "fallback_url": "https://example.invalid/1845"
+    },
+    {
+     "type": "flac",
+     "url": "https://example.invalid/1846",
+     "fallback_url": "https://example.invalid/1847"
+    },
+    {
+     "type": "hls_range",
+     "url": "https://example.invalid/1848.m3u8",
+     "fallback_url": "https://example.invalid/1849.m3u8"
+    },
+    {
+     "type": "hls_ts",
+     "url": "https://example.invalid/1850.m3u8",
+     "fallback_url": "https://example.invalid/1851.m3u8"
+    },
+    {
+     "type": "opaque-208",
+     "url": "https://example.invalid/1852",
+     "fallback_url": "https://example.invalid/1839"
+    }
+   ],
+   "date": 1793349612,
+   "album": {
+    "id": 10477,
+    "title": "Машинистам",
+    "owner_id": -10478,
+    "access_key": "opaque-1853",
+    "thumb": {
+     "width": 1500,
+     "height": 1500,
+     "id": "10200",
+     "photo_34": "https://example.invalid/1854.jpg",
+     "photo_68": "https://example.invalid/1855.jpg",
+     "photo_135": "https://example.invalid/1856.jpg",
+     "photo_270": "https://example.invalid/1857.jpg",
+     "photo_300": "https://example.invalid/1858.jpg",
+     "photo_600": "https://example.invalid/1859.jpg",
+     "photo_1200": "https://example.invalid/1860.jpg"
+    },
+    "main_color": "#E5E5E5"
+   },
+   "track_id": 10479,
+   "main_artists": [
+    {
+     "name": "ТВОИ КОШМАРЫ",
+     "domain": "10202",
+     "id": "10202",
+     "is_followed": false,
+     "can_follow": false
+    }
+   ],
+   "short_videos_allowed": true,
+   "stories_allowed": true,
+   "is_official": true,
+   "release_audio_id": "-10476_10475",
+   "main_color": "#E5E5E5",
+   "thumb": {
+    "width": 1500,
+    "height": 1500,
+    "id": "10200",
+    "photo_34": "https://example.invalid/1854.jpg",
+    "photo_68": "https://example.invalid/1855.jpg",
+    "photo_135": "https://example.invalid/1856.jpg",
+    "photo_270": "https://example.invalid/1857.jpg",
+    "photo_300": "https://example.invalid/1858.jpg",
+    "photo_600": "https://example.invalid/1859.jpg",
+    "photo_1200": "https://example.invalid/1860.jpg"
+   },
+   "file_id": "opaque-1861"
+  },
+  {
+   "artist": "Буерак",
+   "id": 10480,
+   "owner_id": -10481,
+   "title": "Неважно",
+   "duration": 151,
+   "access_key": "opaque-1862",
+   "ads": {
+    "content_id": "-10481_10480",
+    "duration": "151",
+    "account_age_type": "3",
+    "puid22": "14"
+   },
+   "is_explicit": false,
+   "is_focus_track": false,
+   "is_licensed": true,
+   "track_code": "opaque-1863",
+   "url": "https://example.invalid/1864",
+   "audio_streams": [
+    {
+     "type": "aac",
+     "url": "https://example.invalid/1865",
+     "fallback_url": "https://example.invalid/1866"
+    },
+    {
+     "type": "aac_low",
+     "url": "https://example.invalid/1867",
+     "fallback_url": "https://example.invalid/1868"
+    },
+    {
+     "type": "dash",
+     "url": "https://example.invalid/1869",
+     "fallback_url": "https://example.invalid/1870"
+    },
+    {
+     "type": "flac",
+     "url": "https://example.invalid/1871",
+     "fallback_url": "https://example.invalid/1872"
+    },
+    {
+     "type": "hls_range",
+     "url": "https://example.invalid/1873.m3u8",
+     "fallback_url": "https://example.invalid/1874.m3u8"
+    },
+    {
+     "type": "hls_ts",
+     "url": "https://example.invalid/1875.m3u8",
+     "fallback_url": "https://example.invalid/1876.m3u8"
+    },
+    {
+     "type": "opaque-208",
+     "url": "https://example.invalid/1877",
+     "fallback_url": "https://example.invalid/1864"
+    }
+   ],
+   "date": 1747753470,
+   "album": {
+    "id": 10482,
+    "title": "Репост Модерн",
+    "owner_id": -10483,
+    "access_key": "opaque-1878",
+    "thumb": {
+     "width": 1500,
+     "height": 1500,
+     "id": "10196",
+     "photo_34": "https://example.invalid/1879.jpg",
+     "photo_68": "https://example.invalid/1880.jpg",
+     "photo_135": "https://example.invalid/1881.jpg",
+     "photo_270": "https://example.invalid/1882.jpg",
+     "photo_300": "https://example.invalid/1883.jpg",
+     "photo_600": "https://example.invalid/1884.jpg",
+     "photo_1200": "https://example.invalid/1885.jpg"
+    },
+    "main_color": "#060606"
+   },
+   "track_id": 10484,
+   "main_artists": [
+    {
+     "name": "Буерак",
+     "domain": "10485",
+     "id": "10485",
+     "is_followed": false,
+     "can_follow": false
+    }
+   ],
+   "short_videos_allowed": true,
+   "stories_allowed": true,
+   "is_official": true,
+   "release_audio_id": "-10481_10480",
+   "main_color": "#060606",
+   "thumb": {
+    "width": 1500,
+    "height": 1500,
+    "id": "10196",
+    "photo_34": "https://example.invalid/1879.jpg",
+    "photo_68": "https://example.invalid/1880.jpg",
+    "photo_135": "https://example.invalid/1881.jpg",
+    "photo_270": "https://example.invalid/1882.jpg",
+    "photo_300": "https://example.invalid/1883.jpg",
+    "photo_600": "https://example.invalid/1884.jpg",
+    "photo_1200": "https://example.invalid/1885.jpg"
+   },
+   "file_id": "opaque-1886"
+  },
+  {
+   "artist": "ЩЕНКИ",
+   "id": 10486,
+   "owner_id": -10487,
+   "title": "Смерть неизбежна",
+   "duration": 181,
+   "legal_notices_type": 2,
+   "access_key": "opaque-1887",
+   "ads": {
+    "content_id": "-10487_10486",
+    "duration": "181",
+    "account_age_type": "3",
+    "puid22": "4"
+   },
+   "is_explicit": true,
+   "is_focus_track": false,
+   "is_licensed": true,
+   "track_code": "opaque-1888",
+   "url": "https://example.invalid/1889",
+   "audio_streams": [
+    {
+     "type": "aac",
+     "url": "https://example.invalid/1890",
+     "fallback_url": "https://example.invalid/1891"
+    },
+    {
+     "type": "aac_low",
+     "url": "https://example.invalid/1892",
+     "fallback_url": "https://example.invalid/1893"
+    },
+    {
+     "type": "dash",
+     "url": "https://example.invalid/1894",
+     "fallback_url": "https://example.invalid/1895"
+    },
+    {
+     "type": "hls_range",
+     "url": "https://example.invalid/1896.m3u8",
+     "fallback_url": "https://example.invalid/1897.m3u8"
+    },
+    {
+     "type": "hls_ts",
+     "url": "https://example.invalid/1898.m3u8",
+     "fallback_url": "https://example.invalid/1899.m3u8"
+    },
+    {
+     "type": "opaque-208",
+     "url": "https://example.invalid/1900",
+     "fallback_url": "https://example.invalid/1889"
+    }
+   ],
+   "date": 1678365653,
+   "album": {
+    "id": 10488,
+    "title": "unnamed",
+    "owner_id": -10489,
+    "access_key": "opaque-1901",
+    "thumb": {
+     "width": 300,
+     "height": 300,
+     "id": "10154",
+     "photo_34": "https://example.invalid/1902.jpg",
+     "photo_68": "https://example.invalid/1903.jpg",
+     "photo_135": "https://example.invalid/1904.jpg",
+     "photo_270": "https://example.invalid/1905.jpg",
+     "photo_300": "https://example.invalid/1906.jpg",
+     "photo_600": "https://example.invalid/1907.jpg",
+     "photo_1200": "https://example.invalid/1908.jpg"
+    },
+    "main_color": "#0A0813"
+   },
+   "track_id": 10490,
+   "main_artists": [
+    {
+     "name": "ЩЕНКИ",
+     "domain": "10491",
+     "id": "10491",
+     "is_followed": false,
+     "can_follow": false
+    }
+   ],
+   "short_videos_allowed": true,
+   "stories_allowed": true,
+   "stories_cover_allowed": true,
+   "is_official": true,
+   "release_audio_id": "-10487_10486",
+   "main_color": "#0A0813",
+   "thumb": {
+    "width": 300,
+    "height": 300,
+    "id": "10154",
+    "photo_34": "https://example.invalid/1902.jpg",
+    "photo_68": "https://example.invalid/1903.jpg",
+    "photo_135": "https://example.invalid/1904.jpg",
+    "photo_270": "https://example.invalid/1905.jpg",
+    "photo_300": "https://example.invalid/1906.jpg",
+    "photo_600": "https://example.invalid/1907.jpg",
+    "photo_1200": "https://example.invalid/1908.jpg"
+   },
+   "file_id": "opaque-1909"
+  },
+  {
+   "artist": "Полярность",
+   "id": 10032,
+   "owner_id": -10031,
+   "title": "Вдохновение к искусству",
+   "duration": 212,
+   "access_key": "opaque-712",
+   "ads": {
+    "content_id": "-10031_10032",
+    "duration": "212",
+    "account_age_type": "3",
+    "puid22": "14"
+   },
+   "is_explicit": false,
+   "is_focus_track": false,
+   "is_licensed": true,
+   "track_code": "opaque-1910",
+   "url": "https://example.invalid/1911",
+   "audio_streams": [
+    {
+     "type": "aac",
+     "url": "https://example.invalid/1912",
+     "fallback_url": "https://example.invalid/1913"
+    },
+    {
+     "type": "aac_low",
+     "url": "https://example.invalid/1914",
+     "fallback_url": "https://example.invalid/1915"
+    },
+    {
+     "type": "dash",
+     "url": "https://example.invalid/1916",
+     "fallback_url": "https://example.invalid/1917"
+    },
+    {
+     "type": "hls_range",
+     "url": "https://example.invalid/1918.m3u8",
+     "fallback_url": "https://example.invalid/1919.m3u8"
+    },
+    {
+     "type": "hls_ts",
+     "url": "https://example.invalid/1920.m3u8",
+     "fallback_url": "https://example.invalid/1921.m3u8"
+    },
+    {
+     "type": "opaque-208",
+     "url": "https://example.invalid/1922",
+     "fallback_url": "https://example.invalid/1911"
+    }
+   ],
+   "date": 1763131290,
+   "has_lyrics": true,
+   "album": {
+    "id": 10221,
+    "title": "Полярность",
+    "owner_id": -10222,
+    "access_key": "opaque-726",
+    "thumb": {
+     "width": 1500,
+     "height": 1500,
+     "id": "10223",
+     "photo_34": "https://example.invalid/727.jpg",
+     "photo_68": "https://example.invalid/728.jpg",
+     "photo_135": "https://example.invalid/729.jpg",
+     "photo_270": "https://example.invalid/730.jpg",
+     "photo_300": "https://example.invalid/731.jpg",
+     "photo_600": "https://example.invalid/732.jpg",
+     "photo_1200": "https://example.invalid/733.jpg"
+    },
+    "main_color": "#FFFFFF"
+   },
+   "track_id": 10224,
+   "main_artists": [
+    {
+     "name": "Полярность",
+     "domain": "10225",
+     "id": "10225",
+     "is_followed": false,
+     "can_follow": false
+    }
+   ],
+   "short_videos_allowed": true,
+   "stories_allowed": true,
+   "stories_cover_allowed": true,
+   "is_official": true,
+   "release_audio_id": "-10031_10032",
+   "main_color": "#FFFFFF",
+   "thumb": {
+    "width": 1500,
+    "height": 1500,
+    "id": "10223",
+    "photo_34": "https://example.invalid/727.jpg",
+    "photo_68": "https://example.invalid/728.jpg",
+    "photo_135": "https://example.invalid/729.jpg",
+    "photo_270": "https://example.invalid/730.jpg",
+    "photo_300": "https://example.invalid/731.jpg",
+    "photo_600": "https://example.invalid/732.jpg",
+    "photo_1200": "https://example.invalid/733.jpg"
+   },
+   "file_id": "opaque-734"
+  },
+  {
+   "artist": "Сова",
+   "id": 10492,
+   "owner_id": -10493,
+   "title": "Твой взгляд",
+   "duration": 203,
+   "access_key": "opaque-1923",
+   "ads": {
+    "content_id": "-10493_10492",
+    "duration": "203",
+    "account_age_type": "3",
+    "puid22": "14"
+   },
+   "is_explicit": false,
+   "is_focus_track": false,
+   "is_licensed": true,
+   "track_code": "opaque-1924",
+   "url": "https://example.invalid/1925",
+   "audio_streams": [
+    {
+     "type": "aac",
+     "url": "https://example.invalid/1926",
+     "fallback_url": "https://example.invalid/1927"
+    },
+    {
+     "type": "aac_low",
+     "url": "https://example.invalid/1928",
+     "fallback_url": "https://example.invalid/1929"
+    },
+    {
+     "type": "dash",
+     "url": "https://example.invalid/1930",
+     "fallback_url": "https://example.invalid/1931"
+    },
+    {
+     "type": "hls_range",
+     "url": "https://example.invalid/1932.m3u8",
+     "fallback_url": "https://example.invalid/1933.m3u8"
+    },
+    {
+     "type": "hls_ts",
+     "url": "https://example.invalid/1934.m3u8",
+     "fallback_url": "https://example.invalid/1935.m3u8"
+    },
+    {
+     "type": "opaque-208",
+     "url": "https://example.invalid/1936",
+     "fallback_url": "https://example.invalid/1925"
+    }
+   ],
+   "date": 1711118811,
+   "has_lyrics": true,
+   "album": {
+    "id": 10231,
+    "title": "Главный герой",
+    "owner_id": -10232,
+    "access_key": "opaque-772",
+    "thumb": {
+     "width": 1500,
+     "height": 1500,
+     "id": "10105",
+     "photo_34": "https://example.invalid/773.jpg",
+     "photo_68": "https://example.invalid/774.jpg",
+     "photo_135": "https://example.invalid/775.jpg",
+     "photo_270": "https://example.invalid/776.jpg",
+     "photo_300": "https://example.invalid/777.jpg",
+     "photo_600": "https://example.invalid/778.jpg",
+     "photo_1200": "https://example.invalid/779.jpg"
+    },
+    "main_color": "#211D1A"
+   },
+   "track_id": 10494,
+   "main_artists": [
+    {
+     "name": "Сова",
+     "domain": "10234",
+     "id": "10234",
+     "is_followed": false,
+     "can_follow": false
+    }
+   ],
+   "short_videos_allowed": true,
+   "stories_allowed": true,
+   "stories_cover_allowed": true,
+   "is_official": true,
+   "release_audio_id": "-10493_10492",
+   "main_color": "#211D1A",
+   "thumb": {
+    "width": 1500,
+    "height": 1500,
+    "id": "10105",
+    "photo_34": "https://example.invalid/773.jpg",
+    "photo_68": "https://example.invalid/774.jpg",
+    "photo_135": "https://example.invalid/775.jpg",
+    "photo_270": "https://example.invalid/776.jpg",
+    "photo_300": "https://example.invalid/777.jpg",
+    "photo_600": "https://example.invalid/778.jpg",
+    "photo_1200": "https://example.invalid/779.jpg"
+   },
+   "file_id": "opaque-1937"
+  },
+  {
+   "artist": "Перемотка",
+   "id": 10495,
+   "owner_id": -10496,
+   "title": "Твоего балкона свет",
+   "duration": 222,
+   "access_key": "opaque-1938",
+   "ads": {
+    "content_id": "-10496_10495",
+    "duration": "222",
+    "account_age_type": "3",
+    "puid22": "14"
+   },
+   "is_explicit": false,
+   "is_focus_track": false,
+   "is_licensed": true,
+   "track_code": "opaque-1939",
+   "url": "https://example.invalid/1940",
+   "audio_streams": [
+    {
+     "type": "aac",
+     "url": "https://example.invalid/1941",
+     "fallback_url": "https://example.invalid/1942"
+    },
+    {
+     "type": "aac_low",
+     "url": "https://example.invalid/1943",
+     "fallback_url": "https://example.invalid/1944"
+    },
+    {
+     "type": "dash",
+     "url": "https://example.invalid/1945",
+     "fallback_url": "https://example.invalid/1946"
+    },
+    {
+     "type": "hls_range",
+     "url": "https://example.invalid/1947.m3u8",
+     "fallback_url": "https://example.invalid/1948.m3u8"
+    },
+    {
+     "type": "hls_ts",
+     "url": "https://example.invalid/1949.m3u8",
+     "fallback_url": "https://example.invalid/1950.m3u8"
+    },
+    {
+     "type": "opaque-208",
+     "url": "https://example.invalid/1951",
+     "fallback_url": "https://example.invalid/1940"
+    }
+   ],
+   "date": 1603112981,
+   "has_lyrics": true,
+   "album": {
+    "id": 10497,
+    "title": "unnamed",
+    "owner_id": -10498,
+    "access_key": "opaque-1952",
+    "thumb": {
+     "width": 300,
+     "height": 300,
+     "id": "10105",
+     "photo_34": "https://example.invalid/1953.jpg",
+     "photo_68": "https://example.invalid/1954.jpg",
+     "photo_135": "https://example.invalid/1955.jpg",
+     "photo_270": "https://example.invalid/1956.jpg",
+     "photo_300": "https://example.invalid/1957.jpg",
+     "photo_600": "https://example.invalid/1958.jpg",
+     "photo_1200": "https://example.invalid/1959.jpg"
+    },
+    "main_color": "#CC3D4D"
+   },
+   "track_id": 10499,
+   "main_artists": [
+    {
+     "name": "Перемотка",
+     "domain": "10247",
+     "id": "10247",
+     "is_followed": false,
+     "can_follow": false
+    }
+   ],
+   "is_official": true,
+   "release_audio_id": "-10496_10495",
+   "main_color": "#CC3D4D",
+   "thumb": {
+    "width": 300,
+    "height": 300,
+    "id": "10105",
+    "photo_34": "https://example.invalid/1953.jpg",
+    "photo_68": "https://example.invalid/1954.jpg",
+    "photo_135": "https://example.invalid/1955.jpg",
+    "photo_270": "https://example.invalid/1956.jpg",
+    "photo_300": "https://example.invalid/1957.jpg",
+    "photo_600": "https://example.invalid/1958.jpg",
+    "photo_1200": "https://example.invalid/1959.jpg"
+   },
+   "file_id": "opaque-1960"
+  },
+  {
+   "artist": "Чернозем и Звезды",
+   "id": 10500,
+   "owner_id": -10501,
+   "title": "Гипербореи",
+   "duration": 148,
+   "access_key": "opaque-1961",
+   "ads": {
+    "content_id": "-10501_10500",
+    "duration": "148",
+    "account_age_type": "3",
+    "puid22": "8"
+   },
+   "is_explicit": false,
+   "is_focus_track": false,
+   "is_licensed": true,
+   "track_code": "opaque-1962",
+   "url": "https://example.invalid/1963",
+   "audio_streams": [
+    {
+     "type": "aac",
+     "url": "https://example.invalid/1964",
+     "fallback_url": "https://example.invalid/1965"
+    },
+    {
+     "type": "aac_low",
+     "url": "https://example.invalid/1966",
+     "fallback_url": "https://example.invalid/1967"
+    },
+    {
+     "type": "dash",
+     "url": "https://example.invalid/1968",
+     "fallback_url": "https://example.invalid/1969"
+    },
+    {
+     "type": "flac",
+     "url": "https://example.invalid/1970",
+     "fallback_url": "https://example.invalid/1971"
+    },
+    {
+     "type": "hls_range",
+     "url": "https://example.invalid/1972.m3u8",
+     "fallback_url": "https://example.invalid/1973.m3u8"
+    },
+    {
+     "type": "hls_ts",
+     "url": "https://example.invalid/1974.m3u8",
+     "fallback_url": "https://example.invalid/1975.m3u8"
+    },
+    {
+     "type": "opaque-208",
+     "url": "https://example.invalid/1976",
+     "fallback_url": "https://example.invalid/1963"
+    }
+   ],
+   "date": 1723037820,
+   "has_lyrics": true,
+   "album": {
+    "id": 10502,
+    "title": "Гипербореи",
+    "owner_id": -10503,
+    "access_key": "opaque-1977",
+    "thumb": {
+     "width": 1500,
+     "height": 1500,
+     "id": "10105",
+     "photo_34": "https://example.invalid/1978.jpg",
+     "photo_68": "https://example.invalid/1979.jpg",
+     "photo_135": "https://example.invalid/1980.jpg",
+     "photo_270": "https://example.invalid/1981.jpg",
+     "photo_300": "https://example.invalid/1982.jpg",
+     "photo_600": "https://example.invalid/1983.jpg",
+     "photo_1200": "https://example.invalid/1984.jpg"
+    },
+    "main_color": "#9E9E9E"
+   },
+   "track_id": 10504,
+   "main_artists": [
+    {
+     "name": "Чернозем и Звезды",
+     "domain": "10505",
+     "id": "10505",
+     "is_followed": false,
+     "can_follow": false
+    }
+   ],
+   "short_videos_allowed": true,
+   "stories_allowed": true,
+   "is_official": true,
+   "release_audio_id": "-10501_10500",
+   "main_color": "#9E9E9E",
+   "thumb": {
+    "width": 1500,
+    "height": 1500,
+    "id": "10105",
+    "photo_34": "https://example.invalid/1978.jpg",
+    "photo_68": "https://example.invalid/1979.jpg",
+    "photo_135": "https://example.invalid/1980.jpg",
+    "photo_270": "https://example.invalid/1981.jpg",
+    "photo_300": "https://example.invalid/1982.jpg",
+    "photo_600": "https://example.invalid/1983.jpg",
+    "photo_1200": "https://example.invalid/1984.jpg"
+   },
+   "file_id": "opaque-1985"
+  },
+  {
+   "artist": "Моя дорогая",
+   "id": 10506,
+   "owner_id": -10507,
+   "title": "Продолжаю",
+   "duration": 184,
+   "access_key": "opaque-1986",
+   "ads": {
+    "content_id": "-10507_10506",
+    "duration": "184",
+    "account_age_type": "3",
+    "puid22": "14"
+   },
+   "is_explicit": false,
+   "is_focus_track": false,
+   "is_licensed": true,
+   "track_code": "opaque-1987",
+   "url": "https://example.invalid/1988",
+   "audio_streams": [
+    {
+     "type": "aac",
+     "url": "https://example.invalid/1989",
+     "fallback_url": "https://example.invalid/1990"
+    },
+    {
+     "type": "aac_low",
+     "url": "https://example.invalid/1991",
+     "fallback_url": "https://example.invalid/1992"
+    },
+    {
+     "type": "dash",
+     "url": "https://example.invalid/1993",
+     "fallback_url": "https://example.invalid/1994"
+    },
+    {
+     "type": "flac",
+     "url": "https://example.invalid/1995",
+     "fallback_url": "https://example.invalid/1996"
+    },
+    {
+     "type": "hls_range",
+     "url": "https://example.invalid/1997.m3u8",
+     "fallback_url": "https://example.invalid/1998.m3u8"
+    },
+    {
+     "type": "hls_ts",
+     "url": "https://example.invalid/1999.m3u8",
+     "fallback_url": "https://example.invalid/2000.m3u8"
+    },
+    {
+     "type": "opaque-208",
+     "url": "https://example.invalid/2001",
+     "fallback_url": "https://example.invalid/1988"
+    }
+   ],
+   "date": 1598973073,
+   "album": {
+    "id": 10508,
+    "title": "Влюблённые",
+    "owner_id": -10509,
+    "access_key": "opaque-2002",
+    "thumb": {
+     "width": 300,
+     "height": 300,
+     "id": "10510",
+     "photo_34": "https://example.invalid/2003.jpg",
+     "photo_68": "https://example.invalid/2004.jpg",
+     "photo_135": "https://example.invalid/2005.jpg",
+     "photo_270": "https://example.invalid/2006.jpg",
+     "photo_300": "https://example.invalid/2007.jpg",
+     "photo_600": "https://example.invalid/2008.jpg",
+     "photo_1200": "https://example.invalid/2009.jpg"
+    },
+    "main_color": "#DD653D"
+   },
+   "track_id": 10511,
+   "main_artists": [
+    {
+     "name": "Моя дорогая",
+     "domain": "10512",
+     "id": "10512",
+     "is_followed": false,
+     "can_follow": false
+    }
+   ],
+   "is_official": true,
+   "release_audio_id": "-10507_10506",
+   "main_color": "#DD653D",
+   "thumb": {
+    "width": 300,
+    "height": 300,
+    "id": "10510",
+    "photo_34": "https://example.invalid/2003.jpg",
+    "photo_68": "https://example.invalid/2004.jpg",
+    "photo_135": "https://example.invalid/2005.jpg",
+    "photo_270": "https://example.invalid/2006.jpg",
+    "photo_300": "https://example.invalid/2007.jpg",
+    "photo_600": "https://example.invalid/2008.jpg",
+    "photo_1200": "https://example.invalid/2009.jpg"
+   },
+   "file_id": "opaque-2010"
+  },
+  {
+   "artist": "Гр. Полухутенко",
+   "id": 10513,
+   "owner_id": -10514,
+   "title": "Все сгорает",
+   "duration": 160,
+   "access_key": "opaque-2011",
+   "ads": {
+    "content_id": "-10514_10513",
+    "duration": "160",
+    "account_age_type": "3",
+    "puid22": "18"
+   },
+   "is_explicit": false,
+   "is_focus_track": false,
+   "is_licensed": true,
+   "track_code": "opaque-2012",
+   "url": "https://example.invalid/2013",
+   "audio_streams": [
+    {
+     "type": "aac",
+     "url": "https://example.invalid/2014",
+     "fallback_url": "https://example.invalid/2015"
+    },
+    {
+     "type": "aac_low",
+     "url": "https://example.invalid/2016",
+     "fallback_url": "https://example.invalid/2017"
+    },
+    {
+     "type": "dash",
+     "url": "https://example.invalid/2018",
+     "fallback_url": "https://example.invalid/2019"
+    },
+    {
+     "type": "flac",
+     "url": "https://example.invalid/2020",
+     "fallback_url": "https://example.invalid/2021"
+    },
+    {
+     "type": "hls_range",
+     "url": "https://example.invalid/2022.m3u8",
+     "fallback_url": "https://example.invalid/2023.m3u8"
+    },
+    {
+     "type": "hls_ts",
+     "url": "https://example.invalid/2024.m3u8",
+     "fallback_url": "https://example.invalid/2025.m3u8"
+    },
+    {
+     "type": "opaque-208",
+     "url": "https://example.invalid/2026",
+     "fallback_url": "https://example.invalid/2013"
+    }
+   ],
+   "date": 1571236062,
+   "album": {
+    "id": 10515,
+    "title": "Приятные упущения",
+    "owner_id": -10516,
+    "access_key": "opaque-2027",
+    "thumb": {
+     "width": 300,
+     "height": 300,
+     "id": "10517",
+     "photo_34": "https://example.invalid/2028.jpg",
+     "photo_68": "https://example.invalid/2029.jpg",
+     "photo_135": "https://example.invalid/2030.jpg",
+     "photo_270": "https://example.invalid/2031.jpg",
+     "photo_300": "https://example.invalid/2032.jpg",
+     "photo_600": "https://example.invalid/2033.jpg",
+     "photo_1200": "https://example.invalid/2034.jpg"
+    },
+    "main_color": "#9C9B97"
+   },
+   "track_id": 10518,
+   "main_artists": [
+    {
+     "name": "Гр. Полухутенко",
+     "domain": "10519",
+     "id": "10519",
+     "is_followed": false,
+     "can_follow": false
+    }
+   ],
+   "is_official": true,
+   "release_audio_id": "-10514_10513",
+   "main_color": "#9C9B97",
+   "thumb": {
+    "width": 300,
+    "height": 300,
+    "id": "10517",
+    "photo_34": "https://example.invalid/2028.jpg",
+    "photo_68": "https://example.invalid/2029.jpg",
+    "photo_135": "https://example.invalid/2030.jpg",
+    "photo_270": "https://example.invalid/2031.jpg",
+    "photo_300": "https://example.invalid/2032.jpg",
+    "photo_600": "https://example.invalid/2033.jpg",
+    "photo_1200": "https://example.invalid/2034.jpg"
+   },
+   "file_id": "opaque-2035"
+  },
+  {
+   "artist": "Ежовы Рукавицы",
+   "id": 10040,
+   "owner_id": -10039,
+   "title": "Любовь",
+   "duration": 236,
+   "access_key": "opaque-804",
+   "ads": {
+    "content_id": "-10039_10040",
+    "duration": "236",
+    "account_age_type": "3",
+    "puid22": "14"
+   },
+   "is_explicit": false,
+   "is_focus_track": false,
+   "is_licensed": true,
+   "track_code": "opaque-2036",
+   "url": "https://example.invalid/2037",
+   "audio_streams": [
+    {
+     "type": "aac",
+     "url": "https://example.invalid/2038",
+     "fallback_url": "https://example.invalid/2039"
+    },
+    {
+     "type": "aac_low",
+     "url": "https://example.invalid/2040",
+     "fallback_url": "https://example.invalid/2041"
+    },
+    {
+     "type": "dash",
+     "url": "https://example.invalid/2042",
+     "fallback_url": "https://example.invalid/2043"
+    },
+    {
+     "type": "flac",
+     "url": "https://example.invalid/2044",
+     "fallback_url": "https://example.invalid/2045"
+    },
+    {
+     "type": "hls_range",
+     "url": "https://example.invalid/2046.m3u8",
+     "fallback_url": "https://example.invalid/2047.m3u8"
+    },
+    {
+     "type": "hls_ts",
+     "url": "https://example.invalid/2048.m3u8",
+     "fallback_url": "https://example.invalid/2049.m3u8"
+    },
+    {
+     "type": "opaque-208",
+     "url": "https://example.invalid/2050",
+     "fallback_url": "https://example.invalid/2037"
+    }
+   ],
+   "date": 1675444438,
+   "like": true,
+   "album": {
+    "id": 10239,
+    "title": "Понаехали!",
+    "owner_id": -10240,
+    "access_key": "opaque-820",
+    "thumb": {
+     "width": 300,
+     "height": 300,
+     "id": "10241",
+     "photo_34": "https://example.invalid/821.jpg",
+     "photo_68": "https://example.invalid/822.jpg",
+     "photo_135": "https://example.invalid/823.jpg",
+     "photo_270": "https://example.invalid/824.jpg",
+     "photo_300": "https://example.invalid/825.jpg",
+     "photo_600": "https://example.invalid/826.jpg",
+     "photo_1200": "https://example.invalid/827.jpg"
+    },
+    "main_color": "#D1CFC3"
+   },
+   "track_id": 10242,
+   "main_artists": [
+    {
+     "name": "Ежовы Рукавицы",
+     "domain": "10243",
+     "id": "10243",
+     "is_followed": false,
+     "can_follow": false
+    }
+   ],
+   "short_videos_allowed": true,
+   "stories_allowed": true,
+   "is_official": true,
+   "release_audio_id": "-10039_10040",
+   "main_color": "#D1CFC3",
+   "thumb": {
+    "width": 300,
+    "height": 300,
+    "id": "10241",
+    "photo_34": "https://example.invalid/821.jpg",
+    "photo_68": "https://example.invalid/822.jpg",
+    "photo_135": "https://example.invalid/823.jpg",
+    "photo_270": "https://example.invalid/824.jpg",
+    "photo_300": "https://example.invalid/825.jpg",
+    "photo_600": "https://example.invalid/826.jpg",
+    "photo_1200": "https://example.invalid/827.jpg"
+   },
+   "file_id": "opaque-828"
+  },
+  {
+   "artist": "Ночь. Улица. Фонарь.",
+   "id": 10044,
+   "owner_id": -10043,
+   "title": "Наушники",
+   "duration": 297,
+   "access_key": "opaque-852",
+   "ads": {
+    "content_id": "-10043_10044",
+    "duration": "297",
+    "account_age_type": "3",
+    "puid22": "14"
+   },
+   "is_explicit": false,
+   "is_focus_track": false,
+   "is_licensed": true,
+   "track_code": "opaque-2051",
+   "url": "https://example.invalid/2052",
+   "audio_streams": [
+    {
+     "type": "aac",
+     "url": "https://example.invalid/2053",
+     "fallback_url": "https://example.invalid/2054"
+    },
+    {
+     "type": "aac_low",
+     "url": "https://example.invalid/2055",
+     "fallback_url": "https://example.invalid/2056"
+    },
+    {
+     "type": "dash",
+     "url": "https://example.invalid/2057",
+     "fallback_url": "https://example.invalid/2058"
+    },
+    {
+     "type": "hls_range",
+     "url": "https://example.invalid/2059.m3u8",
+     "fallback_url": "https://example.invalid/2060.m3u8"
+    },
+    {
+     "type": "hls_ts",
+     "url": "https://example.invalid/2061.m3u8",
+     "fallback_url": "https://example.invalid/2062.m3u8"
+    },
+    {
+     "type": "opaque-208",
+     "url": "https://example.invalid/2063",
+     "fallback_url": "https://example.invalid/2052"
+    }
+   ],
+   "date": 1728490451,
+   "has_lyrics": true,
+   "album": {
+    "id": 10248,
+    "title": "Совпадения с поэтами случайны",
+    "owner_id": -10249,
+    "access_key": "opaque-866",
+    "thumb": {
+     "width": 1500,
+     "height": 1500,
+     "id": "10228",
+     "photo_34": "https://example.invalid/867.jpg",
+     "photo_68": "https://example.invalid/868.jpg",
+     "photo_135": "https://example.invalid/869.jpg",
+     "photo_270": "https://example.invalid/870.jpg",
+     "photo_300": "https://example.invalid/871.jpg",
+     "photo_600": "https://example.invalid/872.jpg",
+     "photo_1200": "https://example.invalid/873.jpg"
+    },
+    "main_color": "#F4F5E0"
+   },
+   "track_id": 10250,
+   "main_artists": [
+    {
+     "name": "Ночь. Улица. Фонарь.",
+     "domain": "10251",
+     "id": "10251",
+     "is_followed": false,
+     "can_follow": false
+    }
+   ],
+   "short_videos_allowed": true,
+   "stories_allowed": true,
+   "stories_cover_allowed": true,
+   "is_official": true,
+   "release_audio_id": "-10043_10044",
+   "main_color": "#F4F5E0",
+   "thumb": {
+    "width": 1500,
+    "height": 1500,
+    "id": "10228",
+    "photo_34": "https://example.invalid/867.jpg",
+    "photo_68": "https://example.invalid/868.jpg",
+    "photo_135": "https://example.invalid/869.jpg",
+    "photo_270": "https://example.invalid/870.jpg",
+    "photo_300": "https://example.invalid/871.jpg",
+    "photo_600": "https://example.invalid/872.jpg",
+    "photo_1200": "https://example.invalid/873.jpg"
+   },
+   "file_id": "opaque-874"
+  }
+ ]
+}

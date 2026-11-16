@@ -1,0 +1,25 @@
+{
+ "title": "Аудиозапись недоступна. Так решил музыкант или его представитель.",
+ "icons": [
+  {
+   "url": "https://example.invalid/2798.png",
+   "width": 72,
+   "height": 72
+  },
+  {
+   "url": "https://example.invalid/2799.png",
+   "width": 144,
+   "height": 144
+  },
+  {
+   "url": "https://example.invalid/2800.png",
+   "width": 216,
+   "height": 216
+  },
+  {
+   "url": "https://example.invalid/2801.png",
+   "width": 288,
+   "height": 288
+  }
+ ]
+}
