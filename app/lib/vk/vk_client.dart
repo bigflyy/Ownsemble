@@ -72,7 +72,14 @@ class VkStream {
     this.restricted = false,
     this.untilRelease = false,
     this.playlistLinks = 0,
+    this.restrictedCode,
   });
+
+  /// VK's `content_restricted` code when it gives no link, or null. Seen
+  /// on real VK (plan 07, A3): 1 the musician's choice ([restricted]), 2 not
+  /// in the account's region (VK adds that a VPN can cause it), 3 only with a
+  /// subscription, 5 until the release ([untilRelease]), 7 once, unread.
+  final int? restrictedCode;
 
   /// Fresh link to the audio; null when VK gives none.
   final Uri? link;
@@ -200,6 +207,9 @@ class VkClient {
         restricted: audio['content_restricted'] == 1,
         untilRelease: audio['content_restricted'] == 5,
         playlistLinks: playlistLinks,
+        restrictedCode: link == null && audio['content_restricted'] is int
+            ? audio['content_restricted'] as int
+            : null,
       );
     }
   }

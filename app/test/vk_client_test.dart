@@ -105,6 +105,8 @@ void main() {
       final stream = await vk.resolveStream(copy, null);
       expect(stream.restricted, isFalse);
       expect(stream.untilRelease, isFalse);
+      // The code itself is kept, so the player can name it (plan 07).
+      expect(stream.restrictedCode, 2);
     });
 
     test('a song VK does not know has no link', () async {

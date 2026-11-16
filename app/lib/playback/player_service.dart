@@ -103,6 +103,9 @@ String noStreamReason(VkStream stream) => switch (stream) {
     'the artist or their representative made it unavailable on VK',
   VkStream(untilRelease: true) =>
     'VK will open this song after its official release',
+  VkStream(restrictedCode: 2) =>
+    'VK does not offer this song in your region (or a VPN is on)',
+  VkStream(restrictedCode: 3) => 'VK offers this song only with a subscription',
   _ => 'VK does not offer this song',
 };
 

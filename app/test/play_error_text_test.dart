@@ -72,6 +72,17 @@ void main() {
       );
     });
 
+    test('a region-locked and a subscription song say why (plan 07)', () {
+      expect(
+        noStreamReason(const VkStream(restrictedCode: 2)),
+        contains('in your region'),
+      );
+      expect(
+        noStreamReason(const VkStream(restrictedCode: 3)),
+        contains('only with a subscription'),
+      );
+    });
+
     test('any other song says VK does not offer it', () {
       expect(
         noStreamReason(const VkStream()),
