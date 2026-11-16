@@ -823,7 +823,8 @@ class _LibraryScreenState extends State<LibraryScreen> {
                               onGoToSong: _goToPlayingSong,
                               onOpenAlbum: library.openAlbum,
                               onOpenVersions: _openVersions,
-                              addButton: _playerAdd,
+                              addButton: (track) =>
+                                  _playerAdd(track, roomy: true),
                             ),
                         ],
                       ),
@@ -1797,7 +1798,11 @@ class _LibraryScreenState extends State<LibraryScreen> {
   /// VK Mix tag: in the narrow bottom bar it pushed the title out (shot
   /// 2026-11-17); the VK Mix card says "Playing now".
   /// Null when none applies.
-  Widget? _playerAdd(Track track) {
+  ///
+  /// Similar songs only in the side panel ([roomy]): beside the heart it
+  /// pushed the bottom bar's title row over its width in the smallest
+  /// window (acceptance-23).
+  Widget? _playerAdd(Track track, {bool roomy = false}) {
     final catalog = widget.catalog;
     final forYou = widget.forYou;
     if (catalog != null && catalog.foundById(track.id) == null) {
@@ -1818,7 +1823,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
     final recommended = forYou != null && forYou.isRec(track.id);
     // A recommended song has the thumb-down there instead (a narrow bar
     // has room for two buttons beside +); its row menu offers Similar.
-    final similar = !recommended && canFindSimilar(forYou, track);
+    final similar = roomy && !recommended && canFindSimilar(forYou, track);
     if (!recommended && !similar) return add;
     return Row(
       mainAxisSize: MainAxisSize.min,

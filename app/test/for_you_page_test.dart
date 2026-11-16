@@ -15,6 +15,7 @@ import 'package:ownsemble/ui/catalog_search.dart';
 import 'package:ownsemble/ui/for_you.dart';
 import 'package:ownsemble/ui/library_controller.dart';
 import 'package:ownsemble/ui/library_screen.dart';
+import 'package:ownsemble/ui/shell_settings.dart';
 import 'package:ownsemble/ui/sources_scope.dart';
 
 import 'catalog_support.dart';
@@ -114,6 +115,8 @@ void main() {
             playback: playback,
             catalog: catalog,
             forYou: forYou,
+            // The side panel: Similar songs shows there, not in the bar.
+            settings: ShellSettings.inMemory()..dockTo(PlayerDock.side),
           ),
         ),
       ),
