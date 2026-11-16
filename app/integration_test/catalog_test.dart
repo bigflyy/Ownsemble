@@ -25,10 +25,15 @@
 // songs VK has with question-mark names show under their real names (the
 // names of VK's own release of each); then a song the account has, found as
 // another recording, says "you have another version" and keeps + (C4e).
+// Step 5 removes the added song through the app (C5): Remove from library
+// in its row's menu (off VK, the row leaves, the note with Undo), Undo (back
+// on VK under the same key, the same row with the same cells, History kept
+// the play), then Remove from the found row's menu, and a sync agrees.
 // Prints names, counts and times only: no link, key, token or id.
 
 import 'dart:io';
 
+import 'package:flutter/gestures.dart' show kSecondaryMouseButton;
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
@@ -389,7 +394,180 @@ void main() {
       );
     }
 
-    await removeAdded('found song');
+    // 5. Remove from library through the app (C5).
+    final remover = screen.remover!;
+    final addedTrack = library.all.firstWhere((t) => t.sourceKey == newKey);
+    final addedRow = find.byKey(ValueKey('song-${addedTrack.id}'));
+    String cellsOf(Finder row) => [
+      for (final element
+          in find.descendant(of: row, matching: find.byType(Text)).evaluate())
+        (element.widget as Text).data ??
+            (element.widget as Text).textSpan?.toPlainText() ??
+            '',
+    ].join(' | ');
+    Future<void> showOwnRow() async {
+      library.showView(LibraryView.songs);
+      library.goToSong(addedTrack);
+      await tester.pump();
+      await tester.pump();
+      expect(addedRow, findsOneWidget, reason: 'the added song\'s row');
+    }
+
+    Future<void> chooseInMenu(Finder row, String key) async {
+      await tester.tap(row, buttons: kSecondaryMouseButton);
+      await tester.pump();
+      final item = find.byKey(ValueKey(key));
+      await waitUntil(
+        tester,
+        () => item.evaluate().isNotEmpty,
+        timeout: const Duration(seconds: 5),
+        what: 'the menu item $key',
+      );
+      await tester.pump(const Duration(milliseconds: 300));
+      await tester.tap(item);
+      await tester.pump();
+    }
+
+    // The found song played on through the add and the sync: its play's
+    // Listened is read fresh first, or Undo's reload shows a newer number
+    // than this snapshot (catalog-21d: "<1 min" before, "1 min" after).
+    library.filters?.reload();
+    await showOwnRow();
+    final cellsBefore = cellsOf(addedRow);
+    final collections = screen.collections!;
+    final historyHadPlay = collections.history().any(
+      (e) => e.trackId == addedTrack.id,
+    );
+    clock = Stopwatch()..start();
+    await chooseInMenu(addedRow, 'menu-remove-from-library');
+    await waitUntil(
+      tester,
+      () => library.all.length == listedBefore,
+      timeout: const Duration(seconds: 30),
+      what: 'VK to remove the song',
+    );
+    final removeMs = clock.elapsedMilliseconds;
+    await tester.pump();
+    expect(addedRow, findsNothing, reason: 'the row left the list');
+    expect(remover.leaving, isEmpty);
+    final removedNote = 'Removed "${addedTrack.title}" from ${account.name}';
+    expect(find.text(removedNote), findsOneWidget, reason: 'the note');
+    expect(find.byKey(const ValueKey('note-undo')), findsOneWidget);
+    final (vkRemoved, keysRemoved) = await vkLibrary();
+    say(
+      'removed in the app in $removeMs ms (VK and the slide); VK $vkRemoved '
+      'songs; library ${library.all.length} listed',
+    );
+    expect(vkRemoved, vkBefore);
+    expect(keysRemoved.contains(newKey), isFalse);
+    // History keeps the play of a removed song: the found song played on as
+    // the library's song after +, so History has it.
+    expect(historyHadPlay, isTrue, reason: 'History has the added song');
+    {
+      library.showView(const LibraryView(ViewKind.history));
+      await tester.pump();
+      expect(
+        library.visible.any((t) => t.id == addedTrack.id),
+        isTrue,
+        reason: 'History still shows the removed song',
+      );
+      library.showView(LibraryView.songs);
+      await tester.pump();
+    }
+    say('History kept the removed song\'s play: $historyHadPlay');
+
+    // Undo: the same key on VK, the same row, the same cells.
+    await tester.pump(const Duration(milliseconds: 600));
+    clock = Stopwatch()..start();
+    await tester.tap(find.byKey(const ValueKey('note-undo')));
+    await tester.pump();
+    await waitUntil(
+      tester,
+      () => library.all.length == listedBefore + 1,
+      timeout: const Duration(seconds: 30),
+      what: 'Undo to bring the song back',
+    );
+    final undoMs = clock.elapsedMilliseconds;
+    expect(library.byId(addedTrack.id), isNotNull, reason: 'the same row');
+    final (vkUndone, keysUndone) = await vkLibrary();
+    say('Undo in $undoMs ms; VK $vkUndone songs');
+    expect(vkUndone, vkBefore + 1);
+    expect(keysUndone.contains(newKey), isTrue, reason: 'the same key');
+    await showOwnRow();
+    final cellsAfter = cellsOf(addedRow);
+    expect(cellsAfter, cellsBefore, reason: 'the row\'s cells after Undo');
+    say('restored row: same id, same ${cellsAfter.split(' | ').length} cells');
+
+    // Remove again, this time from the found row's menu in search.
+    library.searchText.text = query;
+    await tester.pump();
+    await waitUntil(
+      tester,
+      () => !catalog.searching,
+      timeout: const Duration(seconds: 30),
+      what: 'the On VK part for the found row',
+    );
+    final foundAgain = catalog.songs.firstWhere((f) => f.key == pick.key);
+    expect(catalog.stateOf(foundAgain), FoundState.inLibrary);
+    final foundRow = find.byKey(ValueKey('found-${foundAgain.track.id}'));
+    while (foundRow.evaluate().isEmpty &&
+        scroll.offset < scroll.position.maxScrollExtent) {
+      scroll.jumpTo(
+        (scroll.offset + 300).clamp(0, scroll.position.maxScrollExtent),
+      );
+      await tester.pump();
+    }
+    await tester.ensureVisible(foundRow);
+    await tester.pump();
+    clock = Stopwatch()..start();
+    await chooseInMenu(foundRow, 'menu-remove-from-library');
+    await waitUntil(
+      tester,
+      () => catalog.stateOf(foundAgain) == FoundState.addable,
+      timeout: const Duration(seconds: 30),
+      what: 'the found row to offer + again',
+    );
+    await tester.pump();
+    // Your own results above it shrank (back to none), so the list moved:
+    // find the row again.
+    final stillShown = foundRow.evaluate().isNotEmpty;
+    scroll.jumpTo(0);
+    await tester.pump();
+    while (foundRow.evaluate().isEmpty &&
+        scroll.offset < scroll.position.maxScrollExtent) {
+      scroll.jumpTo(
+        (scroll.offset + 300).clamp(0, scroll.position.maxScrollExtent),
+      );
+      await tester.pump();
+    }
+    say('found row on screen right after Remove: $stillShown');
+    expect(
+      find.descendant(
+        of: foundRow,
+        matching: find.byKey(const ValueKey('add-song')),
+      ),
+      findsOneWidget,
+      reason: '+ on the found row again',
+    );
+    expect(library.all.length, listedBefore);
+    say('removed from the found row in ${clock.elapsedMilliseconds} ms');
+    library.searchText.clear();
+    await tester.pump();
+    final afterRemove = await sync.syncNow().timeout(
+      const Duration(minutes: 3),
+    );
+    await tester.pump();
+    final afterResult = afterRemove!.results.single;
+    final (vkEnd, _) = await vkLibrary();
+    say(
+      'sync after Remove: VK $vkEnd songs, listed ${afterResult.listed}, '
+      'added ${afterResult.added}; library ${library.all.length} listed',
+    );
+    expect(afterRemove.errors, isEmpty);
+    expect(vkEnd, vkBefore);
+    expect(afterResult.added, 0, reason: 'the removed song stays removed');
+    expect(library.all.length, listedBefore);
+    await tester.pump(const Duration(seconds: 7));
 
     // 5b. A found song's album opens from search (C4b): the found song
     // plays, a click on the album name on its row opens the album's place,
