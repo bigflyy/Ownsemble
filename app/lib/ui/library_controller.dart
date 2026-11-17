@@ -96,7 +96,7 @@ class LibraryView {
 
   /// Whether this view is a page planned for later, without songs yet.
   bool get isLater => switch (kind) {
-    ViewKind.artists || ViewKind.playlists => true,
+    ViewKind.artists => true,
     _ => false,
   };
 
@@ -104,6 +104,7 @@ class LibraryView {
   /// Stats or a year report.
   bool get isPage =>
       isLater ||
+      kind == ViewKind.playlists ||
       kind == ViewKind.stats ||
       kind == ViewKind.yearReport ||
       kind == ViewKind.forYou;

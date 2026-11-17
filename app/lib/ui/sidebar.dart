@@ -21,6 +21,7 @@ class Sidebar extends StatelessWidget {
     required this.stored,
     this.changed = 0,
     this.showForYou = false,
+    this.showPlaylists = false,
     required this.rail,
     required this.canExpand,
     required this.onToggleRail,
@@ -40,6 +41,9 @@ class Sidebar extends StatelessWidget {
 
   /// Whether the For you place is offered (plan 07).
   final bool showForYou;
+
+  /// Whether the Playlists place has its page (plan 08); else "later".
+  final bool showPlaylists;
 
   /// Shown as an icon rail.
   final bool rail;
@@ -224,7 +228,7 @@ class Sidebar extends StatelessWidget {
                   'Playlists',
                   Icons.queue_music,
                   const LibraryView(ViewKind.playlists),
-                  later: true,
+                  later: !showPlaylists,
                 ),
                 if (!rail) const _Section('Listening'),
                 item(

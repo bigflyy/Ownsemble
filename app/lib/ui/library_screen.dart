@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' show Random;
 
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
@@ -26,8 +27,9 @@ import 'for_you_page.dart';
 import 'library_controller.dart';
 import 'outside_songs.dart';
 import 'playing_mark.dart';
-import 'playlists.dart';
 import 'player_bar.dart';
+import 'playlists.dart';
+import 'playlists_page.dart';
 import 'shell_settings.dart';
 import 'shortcuts_help.dart';
 import 'sidebar.dart';
@@ -810,6 +812,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
                                 stored: counts.stored,
                                 changed: library.changedCount,
                                 showForYou: widget.forYou != null,
+                                showPlaylists: widget.playlists != null,
                                 rail: rail,
                                 canExpand: roomForSidebar,
                                 onToggleRail: _settings.toggleRail,
@@ -946,6 +949,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
               ?widget.catalog,
               ?widget.remover,
               ?widget.forYou,
+              ?widget.playlists,
             ]),
             builder: (context, _) {
               final view = library.view;
@@ -1100,7 +1104,17 @@ class _LibraryScreenState extends State<LibraryScreen> {
                               onAdd: _addFound,
                             ),
                           )
-                        : view.isLater
+                        : view.kind == ViewKind.playlists &&
+                              widget.playlists != null
+                        ? NowPlayingScope(
+                            playback: widget.playback,
+                            child: PlaylistsPage(
+                              playlists: widget.playlists!,
+                              library: library,
+                              playback: widget.playback,
+                            ),
+                          )
+                        : view.isLater || view.kind == ViewKind.playlists
                         ? _LaterPage(view: view)
                         : _songList(
                             colors,
@@ -1131,9 +1145,15 @@ class _LibraryScreenState extends State<LibraryScreen> {
   /// The line under an album's title: its artist and how far its list got.
   String? _albumDetail(LibraryView view) {
     if (view.kind == ViewKind.forYou) return forYouDetail(widget.forYou);
+    if (view.kind == ViewKind.playlists) {
+      return playlistsDetail(widget.playlists);
+    }
     final status = library.albumStatus;
     final album = view.album;
     if (status == null || album == null) return null;
+    if (view.kind == ViewKind.vkList && isPlaylistRef(album)) {
+      return playlistDetail(widget.playlists, album, status);
+    }
     if (view.kind == ViewKind.vkList) {
       return listDetail(widget.forYou, album, status);
     }
@@ -1799,6 +1819,19 @@ class _LibraryScreenState extends State<LibraryScreen> {
             onPressed: () => widget.playback.playFrom(songs, 0),
             icon: const Icon(Icons.play_arrow, size: 18),
             label: const Text('Play'),
+          ),
+        // A playlist also plays shuffled: shuffle turns on, from a random
+        // song.
+        if (songs.length > 1 && isPlaylistRef(ref))
+          TextButton.icon(
+            key: const ValueKey('list-shuffle'),
+            onPressed: () {
+              final playback = widget.playback;
+              if (!playback.shuffle) playback.toggleShuffle();
+              playback.playFrom(songs, Random().nextInt(songs.length));
+            },
+            icon: const Icon(Icons.shuffle, size: 18),
+            label: const Text('Shuffle'),
           ),
       ],
     );

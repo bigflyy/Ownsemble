@@ -24,6 +24,9 @@ import 'playing_mark.dart';
 import 'theme.dart';
 import 'version_marks.dart' show lengthText;
 
+/// "1 song", "12 songs".
+String songCountText(int count) => count == 1 ? '1 song' : '$count songs';
+
 /// How many songs of a "Similar to" shelf the page shows.
 const similarRowsShown = 3;
 
@@ -296,7 +299,7 @@ class _ForYouPageState extends State<ForYouPage> {
       listenable: Listenable.merge([forYou, widget.playback, ?widget.catalog]),
       builder: (context, _) {
         if (forYou.account == null) {
-          return _Message(
+          return PageMessage(
             'Log in to a VK account (the account button at the bottom) to '
             'see what VK recommends.',
             colors: colors,
@@ -304,7 +307,7 @@ class _ForYouPageState extends State<ForYouPage> {
         }
         if (!forYou.hasLists) {
           return forYou.error != null && !forYou.refreshing
-              ? _Message(
+              ? PageMessage(
                   'VK did not answer: ${forYou.error}',
                   colors: colors,
                   action: TextButton(
@@ -333,7 +336,7 @@ class _ForYouPageState extends State<ForYouPage> {
                 colors: colors,
               ),
             if (forYou.lists.isNotEmpty) ...[
-              _SectionTitle(
+              SectionTitle(
                 'Made for you by VK',
                 note: 'new every day',
                 colors: colors,
@@ -343,8 +346,15 @@ class _ForYouPageState extends State<ForYouPage> {
                 runSpacing: 14,
                 children: [
                   for (final list in forYou.lists)
-                    _ListCard(
-                      list: list,
+                    ListCard(
+                      title: list.title,
+                      detail: forYou.songsOf(list.key).isEmpty
+                          ? (list.count == 0
+                                ? 'loading...'
+                                : songCountText(list.count))
+                          : songCountText(forYou.songsOf(list.key).length),
+                      coverUrl: list.coverUrl,
+                      tint: list.tint,
                       songs: _tracksOf(forYou.songsOf(list.key)),
                       playable: _tracksOf([
                         for (final song in forYou.songsOf(list.key))
@@ -358,7 +368,7 @@ class _ForYouPageState extends State<ForYouPage> {
               ),
             ],
             for (final shelf in forYou.similar) ...[
-              _SectionTitle(
+              SectionTitle(
                 shelf.title,
                 // VK picks this shelf's song and does not say why.
                 note: 'Picked by VK',
@@ -391,7 +401,7 @@ class _ForYouPageState extends State<ForYouPage> {
             for (final shelf in forYou.ownShelves)
               if (forYou.songsOf(shelf.ref.link!.key) case final songs
                   when songs.isNotEmpty) ...[
-                _SectionTitle(
+                SectionTitle(
                   shelf.ref.title,
                   note: shelf.note,
                   colors: colors,
@@ -425,8 +435,9 @@ class _ForYouPageState extends State<ForYouPage> {
   }
 }
 
-class _Message extends StatelessWidget {
-  const _Message(this.text, {required this.colors, this.action});
+/// A page's one message, with an action under it.
+class PageMessage extends StatelessWidget {
+  const PageMessage(this.text, {super.key, required this.colors, this.action});
 
   final String text;
   final OwnColors colors;
@@ -480,7 +491,7 @@ class _Loading extends StatelessWidget {
           Wrap(
             spacing: 14,
             runSpacing: 14,
-            children: [for (var i = 0; i < 4; i++) box(_ListCard.side, 150)],
+            children: [for (var i = 0; i < 4; i++) box(ListCard.side, 150)],
           ),
         ],
       ),
@@ -529,9 +540,12 @@ class _Banner extends StatelessWidget {
   }
 }
 
-class _SectionTitle extends StatelessWidget {
-  const _SectionTitle(
+/// A section's title on the For you and Playlists pages, with a note and
+/// Show all.
+class SectionTitle extends StatelessWidget {
+  const SectionTitle(
     this.title, {
+    super.key,
     required this.colors,
     this.note,
     this.onAll,
@@ -709,10 +723,15 @@ class _RoundPlay extends StatelessWidget {
   );
 }
 
-/// One of VK's lists: its cover (or initials), Play, name and song count.
-class _ListCard extends StatelessWidget {
-  const _ListCard({
-    required this.list,
+/// A VK list as a card (For you's lists, the playlists): its cover (or
+/// initials), Play, name and a detail line (the song count).
+class ListCard extends StatelessWidget {
+  const ListCard({
+    super.key,
+    required this.title,
+    required this.detail,
+    this.coverUrl,
+    this.tint,
     required this.songs,
     required this.playable,
     required this.onPlay,
@@ -722,7 +741,12 @@ class _ListCard extends StatelessWidget {
 
   static const side = 128.0;
 
-  final VkRecList list;
+  final String title;
+
+  /// The line under the title ("12 songs").
+  final String detail;
+  final String? coverUrl;
+  final int? tint;
   final List<Track> songs;
 
   /// [songs] without those VK gives no file for: what Play plays.
@@ -732,9 +756,9 @@ class _ListCard extends StatelessWidget {
   final OwnColors colors;
 
   String get _initials {
-    final daily = RegExp(r'(\d+)$').firstMatch(list.title);
+    final daily = RegExp(r'(\d+)$').firstMatch(title);
     if (daily != null) return daily[1]!;
-    return list.title
+    return title
         .split(' ')
         .where((w) => w.isNotEmpty)
         .take(2)
@@ -745,12 +769,12 @@ class _ListCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final state = NowPlaying.listStateFor(context, playable);
-    final count = songs.isEmpty ? list.count : songs.length;
-    final tint = list.tint == null ? colors.accentBg : Color(list.tint!);
+    final tint = this.tint;
+    final color = tint == null ? colors.accentBg : Color(tint);
     return SizedBox(
       width: side,
       child: InkWell(
-        key: ValueKey('list-card-${list.title}'),
+        key: ValueKey('list-card-$title'),
         borderRadius: BorderRadius.circular(10),
         onTap: onOpen,
         child: Column(
@@ -762,23 +786,23 @@ class _ListCard extends StatelessWidget {
                   width: side,
                   height: side,
                   decoration: BoxDecoration(
-                    color: tint.withValues(alpha: 0.35),
+                    color: color.withValues(alpha: 0.35),
                     borderRadius: BorderRadius.circular(10),
                   ),
                   alignment: Alignment.center,
-                  child: list.coverUrl != null
+                  child: coverUrl != null
                       ? TrackTile(
                           track: Track(
                             id: -1,
                             sourceId: 0,
                             source: TrackSource.vk,
-                            artist: list.title,
-                            title: list.title,
-                            album: list.title,
+                            artist: title,
+                            title: title,
+                            album: title,
                             durationSec: 0,
-                            coverUrl: list.coverUrl,
-                            coverMidUrl: list.coverUrl,
-                            coverLargeUrl: list.coverUrl,
+                            coverUrl: coverUrl,
+                            coverMidUrl: coverUrl,
+                            coverLargeUrl: coverUrl,
                           ),
                           size: side,
                           radius: 10,
@@ -796,7 +820,7 @@ class _ListCard extends StatelessWidget {
                   right: 8,
                   bottom: 8,
                   child: _RoundPlay(
-                    key: ValueKey('list-play-${list.title}'),
+                    key: ValueKey('list-play-$title'),
                     playing: state ?? false,
                     size: 34,
                     onPressed: playable.isEmpty
@@ -811,13 +835,13 @@ class _ListCard extends StatelessWidget {
             ),
             const SizedBox(height: 6),
             Text(
-              list.title,
+              title,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
             ),
             Text(
-              songs.isEmpty && list.count == 0 ? 'loading...' : '$count songs',
+              detail,
               maxLines: 1,
               style: TextStyle(fontSize: 12, color: colors.dim),
             ),

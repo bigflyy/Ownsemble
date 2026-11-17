@@ -32,6 +32,8 @@ import 'package:ownsemble/ui/collections_controller.dart';
 import 'package:ownsemble/ui/for_you.dart';
 import 'package:ownsemble/ui/library_controller.dart';
 import 'package:ownsemble/ui/library_screen.dart';
+import 'package:ownsemble/ui/outside_songs.dart';
+import 'package:ownsemble/ui/playlists.dart';
 import 'package:ownsemble/ui/song_filters.dart';
 import 'package:ownsemble/ui/song_remover.dart';
 import 'package:ownsemble/ui/shell_settings.dart';
@@ -220,6 +222,11 @@ void main() {
     // 'own' (scrolled to the own Similar to shelves, plan 07 Stage E, a
     // song of the last one playing).
     String? forYouStep,
+    // The Playlists place (plan 08) from a made-up VK: 'page' (made and
+    // followed playlists, a long title), 'list' (a made playlist opened,
+    // its second song playing, a song VK gives no file for), 'empty' (no
+    // playlists on VK).
+    String? playlistsStep,
   }) async {
     final store = LibraryStore.open(':memory:');
     addTearDown(store.close);
@@ -464,13 +471,21 @@ void main() {
 
     // A song playing while it is saved, and another one downloading.
     final storage = AudioStorage(dataDir: '.', store: store);
-    final player = saving || playingFirst || catalogPlays || forYouStep != null
+    final player =
+        saving ||
+            playingFirst ||
+            catalogPlays ||
+            forYouStep != null ||
+            playlistsStep != null
         ? _ShownPlayer(storage)
         : PlayerService(muted: true, dataDir: '.');
     // A made-up VK: what the search finds and an add that always works.
     // Nothing leaves the test.
     CatalogSearch? catalog;
-    if (catalogQuery != null || albumListed != null || forYouStep != null) {
+    if (catalogQuery != null ||
+        albumListed != null ||
+        forYouStep != null ||
+        playlistsStep != null) {
       var newId = 700;
       Future<Object?> fakeVk(String method, Map<String, String> params) async {
         if (method == 'audio.add') {
@@ -603,6 +618,111 @@ void main() {
         await forYou.refresh();
       }
     }
+    // A made-up VK with the account's playlists. Nothing leaves the test.
+    VkPlaylists? playlists;
+    if (playlistsStep != null) {
+      Map<String, dynamic> list(
+        int id,
+        String title, {
+        required int count,
+        String type = 'ugc',
+        bool followed = false,
+      }) => {
+        'id': id,
+        'owner_id': 1,
+        'title': title,
+        'count': count,
+        'update_time': 100,
+        'type': type,
+        if (followed || type == 'album')
+          'original': {'owner_id': -5, 'playlist_id': id},
+      };
+      // The library's songs by their index (same name and length), and
+      // songs the library lacks.
+      Map<String, dynamic> own(int i) => {
+        'owner_id': -3,
+        'id': 300 + i,
+        'artist': songs[i].$1,
+        'title': songs[i].$2,
+        'duration': 180 + i * 17,
+      };
+      Map<String, dynamic> other(
+        int id,
+        String artist,
+        String title, {
+        int? restricted,
+      }) => {
+        'owner_id': -4,
+        'id': id,
+        'artist': artist,
+        'title': title,
+        'duration': 190 + id % 60,
+        'url': restricted == null ? 'https://example.invalid/$id.mp3' : '',
+        'content_restricted': ?restricted,
+      };
+      final lists = playlistsStep == 'empty'
+          ? const <Map<String, dynamic>>[]
+          : [
+              list(1, 'В дорогу', count: 6),
+              list(
+                2,
+                'Вечер у моря, когда никуда не надо спешить и можно слушать '
+                'всё подряд',
+                count: 4,
+              ),
+              list(3, 'Тренировка', count: 3),
+              list(4, 'сладкая вата', count: 5, followed: true),
+              list(5, 'Indie Mix', count: 2, followed: true),
+              list(6, 'Альбом', count: 9, type: 'album'),
+            ];
+      final listSongs = {
+        '1_1': [
+          own(2),
+          other(11, 'Кино', 'Звезда по имени Солнце'),
+          own(4),
+          other(12, 'Земфира', 'Искала'),
+          other(13, 'Сплин', 'Орбит без сахара', restricted: 2),
+          own(7),
+        ],
+        '1_2': [
+          own(8),
+          other(21, 'Portishead', 'Roads'),
+          own(10),
+          other(22, 'Massive Attack', 'Angel'),
+        ],
+        '1_3': [own(3), other(31, 'Rammstein', 'Sonne'), own(6)],
+        '1_4': [
+          other(41, 'мартин', 'моя любовь'),
+          other(42, 'Монеточка', 'Каждый раз'),
+          own(1),
+          other(43, 'Пошлая Молли', 'Типичный рэп'),
+          other(44, 'Хадн дадн', 'Шугейз'),
+        ],
+        '1_5': [other(51, 'Arctic Monkeys', 'Do I Wanna Know?'), own(5)],
+        '1_6': [for (var i = 60; i < 69; i++) other(i, 'Би-2', 'Песня $i')],
+      };
+      Future<Object?> playlistsVk(
+        String method,
+        Map<String, String> params,
+      ) async {
+        if (method == 'audio.getPlaylists') {
+          return {'count': lists.length, 'items': lists};
+        }
+        final songs =
+            listSongs['${params['owner_id']}_${params['album_id']}'] ??
+            const [];
+        return {'count': songs.length, 'items': songs};
+      }
+
+      final found = catalog!;
+      playlists = VkPlaylists(
+        accounts: () => found.accounts,
+        apiOfSource: (_) => playlistsVk,
+        outside: OutsideSongs(libraryCopyOfSong: found.libraryCopyOfSong),
+      );
+      library.vkLists = playlists;
+      await playlists.refresh();
+    }
     // A made-up VK that removes and restores. Nothing leaves the test.
     SongRemover? remover;
     if (removeStep != null) {
@@ -673,6 +793,7 @@ void main() {
               catalog: catalog,
               remover: remover,
               forYou: forYou,
+              playlists: playlists,
             ),
           ),
         ),
@@ -824,6 +945,13 @@ void main() {
       player.playing.value = true;
       await tester.pump(const Duration(milliseconds: 300));
     }
+    if (playlists != null && playlistsStep == 'list') {
+      await tester.tap(find.byKey(const ValueKey('list-card-В дорогу')));
+      await tester.pumpAndSettle();
+      await playback.playFrom(library.visible, 1);
+      player.playing.value = true;
+      await tester.pump(const Duration(milliseconds: 300));
+    }
     if (forYou != null && forYouStep == 'mix') {
       await tester.tap(find.byKey(const ValueKey('vk-mix-play')));
       await tester.pump();
@@ -882,7 +1010,10 @@ void main() {
     });
     library.jump.clear();
     // Stops the playing timer of the controller before the tree goes.
-    if (playingFirst || catalogPlays || forYouStep != null) {
+    if (playingFirst ||
+        catalogPlays ||
+        forYouStep != null ||
+        playlistsStep != null) {
       player.playing.value = false;
     }
     // Lets the note at the bottom time out, so no timer is left.
@@ -895,6 +1026,30 @@ void main() {
     catalog?.dispose();
     remover?.dispose();
     forYou?.dispose();
+    playlists?.dispose();
+  }
+
+  for (final (step, dark, size) in [
+    ('page', false, const Size(1440, 900)),
+    ('page', true, const Size(1440, 900)),
+    ('page', false, const Size(760, 900)),
+    ('list', true, const Size(1440, 900)),
+    ('list', false, const Size(760, 900)),
+    ('empty', false, const Size(1440, 900)),
+  ]) {
+    final width = size.width < 1000 ? 'narrow' : 'wide';
+    testWidgets(
+      'Playlists: $step, ${dark ? 'dark' : 'light'}, $width',
+      (t) => shoot(
+        t,
+        '${dark ? 'dark' : 'light'}-playlists-$step-$width',
+        dark: dark,
+        size: size,
+        dock: size.width < 1000 ? PlayerDock.bottom : PlayerDock.side,
+        view: const LibraryView(ViewKind.playlists),
+        playlistsStep: step,
+      ),
+    );
   }
 
   for (final (step, dark, size) in [
