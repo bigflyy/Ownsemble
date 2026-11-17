@@ -153,6 +153,7 @@ class EditVk {
         method,
         for (final name in [
           'playlist_id',
+          'album_id',
           'audio_ids',
           'audio_id',
           'before',

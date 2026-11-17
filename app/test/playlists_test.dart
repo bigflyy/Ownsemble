@@ -141,7 +141,9 @@ void main() {
     await playlists.refresh();
     vk.calls.clear();
     await playlists.refresh();
-    expect(vk.calls, ['audio.getPlaylists'], reason: 'nothing moved');
+    // Nothing moved; the made playlist is read every time (a vk.com
+    // reorder moves neither its time nor its count: B17).
+    expect(vk.calls, ['audio.getPlaylists', 'audio.get 10000_2']);
 
     vk.items[0]['update_time'] = 200;
     vk.songs['10000_2'] = vk.songs['10000_2']!.take(2).toList();
@@ -164,14 +166,21 @@ void main() {
     vk.failing.add('10000_1');
     vk.calls.clear();
     await playlists.refresh();
-    expect(vk.songReads(), ['audio.get 10000_1']);
+    expect(
+      vk.songReads(),
+      unorderedEquals(['audio.get 10000_1', 'audio.get 10000_2']),
+    );
     expect(playlists.songsOf('10000_1'), hasLength(20));
     expect(logs.last, contains('1 failed'));
 
     vk.failing.clear();
     vk.calls.clear();
     await playlists.refresh();
-    expect(vk.songReads(), ['audio.get 10000_1'], reason: 'asked again');
+    expect(
+      vk.songReads(),
+      unorderedEquals(['audio.get 10000_1', 'audio.get 10000_2']),
+      reason: 'asked again (and the made one, as always)',
+    );
     expect(playlists.allOf(_account.id)[1].updateTime, 5);
   });
 
@@ -225,6 +234,9 @@ void main() {
   test('a refresh asked while one runs runs once after it', () async {
     final playlists = make();
     final first = playlists.refresh();
+    // Asks before it began join it; these come once it runs.
+    expect(identical(playlists.refresh(), first), isTrue);
+    await Future<void>.delayed(Duration.zero);
     final second = playlists.refresh();
     final third = playlists.refresh();
     await Future.wait([first, second, third]);
