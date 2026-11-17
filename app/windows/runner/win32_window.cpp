@@ -209,6 +209,11 @@ bool Win32Window::Show() {
                  SWP_NOSIZE | SWP_NOACTIVATE);
     return ShowWindow(window_handle_, SW_SHOWNA);
   }
+  // A minimized start stays in the taskbar and leaves the focus where it is;
+  // a maximized window still comes back maximized.
+  if (start_minimized_) {
+    return ShowWindow(window_handle_, SW_SHOWMINNOACTIVE);
+  }
   return ShowWindow(window_handle_,
                     start_maximized_ ? SW_SHOWMAXIMIZED : SW_SHOWNORMAL);
 }

@@ -36,6 +36,11 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
   if (const auto placement = LoadWindowPlacement(placement_path)) {
     window.SetStartPlacement(placement->frame, placement->maximized);
   }
+  // The launcher's minimized start (a shortcut set to "Run: Minimized", or
+  // the install script reopening the app) is kept, as other apps do.
+  window.SetStartMinimized(show_command == SW_SHOWMINNOACTIVE ||
+                           show_command == SW_SHOWMINIMIZED ||
+                           show_command == SW_MINIMIZE);
   if (!window.Create(L"Ownsemble v2", origin, size)) {
     return EXIT_FAILURE;
   }

@@ -41,6 +41,11 @@ class Win32Window {
   // as the place it is restored to. Call before Create.
   void SetStartPlacement(const RECT& frame, bool maximized);
 
+  // Makes Show open the window minimized, without taking the focus: the
+  // launcher asked for a minimized start (the install script reopening the
+  // app after an update, user 2026-11-18). Call before Show.
+  void SetStartMinimized(bool minimized) { start_minimized_ = minimized; }
+
   // Show the current window. Returns true if the window was successfully shown.
   bool Show();
 
@@ -101,6 +106,7 @@ class Win32Window {
   bool has_start_frame_ = false;
   RECT start_frame_ = {};
   bool start_maximized_ = false;
+  bool start_minimized_ = false;
 
   // window handle for top level window.
   HWND window_handle_ = nullptr;
