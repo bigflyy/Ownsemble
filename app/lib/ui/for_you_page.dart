@@ -351,6 +351,8 @@ class _ForYouPageState extends State<ForYouPage> {
             for (final shelf in forYou.similar) ...[
               _SectionTitle(
                 shelf.title,
+                // VK picks this shelf's song and does not say why.
+                note: 'Picked by VK',
                 colors: colors,
                 onAll: shelf.songs.length > similarRowsShown
                     ? () => _open(forYou.refOfShelf(shelf))
