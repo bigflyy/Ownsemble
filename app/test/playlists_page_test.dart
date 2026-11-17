@@ -4,6 +4,7 @@
 // in place and + on the others, songs VK gives no file for greyed, Play and
 // Shuffle, and the narrow window.
 
+import 'package:flutter/gestures.dart' show kSecondaryMouseButton;
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ownsemble/library/library_store.dart';
@@ -250,6 +251,71 @@ void main() {
       playback.queue.context.map((t) => t.title),
       isNot(contains('Не в регионе')),
     );
+    player.playing.value = false;
+    await tester.pump(const Duration(seconds: 5));
+  });
+
+  testWidgets('Back to a playlist after a refresh shows its new songs', (
+    tester,
+  ) async {
+    await openPlaylists(tester);
+    await tester.tap(find.byKey(const ValueKey('list-card-В дорогу')));
+    await tester.pumpAndSettle();
+    expect(library.visible, hasLength(4));
+    library.showView(LibraryView.songs);
+    await tester.pumpAndSettle();
+    songs['42_1'] = songs['42_1']!.take(2).toList();
+    items[0]['count'] = 2;
+    items[0]['update_time'] = 999;
+    await playlists.refresh();
+    await tester.pumpAndSettle();
+    library.goBack();
+    await tester.pumpAndSettle();
+    expect(library.view.kind, ViewKind.vkList);
+    expect(library.visible, hasLength(2));
+  });
+
+  testWidgets('a playlist removed on VK while open says so', (tester) async {
+    await openPlaylists(tester);
+    await tester.tap(find.byKey(const ValueKey('list-card-В дорогу')));
+    await tester.pumpAndSettle();
+    items.removeAt(0);
+    await playlists.refresh();
+    await tester.pumpAndSettle();
+    expect(library.visible.where((t) => !t.inLibrary), isEmpty);
+    expect(find.textContaining('no longer lists this playlist'), findsWidgets);
+  });
+
+  testWidgets("a greyed row's Play next and Add to queue are off", (
+    tester,
+  ) async {
+    await openPlaylists(tester);
+    await tester.tap(find.byKey(const ValueKey('list-card-В дорогу')));
+    await tester.pumpAndSettle();
+    final greyed = library.visible.last;
+    await tester.tap(
+      find.byKey(ValueKey('song-${greyed.id}')),
+      buttons: kSecondaryMouseButton,
+    );
+    await tester.pumpAndSettle();
+    for (final key in ['menu-play-next', 'menu-add-to-queue']) {
+      final item = tester.widget<PopupMenuItem<Object>>(
+        find.byKey(ValueKey(key)),
+      );
+      expect(item.enabled, isFalse, reason: key);
+    }
+    await tester.tapAt(const Offset(5, 5));
+    await tester.pumpAndSettle();
+  });
+
+  testWidgets('a song VK blocks in the playlist that the library has plays '
+      'as the library\'s song from the card too', (tester) async {
+    songs['42_1']![0] = recSong(-7, 10, restricted: 2);
+    await openPlaylists(tester);
+    await tester.tap(find.byKey(const ValueKey('list-play-В дорогу')));
+    await tester.pumpAndSettle();
+    expect(player.current?.inLibrary, isTrue);
+    expect(playback.queue.context, hasLength(3));
     player.playing.value = false;
     await tester.pump(const Duration(seconds: 5));
   });

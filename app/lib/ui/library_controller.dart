@@ -623,6 +623,31 @@ class LibraryController extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// The songs of VK lists changed at their source (the playlists after a
+  /// sync): every list [which] picks that was opened in this run takes its
+  /// new songs, so Back to it shows them too; one its source no longer has
+  /// is dropped, and asked again (and told why) when it shows. The open
+  /// one shows the change.
+  void listsChanged(bool Function(AlbumRef list) which) {
+    var openChanged = false;
+    for (final list in [..._albumLists.keys]) {
+      if (!which(list)) continue;
+      final cached = vkLists?.cached(list);
+      if (cached == null) {
+        _albumLists.remove(list);
+      } else {
+        _albumLists[list] = cached;
+      }
+      if (_view.kind == ViewKind.vkList && _view.album == list) {
+        openChanged = true;
+      }
+    }
+    if (!openChanged) return;
+    _rebuildBase();
+    _applySearch();
+    notifyListeners();
+  }
+
   /// Opens the report of [year] as a new place (from Stats; Back returns).
   void openYearReport(int year) {
     final view = LibraryView(ViewKind.yearReport, year: year);

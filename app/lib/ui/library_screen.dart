@@ -165,6 +165,9 @@ class _LibraryScreenState extends State<LibraryScreen> {
   @override
   void initState() {
     super.initState();
+    // Playlists read again after a sync: every playlist place opened
+    // takes the new songs (Back to one shows them too).
+    widget.playlists?.addListener(_playlistsChanged);
     // Play numbers are read after the first frame: the list shows first.
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) library.filters?.load();
@@ -438,6 +441,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
 
   @override
   void dispose() {
+    widget.playlists?.removeListener(_playlistsChanged);
     FocusManager.instance.removeEarlyKeyEventHandler(_onEarlyKey);
     _searchFocus.removeListener(_endJumpInSearch);
     for (final subscription in _subscriptions) {
@@ -446,6 +450,8 @@ class _LibraryScreenState extends State<LibraryScreen> {
     _searchFocus.dispose();
     super.dispose();
   }
+
+  void _playlistsChanged() => library.listsChanged(isPlaylistRef);
 
   /// Plays the visible song at [index], with the visible list as the list
   /// next and previous move in; clicking the song that is already loaded
@@ -620,6 +626,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
     }
     final showsAlbum =
         library.view.kind == ViewKind.album && library.view.album == album;
+    final restricted = _outside?.restrictionOf(track.id) != null;
     final choice = await showMenu<Object>(
       context: context,
       position: RelativeRect.fromLTRB(
@@ -629,15 +636,18 @@ class _LibraryScreenState extends State<LibraryScreen> {
         position.dy,
       ),
       items: [
-        const PopupMenuItem(
-          key: ValueKey('menu-play-next'),
+        // A song VK gives no file for cannot play: greyed, nothing queued.
+        PopupMenuItem(
+          key: const ValueKey('menu-play-next'),
           value: 'play-next',
-          child: Text('Play next'),
+          enabled: !restricted,
+          child: const Text('Play next'),
         ),
-        const PopupMenuItem(
-          key: ValueKey('menu-add-to-queue'),
+        PopupMenuItem(
+          key: const ValueKey('menu-add-to-queue'),
           value: 'add-to-queue',
-          child: Text('Add to queue'),
+          enabled: !restricted,
+          child: const Text('Add to queue'),
         ),
         if (album != null && !showsAlbum)
           const PopupMenuItem(

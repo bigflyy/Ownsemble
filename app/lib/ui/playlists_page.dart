@@ -185,9 +185,11 @@ class _PlaylistsPageState extends State<PlaylistsPage> {
       detail: _detailOf(list),
       coverUrl: list.coverUrl,
       songs: tracks,
+      // A song VK blocks in the playlist plays as the library's song when
+      // the library has it (its row is the library's, as a click plays).
       playable: [
-        for (final (i, song) in songs.indexed)
-          if (song.playable) tracks[i],
+        for (final track in tracks)
+          if (playlists.outside.restrictionOf(track.id) == null) track,
       ],
       onPlay: _play,
       onOpen: () => widget.library.openList(playlists.refOf(sourceId, list)),

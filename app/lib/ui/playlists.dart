@@ -282,7 +282,7 @@ class VkPlaylists extends ChangeNotifier implements ListCatalog {
   @override
   bool canFetch(AlbumRef album) =>
       cached(album) != null ||
-      playlistOf(album) != null && apiOfSource(album.link!.sourceId) != null;
+      isPlaylistRef(album) && apiOfSource(album.link!.sourceId) != null;
 
   @override
   Future<List<AlbumSong>> fetch(AlbumRef album) async {
@@ -290,8 +290,13 @@ class VkPlaylists extends ChangeNotifier implements ListCatalog {
     if (at != null) return at;
     final list = playlistOf(album);
     final call = album.link == null ? null : apiOfSource(album.link!.sourceId);
-    if (list == null || call == null) {
+    if (call == null) {
       throw const AlbumNotListed('log in to the account it came from');
+    }
+    if (list == null) {
+      throw const AlbumNotListed(
+        'VK no longer lists this playlist for the account',
+      );
     }
     try {
       final songs = await fetchVkPlaylistSongs(call, list);

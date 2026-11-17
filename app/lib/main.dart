@@ -391,15 +391,6 @@ Future<void> main(List<String> args) async {
     lastOutcome = outcome;
     if (outcome != null) unawaited(playlists.refresh());
   });
-  // An open playlist shows its new songs once VK gave them.
-  playlists.addListener(() {
-    final ref = library.view.album;
-    if (library.view.kind == ViewKind.vkList &&
-        ref != null &&
-        isPlaylistRef(ref)) {
-      library.listChanged(ref);
-    }
-  });
   // VK Mix never ends: near the end of its songs the next ones are asked.
   player.currentStream.listen((track) async {
     if (track == null || !forYou.isMixList(playback.queue.context)) return;
