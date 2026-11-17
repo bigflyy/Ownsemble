@@ -425,6 +425,16 @@ Future<void> main(List<String> args) async {
         });
         await show('5i5 removeFromPlaylist y');
       }
+      // The key with its access key: "owner_id_id_accesskey".
+      if (foreign.length > 1 && foreign.elementAt(1)['access_key'] is String) {
+        final z = foreign.elementAt(1);
+        await tryCall('add z+ak', 'audio.addToPlaylist', {
+          'owner_id': '$me',
+          'playlist_id': '$playlistId',
+          'audio_ids': '${keyOf(z)}_${z['access_key']}',
+        });
+        await show('5i6 add z as key_accesskey (count +1 = taken)');
+      }
       final now = await songsOf(playlistId);
       await tryCall('move x', 'audio.reorder', {
         'owner_id': xOwner,
@@ -485,7 +495,17 @@ Future<void> main(List<String> args) async {
         '  follow reply fields: '
         '${followed is Map ? (followed.keys.toList()..sort()).join(',') : followed.runtimeType}',
       );
-      if (followed is Map<String, dynamic>) followedCopy = followed;
+      if (followed is Map<String, dynamic>) {
+        followedCopy = followed;
+        final copy = await playlistInfo(
+          followed['owner_id'] as int,
+          followed['playlist_id'] as int,
+        );
+        print(
+          '  copy by getPlaylistById: original ${copy?['original'] is Map ? 'yes' : 'no'}, '
+          'permissions ${copy?['permissions'] is Map ? ((copy!['permissions'] as Map).entries.map((e) => '${e.key}=${e.value}').join(' ')) : '-'}',
+        );
+      }
       final after = await tryCall('lists', 'audio.getPlaylists', {
         'owner_id': '$me',
         'count': '200',
