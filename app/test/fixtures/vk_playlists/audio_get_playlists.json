@@ -1,0 +1,56 @@
+{
+  "count": 1,
+  "items": [
+    {
+      "id": 1,
+      "owner_id": 10000,
+      "type": "ugc",
+      "title": "сладкая вата",
+      "description": "opaque-1",
+      "count": 749,
+      "followers": 2183,
+      "plays": 10001,
+      "create_time": 1619618476,
+      "update_time": 1731794619,
+      "genres": [],
+      "is_following": true,
+      "original": {
+        "playlist_id": 779,
+        "owner_id": 10002,
+        "access_key": "opaque-2"
+      },
+      "followed": {
+        "playlist_id": 1,
+        "owner_id": 10000
+      },
+      "photo": {
+        "width": 300,
+        "height": 300,
+        "id": "10003",
+        "photo_34": "https://example.invalid/3.jpg",
+        "photo_68": "https://example.invalid/4.jpg",
+        "photo_135": "https://example.invalid/5.jpg",
+        "photo_270": "https://example.invalid/6.jpg",
+        "photo_300": "https://example.invalid/7.jpg",
+        "photo_600": "https://example.invalid/8.jpg",
+        "photo_1200": "https://example.invalid/9.jpg"
+      },
+      "permissions": {
+        "play": true,
+        "share": true,
+        "edit": false,
+        "follow": false,
+        "delete": false,
+        "boom_download": true,
+        "save_as_copy": false
+      },
+      "subtitle_badge": false,
+      "play_button": false,
+      "access_key": "opaque-10",
+      "main_color": "#98BDEA"
+    }
+  ],
+  "next_from": "",
+  "profiles": [],
+  "groups": []
+}

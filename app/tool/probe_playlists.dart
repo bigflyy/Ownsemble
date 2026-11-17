@@ -12,12 +12,19 @@
 //
 // Run from app/:
 //   dart run tool/probe_playlists.dart --vk-session FILE [--counts-only]
-//     [--lists N]
+//     [--lists N] [--fixtures DIR]
+//
+// --fixtures writes scrubbed copies (probe_recommendations.dart's Scrubber)
+// of the playlist list and of 20 songs of the first playlist, for the unit
+// tests' fakes; never with the second account.
 // ignore_for_file: avoid_print
 
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:ownsemble/vk/vk_client.dart';
+
+import 'probe_recommendations.dart' show Scrubber;
 
 /// Long numbers blanked, so an id inside an error text never shows.
 String blank(Object? text) => '$text'.replaceAll(RegExp(r'\d{4,}'), 'N');
@@ -63,6 +70,17 @@ Future<void> main(List<String> args) async {
 
   final countsOnly = args.contains('--counts-only');
   final maxLists = int.parse(valueOf('--lists') ?? '12');
+  final fixtureDir = countsOnly ? null : valueOf('--fixtures');
+  final scrubber = Scrubber();
+  void saveFixture(String name, Object? reply) {
+    if (fixtureDir == null || reply == null) return;
+    Directory(fixtureDir).createSync(recursive: true);
+    File('$fixtureDir/$name.json').writeAsStringSync(
+      const JsonEncoder.withIndent('  ').convert(scrubber.scrub(reply)),
+    );
+    print('fixture $name written');
+  }
+
   final client = VkClient(
     SessionCookie.loadAll(File(valueOf('--vk-session')!)),
     requestTimeout: const Duration(seconds: 90),
@@ -105,6 +123,7 @@ Future<void> main(List<String> args) async {
       'count': '200',
     }) as Map<String, dynamic>?;
     if (reply == null) return;
+    saveFixture('audio_get_playlists', reply);
     final lists = (reply['items'] as List).cast<Map<String, dynamic>>();
     print('audio.getPlaylists: count ${reply['count']}, ${lists.length} items');
     final fields = <String>{};
@@ -205,6 +224,33 @@ Future<void> main(List<String> args) async {
           print('  copy and original: same songs in the same order: $same');
         }
       }
+    }
+
+    // 2b. The album reader's parameter (album_id) reads the same songs as
+    // playlist_id; and a page of 20 songs for the fixtures.
+    if (lists.isNotEmpty) {
+      final list = lists.first;
+      Future<Map<String, dynamic>?> page(String idName) async =>
+          await ask('audio.get', {
+            'owner_id': '${list['owner_id']}',
+            idName: '${list['id']}',
+            'access_key': ?(list['access_key'] as String?),
+            'count': '20',
+          }) as Map<String, dynamic>?;
+      final byPlaylist = await page('playlist_id');
+      final byAlbum = await page('album_id');
+      if (byPlaylist != null && byAlbum != null) {
+        String keys(Map<String, dynamic> r) => [
+          for (final item in r['items'] as List)
+            keyOf(item as Map<String, dynamic>),
+        ].join(',');
+        print(
+          '\nalbum_id reads the same 20 songs as playlist_id: '
+          '${keys(byPlaylist) == keys(byAlbum)} '
+          '(counts ${byPlaylist['count']} / ${byAlbum['count']})',
+        );
+      }
+      saveFixture('audio_get_playlist_songs', byPlaylist);
     }
 
     // 3. One playlist by id: anything more than in the list reply?
