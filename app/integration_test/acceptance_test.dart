@@ -2377,7 +2377,8 @@ void main() {
               .byWidgetPredicate(
                 (widget) =>
                     widget is RawImage &&
-                    widget.width == 220 &&
+                    // 220 px, or 168 in a short panel (session 27).
+                    (widget.width ?? 0) >= 160 &&
                     (widget.image?.width ?? 0) > TrackTile.smallCoverPixels,
               )
               .evaluate()

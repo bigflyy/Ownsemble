@@ -29,6 +29,7 @@ import 'package:ownsemble/main.dart' as app;
 import 'package:ownsemble/playback/player_service.dart';
 import 'package:ownsemble/ui/library_controller.dart';
 import 'package:ownsemble/ui/library_screen.dart';
+import 'package:ownsemble/ui/player_bar.dart';
 import 'package:ownsemble/vk/vk_catalog.dart';
 import 'package:ownsemble/vk/vk_client.dart';
 import 'package:ownsemble/vk/vk_playlists.dart';
@@ -312,9 +313,36 @@ void main() {
     );
     if (!shuffleWas) playback.toggleShuffle();
 
-    // 7. The followed playlist, from what the refresh read.
+    // 6b. The page shows which playlist plays (user, 2026-11-18: "not very
+    // clear which playlist is playing now"): its card is marked after
+    // Shuffle, the other is not, and the side panel says where it plays
+    // from.
     library.goBack();
     await tester.pump();
+    expect(library.view.kind, ViewKind.playlists);
+    expect(
+      find.byKey(ValueKey('list-playing-$testTitle')),
+      findsOneWidget,
+      reason: 'the playing card is marked',
+    );
+    expect(
+      find.byKey(ValueKey('list-playing-${followed.title}')),
+      findsNothing,
+    );
+    final from = find.byKey(const ValueKey('player-from'));
+    final panel = find.byType(NowPlayingPanel).evaluate().isNotEmpty;
+    if (panel) {
+      expect(
+        find.descendant(of: from, matching: find.textContaining(testTitle)),
+        findsOneWidget,
+      );
+    }
+    say(
+      'playing mark: on the "$testTitle" card after Shuffle; side panel '
+      '${panel ? 'says Playing from "$testTitle"' : 'not shown (bottom bar)'}',
+    );
+
+    // 7. The followed playlist, from what the refresh read.
     clock = Stopwatch()..start();
     await tester.tap(find.byKey(ValueKey('list-card-${followed.title}')));
     await tester.pump();
