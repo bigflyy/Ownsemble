@@ -181,10 +181,16 @@ class ForYou extends ChangeNotifier implements ListCatalog {
         fetched == null ||
         _now().difference(fetched) > staleAfter ||
         _sourceId != account?.id;
-    // Started after the caller's build: refresh tells its listeners.
-    if (stale) scheduleMicrotask(() => unawaited(refresh()));
-    if (seedsOf != null) {
-      scheduleMicrotask(() => unawaited(refreshOwnShelves()));
+    // Started after the caller's build: refresh tells its listeners. The
+    // own shelves wait for a stale page, so they leave out the song of VK's
+    // own shelf and are asked as the account the page is of.
+    if (stale || seedsOf != null) {
+      scheduleMicrotask(
+        () => unawaited(() async {
+          if (stale) await refresh();
+          if (seedsOf != null) await refreshOwnShelves();
+        }()),
+      );
     }
   }
 
@@ -281,9 +287,18 @@ class ForYou extends ChangeNotifier implements ListCatalog {
             list,
       ];
       if (!sameAccount) {
-        _songs.clear();
-        _own = const [];
-        _ownSeeds = null;
+        // Own shelves already asked as this account (a first open) stay,
+        // with their songs; everything else was another account's.
+        final mine = [
+          for (final shelf in _own)
+            if (shelf.ref.link?.sourceId == source.id) shelf,
+        ];
+        final kept = {for (final shelf in mine) shelf.ref.link!.key};
+        _songs.removeWhere((key, _) => !kept.contains(key));
+        if (mine.length != _own.length) {
+          _own = mine;
+          _ownSeeds = null;
+        }
       }
       final failed = <String>[];
       await Future.wait([

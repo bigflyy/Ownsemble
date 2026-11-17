@@ -2,6 +2,7 @@
 // refreshing only the lists VK rewrote, keeping what it had when VK fails,
 // VK Mix, similar songs and the dislike, against the recorded VK replies.
 
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -335,6 +336,51 @@ void main() {
           shelf.title.substring(11).toLowerCase(),
       }, reason: 'VK\'s own shelf titles are left out of the seeds');
       expect(skipped.last, isNotEmpty);
+    });
+
+    test(
+      'the first open keeps them when VK\'s page comes after them',
+      () async {
+        // Real VK, 2026-11-17: the similar songs came in 1.5 s, the page and
+        // lists in 3.9 s; the page then wiped the shelves as another
+        // account's, and VK's own shelf was not yet known to leave out.
+        final page = Completer<Object?>();
+        final slow = RecsVk(
+          overrides: {'catalog.getAudio': (_) => page.future},
+        );
+        final forYou = make(fake: slow, seedsOf: seedsOf)..open();
+        await pumpEventQueue();
+        page.complete(recFixture('catalog_get_audio'));
+        await pumpEventQueue();
+        expect(forYou.hasLists, isTrue);
+        expect(forYou.ownShelves, hasLength(2));
+        expect(skipped.last, isNotEmpty, reason: 'VK\'s shelf left out');
+      },
+    );
+
+    test('own shelves of another account go when its page comes', () async {
+      final first = make(seedsOf: seedsOf);
+      await first.refresh();
+      await first.refreshOwnShelves();
+      expect(first.ownShelves, hasLength(2));
+      final other = ForYou(
+        accounts: () => const [
+          SourceInfo(
+            id: 9,
+            kind: TrackSource.vk,
+            account: 'x',
+            name: 'X',
+            songCount: 0,
+            goneCount: 0,
+          ),
+        ],
+        apiOfSource: (id) => vk.call,
+        libraryCopyOfSong: (_) => null,
+        cacheDir: dir.path,
+        now: () => now,
+      );
+      await other.refresh();
+      expect(other.ownShelves, isEmpty);
     });
 
     test('kept in the cache a day; asked again after it', () async {
