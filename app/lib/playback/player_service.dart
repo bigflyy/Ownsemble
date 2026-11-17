@@ -183,6 +183,18 @@ class PlayerService {
   /// start costs no network and no failed link.
   Duration? _resumeAt;
 
+  /// Whether a play request for [_current] is still on its way to sound,
+  /// over all its rounds (another file of the song may load after the
+  /// first, see [_play]).
+  bool _loading = false;
+
+  /// Where the play request on its way wants the song to start: where it
+  /// was asked to, or where the user moved since (open check B10: a seek
+  /// right after a click was lost). One value for the whole request, over
+  /// its rounds: a failed start keeps it as [resumeAt], and once the sound
+  /// comes mpv is moved there if it started elsewhere.
+  Duration? _wantedAt;
+
   /// Whether [_current] is a restored song no play request has touched yet:
   /// mpv's own state says nothing about it.
   bool _restored = false;
@@ -206,6 +218,10 @@ class PlayerService {
   /// Whether [current] is loaded in mpv (its last play request succeeded),
   /// so pausing and resuming applies to it.
   bool get currentLoaded => _loaded;
+
+  /// Whether a play request for [current] is on its way to sound; a seek
+  /// now moves where it starts ([position] shows it).
+  bool get loading => _loading;
   Stream<Track?> get currentStream => _currentController.stream;
 
   /// Where a restored song goes on from; null once it sounds, and for every
@@ -325,6 +341,10 @@ class PlayerService {
     String? news,
   }) async {
     final generation = ++_generation;
+    _loading = true;
+    // A new request starts where it is asked to; its next round keeps
+    // where the user moved meanwhile.
+    if (round == 0) _wantedAt = from;
     // The last song's play time ends here, before anything is awaited.
     _heard.stop();
     final skipped = _currentStream;
@@ -466,13 +486,19 @@ class PlayerService {
       // previous song keeps reporting positions until it is unloaded.
       _loadingUri = uri;
       _loadingUriActive = false;
-      final startsAt = from ?? Duration.zero;
+      // mpv starts where the request asked; a place the user moved to
+      // since is reached by a seek once the sound comes. Not by mpv's
+      // start: on a stream that reads the file from its first byte, with no
+      // range request (acceptance-24c: no sound after 20 s), while a seek
+      // asks for a range.
+      final startAt = from;
+      final startsAt = startAt ?? Duration.zero;
       final positions = _player.stream.position.listen((position) {
         // Starting at a position, nothing older can be reported: the song
         // follows no other one in mpv. It may land a little past the target.
         if (_loadingUriActive &&
             position > startsAt &&
-            (from != null || position <= clock.elapsed) &&
+            (startAt != null || position <= clock.elapsed) &&
             !sound.isCompleted) {
           sound.complete();
         }
@@ -507,9 +533,9 @@ class PlayerService {
         // mpv keeps 'start' for every later file, so each play sets it.
         await _mpv.setProperty(
           'start',
-          from == null
+          startAt == null
               ? 'none'
-              : (from.inMilliseconds / 1000).toStringAsFixed(3),
+              : (startAt.inMilliseconds / 1000).toStringAsFixed(3),
         );
         await _mpv.setProperty('pause', 'no');
         await _mpv.command(['loadfile', uri, 'replace']);
@@ -522,8 +548,15 @@ class PlayerService {
       }
       if (generation == _generation) {
         _loaded = true;
+        _loading = false;
         _resumeAt = null;
         _countHeard();
+        final wanted = _wantedAt;
+        _wantedAt = null;
+        if (wanted != null && wanted != startAt) {
+          final seconds = wanted.inMilliseconds / 1000;
+          await _mpv.command(['seek', seconds.toStringAsFixed(3), 'absolute']);
+        }
       }
       final toSoundMs = clock.elapsedMilliseconds;
       final measured = proxied == null
@@ -591,6 +624,10 @@ class PlayerService {
         );
       }
       if (generation == _generation) {
+        // The next try goes on from where the user wanted.
+        _loading = false;
+        _resumeAt = _wantedAt;
+        _wantedAt = null;
         // Unload whatever is left, so resuming cannot bring back the
         // previous song under this song's title.
         await _mpv.command(['stop']);
@@ -724,8 +761,9 @@ class PlayerService {
 
   /// Position in the loaded song, or where a restored song goes on from
   /// (zero when nothing is loaded).
-  Duration get position =>
-      _resumeAt ?? (_loaded ? _player.state.position : Duration.zero);
+  Duration get position => _loading
+      ? _wantedAt ?? Duration.zero
+      : _resumeAt ?? (_loaded ? _player.state.position : Duration.zero);
 
   /// Length of the loaded song as mpv knows it, else the listed length.
   Duration get duration {
@@ -736,9 +774,13 @@ class PlayerService {
     return Duration(seconds: _current?.durationSec ?? 0);
   }
 
-  /// Moves within the loaded song, or moves where a restored song goes on
-  /// from; does nothing while no song is loaded.
+  /// Moves within the loaded song, or moves where a loading or restored
+  /// song starts; does nothing while no song is loaded or loading.
   Future<void> seek(Duration to) async {
+    if (_loading) {
+      _wantedAt = to;
+      return;
+    }
     if (_resumeAt != null) {
       _resumeAt = to;
       return;
@@ -751,21 +793,27 @@ class PlayerService {
   /// Moves by [offset] from where the song is. mpv adds up seeks it has not
   /// finished yet, so quick presses on a stream all count.
   Future<void> seekBy(Duration offset) async {
+    if (_loading) {
+      _wantedAt = _clampedSeek((_wantedAt ?? Duration.zero) + offset);
+      return;
+    }
     final resumeAt = _resumeAt;
     if (resumeAt != null) {
-      final length = duration - const Duration(seconds: 1);
-      final to = resumeAt + offset;
-      _resumeAt = to.isNegative
-          ? Duration.zero
-          : length > Duration.zero && to > length
-          ? length
-          : to;
+      _resumeAt = _clampedSeek(resumeAt + offset);
       return;
     }
     if (!_loaded) return;
     final seconds = offset.inMilliseconds / 1000;
     relativeSeeksSent++;
     await _mpv.command(['seek', seconds.toStringAsFixed(3), 'relative']);
+  }
+
+  /// [to] kept within the song: not before its start, and not past one
+  /// second before its end when its length is known.
+  Duration _clampedSeek(Duration to) {
+    final length = duration - const Duration(seconds: 1);
+    if (to.isNegative) return Duration.zero;
+    return length > Duration.zero && to > length ? length : to;
   }
 
   /// Relative seeks handed to mpv so far. The acceptance test reports it

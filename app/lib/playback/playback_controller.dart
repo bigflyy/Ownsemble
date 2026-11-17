@@ -175,14 +175,15 @@ class PlaybackController extends ChangeNotifier {
   Future<void> seek(Duration to) async {
     _idle = false;
     await player.seek(to);
-    // A restored song reports no positions, so the seek bar waits for this.
-    if (player.resumeAt != null) notifyListeners();
+    // A restored or loading song reports no positions, so the seek bar
+    // waits for this.
+    if (player.resumeAt != null || player.loading) notifyListeners();
   }
 
   /// Moves by [offset] within the song, for the arrow keys.
   Future<void> seekBy(Duration offset) async {
     await player.seekBy(offset);
-    if (player.resumeAt != null) notifyListeners();
+    if (player.resumeAt != null || player.loading) notifyListeners();
   }
 
   /// Sound from any cause means something plays, for example the last song

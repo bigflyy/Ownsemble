@@ -36,6 +36,8 @@ class FakePlayer implements PlayerService {
   Duration duration = const Duration(seconds: 200);
   @override
   Duration? resumeAt;
+  @override
+  bool loading = false;
 
   @override
   bool get isReady => true;
@@ -208,6 +210,18 @@ void main() {
       expect(plays.trackIds, [0]);
     },
   );
+
+  test('a seek while the song loads tells the seek bar (B10)', () async {
+    var told = 0;
+    playback.addListener(() => told++);
+    player.loading = true;
+    await playback.seek(const Duration(seconds: 60));
+    await playback.seekBy(const Duration(seconds: 5));
+    expect(told, 2);
+    player.loading = false;
+    await playback.seek(const Duration(seconds: 70));
+    expect(told, 2, reason: 'a loaded song reports its own positions');
+  });
 
   test('clicking the loaded song pauses or resumes it', () async {
     final list = songs(3);
