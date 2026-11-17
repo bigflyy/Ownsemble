@@ -7,6 +7,7 @@ import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ownsemble/library/library_store.dart';
+import 'package:ownsemble/library/similar_seeds.dart';
 import 'package:ownsemble/library/track.dart';
 import 'package:ownsemble/ui/for_you.dart';
 import 'package:ownsemble/vk/vk_client.dart';
@@ -36,11 +37,16 @@ void main() {
   });
   tearDown(() => dir.deleteSync(recursive: true));
 
-  ForYou make({RecsVk? fake, Track? Function(NewTrack)? copyOf}) => ForYou(
+  ForYou make({
+    RecsVk? fake,
+    Track? Function(NewTrack)? copyOf,
+    List<SimilarSeed> Function({required Set<String> skipTitles})? seedsOf,
+  }) => ForYou(
     accounts: () => [_account],
     apiOfSource: (id) => id == _account.id ? (fake ?? vk).call : null,
     libraryCopyOfSong: copyOf ?? (_) => null,
     cacheDir: dir.path,
+    seedsOf: seedsOf,
     log: logs.add,
     now: () => now,
   );
@@ -271,6 +277,142 @@ void main() {
     final record = jsonDecode(line) as Map<String, dynamic>;
     expect(record['key'], '5_6');
     expect(record['title'], 'Звезда');
+  });
+
+  group('own "Similar to" shelves (Stage E)', () {
+    Track own(int id, String artist, String title) => Track(
+      id: id,
+      sourceId: _account.id,
+      source: TrackSource.vk,
+      artist: artist,
+      title: title,
+      durationSec: 200,
+      sourceKey: '5_$id',
+    );
+    final kino = own(10, 'Кино', 'Звезда');
+    final splin = own(11, 'Сплин', 'Романс');
+    var seeds = <SimilarSeed>[
+      (kind: SimilarSeedKind.mostHeard, track: kino),
+      (kind: SimilarSeedKind.rediscover, track: splin),
+    ];
+    final skipped = <Set<String>>[];
+    List<SimilarSeed> seedsOf({required Set<String> skipTitles}) {
+      skipped.add(skipTitles);
+      return seeds;
+    }
+
+    setUp(() {
+      seeds = [
+        (kind: SimilarSeedKind.mostHeard, track: kino),
+        (kind: SimilarSeedKind.rediscover, track: splin),
+      ];
+      skipped.clear();
+    });
+
+    List<String> similarCalls(RecsVk fake) => [
+      for (final call in fake.calls)
+        if (call.startsWith('audio.getRecommendations')) call,
+    ];
+
+    test('one shelf per seed, from the seed\'s own key', () async {
+      final forYou = make(seedsOf: seedsOf);
+      await forYou.refresh();
+      await forYou.refreshOwnShelves();
+      expect(
+        [for (final s in forYou.ownShelves) s.ref.title],
+        ['Similar to Звезда', 'Similar to Романс'],
+      );
+      expect(
+        [for (final s in forYou.ownShelves) s.kind],
+        [SimilarSeedKind.mostHeard, SimilarSeedKind.rediscover],
+      );
+      expect(forYou.ownShelves.last.note, contains('favorites'));
+      expect(forYou.cached(forYou.ownShelves.first.ref), hasLength(12));
+      expect(similarCalls(vk), hasLength(2));
+      expect(similarCalls(vk).first, contains('target_audio=5_10'));
+      expect(skipped.last, {
+        for (final shelf in forYou.similar)
+          shelf.title.substring(11).toLowerCase(),
+      }, reason: 'VK\'s own shelf titles are left out of the seeds');
+      expect(skipped.last, isNotEmpty);
+    });
+
+    test('kept in the cache a day; asked again after it', () async {
+      final first = make(seedsOf: seedsOf);
+      await first.refresh();
+      await first.refreshOwnShelves();
+
+      now = now.add(const Duration(hours: 5));
+      final again = RecsVk();
+      final next = make(fake: again, seedsOf: seedsOf)..open();
+      expect(next.ownShelves, hasLength(2), reason: 'from the cache at once');
+      expect(next.cached(next.ownShelves.first.ref), hasLength(12));
+      await next.refreshOwnShelves();
+      expect(similarCalls(again), isEmpty, reason: 'same seeds, same day');
+
+      now = now.add(const Duration(hours: 20));
+      final later = RecsVk();
+      final third = make(fake: later, seedsOf: seedsOf);
+      await third.refreshOwnShelves();
+      expect(similarCalls(later), hasLength(2), reason: 'a day old');
+    });
+
+    test('other seeds are asked for at once', () async {
+      final forYou = make(seedsOf: seedsOf);
+      await forYou.refresh();
+      await forYou.refreshOwnShelves();
+      seeds = [(kind: SimilarSeedKind.mostHeard, track: splin)];
+      final again = RecsVk();
+      final next = make(fake: again, seedsOf: seedsOf);
+      await next.refreshOwnShelves();
+      expect(similarCalls(again), hasLength(1));
+      expect([for (final s in next.ownShelves) s.seedId], [11]);
+    });
+
+    test(
+      'VK not answering keeps the shelf from before and asks again',
+      () async {
+        final forYou = make(seedsOf: seedsOf);
+        await forYou.refresh();
+        await forYou.refreshOwnShelves();
+        now = now.add(const Duration(days: 2));
+        final down = RecsVk(
+          overrides: {
+            'audio.getRecommendations': (_) => throw VkException('flood'),
+          },
+        );
+        final next = make(fake: down, seedsOf: seedsOf);
+        await next.refreshOwnShelves();
+        expect(next.ownShelves, hasLength(2), reason: 'kept');
+        expect(next.cached(next.ownShelves.first.ref), hasLength(12));
+        final up = RecsVk();
+        final third = make(fake: up, seedsOf: seedsOf);
+        await third.refreshOwnShelves();
+        expect(
+          similarCalls(up),
+          hasLength(2),
+          reason: 'the failure asks again',
+        );
+      },
+    );
+
+    test('nothing similar and no seeds give no shelves', () async {
+      final none = RecsVk(
+        overrides: {
+          'audio.getRecommendations': (_) =>
+              recFixture('audio_get_recommendations_target_missing'),
+          'audio.search': (_) => {'count': 0, 'items': []},
+        },
+      );
+      final forYou = make(fake: none, seedsOf: seedsOf);
+      await forYou.refreshOwnShelves();
+      expect(forYou.ownShelves, isEmpty);
+      seeds = [];
+      final empty = make(seedsOf: seedsOf);
+      await empty.refreshOwnShelves();
+      expect(empty.ownShelves, isEmpty);
+      expect(similarCalls(vk), isEmpty);
+    });
   });
 
   test('a list of another account is never shown as this one\'s', () async {

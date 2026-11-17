@@ -375,6 +375,38 @@ class _ForYouPageState extends State<ForYouPage> {
                   colors: colors,
                 ),
             ],
+            // Own "Similar to" shelves (Stage E): songs like ones the user
+            // plays a lot or has not heard in a while.
+            for (final shelf in forYou.ownShelves)
+              if (forYou.songsOf(shelf.ref.link!.key) case final songs
+                  when songs.isNotEmpty) ...[
+                _SectionTitle(
+                  shelf.ref.title,
+                  note: shelf.note,
+                  colors: colors,
+                  onAll: songs.length > similarRowsShown
+                      ? () => _open(shelf.ref)
+                      : null,
+                ),
+                for (final (i, track) in _tracksOf(
+                  songs,
+                ).take(similarRowsShown).indexed)
+                  _ShelfRow(
+                    track: track,
+                    own: widget.library.vkLists?.libraryCopyOf((
+                      track: track,
+                      vkTrackId: null,
+                    )),
+                    restricted: forYou.restrictionOf(track.id),
+                    add: widget.catalog == null
+                        ? null
+                        : recFoundSong(forYou, widget.catalog!, track),
+                    catalog: widget.catalog,
+                    onAdd: widget.onAdd,
+                    onTap: () => _play(_tracksOf(songs), i),
+                    colors: colors,
+                  ),
+              ],
           ],
         );
       },

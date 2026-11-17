@@ -7,8 +7,10 @@ import 'package:flutter/material.dart';
 import 'package:path/path.dart' as p;
 
 import 'bench/speed_bench.dart';
+import 'library/day_range.dart';
 import 'library/library_store.dart';
 import 'library/search_index.dart';
+import 'library/similar_seeds.dart';
 import 'library/track.dart';
 import 'playback/playback_controller.dart';
 import 'platform/end_process.dart';
@@ -347,6 +349,21 @@ Future<void> main(List<String> args) async {
     apiOfSource: (sourceId) => clientOfSource(sourceId)?.call,
     libraryCopyOfSong: catalog.libraryCopyOfSong,
     cacheDir: options.dataDir,
+    // Own "Similar to" shelves (plan 07, Stage E): from the History of the
+    // last weeks and the Favorites.
+    seedsOf: ({required skipTitles}) {
+      final now = DateTime.now();
+      DayRange lastDays(int days) =>
+          DayRange(now.subtract(Duration(days: days - 1)), now);
+      return pickSimilarSeeds(
+        library: library.all,
+        recent: store.songPlays(range: lastDays(recentDays)),
+        lastMonth: store.songPlays(range: lastDays(rediscoverAfterDays)),
+        favorites: [for (final f in collections.favorites) f.trackId],
+        now: now,
+        skipTitles: skipTitles,
+      );
+    },
     log: logPerf,
   );
   library.vkLists = forYou;
