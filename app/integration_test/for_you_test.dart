@@ -15,7 +15,11 @@
 // library's rows); play two recommended songs the library lacks (streams,
 // decoded); + one; Remove it in the app and Undo, then Remove again (VK and
 // the library back to their counts); Similar songs from a library song's
-// menu; VK Mix plays and the thumb-down skips, VK marks the song disliked,
+// menu; the own "Similar to" shelves (plan 07, Stage E) from listening
+// written into the copy's History (two songs heard today, a favorite not
+// heard for 30 days): VK asked by the songs' keys, the shelves on the page
+// after VK's own, a song of one plays, Show all opens it; VK Mix plays and
+// the thumb-down skips, VK marks the song disliked,
 // and the dislike is taken back; the place opened again comes from the
 // cache. Prints names, counts and times only: no link, key, token or id.
 
@@ -25,7 +29,9 @@ import 'package:flutter/gestures.dart' show kSecondaryMouseButton;
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
+import 'package:ownsemble/library/day_range.dart';
 import 'package:ownsemble/library/library_store.dart';
+import 'package:ownsemble/library/similar_seeds.dart';
 import 'package:ownsemble/library/track.dart';
 import 'package:ownsemble/main.dart' as app;
 import 'package:ownsemble/playback/player_service.dart';
@@ -80,7 +86,45 @@ void main() {
       final file = File(p.join(dataDir, name));
       if (file.existsSync()) file.copySync(p.join(copy.path, name));
     }
-    LibraryStore.open(p.join(copy.path, 'library.db')).close();
+    // Listening for the own "Similar to" shelves: the copy's History has
+    // no heard time (agent runs), so two songs of different artists get
+    // 3 minutes heard an hour ago, and a third, with no play in 30 days,
+    // becomes a favorite.
+    final seeded = LibraryStore.open(p.join(copy.path, 'library.db'));
+    final seedNow = DateTime.now();
+    final lastMonth = seeded.songPlays(
+      range: DayRange(seedNow.subtract(const Duration(days: 29)), seedNow),
+    );
+    final usable = [
+      for (final t in seeded.loadAll())
+        if (t.source == TrackSource.vk &&
+            !t.isGone &&
+            t.sourceKey != null &&
+            t.durationSec >= 120)
+          t,
+    ];
+    final heard = <Track>[];
+    for (final t in usable) {
+      if (heard.length == 2) break;
+      if (heard.any((h) => h.artist == t.artist)) continue;
+      heard.add(t);
+    }
+    final rediscover = usable.firstWhere(
+      (t) =>
+          !heard.contains(t) &&
+          heard.every((h) => h.artist != t.artist) &&
+          !lastMonth.containsKey(t.id),
+    );
+    final hourAgo = seedNow
+        .subtract(const Duration(hours: 1))
+        .millisecondsSinceEpoch;
+    seeded.addPlays([
+      (heard[0].id, hourAgo, 180000, PlayEnd.finished.name),
+      (heard[0].id, hourAgo + 200000, 180000, PlayEnd.finished.name),
+      (heard[1].id, hourAgo + 400000, 150000, PlayEnd.finished.name),
+    ]);
+    seeded.addFavorite(rediscover.id);
+    seeded.close();
     final copied = sqlite3.open(p.join(copy.path, 'library.db'));
     copied.execute('DELETE FROM audio_files');
     copied.close();
@@ -159,6 +203,97 @@ void main() {
     expect(forYou.lists.first.title, 'For you');
     expect(forYou.songsOf(forYou.lists.first.key), isNotEmpty);
     expect(find.byKey(const ValueKey('list-card-For you')), findsOneWidget);
+
+    // 1b. The own "Similar to" shelves: asked on the open, after VK's own.
+    await waitUntil(
+      tester,
+      () => forYou.ownShelves.isNotEmpty,
+      timeout: const Duration(seconds: 30),
+      what: 'the own Similar to shelves',
+    );
+    await tester.pump();
+    say(
+      'own shelves: ${forYou.ownShelves.map((s) => '${s.kind.name} '
+          '"${s.ref.title}" ${forYou.songsOf(s.ref.link!.key).length}').join(', ')} '
+      '(seeds: heard ${heard.map((t) => t.title).join(' / ')}, '
+      'favorite ${rediscover.title})',
+    );
+    expect({
+      for (final s in forYou.ownShelves) s.kind,
+    }, containsAll([SimilarSeedKind.mostHeard, SimilarSeedKind.rediscover]));
+    expect([
+      for (final s in forYou.ownShelves) s.seedId,
+    ], containsAll([heard[0].id, rediscover.id]));
+    final ownTitle = forYou.ownShelves.first.ref.title;
+    final page = find.byKey(const ValueKey('for-you-page'));
+    final ownHeader = find.text(ownTitle.toUpperCase());
+    await tester.scrollUntilVisible(
+      ownHeader,
+      300,
+      scrollable: find.descendant(of: page, matching: find.byType(Scrollable)),
+    );
+    await tester.pump();
+    expect(find.text(forYou.ownShelves.first.note), findsWidgets);
+    if (forYou.similar.isNotEmpty) {
+      final vkHeader = find.text(forYou.similar.first.title.toUpperCase());
+      if (vkHeader.evaluate().isNotEmpty) {
+        expect(
+          tester.getTopLeft(vkHeader).dy,
+          lessThan(tester.getTopLeft(ownHeader).dy),
+          reason: 'VK\'s own shelf first',
+        );
+      }
+    }
+    // A song of the shelf plays (streamed, decoded).
+    final ownSongs = forYou.songsOf(forYou.ownShelves.first.ref.link!.key);
+    final firstPlayable = ownSongs.indexWhere((s) => s.playable);
+    expect(firstPlayable, inInclusiveRange(0, 2), reason: 'a row on the page');
+    final shelfRows = find.descendant(
+      of: page,
+      matching: find.byWidgetPredicate(
+        (w) =>
+            w.key is ValueKey<String> &&
+            (w.key! as ValueKey<String>).value.startsWith('shelf-row-'),
+      ),
+    );
+    final headerY = tester.getTopLeft(ownHeader).dy;
+    final belowHeader = [
+      for (final e in shelfRows.evaluate())
+        if (tester.getTopLeft(find.byWidget(e.widget)).dy > headerY) e.widget,
+    ];
+    final ownTimings = <PlayTiming>[];
+    final ownListening = player.timings.listen(ownTimings.add);
+    clock = Stopwatch()..start();
+    await tester.tap(find.byWidget(belowHeader[firstPlayable]));
+    await tester.pump();
+    await waitUntil(
+      tester,
+      () => ownTimings.isNotEmpty,
+      timeout: const Duration(seconds: 60),
+      what: 'a song of the own shelf to sound',
+    );
+    await ownListening.cancel();
+    final ownTiming = ownTimings.last;
+    expect(ownTiming.ok, isTrue, reason: 'error: ${ownTiming.error}');
+    expect(ownTiming.sampleRate, isNotNull, reason: 'mpv decoded the audio');
+    say(
+      'own shelf song ${player.current?.artist} - ${player.current?.title}: '
+      'sound in ${ownTiming.toSoundMs} ms (network first chunk '
+      '${ownTiming.networkFirstChunkMs} ms), ${ownTiming.sampleRate} Hz',
+    );
+    // Show all opens the shelf as a list.
+    if (ownSongs.length > 3) {
+      await tester.tap(find.byKey(ValueKey('show-all-$ownTitle')));
+      await tester.pump();
+      expect(library.view.kind, ViewKind.vkList);
+      expect(library.view.album?.title, ownTitle);
+      say('Show all: ${library.visible.length} songs');
+      await tester.tap(find.byKey(const ValueKey('nav-forYou')));
+      await tester.pump();
+    }
+    await tester.drag(page, const Offset(0, 20000));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
 
     // 2. The For you list from its card: rows at once from the cache.
     clock = Stopwatch()..start();
