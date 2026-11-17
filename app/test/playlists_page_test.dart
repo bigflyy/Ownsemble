@@ -294,7 +294,7 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('list-card-В дорогу')));
     await tester.pumpAndSettle();
     final second = library.visible[1];
-    await tester.tap(find.byKey(ValueKey('song-${second.id}')));
+    await tester.tap(find.byKey(ValueKey('entry-${second.id}')));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 100));
     expect(player.current?.id, second.id);
@@ -346,7 +346,7 @@ void main() {
     await tester.pumpAndSettle();
     final greyed = library.visible.last;
     await tester.tap(
-      find.byKey(ValueKey('song-${greyed.id}')),
+      find.byKey(ValueKey('entry-${greyed.id}')),
       buttons: kSecondaryMouseButton,
     );
     await tester.pumpAndSettle();

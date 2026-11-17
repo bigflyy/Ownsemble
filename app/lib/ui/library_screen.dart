@@ -29,6 +29,7 @@ import 'library_controller.dart';
 import 'outside_songs.dart';
 import 'playing_mark.dart';
 import 'player_bar.dart';
+import 'playlist_actions.dart';
 import 'playlists.dart';
 import 'playlists_page.dart';
 import 'shell_settings.dart';
@@ -169,6 +170,9 @@ class _LibraryScreenState extends State<LibraryScreen> {
     // Playlists read again after a sync: every playlist place opened
     // takes the new songs (Back to one shows them too).
     widget.playlists?.addListener(_playlistsChanged);
+    // A playlist lists every entry, so each can be taken out or moved
+    // (plan 08, C4).
+    if (widget.playlists != null) library.keepsEveryEntry ??= isPlaylistRef;
     // Play numbers are read after the first frame: the list shows first.
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) library.filters?.load();
@@ -659,6 +663,26 @@ class _LibraryScreenState extends State<LibraryScreen> {
     final showsAlbum =
         library.view.kind == ViewKind.album && library.view.album == album;
     final restricted = _outside?.restrictionOf(track.id) != null;
+    // In a playlist the account made, a row is one entry of it (plan 08).
+    final playlists = widget.playlists;
+    final view = library.view;
+    final playlistRef =
+        view.kind == ViewKind.vkList &&
+            view.album != null &&
+            isPlaylistRef(view.album!)
+        ? view.album
+        : null;
+    final playlist = playlistRef == null
+        ? null
+        : playlists?.playlistOf(playlistRef);
+    final entryKey = entryId == null || playlist == null
+        ? null
+        : _outside?.songOf(entryId)?.key;
+    final inMadePlaylist =
+        playlist != null &&
+        playlist.editable &&
+        entryKey != null &&
+        playlists!.apiOfSource(playlistRef!.link!.sourceId) != null;
     final choice = await showMenu<Object>(
       context: context,
       position: RelativeRect.fromLTRB(
@@ -711,7 +735,16 @@ class _LibraryScreenState extends State<LibraryScreen> {
                   value: 'favorite',
                   child: Text('Add to Favorites'),
                 ),
-        if (track.hasCover || (storage != null && inLibrary) || inStack)
+        if (canAddToPlaylist(playlists, track))
+          const PopupMenuItem(
+            key: ValueKey('menu-add-to-playlist'),
+            value: 'add-to-playlist',
+            child: Text('Add to playlist...'),
+          ),
+        if (track.hasCover ||
+            (storage != null && inLibrary) ||
+            inStack ||
+            inMadePlaylist)
           const PopupMenuDivider(),
         if (track.hasCover)
           const PopupMenuItem(
@@ -736,6 +769,12 @@ class _LibraryScreenState extends State<LibraryScreen> {
             key: ValueKey('menu-remove-from-stack'),
             value: 'unstack',
             child: Text('Remove from this Stack'),
+          ),
+        if (inMadePlaylist)
+          const PopupMenuItem(
+            key: ValueKey('menu-remove-from-playlist'),
+            value: 'remove-from-playlist',
+            child: Text('Remove from this playlist'),
           ),
         if (collections != null && inLibrary) ...[
           const PopupMenuDivider(),
@@ -776,6 +815,20 @@ class _LibraryScreenState extends State<LibraryScreen> {
         collections!.setFavorite(track, false);
       case 'unstack':
         collections!.removeStackEntry(entryId!);
+      case 'add-to-playlist':
+        await showAddToPlaylist(
+          context,
+          playlists: playlists!,
+          track: track,
+          position: position,
+        );
+      case 'remove-from-playlist':
+        removeFromPlaylist(
+          context,
+          playlists: playlists!,
+          ref: playlistRef!,
+          songKey: entryKey!,
+        );
       case final int stackChoice:
         await addToStackChoice(context, collections!, track, stackChoice);
     }
@@ -1063,6 +1116,12 @@ class _LibraryScreenState extends State<LibraryScreen> {
                       if (view.kind == ViewKind.versions) _versionsSearch(),
                       ?_albumAddAll(view, tight: tight),
                       ?_listActions(view),
+                      if (view.kind == ViewKind.playlists &&
+                          widget.playlists != null)
+                        NewPlaylistButton(
+                          playlists: widget.playlists!,
+                          onMade: library.openList,
+                        ),
                       if (view.kind == ViewKind.yearReport &&
                           library.filters != null)
                         YearArrows(
@@ -1316,7 +1375,12 @@ class _LibraryScreenState extends State<LibraryScreen> {
     ViewKind.versions =>
       'Versions of ${library.versionsRow?.title ?? 'a song'}',
     ViewKind.forYou => 'For you',
-    ViewKind.vkList => view.album?.title ?? 'From VK',
+    ViewKind.vkList => switch ((view.album, widget.playlists)) {
+      (final ref?, final playlists?) when isPlaylistRef(ref) =>
+        playlists.titleOf(ref),
+      (final ref?, _) => ref.title,
+      _ => 'From VK',
+    },
   };
 
   Widget _songList(
@@ -1897,6 +1961,13 @@ class _LibraryScreenState extends State<LibraryScreen> {
             },
             icon: const Icon(Icons.shuffle, size: 18),
             label: const Text('Shuffle'),
+          ),
+        // Rename and Delete, or Unfollow (plan 08, C4).
+        if (isPlaylistRef(ref) && widget.playlists != null)
+          PlaylistHeadingMenu(
+            playlists: widget.playlists!,
+            ref: ref,
+            onGone: library.goBack,
           ),
       ],
     );

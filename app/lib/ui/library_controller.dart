@@ -310,6 +310,16 @@ class LibraryController extends ChangeNotifier {
   /// such list opens.
   ListCatalog? vkLists;
 
+  /// Whether a VK list lists every entry, each its own row with its own
+  /// entry id ([entryIdAt]: the outside track id of the entry): the
+  /// account's playlists (plan 08, C4), where two VK copies of one library
+  /// song are two entries to remove or move one by one. Other lists show
+  /// each song once.
+  bool Function(AlbumRef list)? keepsEveryEntry;
+
+  /// The entry ids of the open list's rows when it keeps every entry.
+  List<int>? _albumEntryIds;
+
   /// The versions chosen for swapped songs, for the Changed on VK view.
   final VersionBook? versions;
 
@@ -704,6 +714,7 @@ class LibraryController extends ChangeNotifier {
   /// unless the last ask failed: the rebuild after a failure lands here too,
   /// and must not ask VK again and again.
   List<Track> _albumSongs(AlbumRef album) {
+    _albumEntryIds = null;
     final catalog = _catalogOf(_view);
     if (catalog == null) return const [];
     final libraryIds = catalog.libraryIds(album);
@@ -713,7 +724,13 @@ class LibraryController extends ChangeNotifier {
       if (!_albumFailures.containsKey(album)) _fetchAlbum(album);
       return [for (final id in libraryIds) ?_byId[id]];
     }
-    if (catalog is ListCatalog) return _listSongs(catalog, listed);
+    if (catalog is ListCatalog) {
+      if (keepsEveryEntry?.call(album) ?? false) {
+        _albumEntryIds = [for (final song in listed) song.track.id];
+        return [for (final song in listed) _ownOrOutside(catalog, song)];
+      }
+      return _listSongs(catalog, listed);
+    }
     final byTrackId = catalog.libraryIdsByVkTrackId([
       for (final song in listed) ?song.vkTrackId,
     ]);
@@ -1166,6 +1183,7 @@ class LibraryController extends ChangeNotifier {
       case ViewKind.album || ViewKind.vkList:
         final album = _view.album;
         _base = album == null ? const [] : _albumSongs(album);
+        _baseEntryIds = _albumEntryIds;
       case ViewKind.versions:
         _base = _versionSongs();
       case ViewKind.artists ||
@@ -1202,13 +1220,21 @@ class LibraryController extends ChangeNotifier {
     // is short, so its rows are matched one by one.
     if (_view.listsOutside && base != null) {
       final words = searchWords(_appliedQuery);
-      _visible = words.isEmpty
-          ? base
-          : [
-              for (final track in base)
-                if (matchesAllWords(searchTextOf(track), words)) track,
-            ];
-      _visibleEntryIds = null;
+      if (words.isEmpty) {
+        _visible = base;
+        _visibleEntryIds = _baseEntryIds;
+        return;
+      }
+      final ids = _baseEntryIds;
+      final tracks = <Track>[];
+      final keptIds = ids == null ? null : <int>[];
+      for (var i = 0; i < base.length; i++) {
+        if (!matchesAllWords(searchTextOf(base[i]), words)) continue;
+        tracks.add(base[i]);
+        keptIds?.add(ids![i]);
+      }
+      _visible = tracks;
+      _visibleEntryIds = keptIds;
       return;
     }
     final matches = _index.search(_appliedQuery);
