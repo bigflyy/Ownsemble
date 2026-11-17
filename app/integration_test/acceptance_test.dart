@@ -43,6 +43,7 @@ import 'package:ownsemble/playback/stream_proxy.dart'
     show LostSave, ProxyRequestLog;
 import 'package:ownsemble/storage/audio_storage.dart';
 import 'package:ownsemble/storage/cover_store.dart';
+import 'package:ownsemble/ui/catalog_search.dart';
 import 'package:ownsemble/ui/cover_tile.dart';
 import 'package:ownsemble/ui/filter_bar.dart';
 import 'package:ownsemble/ui/library_controller.dart';
@@ -51,6 +52,8 @@ import 'package:ownsemble/ui/shell_settings.dart';
 import 'package:ownsemble/ui/stat_text.dart';
 import 'package:ownsemble/ui/stats_calendar.dart';
 import 'package:ownsemble/ui/sync_controller.dart';
+import 'package:ownsemble/vk/vk_catalog.dart';
+import 'package:ownsemble/vk/vk_client.dart';
 import 'package:ownsemble/vk/vk_sync.dart';
 import 'package:path/path.dart' as p;
 import 'package:sqlite3/sqlite3.dart';
@@ -2504,6 +2507,164 @@ void main() {
     expect(history.first.trackId, player.current?.id);
     checkPlayDetails(history.take(historyAdded).toList(), runClock);
 
+    // Plan 06 D1: a song found on VK goes into the library with + on its
+    // row, and Remove from library, its Undo and Remove again (row menus,
+    // the note's Undo) leave the test account and the library as they were.
+    // integration_test/catalog_test.dart checks the rest of adding songs.
+    final catalog = screen.catalog!;
+    final vkClient = VkClient(SessionCookie.loadAll(File(sessionFile)));
+    await vkClient.ensureToken();
+    Future<Set<String>> vkKeys() async {
+      final reply = await vkClient.call('audio.get', {
+        'owner_id': '${vkClient.userId}',
+        'count': '1000',
+      }) as Map<String, dynamic>;
+      return {
+        for (final item in reply['items'] as List)
+          vkSourceKey(item as Map<String, dynamic>),
+      };
+    }
+
+    final vkKeysBefore = await vkKeys();
+    // Whatever this step leaves on the account is removed, even on a failure.
+    addTearDown(() async {
+      for (final key in (await vkKeys()).difference(vkKeysBefore)) {
+        final ok = await deleteVkSong(vkClient.call, key);
+        // ignore: avoid_print
+        print('cleanup: removed a copy left behind: $ok');
+      }
+    });
+    final listedBeforeAdd = library.all.length;
+    library.showView(LibraryView.songs);
+    await tester.pump();
+    await tester.enterText(field, 'Наутилус Помпилиус');
+    await tester.pump();
+    await waitUntil(
+      tester,
+      () => catalog.active && !catalog.searching && catalog.songs.isNotEmpty,
+      timeout: const Duration(seconds: 30),
+      what: 'the On VK part',
+    );
+    final keysListedNow = {for (final t in library.all) t.sourceKey};
+    final pick = catalog.songs.firstWhere(
+      (f) =>
+          catalog.stateOf(f) == FoundState.addable &&
+          !keysListedNow.contains(f.key),
+    );
+    final foundRow = find.byKey(ValueKey('found-${pick.track.id}'));
+    while (foundRow.evaluate().isEmpty &&
+        library.scroll.offset < library.scroll.position.maxScrollExtent) {
+      library.scroll.jumpTo(
+        (library.scroll.offset + 300).clamp(
+          0,
+          library.scroll.position.maxScrollExtent,
+        ),
+      );
+      await tester.pump();
+    }
+    await tester.ensureVisible(foundRow);
+    await tester.pump();
+    var addClock = Stopwatch()..start();
+    await tester.tap(
+      find.descendant(
+        of: foundRow,
+        matching: find.byKey(const ValueKey('add-song')),
+      ),
+    );
+    await tester.pump();
+    await waitUntil(
+      tester,
+      () => library.all.length == listedBeforeAdd + 1,
+      timeout: const Duration(seconds: 30),
+      what: 'VK to add the found song',
+    );
+    final addMs = addClock.elapsedMilliseconds;
+    final vkKeysAdded = await vkKeys();
+    final addedKey = vkKeysAdded.difference(vkKeysBefore).single;
+    final addedTrack = library.all.firstWhere((t) => t.sourceKey == addedKey);
+    expect(
+      catalog.stateOf(pick),
+      FoundState.inLibrary,
+      reason: 'the found row shows the check',
+    );
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await tester.pump();
+
+    final addedRow = find.byKey(ValueKey('song-${addedTrack.id}'));
+    Future<void> removeByMenu() async {
+      library.showView(LibraryView.songs);
+      library.goToSong(addedTrack);
+      await tester.pump();
+      await tester.pump();
+      expect(addedRow, findsOneWidget, reason: 'the added song\'s row');
+      await tester.tap(addedRow, buttons: kSecondaryMouseButton);
+      await tester.pump();
+      final item = find.byKey(const ValueKey('menu-remove-from-library'));
+      await waitUntil(
+        tester,
+        () => item.evaluate().isNotEmpty,
+        timeout: const Duration(seconds: 5),
+        what: 'Remove from library in the menu',
+      );
+      await tester.pump(const Duration(milliseconds: 300));
+      await tester.tap(item);
+      await tester.pump();
+      await waitUntil(
+        tester,
+        () => library.all.length == listedBeforeAdd,
+        timeout: const Duration(seconds: 30),
+        what: 'VK to remove the song',
+      );
+    }
+
+    addClock = Stopwatch()..start();
+    await removeByMenu();
+    final removeMs = addClock.elapsedMilliseconds;
+    expect((await vkKeys()).contains(addedKey), isFalse, reason: 'off VK');
+    // The add's note is still up and gives way to the remove's: Undo is
+    // tapped once a click at its centre reaches it, as a user would see it
+    // (acceptance-24a tapped it while the note was still coming in).
+    final undo = find.byKey(const ValueKey('note-undo'));
+    await waitUntil(
+      tester,
+      () {
+        if (undo.evaluate().isEmpty) return false;
+        final box = tester.renderObject(undo) as RenderBox;
+        if (!box.hasSize) return false;
+        final center = box.localToGlobal(box.size.center(Offset.zero));
+        return tester
+            .hitTestOnBinding(center)
+            .path
+            .any((entry) => entry.target == box);
+      },
+      timeout: const Duration(seconds: 5),
+      what: 'the note\'s Undo to take a click',
+    );
+    addClock = Stopwatch()..start();
+    await tester.tap(undo);
+    await tester.pump();
+    await waitUntil(
+      tester,
+      () => library.all.length == listedBeforeAdd + 1,
+      timeout: const Duration(seconds: 30),
+      what: 'Undo to bring the song back',
+    );
+    final undoMs = addClock.elapsedMilliseconds;
+    expect(library.byId(addedTrack.id), isNotNull, reason: 'the same row');
+    expect((await vkKeys()).contains(addedKey), isTrue, reason: 'back on VK');
+    await tester.pump(const Duration(milliseconds: 600));
+    await removeByMenu();
+    final vkKeysAfter = await vkKeys();
+    expect(vkKeysAfter, vkKeysBefore, reason: 'the account as it was');
+    expect(library.all.length, listedBeforeAdd);
+    // ignore: avoid_print
+    print(
+      'add from search: + on a found song $addMs ms, Remove from library '
+      '$removeMs ms, Undo $undoMs ms (same row), Remove again; VK '
+      '${vkKeysBefore.length} -> ${vkKeysAdded.length} -> '
+      '${vkKeysAfter.length} songs, library $listedBeforeAdd',
+    );
+
     // Sync now right after the start sync finds nothing new and leaves the
     // library as it is.
     final before = library.all;
@@ -2541,6 +2702,42 @@ void main() {
       // ignore: avoid_print
       print('Sync now: VK changed $newKeys access keys, nothing else');
     }
+
+    // Open check B10: a seek made right after the click, while the song is
+    // still loading, is kept: the song starts from there, not from 0.
+    // (acceptance-19b/c lost such a seek when the song was loaded again.)
+    final loadingSeekSong = [
+      for (final t in list)
+        if (playedOk.contains(t.id) &&
+            t.durationSec >= 120 &&
+            t.id != player.current?.id)
+          t,
+    ].firstWhere((t) => !storedNow(t), orElse: () => list.first);
+    final loadingSeekTo = Duration(seconds: loadingSeekSong.durationSec ~/ 2);
+    final loadingResult = player.timings.first;
+    await tapSong(tester, loadingSeekSong);
+    expect(
+      player.currentLoaded,
+      isFalse,
+      reason: 'the seek comes while the song loads',
+    );
+    await playback.seek(loadingSeekTo);
+    final loadingTiming = await loadingResult.timeout(
+      const Duration(seconds: 30),
+    );
+    expect(loadingTiming.ok, isTrue, reason: 'error: ${loadingTiming.error}');
+    await waitUntil(
+      tester,
+      () => player.position >= loadingSeekTo + const Duration(seconds: 2),
+      timeout: const Duration(seconds: 30),
+      what: 'play from a seek made while the song loaded',
+    );
+    // ignore: avoid_print
+    print(
+      'seek while loading: ${songName(loadingSeekSong)} '
+      '(${storedNow(loadingSeekSong) ? 'stored' : 'streamed'}) went on from '
+      '${loadingSeekTo.inSeconds} s',
+    );
 
     await player.stop();
   });
