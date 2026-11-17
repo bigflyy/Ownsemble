@@ -381,11 +381,15 @@ Future<void> main(List<String> args) async {
     log: logPerf,
   );
   library.vkLists = CombinedLists(playlists: playlists, others: forYou);
-  var wasSyncing = false;
+  // Each sync run hands over a new outcome: the playlists are read then,
+  // once per run. (`syncing` also blinks back on when the file check after
+  // the sync ends, which asked VK twice per sync.)
+  var lastOutcome = sync.lastOutcome;
   sync.addListener(() {
-    final syncing = sync.syncing;
-    if (wasSyncing && !syncing) unawaited(playlists.refresh());
-    wasSyncing = syncing;
+    final outcome = sync.lastOutcome;
+    if (identical(outcome, lastOutcome)) return;
+    lastOutcome = outcome;
+    if (outcome != null) unawaited(playlists.refresh());
   });
   // An open playlist shows its new songs once VK gave them.
   playlists.addListener(() {
