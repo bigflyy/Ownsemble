@@ -19,11 +19,13 @@ import '../playback/playback_controller.dart';
 import '../playback/player_service.dart';
 import '../playback/stream_proxy.dart' show ProxyRequestLog;
 import '../storage/cover_store.dart';
+import '../ui/catalog_search.dart';
 import '../ui/collections_controller.dart';
 import '../ui/cover_tile.dart';
 import '../ui/for_you.dart';
 import '../ui/library_controller.dart';
 import '../ui/song_filters.dart';
+import '../ui/song_remover.dart';
 import '../vk/vk_client.dart';
 import 'key_state.dart';
 
@@ -41,6 +43,8 @@ class SpeedBench {
     required this.covers,
     this.collections,
     this.forYou,
+    this.catalog,
+    this.remover,
     this.resultFile,
     this.volume = 100,
   });
@@ -62,6 +66,10 @@ class SpeedBench {
 
   /// The For you place (plan 07), for the forYou part; null when not needed.
   final ForYou? forYou;
+
+  /// Search on VK and Remove from library (plan 06), for the catalog parts.
+  final CatalogSearch? catalog;
+  final SongRemover? remover;
 
   /// The result file; the restart check writes it while the app stays open.
   final String? resultFile;
@@ -138,6 +146,12 @@ class SpeedBench {
     }
     if (parts?.contains('forYouMix') ?? false) {
       result['forYouMix'] = await _forYouMixCheck();
+    }
+    if (parts?.contains('catalogKeys') ?? false) {
+      result['catalogKeys'] = await _catalogKeysBench();
+    }
+    if (parts?.contains('catalogAdd') ?? false) {
+      result['catalogAdd'] = await _catalogAddBench();
     }
     await player.setVolume(volume);
     result['volume'] = volume;
@@ -1035,6 +1049,163 @@ class SpeedBench {
       'wrappedToStart': wrapped,
       'steps': stepsOut,
     };
+  }
+
+  /// Plan 06 C6: search keystrokes with the On VK part on. Types each
+  /// query as [_searchBench] does, waits for VK's songs under the own
+  /// results (the time from the last keystroke includes the 0.5 s pause
+  /// before VK is asked), then deletes and retypes the last letter, so two
+  /// more keystrokes land while the part shows (loading, then VK's songs
+  /// at once from the answer kept). One VK search per query. Times only.
+  Future<Map<String, Object?>> _catalogKeysBench() async {
+    final catalog = this.catalog;
+    if (catalog == null || catalog.accounts.isEmpty) {
+      return {'skipped': 'no VK account'};
+    }
+    library.showView(LibraryView.songs);
+    await WidgetsBinding.instance.endOfFrame;
+    const queries = ['кино', 'metallica', 'наутилус', 'love'];
+    final typing = <int>[];
+    final withPart = <int>[];
+    final uiDoneMs = <double>[];
+    final toPartMs = <int>[];
+    final vkSongs = <int>[];
+    Future<void> key(String text, List<int> into) async {
+      await Future<void>.delayed(const Duration(milliseconds: 40));
+      final startUs = Timeline.now;
+      library.searchText.text = text;
+      await WidgetsBinding.instance.endOfFrame;
+      uiDoneMs.add((Timeline.now - startUs) / 1000);
+      into.add(startUs);
+    }
+
+    for (final query in queries) {
+      for (var length = 1; length <= query.length; length++) {
+        await key(query.substring(0, length), typing);
+      }
+      final clock = Stopwatch()..start();
+      final deadline = DateTime.now().add(const Duration(seconds: 15));
+      while ((catalog.searching || catalog.songs.isEmpty) &&
+          catalog.error == null &&
+          DateTime.now().isBefore(deadline)) {
+        await Future<void>.delayed(const Duration(milliseconds: 10));
+      }
+      await WidgetsBinding.instance.endOfFrame;
+      toPartMs.add(clock.elapsedMilliseconds);
+      vkSongs.add(catalog.songs.length);
+      await key(query.substring(0, query.length - 1), withPart);
+      await key(query, withPart);
+      await Future<void>.delayed(const Duration(milliseconds: 1500));
+      library.searchText.clear();
+      await WidgetsBinding.instance.endOfFrame;
+    }
+    await _settle();
+    List<double> toRaster(List<int> starts) => [
+      for (final startUs in starts)
+        if (_firstFrameStartingAfter(startUs) case final frame?)
+          (frame.timestampInMicroseconds(FramePhase.rasterFinish) - startUs) /
+              1000,
+    ];
+    return {
+      'songs': library.all.length,
+      'typingToRasterMs': _stats(toRaster(typing)),
+      'withVkPartToRasterMs': _stats(toRaster(withPart)),
+      'keystrokeToUiDoneMs': _stats(uiDoneMs),
+      'lastKeyToVkSongsMs': _stats([for (final ms in toPartMs) ms.toDouble()]),
+      'vkSongsShown': vkSongs,
+      'vkError': catalog.error,
+    };
+  }
+
+  /// Plan 06 C6: + on a found song, then Remove from library, its Undo, and
+  /// Remove again, so the TEST account ends with the songs it had. Times
+  /// what the user waits for: VK's yes and the library listing the song;
+  /// the remove's VK call and the row's slide; Undo until the row is back.
+  /// Run it only on a copy of the test account's data. Counts and times
+  /// only: no names, links or keys.
+  Future<Map<String, Object?>> _catalogAddBench() async {
+    final catalog = this.catalog;
+    final remover = this.remover;
+    final vk = this.vk;
+    if (catalog == null || remover == null || vk == null) {
+      return {'skipped': 'no VK account'};
+    }
+    Future<int> vkCount() async {
+      final reply = await vk.call('audio.get', {
+        'owner_id': '${vk.userId}',
+        'count': '1',
+      }) as Map<String, dynamic>;
+      return reply['count'] as int;
+    }
+
+    Future<bool> waitFor(bool Function() done, {int seconds = 15}) async {
+      final deadline = DateTime.now().add(Duration(seconds: seconds));
+      while (!done() && DateTime.now().isBefore(deadline)) {
+        await Future<void>.delayed(const Duration(milliseconds: 10));
+      }
+      return done();
+    }
+
+    final vkBefore = await vkCount();
+    final listedBefore = library.all.length;
+    library.showView(LibraryView.songs);
+    library.searchText.text = 'наутилус';
+    await waitFor(() => !catalog.searching && catalog.songs.isNotEmpty);
+    final pick = catalog.songs
+        .where(
+          (f) =>
+              catalog.stateOf(f) == FoundState.addable &&
+              f.song.durationSec >= 60,
+        )
+        .firstOrNull;
+    if (pick == null) return {'error': 'no found song to add'};
+    final result = <String, Object?>{'vkBefore': vkBefore};
+    var clock = Stopwatch()..start();
+    final note = catalog.add(pick);
+    final added = await waitFor(
+      () => catalog.stateOf(pick) == FoundState.inLibrary,
+    );
+    result['addToCheckMs'] = clock.elapsedMilliseconds;
+    await note;
+    final listed = await waitFor(
+      () => library.all.length == listedBefore + 1,
+      seconds: 10,
+    );
+    result['addToListedMs'] = clock.elapsedMilliseconds;
+    result['added'] = added && listed;
+    final copy = catalog.libraryCopyOfSong(pick.song);
+    if (copy == null) return {...result, 'error': 'no library copy'};
+    library.searchText.clear();
+    await WidgetsBinding.instance.endOfFrame;
+    result['vkAfterAdd'] = await vkCount();
+
+    clock = Stopwatch()..start();
+    final removed = await remover.remove(copy);
+    result['removeMs'] = clock.elapsedMilliseconds;
+    result['removed'] = removed.canUndo;
+    await WidgetsBinding.instance.endOfFrame;
+    result['vkAfterRemove'] = await vkCount();
+
+    clock = Stopwatch()..start();
+    final undoNote = await remover.undo(removed);
+    await waitFor(() => library.all.any((t) => t.id == copy.id), seconds: 10);
+    await WidgetsBinding.instance.endOfFrame;
+    result['undoMs'] = clock.elapsedMilliseconds;
+    result['undone'] = undoNote == null;
+    result['sameRowBack'] = library.all.any((t) => t.id == copy.id);
+    result['vkAfterUndo'] = await vkCount();
+
+    // Back to how the account was.
+    final again = library.byId(copy.id) ?? copy;
+    clock = Stopwatch()..start();
+    final last = await remover.remove(again);
+    result['removeAgainMs'] = clock.elapsedMilliseconds;
+    result['removedAgain'] = last.canUndo;
+    final vkAfter = await vkCount();
+    result['vkAfter'] = vkAfter;
+    result['accountAsBefore'] = vkAfter == vkBefore;
+    result['listedAfter'] = library.all.length;
+    return result;
   }
 
   /// Seeks streamed songs to three quarters as soon as their sound starts,
