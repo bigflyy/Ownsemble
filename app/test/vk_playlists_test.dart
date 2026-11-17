@@ -115,4 +115,31 @@ void main() {
     expect(asked.single['access_key'], 'opaque-10');
     expect(asked.single['count'], '500');
   });
+
+  test('editable and the original come from VK and survive the cache', () {
+    final followed = vkPlaylistOf(recordedItem())!;
+    expect(followed.editable, isFalse, reason: 'permissions.edit false');
+    expect(followed.originalKey, '10002_779');
+    expect(followed.originalAccessKey, 'opaque-2');
+    final made = vkPlaylistOf(
+      recordedItem()
+        ..remove('original')
+        ..remove('permissions'),
+    )!;
+    expect(made.editable, isTrue, reason: 'no permissions: a made one is');
+    expect(made.originalKey, isNull);
+    for (final list in [followed, made]) {
+      final back = VkPlaylist.fromJson(
+        jsonDecode(jsonEncode(list.toJson())) as Map<String, dynamic>,
+      );
+      expect(back.editable, list.editable);
+      expect(back.originalKey, list.originalKey);
+      expect(back.originalAccessKey, list.originalAccessKey);
+    }
+    expect(followed.withTitle('Новое').title, 'Новое');
+    expect(followed.withTitle('Новое').originalKey, '10002_779');
+    // An older cache without the fields: a made one is editable.
+    final old = made.toJson()..remove('editable');
+    expect(VkPlaylist.fromJson(old).editable, isTrue);
+  });
 }

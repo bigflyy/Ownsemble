@@ -36,7 +36,10 @@ class VkPlaylist {
     required this.updateTime,
     this.coverUrl,
     this.description = '',
-  });
+    bool? editable,
+    this.originalKey,
+    this.originalAccessKey,
+  }) : editable = editable ?? kind == VkPlaylistKind.made;
 
   /// "ownerId_id" of the account's own entry ([fetchVkPlaylistSongs]).
   final String key;
@@ -56,6 +59,15 @@ class VkPlaylist {
   final String? coverUrl;
   final String description;
 
+  /// Whether the account may change the songs and the name (VK's
+  /// permissions.edit; false for a followed playlist's copy, probe-edits-28g).
+  final bool editable;
+
+  /// "ownerId_id" and access key of the playlist a followed one copies;
+  /// null for a made one.
+  final String? originalKey;
+  final String? originalAccessKey;
+
   /// Whether the songs read before still stand: same time and count.
   bool sameSongsAs(VkPlaylist other) =>
       other.key == key &&
@@ -71,6 +83,9 @@ class VkPlaylist {
     'updateTime': updateTime,
     'coverUrl': coverUrl,
     'description': description,
+    'editable': editable,
+    'originalKey': originalKey,
+    'originalAccessKey': originalAccessKey,
   };
 
   static VkPlaylist fromJson(Map<String, dynamic> json) => VkPlaylist(
@@ -82,6 +97,24 @@ class VkPlaylist {
     updateTime: json['updateTime'] as int? ?? 0,
     coverUrl: json['coverUrl'] as String?,
     description: json['description'] as String? ?? '',
+    editable: json['editable'] as bool?,
+    originalKey: json['originalKey'] as String?,
+    originalAccessKey: json['originalAccessKey'] as String?,
+  );
+
+  /// This playlist with another [title] (a rename the app made).
+  VkPlaylist withTitle(String title) => VkPlaylist(
+    key: key,
+    accessKey: accessKey,
+    title: title,
+    kind: kind,
+    count: count,
+    updateTime: updateTime,
+    coverUrl: coverUrl,
+    description: description,
+    editable: editable,
+    originalKey: originalKey,
+    originalAccessKey: originalAccessKey,
   );
 }
 
@@ -101,6 +134,8 @@ VkPlaylist? vkPlaylistOf(Object? item) {
       ? (photo['photo_300'] ?? photo['photo_270']) as String?
       : null;
   final thumbs = item['thumbs'];
+  final permissions = item['permissions'];
+  final original = item['original'];
   return VkPlaylist(
     key: '${owner}_$id',
     accessKey: item['access_key'] as String?,
@@ -112,6 +147,15 @@ VkPlaylist? vkPlaylistOf(Object? item) {
         photoOf(item['photo']) ??
         (thumbs is List && thumbs.isNotEmpty ? photoOf(thumbs.first) : null),
     description: item['description'] as String? ?? '',
+    editable: permissions is Map && permissions['edit'] is bool
+        ? permissions['edit'] as bool
+        : null,
+    originalKey: original is Map
+        ? '${original['owner_id']}_${original['playlist_id']}'
+        : null,
+    originalAccessKey: original is Map
+        ? original['access_key'] as String?
+        : null,
   );
 }
 
