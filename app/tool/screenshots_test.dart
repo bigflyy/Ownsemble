@@ -20,6 +20,7 @@ import 'package:ownsemble/library/day_range.dart';
 import 'package:ownsemble/library/library_store.dart';
 import 'package:ownsemble/library/play_period.dart';
 import 'package:ownsemble/library/search_index.dart';
+import 'package:ownsemble/library/similar_seeds.dart';
 import 'package:ownsemble/library/song_filter.dart';
 import 'package:ownsemble/library/track.dart';
 import 'package:ownsemble/playback/playback_controller.dart';
@@ -215,7 +216,9 @@ void main() {
     // The For you place (plan 07) from VK's recorded replies
     // (test/fixtures/vk_recommendations): 'page', 'list' (For you opened,
     // its second song playing), 'mix' (VK Mix playing), 'loading' (the very
-    // first open), 'banner' (VK not answering, the lists from before).
+    // first open), 'banner' (VK not answering, the lists from before),
+    // 'own' (scrolled to the own Similar to shelves, plan 07 Stage E, a
+    // song of the last one playing).
     String? forYouStep,
   }) async {
     final store = LibraryStore.open(':memory:');
@@ -569,9 +572,22 @@ void main() {
         accounts: () => found.accounts,
         apiOfSource: (_) => recsVk,
         libraryCopyOfSong: found.libraryCopyOfSong,
+        // Most heard "Выхода нет", next "Хочешь?" by another artist, and
+        // the favorite "Владивосток 2000" not heard in a while.
+        seedsOf: forYouStep != 'own'
+            ? null
+            : ({required skipTitles}) {
+                final all = {for (final t in store.loadAll()) t.id: t};
+                return [
+                  (kind: SimilarSeedKind.mostHeard, track: all[ids[2]]!),
+                  (kind: SimilarSeedKind.alsoHeard, track: all[ids[1]]!),
+                  (kind: SimilarSeedKind.rediscover, track: all[ids[4]]!),
+                ];
+              },
       );
       library.vkLists = forYou;
       if (forYouStep != 'loading') await forYou.refresh();
+      if (forYouStep == 'own') await forYou.refreshOwnShelves();
       if (forYouStep == 'banner') {
         vkDown = true;
         await forYou.refresh();
@@ -779,6 +795,25 @@ void main() {
       player.playing.value = true;
       await tester.pump(const Duration(milliseconds: 300));
     }
+    if (forYou != null && forYouStep == 'own') {
+      await tester.drag(
+        find.byKey(const ValueKey('for-you-page')),
+        const Offset(0, -3000),
+      );
+      await tester.pumpAndSettle();
+      final rows = find
+          .byWidgetPredicate(
+            (w) =>
+                w.key is ValueKey<String> &&
+                (w.key! as ValueKey<String>).value.startsWith('shelf-row-'),
+          )
+          .hitTestable();
+      await tester.tap(rows.at(rows.evaluate().length - 2));
+      await tester.pump();
+      await tester.pump();
+      player.playing.value = true;
+      await tester.pump(const Duration(milliseconds: 300));
+    }
     if (forYou != null && forYouStep == 'mix') {
       await tester.tap(find.byKey(const ValueKey('vk-mix-play')));
       await tester.pump();
@@ -862,6 +897,9 @@ void main() {
     ('mix', true, const Size(760, 900)),
     ('loading', false, const Size(1440, 900)),
     ('banner', true, const Size(1440, 900)),
+    ('own', false, const Size(1440, 900)),
+    ('own', true, const Size(1440, 900)),
+    ('own', false, const Size(760, 900)),
   ]) {
     final width = size.width < 1000 ? 'narrow' : 'wide';
     testWidgets(
@@ -877,6 +915,20 @@ void main() {
       ),
     );
   }
+
+  // The narrow window with the side panel, where a long note once pushed
+  // Show all off the row.
+  testWidgets(
+    'For you: own, dark, narrow, side panel',
+    (t) => shoot(
+      t,
+      'dark-for-you-own-narrow-side',
+      dark: true,
+      size: const Size(760, 900),
+      view: const LibraryView(ViewKind.forYou),
+      forYouStep: 'own',
+    ),
+  );
 
   for (final (step, dark) in [
     ('menu', true),
