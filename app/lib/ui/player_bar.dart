@@ -32,6 +32,7 @@ class NowPlayingPanel extends StatelessWidget {
     this.onOpenVersions,
     this.addButton,
     this.songButtons,
+    this.onOpenFrom,
   });
 
   final PlaybackController playback;
@@ -55,6 +56,9 @@ class NowPlayingPanel extends StatelessWidget {
   /// Similar songs, or the thumb-down of a song VK recommended (plan 07),
   /// first on the button row; null when neither applies.
   final Widget? Function(Track track)? songButtons;
+
+  /// A click on the "Playing from" heading: opens that list.
+  final VoidCallback? onOpenFrom;
 
   @override
   Widget build(BuildContext context) {
@@ -84,7 +88,15 @@ class NowPlayingPanel extends StatelessWidget {
                 children: [
                   Row(
                     children: [
-                      const Expanded(child: SectionLabel('Now playing')),
+                      Expanded(
+                        child: switch ((track, playback.queue.from)) {
+                          (_?, final from?) => _PlayingFrom(
+                            from: from,
+                            onOpen: onOpenFrom,
+                          ),
+                          _ => const SectionLabel('Now playing'),
+                        },
+                      ),
                       IconButton(
                         key: const ValueKey('dock-bottom'),
                         tooltip: 'Move the player to the bottom',
@@ -190,6 +202,55 @@ class NowPlayingPanel extends StatelessWidget {
 
   /// Shorter than this, the panel's cover is the smaller size.
   static const _shortPanelHeight = 720.0;
+}
+
+/// The panel's heading while a list plays: "PLAYING FROM" and the list's name (user,
+/// 2026-11-18: "not very clear which playlist is playing now"), as Spotify's
+/// "Playing from playlist". A click opens the list with the song outlined.
+class _PlayingFrom extends StatelessWidget {
+  const _PlayingFrom({required this.from, required this.onOpen});
+
+  final PlayedFrom from;
+  final VoidCallback? onOpen;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = OwnColors.of(context);
+    final text = Text.rich(
+      TextSpan(
+        children: [
+          TextSpan(
+            text: 'PLAYING FROM  ',
+            style: TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+              letterSpacing: 1,
+              color: colors.dim,
+            ),
+          ),
+          TextSpan(text: from.label),
+        ],
+      ),
+      maxLines: 1,
+      overflow: TextOverflow.ellipsis,
+      style: TextStyle(
+        fontSize: 13,
+        fontWeight: FontWeight.w600,
+        color: colors.text,
+      ),
+    );
+    return Align(
+      alignment: Alignment.centerLeft,
+      child: MouseRegion(
+        cursor: onOpen == null ? MouseCursor.defer : SystemMouseCursors.click,
+        child: GestureDetector(
+          key: const ValueKey('player-from'),
+          onTap: onOpen,
+          child: Tooltip(message: 'Show the list it plays from', child: text),
+        ),
+      ),
+    );
+  }
 }
 
 /// The player as a bar at the bottom (B2 dock): song on the left,

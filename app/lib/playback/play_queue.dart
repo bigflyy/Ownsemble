@@ -14,6 +14,23 @@ enum Repeat {
   one,
 }
 
+/// The list a song was played from, as the player names it ("Playing from
+/// <label>", user 2026-11-18: "not very clear which playlist is playing
+/// now").
+class PlayedFrom {
+  const PlayedFrom({required this.label, required this.key, this.place});
+
+  /// The list's name: a playlist's title, "Favorites", a Stack's name.
+  final String label;
+
+  /// What tells two lists apart, also when their songs or order changed (a
+  /// refresh, shuffle).
+  final String key;
+
+  /// What the UI opens to show the list; the queue does not read it.
+  final Object? place;
+}
+
 /// The list a song was started from and the way through it.
 ///
 /// Clicking a song makes the list it is in (as shown at that moment) the
@@ -29,6 +46,7 @@ class PlayQueue {
 
   final Random _random;
   List<Track> _context = const [];
+  PlayedFrom? _from;
 
   /// Songs waiting to play, first one next.
   final List<Track> _queued = [];
@@ -54,6 +72,9 @@ class PlayQueue {
   bool get shuffle => _shuffle;
   List<Track> get context => _context;
 
+  /// The list [context] was played from; null when the caller did not say.
+  PlayedFrom? get from => _from;
+
   /// The songs waiting to play, first one next.
   List<Track> get queued => List.unmodifiable(_queued);
 
@@ -67,10 +88,11 @@ class PlayQueue {
       ? -1
       : _order.take(_position + 1).lastWhere(_isListEntry, orElse: () => -1);
 
-  /// Makes [context] the play list and [index] in it the current song. The
-  /// songs waiting in the queue stay there.
-  Track start(List<Track> context, int index) {
+  /// Makes [context] the play list and [index] in it the current song, as
+  /// played [from] that list. The songs waiting in the queue stay there.
+  Track start(List<Track> context, int index, {PlayedFrom? from}) {
     _context = List.unmodifiable(context);
+    _from = from;
     _played.clear();
     _order = List.generate(_context.length, (i) => i);
     _position = index;

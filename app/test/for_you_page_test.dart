@@ -190,7 +190,9 @@ void main() {
   ) async {
     await openForYou(tester);
     await tester.tap(find.byKey(const ValueKey('list-play-For you')));
-    await tester.pumpAndSettle();
+    // The playing card's mark moves: nothing settles.
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
     expect(player.current?.title, 'Закрой за мной дверь');
     expect(playback.queue.context, hasLength(12));
     player.playing.value = false;
@@ -246,7 +248,9 @@ void main() {
   ) async {
     await openForYou(tester);
     await tester.tap(find.byKey(const ValueKey('list-play-For you')));
-    await tester.pumpAndSettle();
+    // The playing card's mark moves: nothing settles.
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
     // The first song is the library's own: Similar, no thumb-down.
     expect(find.byKey(const ValueKey('player-dislike')), findsNothing);
     await tester.tap(find.byKey(const ValueKey('player-similar')));

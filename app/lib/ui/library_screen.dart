@@ -10,6 +10,7 @@ import '../library/song_filter.dart';
 import '../library/song_version.dart';
 import '../library/track.dart';
 import '../playback/playback_controller.dart';
+import '../playback/play_queue.dart';
 import '../playback/version_book.dart';
 import '../playback/player_service.dart';
 import '../storage/audio_storage.dart';
@@ -296,6 +297,29 @@ class _LibraryScreenState extends State<LibraryScreen> {
 
   /// Shows the playing song in the list it came from. Leaves the search box,
   /// so Enter and letters work on the row found.
+  /// The player's "Playing from" for a list shown as [view].
+  PlayedFrom _playedFrom(LibraryView view) =>
+      PlayedFrom(label: _viewTitle(view), key: view.playKey, place: view);
+
+  /// The panel's "Playing from" line: opens the list the song plays from,
+  /// with the song outlined. A VK list is opened afresh, so its songs are in
+  /// even when it was played from its card without being opened.
+  void _openPlayedFrom() {
+    final place = widget.playback.queue.from?.place;
+    if (place is LibraryView &&
+        place.kind == ViewKind.vkList &&
+        place.album != null) {
+      library.openList(place.album!);
+      // The row is outlined once the list is laid out: before that it never
+      // counts as in sight, and Back would come to the same list again.
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _goToPlayingSong();
+      });
+      return;
+    }
+    _goToPlayingSong();
+  }
+
   void _goToPlayingSong() {
     final track = widget.player.current;
     if (track == null) return;
@@ -469,10 +493,18 @@ class _LibraryScreenState extends State<LibraryScreen> {
         for (final track in library.visible)
           if (outside.restrictionOf(track.id) == null) track,
       ];
-      widget.playback.playFrom(playable, playable.indexOf(row));
+      widget.playback.playFrom(
+        playable,
+        playable.indexOf(row),
+        from: _playedFrom(library.view),
+      );
       return;
     }
-    widget.playback.playFrom(library.visible, index);
+    widget.playback.playFrom(
+      library.visible,
+      index,
+      from: _playedFrom(library.view),
+    );
   }
 
   /// A click on a song outside the library that the player already has
@@ -861,6 +893,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
                               onOpenAlbum: library.openAlbum,
                               onOpenVersions: _openVersions,
                               addButton: _foundAdd,
+                              onOpenFrom: _openPlayedFrom,
                               songButtons: (track) =>
                                   _songButtons(track, roomy: true),
                             ),
@@ -1840,7 +1873,10 @@ class _LibraryScreenState extends State<LibraryScreen> {
         if (songs.isNotEmpty)
           TextButton.icon(
             key: const ValueKey('list-play'),
-            onPressed: () => widget.playback.playFrom(songs, 0),
+            onPressed: () {
+              library.notePlayedFrom();
+              widget.playback.playFrom(songs, 0, from: _playedFrom(view));
+            },
             icon: const Icon(Icons.play_arrow, size: 18),
             label: const Text('Play'),
           ),
@@ -1852,7 +1888,12 @@ class _LibraryScreenState extends State<LibraryScreen> {
             onPressed: () {
               final playback = widget.playback;
               if (!playback.shuffle) playback.toggleShuffle();
-              playback.playFrom(songs, Random().nextInt(songs.length));
+              library.notePlayedFrom();
+              playback.playFrom(
+                songs,
+                Random().nextInt(songs.length),
+                from: _playedFrom(view),
+              );
             },
             icon: const Icon(Icons.shuffle, size: 18),
             label: const Text('Shuffle'),

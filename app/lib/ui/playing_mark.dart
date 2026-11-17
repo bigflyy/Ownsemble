@@ -15,6 +15,7 @@ class NowPlaying extends InheritedWidget {
     required this.trackId,
     required this.playing,
     this.contextIds = const [],
+    this.fromKey,
     this.onPlayOrPause,
     required super.child,
   });
@@ -28,6 +29,10 @@ class NowPlaying extends InheritedWidget {
   /// The ids of the list the current song was started from (next and
   /// previous move in it).
   final List<int> contextIds;
+
+  /// The key of the list the current song was played from
+  /// (`PlayedFrom.key`); null when the player was not told.
+  final String? fromKey;
 
   /// Pauses or resumes the current song.
   final VoidCallback? onPlayOrPause;
@@ -46,9 +51,19 @@ class NowPlaying extends InheritedWidget {
   /// For a button that plays [songs] as a list: null when the current song
   /// was not started from this same list, else whether it plays. As in
   /// Spotify, such a button shows Pause while its list plays.
-  static bool? listStateFor(BuildContext context, List<Track> songs) {
+  ///
+  /// With [key] (the list's `PlayedFrom.key`) and a player that knows where
+  /// it plays from, the key decides: the list stays the playing one after
+  /// Shuffle, a row click that skips greyed songs, or a refresh.
+  static bool? listStateFor(
+    BuildContext context,
+    List<Track> songs, {
+    String? key,
+  }) {
     final now = _of(context);
     if (now == null || now.trackId == null) return null;
+    final from = now.fromKey;
+    if (key != null && from != null) return from == key ? now.playing : null;
     final ids = now.contextIds;
     if (ids.length != songs.length) return null;
     for (var i = 0; i < ids.length; i++) {
@@ -71,6 +86,7 @@ class NowPlaying extends InheritedWidget {
   bool updateShouldNotify(NowPlaying oldWidget) =>
       trackId != oldWidget.trackId ||
       playing != oldWidget.playing ||
+      fromKey != oldWidget.fromKey ||
       !_sameIds(contextIds, oldWidget.contextIds);
 
   static bool _sameIds(List<int> a, List<int> b) {
@@ -126,6 +142,7 @@ class _NowPlayingScopeState extends State<NowPlayingScope> {
           trackId: current.data?.id,
           playing: player.playing.value,
           contextIds: _idsOf(playback.queue.context),
+          fromKey: playback.queue.from?.key,
           onPlayOrPause: playback.playOrPause,
           child: widget.child,
         ),

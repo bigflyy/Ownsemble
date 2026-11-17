@@ -258,15 +258,18 @@ class _ForYouPageState extends State<ForYouPage> {
     return own == null ? track : widget.library.byId(own.id) ?? own;
   }
 
-  /// Plays [songs] from [index], skipping songs VK gives no file for.
-  Future<void> _play(List<Track> songs, int index) async {
+  /// Plays [songs] of the list [ref] from [index], skipping songs VK gives
+  /// no file for.
+  Future<void> _play(List<Track> songs, int index, AlbumRef ref) async {
     final playable = [
       for (final track in songs)
         if (forYou.restrictionOf(track.id) == null) track,
     ];
     if (playable.isEmpty) return;
     final start = playable.indexOf(songs[index]);
-    await widget.playback.playFrom(playable, start < 0 ? 0 : start);
+    final from = playedFromList(ref);
+    widget.library.notePlayedFrom(view: from.place! as LibraryView);
+    await widget.playback.playFrom(playable, start < 0 ? 0 : start, from: from);
   }
 
   Future<void> _playMix() async {
@@ -289,7 +292,13 @@ class _ForYouPageState extends State<ForYouPage> {
       );
       return;
     }
-    await playback.playFrom(songs, songs.length > 3 ? songs.length - 3 : 0);
+    final from = playedFromList(forYou.mixRef);
+    widget.library.notePlayedFrom(view: from.place! as LibraryView);
+    await playback.playFrom(
+      songs,
+      songs.length > 3 ? songs.length - 3 : 0,
+      from: from,
+    );
   }
 
   @override
@@ -360,7 +369,9 @@ class _ForYouPageState extends State<ForYouPage> {
                         for (final song in forYou.songsOf(list.key))
                           if (song.playable) song,
                       ]),
-                      onPlay: _play,
+                      onPlay: (songs, index) =>
+                          _play(songs, index, forYou.refOf(list)),
+                      listKey: playedFromList(forYou.refOf(list)).key,
                       onOpen: () => _open(forYou.refOf(list)),
                       colors: colors,
                     ),
@@ -392,7 +403,11 @@ class _ForYouPageState extends State<ForYouPage> {
                       : recFoundSong(forYou.outside, widget.catalog!, track),
                   catalog: widget.catalog,
                   onAdd: widget.onAdd,
-                  onTap: () => _play(_tracksOf(shelf.songs), i),
+                  onTap: () => _play(
+                    _tracksOf(shelf.songs),
+                    i,
+                    forYou.refOfShelf(shelf),
+                  ),
                   colors: colors,
                 ),
             ],
@@ -424,7 +439,7 @@ class _ForYouPageState extends State<ForYouPage> {
                         : recFoundSong(forYou.outside, widget.catalog!, track),
                     catalog: widget.catalog,
                     onAdd: widget.onAdd,
-                    onTap: () => _play(_tracksOf(songs), i),
+                    onTap: () => _play(_tracksOf(songs), i, shelf.ref),
                     colors: colors,
                   ),
               ],
@@ -737,9 +752,14 @@ class ListCard extends StatelessWidget {
     required this.onPlay,
     required this.onOpen,
     required this.colors,
+    this.listKey,
   });
 
   static const side = 128.0;
+
+  /// The list's `PlayedFrom.key`: the card shows its list playing whenever
+  /// the player plays from it, in any order (Shuffle, a row click).
+  final String? listKey;
 
   final String title;
 
@@ -768,7 +788,7 @@ class ListCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final state = NowPlaying.listStateFor(context, playable);
+    final state = NowPlaying.listStateFor(context, playable, key: listKey);
     final tint = this.tint;
     final color = tint == null ? colors.accentBg : Color(tint);
     return SizedBox(
@@ -816,6 +836,18 @@ class ListCard extends StatelessWidget {
                           ),
                         ),
                 ),
+                // The playing list's cover is outlined in the accent colour.
+                if (state != null)
+                  Positioned.fill(
+                    child: IgnorePointer(
+                      child: DecoratedBox(
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(color: colors.accent, width: 2),
+                        ),
+                      ),
+                    ),
+                  ),
                 Positioned(
                   right: 8,
                   bottom: 8,
@@ -834,11 +866,33 @@ class ListCard extends StatelessWidget {
               ],
             ),
             const SizedBox(height: 6),
-            Text(
-              title,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+            // The list that plays: its title in the accent colour after the
+            // moving mark, as a playing row's (user, 2026-11-18: "not very
+            // clear which playlist is playing now").
+            Row(
+              children: [
+                if (state != null) ...[
+                  PlayingMark(
+                    key: ValueKey('list-playing-$title'),
+                    playing: state,
+                    size: 12,
+                    color: colors.accent,
+                  ),
+                  const SizedBox(width: 6),
+                ],
+                Expanded(
+                  child: Text(
+                    title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                      color: state != null ? colors.accent : null,
+                    ),
+                  ),
+                ),
+              ],
             ),
             Text(
               detail,

@@ -8,6 +8,7 @@ import '../library/search_text.dart';
 import '../library/song_filter.dart';
 import '../library/song_version.dart';
 import '../library/track.dart';
+import '../playback/play_queue.dart';
 import '../playback/stream_route.dart';
 import '../playback/version_book.dart';
 import '../storage/audio_storage.dart';
@@ -119,6 +120,13 @@ class LibraryView {
   bool get listsStorage =>
       kind == ViewKind.downloads || kind == ViewKind.stored;
 
+  /// What tells this list apart from others for the player's "Playing
+  /// from" (`PlayedFrom.key`): the same for the same list, also after its
+  /// songs changed.
+  String get playKey =>
+      '${kind.name}:${stackId ?? ''}:${album?.identity ?? ''}:'
+      '${versionsOf ?? ''}:${year ?? ''}';
+
   @override
   bool operator ==(Object other) =>
       other is LibraryView &&
@@ -130,6 +138,13 @@ class LibraryView {
 
   @override
   int get hashCode => Object.hash(kind, stackId, album, versionsOf, year);
+}
+
+/// The player's "Playing from" for the VK list [ref] (a For you list, a
+/// playlist), played from its card or its own place.
+PlayedFrom playedFromList(AlbumRef ref) {
+  final view = LibraryView(ViewKind.vkList, album: ref);
+  return PlayedFrom(label: ref.title, key: view.playKey, place: view);
 }
 
 /// How far an open album's song list got.
@@ -883,8 +898,13 @@ class LibraryController extends ChangeNotifier {
 
   /// Remembers the list on screen as the one the song being started comes
   /// from, for [goToSong]. Saved, since the song comes back in the next run.
-  void notePlayedFrom() {
-    final from = Place(view: _view, search: _appliedQuery, source: _source);
+  ///
+  /// A list played from a page without opening it (a card's Play on For you
+  /// or Playlists) passes its [view].
+  void notePlayedFrom({LibraryView? view}) {
+    final from = view == null
+        ? Place(view: _view, search: _appliedQuery, source: _source)
+        : Place(view: view, search: '');
     if (_playedFrom == from) return;
     _playedFrom = from;
     _writeSetting?.call(

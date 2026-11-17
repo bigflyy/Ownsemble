@@ -90,8 +90,12 @@ class _PlaylistsPageState extends State<PlaylistsPage> {
     return own == null ? track : widget.library.byId(own.id) ?? own;
   }
 
-  Future<void> _play(List<Track> songs, int index) =>
-      widget.playback.playFrom(songs, index);
+  /// Plays [songs] of the playlist [ref] from [index].
+  Future<void> _play(List<Track> songs, int index, AlbumRef ref) {
+    final from = playedFromList(ref);
+    widget.library.notePlayedFrom(view: from.place! as LibraryView);
+    return widget.playback.playFrom(songs, index, from: from);
+  }
 
   String _detailOf(VkPlaylist list) {
     final songs = playlists.songsOf(list.key);
@@ -179,6 +183,7 @@ class _PlaylistsPageState extends State<PlaylistsPage> {
   Widget _card(int sourceId, VkPlaylist list, OwnColors colors) {
     final songs = playlists.songsOf(list.key);
     final tracks = _tracksOf(songs, sourceId);
+    final ref = playlists.refOf(sourceId, list);
     return ListCard(
       key: ValueKey('playlist-${list.key}'),
       title: list.title,
@@ -191,8 +196,9 @@ class _PlaylistsPageState extends State<PlaylistsPage> {
         for (final track in tracks)
           if (playlists.outside.restrictionOf(track.id) == null) track,
       ],
-      onPlay: _play,
-      onOpen: () => widget.library.openList(playlists.refOf(sourceId, list)),
+      onPlay: (songs, index) => _play(songs, index, ref),
+      listKey: playedFromList(ref).key,
+      onOpen: () => widget.library.openList(ref),
       colors: colors,
     );
   }

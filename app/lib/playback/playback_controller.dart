@@ -124,7 +124,11 @@ class PlaybackController extends ChangeNotifier {
   /// A click on the song at [index] of [list]: the song that is already
   /// loaded pauses or resumes; any other song starts, and [list] becomes the
   /// list next and previous move in. A song that failed is retried.
-  Future<PlayTiming?> playFrom(List<Track> list, int index) async {
+  Future<PlayTiming?> playFrom(
+    List<Track> list,
+    int index, {
+    PlayedFrom? from,
+  }) async {
     if (!player.isReady) return null;
     final track = list[index];
     if (track.id == player.current?.id &&
@@ -132,7 +136,7 @@ class PlaybackController extends ChangeNotifier {
       await playOrPause();
       return null;
     }
-    return _play(queue.start(list, index), start: PlayStart.chosen);
+    return _play(queue.start(list, index, from: from), start: PlayStart.chosen);
   }
 
   /// Pauses or resumes. A song restored from the last run starts here, at

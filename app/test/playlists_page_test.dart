@@ -211,7 +211,9 @@ void main() {
       'song, the library\'s own song first', (tester) async {
     await openPlaylists(tester);
     await tester.tap(find.byKey(const ValueKey('list-play-В дорогу')));
-    await tester.pumpAndSettle();
+    // The playing card's mark moves: nothing settles.
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
     expect(player.current?.title, 'Закрой за мной дверь');
     expect(player.current?.inLibrary, isTrue);
     expect(playback.queue.context, hasLength(3));
@@ -232,6 +234,56 @@ void main() {
     expect(playback.shuffle, isTrue);
     expect(playback.queue.context, hasLength(3));
     expect(player.current, isNotNull);
+    player.playing.value = false;
+    await tester.pump(const Duration(seconds: 5));
+  });
+
+  // User, 2026-11-18: "not very clear which playlist is playing now".
+  testWidgets('the playing playlist is marked: its card after Shuffle, and '
+      'the player says where it plays from', (tester) async {
+    await openPlaylists(tester);
+    await tester.tap(find.byKey(const ValueKey('list-card-В дорогу')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('list-shuffle')));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+    await tester.tap(find.byKey(const ValueKey('album-back')));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(library.view.kind, ViewKind.playlists);
+    expect(find.byKey(const ValueKey('list-playing-В дорогу')), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey('list-playing-Чужой плейлист')),
+      findsNothing,
+    );
+    final from = find.byKey(const ValueKey('player-from'));
+    expect(
+      find.descendant(of: from, matching: find.textContaining('В дорогу')),
+      findsOneWidget,
+    );
+    // The line opens the list it plays from.
+    await tester.tap(from);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(library.view.kind, ViewKind.vkList);
+    expect(library.view.album?.title, 'В дорогу');
+
+    // Another card's Play moves the mark to that card.
+    await tester.tap(find.byKey(const ValueKey('album-back')));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+    await tester.tap(find.byKey(const ValueKey('list-play-Чужой плейлист')));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(
+      find.byKey(const ValueKey('list-playing-Чужой плейлист')),
+      findsOneWidget,
+    );
+    expect(find.byKey(const ValueKey('list-playing-В дорогу')), findsNothing);
+    expect(
+      find.descendant(of: from, matching: find.textContaining('Чужой')),
+      findsOneWidget,
+    );
     player.playing.value = false;
     await tester.pump(const Duration(seconds: 5));
   });
@@ -313,7 +365,9 @@ void main() {
     songs['42_1']![0] = recSong(-7, 10, restricted: 2);
     await openPlaylists(tester);
     await tester.tap(find.byKey(const ValueKey('list-play-В дорогу')));
-    await tester.pumpAndSettle();
+    // The playing card's mark moves: nothing settles.
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
     expect(player.current?.inLibrary, isTrue);
     expect(playback.queue.context, hasLength(3));
     player.playing.value = false;

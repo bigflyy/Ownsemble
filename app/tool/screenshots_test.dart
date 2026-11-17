@@ -957,7 +957,24 @@ void main() {
     if (playlists != null && playlistsStep == 'list') {
       await tester.tap(find.byKey(const ValueKey('list-card-В дорогу')));
       await tester.pumpAndSettle();
-      await playback.playFrom(library.visible, 1);
+      // A row click, so the player says where it plays from.
+      await tester.tap(find.byKey(ValueKey('song-${library.visible[1].id}')));
+      await tester.pump();
+      player.playing.value = true;
+      await tester.pump(const Duration(milliseconds: 300));
+    }
+    // The page with a playlist playing from its card (user, 2026-11-18:
+    // "not very clear which playlist is playing now").
+    if (playlists != null && playlistsStep == 'playing') {
+      await tester.tap(
+        find.byKey(
+          const ValueKey(
+            'list-play-Вечер у моря, когда никуда не надо спешить и можно '
+            'слушать всё подряд',
+          ),
+        ),
+      );
+      await tester.pump();
       player.playing.value = true;
       await tester.pump(const Duration(milliseconds: 300));
     }
@@ -1045,6 +1062,9 @@ void main() {
     ('list', true, const Size(1440, 900)),
     ('list', false, const Size(760, 900)),
     ('empty', false, const Size(1440, 900)),
+    ('playing', true, const Size(1440, 900)),
+    ('playing', false, const Size(1440, 900)),
+    ('playing', false, const Size(760, 900)),
   ]) {
     final width = size.width < 1000 ? 'narrow' : 'wide';
     testWidgets(
