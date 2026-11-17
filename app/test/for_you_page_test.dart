@@ -2,13 +2,15 @@
 // recorded replies, a list opened as an ordinary song list with the
 // library's own song in its place and + on the others, songs VK gives no
 // file for greyed with VK's reason, VK Mix with the thumb-down, and
-// "Similar songs" from a row's menu (C5).
+// "Similar songs" from a row's menu (C5), and the own "Similar to" shelves
+// picked from the library's History and Favorites (Stage E).
 
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ownsemble/library/library_store.dart';
 import 'package:ownsemble/library/search_index.dart';
+import 'package:ownsemble/library/similar_seeds.dart';
 import 'package:ownsemble/library/track.dart';
 import 'package:ownsemble/playback/playback_controller.dart';
 import 'package:ownsemble/ui/catalog_search.dart';
@@ -32,6 +34,10 @@ void main() {
   late ValueNotifier<List<SourceInfo>> sources;
   late PlaybackController playback;
   late ShowingPlayer player;
+  late ForYou Function({
+    List<SimilarSeed> Function({required Set<String> skipTitles})? seedsOf,
+  })
+  makeForYou;
 
   setUp(() {
     store = LibraryStore.open(':memory:');
@@ -88,11 +94,13 @@ void main() {
       },
       onAdded: playback.adoptAdded,
     );
-    forYou = ForYou(
+    makeForYou = ({seedsOf}) => ForYou(
       accounts: () => catalog.accounts,
       apiOfSource: (id) => id == source ? call : null,
       libraryCopyOfSong: catalog.libraryCopyOfSong,
+      seedsOf: seedsOf,
     );
+    forYou = makeForYou();
     library.vkLists = forYou;
     recsMixRound = 1;
   });
@@ -102,8 +110,12 @@ void main() {
     store.close();
   });
 
-  Future<void> openForYou(WidgetTester tester, {double width = 1400}) async {
-    tester.view.physicalSize = Size(width, 900);
+  Future<void> openForYou(
+    WidgetTester tester, {
+    double width = 1400,
+    double height = 900,
+  }) async {
+    tester.view.physicalSize = Size(width, height);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
     await tester.pumpWidget(
@@ -249,6 +261,133 @@ void main() {
     await openForYou(tester, width: 760);
     expect(tester.takeException(), isNull);
     expect(find.byKey(const ValueKey('list-card-Daily playlist 4')), findsOne);
+  });
+
+  group('own "Similar to" shelves (Stage E)', () {
+    /// Gives the library a second song and the page two own shelves: the
+    /// library's Kino song as the most heard one and the second song as a
+    /// favorite not heard in a while.
+    void withOwnShelves({String second = 'Романс'}) {
+      store.upsertAll(source, [
+        NewTrack(
+          sourceKey: '42_2',
+          artist: 'Сплин',
+          title: second,
+          durationSec: 230,
+          addedAt: 3,
+        ),
+      ]);
+      final tracks = store.loadAll();
+      library.replaceTracks(tracks, SearchIndex(tracks));
+      Track byKey(String key) => tracks.firstWhere((t) => t.sourceKey == key);
+      forYou = makeForYou(
+        seedsOf: ({required skipTitles}) => [
+          (kind: SimilarSeedKind.mostHeard, track: byKey('42_1')),
+          (kind: SimilarSeedKind.rediscover, track: byKey('42_2')),
+        ],
+      );
+      library.vkLists = forYou;
+    }
+
+    double topOf(WidgetTester tester, String text) =>
+        tester.getTopLeft(find.text(text)).dy;
+
+    Finder shelfRows() => find.byWidgetPredicate(
+      (w) =>
+          w.key is ValueKey<String> &&
+          (w.key! as ValueKey<String>).value.startsWith('shelf-row-'),
+    );
+
+    testWidgets('they come after VK\'s own shelf, each with why it is there', (
+      tester,
+    ) async {
+      withOwnShelves();
+      // Tall enough to build the whole page at once.
+      await openForYou(tester, height: 3000);
+      const vkShelf = 'SIMILAR TO ПОЙ ЖЕ, ПОЙ (LEMIUM)';
+      const kino = 'SIMILAR TO ЗАКРОЙ ЗА МНОЙ ДВЕРЬ';
+      const splin = 'SIMILAR TO РОМАНС';
+      expect(find.text(vkShelf), findsOneWidget);
+      expect(find.text(kino), findsOneWidget);
+      expect(find.text(splin), findsOneWidget);
+      expect(find.text('Picked by VK'), findsOneWidget);
+      expect(find.text('You play it a lot lately'), findsOneWidget);
+      expect(
+        find.text('One of your favorites, not heard in a while'),
+        findsOneWidget,
+      );
+      expect(topOf(tester, vkShelf), lessThan(topOf(tester, kino)));
+      expect(topOf(tester, kino), lessThan(topOf(tester, splin)));
+      // Three rows a shelf (VK's and two own), Show all for the rest.
+      expect(shelfRows(), findsNWidgets(9));
+      expect(
+        find.byKey(const ValueKey('show-all-Similar to Романс')),
+        findsOne,
+      );
+      // VK was asked once per seed, by the seed's own key.
+      final asked = [
+        for (final c in recs.calls)
+          if (c.startsWith('audio.getRecommendations')) c,
+      ];
+      expect(asked, hasLength(2));
+      expect(asked.any((c) => c.contains('target_audio=42_1')), isTrue);
+      expect(asked.any((c) => c.contains('target_audio=42_2')), isTrue);
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('no seeds: no own shelves, VK\'s shelf as before', (
+      tester,
+    ) async {
+      forYou = makeForYou(seedsOf: ({required skipTitles}) => []);
+      library.vkLists = forYou;
+      await openForYou(tester, height: 3000);
+      expect(find.text('SIMILAR TO ПОЙ ЖЕ, ПОЙ (LEMIUM)'), findsOneWidget);
+      expect(find.text('You play it a lot lately'), findsNothing);
+      expect(shelfRows(), findsNWidgets(3));
+    });
+
+    testWidgets('Show all opens the shelf as a list; a row plays the shelf', (
+      tester,
+    ) async {
+      withOwnShelves();
+      await openForYou(tester, height: 3000);
+      await tester.tap(
+        find.byKey(const ValueKey('show-all-Similar to Романс')),
+      );
+      await tester.pumpAndSettle();
+      expect(library.view.kind, ViewKind.vkList);
+      expect(library.view.album?.title, 'Similar to Романс');
+      expect(library.visible, hasLength(12));
+
+      await tester.tap(find.byKey(const ValueKey('nav-forYou')));
+      await tester.pumpAndSettle();
+      // The last shelf's first row (rows 7 to 9 are the Romance shelf's).
+      final row = shelfRows().at(6);
+      final key = tester.widget(row).key! as ValueKey<String>;
+      final id = int.parse(key.value.substring('shelf-row-'.length));
+      await tester.tap(row);
+      // The playing row's bars move: pump, not settle.
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 200));
+      expect(player.current?.id, id);
+      expect(playback.queue.context, hasLength(12));
+      player.playing.value = false;
+      await tester.pump(const Duration(seconds: 5));
+    });
+
+    testWidgets('narrow, a long title: the note and Show all still fit', (
+      tester,
+    ) async {
+      withOwnShelves(
+        second: 'Очень длинное название песни, которое не помещается в строку',
+      );
+      await openForYou(tester, width: 760, height: 3000);
+      expect(tester.takeException(), isNull);
+      expect(
+        find.text('One of your favorites, not heard in a while'),
+        findsOneWidget,
+      );
+    });
   });
 }
 

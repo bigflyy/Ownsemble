@@ -533,37 +533,59 @@ class _SectionTitle extends StatelessWidget {
   final OwnColors colors;
   final VoidCallback? onAll;
 
+  /// Below this width the note goes under the title, so a long note and
+  /// Show all never squeeze the title away (narrow window, side panel).
+  static const _noteInlineFrom = 520.0;
+
   @override
   Widget build(BuildContext context) => Padding(
     padding: const EdgeInsets.only(top: 18, bottom: 8),
-    child: Row(
-      children: [
-        Flexible(
-          child: Text(
-            title.toUpperCase(),
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: TextStyle(
-              fontSize: 11,
-              fontWeight: FontWeight.w600,
-              letterSpacing: 0.6,
-              color: colors.dim,
+    child: LayoutBuilder(
+      builder: (context, constraints) {
+        final inline = constraints.maxWidth >= _noteInlineFrom;
+        final noteText = note == null
+            ? null
+            : Text(
+                note!,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(fontSize: 11, color: colors.dim2),
+              );
+        final titleRow = Row(
+          children: [
+            Flexible(
+              child: Text(
+                title.toUpperCase(),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w600,
+                  letterSpacing: 0.6,
+                  color: colors.dim,
+                ),
+              ),
             ),
-          ),
-        ),
-        if (note != null) ...[
-          const SizedBox(width: 8),
-          Text(note!, style: TextStyle(fontSize: 11, color: colors.dim2)),
-        ],
-        if (onAll != null) ...[
-          const SizedBox(width: 8),
-          TextButton(
-            key: ValueKey('show-all-$title'),
-            onPressed: onAll,
-            child: const Text('Show all'),
-          ),
-        ],
-      ],
+            if (inline && noteText != null) ...[
+              const SizedBox(width: 8),
+              Flexible(child: noteText),
+            ],
+            if (onAll != null) ...[
+              const SizedBox(width: 8),
+              TextButton(
+                key: ValueKey('show-all-$title'),
+                onPressed: onAll,
+                child: const Text('Show all'),
+              ),
+            ],
+          ],
+        );
+        if (inline || noteText == null) return titleRow;
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [titleRow, noteText],
+        );
+      },
     ),
   );
 }
