@@ -24,7 +24,9 @@ import 'filter_bar.dart';
 import 'for_you.dart';
 import 'for_you_page.dart';
 import 'library_controller.dart';
+import 'outside_songs.dart';
 import 'playing_mark.dart';
+import 'playlists.dart';
 import 'player_bar.dart';
 import 'shell_settings.dart';
 import 'shortcuts_help.dart';
@@ -105,6 +107,7 @@ class LibraryScreen extends StatefulWidget {
     this.catalog,
     this.remover,
     this.forYou,
+    this.playlists,
     this._settings,
   });
 
@@ -134,6 +137,9 @@ class LibraryScreen extends StatefulWidget {
   /// What VK recommends (plan 07); no For you place when null.
   final ForYou? forYou;
 
+  /// The accounts' VK playlists (plan 08); no Playlists place when null.
+  final VkPlaylists? playlists;
+
   final ShellSettings? _settings;
 
   @override
@@ -147,6 +153,11 @@ class _LibraryScreenState extends State<LibraryScreen> {
       widget._settings ?? ShellSettings.inMemory();
 
   LibraryController get library => widget.library;
+
+  /// The songs of VK's lists the library lacks (For you and the
+  /// playlists share them).
+  OutsideSongs? get _outside =>
+      widget.forYou?.outside ?? widget.playlists?.outside;
   AudioStorage? get _storage => widget.player.storage;
 
   @override
@@ -1408,7 +1419,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
                       ? null
                       : () => widget.collections!.toggleFavorite(track),
                   versionTag: (compact) => version == null
-                      ? restrictedTag(widget.forYou, track, compact: compact) ??
+                      ? restrictedTag(_outside, track, compact: compact) ??
                             (outside == null
                                 ? null
                                 : _otherVersionTag(
@@ -1435,7 +1446,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
                   // column: it goes under the title, as Versions tags do.
                   tagsUnderTitle:
                       version != null ||
-                      (widget.forYou?.restrictionOf(track.id) != null) ||
+                      (_outside?.restrictionOf(track.id) != null) ||
                       outside != null &&
                           widget.catalog!.otherVersionOf(outside) != null,
                   action: outside == null
@@ -1662,7 +1673,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
       );
     }
     if (library.view.kind == ViewKind.vkList) {
-      return recFoundSong(widget.forYou, catalog, track);
+      return recFoundSong(_outside, catalog, track);
     }
     if (library.view.kind != ViewKind.album) return null;
     final link = library.view.album?.link;
@@ -1744,18 +1755,18 @@ class _LibraryScreenState extends State<LibraryScreen> {
       ..showSnackBar(SnackBar(content: Text(note)));
   }
 
-  /// The heading's buttons of a recommended list: Play, and for similar
-  /// songs "More" (VK gives a few new ones each time it is asked).
+  /// The heading's buttons of a VK list (recommended or a playlist): Play,
+  /// and for similar songs "More" (VK gives a few new ones each time it is
+  /// asked).
   Widget? _listActions(LibraryView view) {
     final forYou = widget.forYou;
     final ref = view.album;
-    if (forYou == null || ref == null || view.kind != ViewKind.vkList) {
-      return null;
-    }
-    final similar = ref.link?.key.startsWith('similar:') ?? false;
+    if (ref == null || view.kind != ViewKind.vkList) return null;
+    final similar =
+        forYou != null && (ref.link?.key.startsWith('similar:') ?? false);
     final songs = [
       for (final track in library.visible)
-        if (forYou.restrictionOf(track.id) == null) track,
+        if (_outside?.restrictionOf(track.id) == null) track,
     ];
     return Row(
       mainAxisSize: MainAxisSize.min,
@@ -1806,7 +1817,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
     final catalog = widget.catalog;
     final forYou = widget.forYou;
     if (catalog != null && catalog.foundById(track.id) == null) {
-      recFoundSong(forYou, catalog, track);
+      recFoundSong(_outside, catalog, track);
     }
     final add = catalog == null || catalog.foundById(track.id) == null
         ? null
@@ -1820,7 +1831,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
               large: true,
             ),
           );
-    final recommended = forYou != null && forYou.isRec(track.id);
+    final recommended = _outside?.isRecommended(track.id) ?? false;
     // A recommended song has the thumb-down there instead (a narrow bar
     // has room for two buttons beside +); its row menu offers Similar.
     final similar = roomy && !recommended && canFindSimilar(forYou, track);

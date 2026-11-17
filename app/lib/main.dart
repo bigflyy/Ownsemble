@@ -28,6 +28,8 @@ import 'ui/cover_tile.dart';
 import 'ui/for_you.dart';
 import 'ui/library_controller.dart';
 import 'ui/library_screen.dart';
+import 'ui/outside_songs.dart';
+import 'ui/playlists.dart';
 import 'ui/shell_settings.dart';
 import 'ui/song_filters.dart';
 import 'ui/song_remover.dart';
@@ -343,11 +345,15 @@ Future<void> main(List<String> args) async {
     writeSetting: store.writeSetting,
     log: logPerf,
   );
+  // Songs of VK's lists the library lacks: one registry for For you and
+  // the playlists (plan 08), so a song is the same in both.
+  final outside = OutsideSongs(libraryCopyOfSong: catalog.libraryCopyOfSong);
   // The For you place (plan 07): what VK recommends to the first account.
   final forYou = ForYou(
     accounts: () => catalog.accounts,
     apiOfSource: (sourceId) => clientOfSource(sourceId)?.call,
     libraryCopyOfSong: catalog.libraryCopyOfSong,
+    outside: outside,
     cacheDir: options.dataDir,
     // Own "Similar to" shelves (plan 07, Stage E): from the History of the
     // last weeks and the Favorites.
@@ -366,7 +372,30 @@ Future<void> main(List<String> args) async {
     },
     log: logPerf,
   );
-  library.vkLists = forYou;
+  // The accounts' VK playlists (plan 08), mirrored after each sync.
+  final playlists = VkPlaylists(
+    accounts: () => catalog.accounts,
+    apiOfSource: (sourceId) => clientOfSource(sourceId)?.call,
+    outside: outside,
+    cacheDir: options.dataDir,
+    log: logPerf,
+  );
+  library.vkLists = CombinedLists(playlists: playlists, others: forYou);
+  var wasSyncing = false;
+  sync.addListener(() {
+    final syncing = sync.syncing;
+    if (wasSyncing && !syncing) unawaited(playlists.refresh());
+    wasSyncing = syncing;
+  });
+  // An open playlist shows its new songs once VK gave them.
+  playlists.addListener(() {
+    final ref = library.view.album;
+    if (library.view.kind == ViewKind.vkList &&
+        ref != null &&
+        isPlaylistRef(ref)) {
+      library.listChanged(ref);
+    }
+  });
   // VK Mix never ends: near the end of its songs the next ones are asked.
   player.currentStream.listen((track) async {
     if (track == null || !forYou.isMixList(playback.queue.context)) return;
@@ -434,6 +463,7 @@ Future<void> main(List<String> args) async {
       catalog: catalog,
       remover: remover,
       forYou: forYou,
+      playlists: playlists,
       settings: settings,
     ),
   );
@@ -649,6 +679,7 @@ class OwnsembleApp extends StatelessWidget {
     this.catalog,
     this.remover,
     this.forYou,
+    this.playlists,
   });
 
   final CoverStore covers;
@@ -662,6 +693,7 @@ class OwnsembleApp extends StatelessWidget {
   final CatalogSearch? catalog;
   final SongRemover? remover;
   final ForYou? forYou;
+  final VkPlaylists? playlists;
 
   @override
   Widget build(BuildContext context) {
@@ -683,6 +715,7 @@ class OwnsembleApp extends StatelessWidget {
             catalog: catalog,
             remover: remover,
             forYou: forYou,
+            playlists: playlists,
             settings: settings,
           ),
         ),

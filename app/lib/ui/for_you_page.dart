@@ -19,6 +19,7 @@ import 'catalog_search.dart';
 import 'cover_tile.dart';
 import 'for_you.dart';
 import 'library_controller.dart';
+import 'outside_songs.dart';
 import 'playing_mark.dart';
 import 'theme.dart';
 import 'version_marks.dart' show lengthText;
@@ -80,14 +81,18 @@ String? listDetail(ForYou? forYou, AlbumRef ref, AlbumStatus status) {
   return 'Made by VK for you. $subtitle$yours';
 }
 
-/// [track], a recommended song outside the library, as a song + can add
-/// (through the On VK part's accounts); null for every other song and for a
-/// song VK gives no file for.
-FoundSong? recFoundSong(ForYou? forYou, CatalogSearch catalog, Track track) {
-  if (forYou == null || track.inLibrary || catalog.accounts.isEmpty) {
+/// [track], a song of a VK list (recommended or a playlist) outside the
+/// library, as a song + can add (through the On VK part's accounts); null
+/// for every other song and for a song VK gives no file for.
+FoundSong? recFoundSong(
+  OutsideSongs? outside,
+  CatalogSearch catalog,
+  Track track,
+) {
+  if (outside == null || track.inLibrary || catalog.accounts.isEmpty) {
     return null;
   }
-  final rec = forYou.recSongOf(track.id);
+  final rec = outside.songOf(track.id);
   if (rec == null || !rec.playable) return null;
   return catalog.outsideSong(
     track,
@@ -97,10 +102,14 @@ FoundSong? recFoundSong(ForYou? forYou, CatalogSearch catalog, Track track) {
   );
 }
 
-/// The greyed tag of a recommended song VK gives no file for ("Not in your
+/// The greyed tag of a VK list's song VK gives no file for ("Not in your
 /// region"), or null.
-Widget? restrictedTag(ForYou? forYou, Track track, {bool compact = false}) {
-  final code = forYou?.restrictionOf(track.id);
+Widget? restrictedTag(
+  OutsideSongs? outside,
+  Track track, {
+  bool compact = false,
+}) {
+  final code = outside?.restrictionOf(track.id);
   if (code == null) return null;
   return RestrictedTag(code: code, compact: compact);
 }
@@ -370,7 +379,7 @@ class _ForYouPageState extends State<ForYouPage> {
                   restricted: forYou.restrictionOf(track.id),
                   add: widget.catalog == null
                       ? null
-                      : recFoundSong(forYou, widget.catalog!, track),
+                      : recFoundSong(forYou.outside, widget.catalog!, track),
                   catalog: widget.catalog,
                   onAdd: widget.onAdd,
                   onTap: () => _play(_tracksOf(shelf.songs), i),
@@ -402,7 +411,7 @@ class _ForYouPageState extends State<ForYouPage> {
                     restricted: forYou.restrictionOf(track.id),
                     add: widget.catalog == null
                         ? null
-                        : recFoundSong(forYou, widget.catalog!, track),
+                        : recFoundSong(forYou.outside, widget.catalog!, track),
                     catalog: widget.catalog,
                     onAdd: widget.onAdd,
                     onTap: () => _play(_tracksOf(songs), i),

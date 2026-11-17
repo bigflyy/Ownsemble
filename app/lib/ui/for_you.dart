@@ -27,14 +27,11 @@ import '../vk/vk_client.dart';
 import '../vk/vk_recommendations.dart';
 import '../vk/vk_sync.dart' show describeSyncError;
 import 'albums.dart';
+import 'outside_songs.dart';
 
 /// Keys of the lists that are not one of VK's own lists.
 const forYouMixKey = 'mix';
 const _similarKeyPrefix = 'similar:';
-
-/// Ids of recommended songs start here and go down, below the album songs
-/// (-1, -2, ...) and versions (-1e9 - n), above found songs (-2e9 - n).
-const _firstRecId = -1500000000;
 
 /// One of Ownsemble's own "Similar to" shelves (plan 07, Stage E): what VK
 /// finds similar to a song picked from the user's own listening.
@@ -96,12 +93,14 @@ class ForYou extends ChangeNotifier implements ListCatalog {
     required this.accounts,
     required this.apiOfSource,
     required this.libraryCopyOfSong,
+    OutsideSongs? outside,
     this.cacheDir,
     this.staleAfter = const Duration(minutes: 10),
     this.seedsOf,
     this.log,
     DateTime Function()? now,
-  }) : _now = now ?? DateTime.now;
+  }) : outside = outside ?? OutsideSongs(libraryCopyOfSong: libraryCopyOfSong),
+       _now = now ?? DateTime.now;
 
   /// The VK accounts that are logged in, first one first: VK recommends to
   /// each account its own; the place shows the first account's.
@@ -110,6 +109,10 @@ class ForYou extends ChangeNotifier implements ListCatalog {
 
   /// The library's song that a VK song is ([ListCatalog.libraryCopyOf]).
   final Track? Function(NewTrack song) libraryCopyOfSong;
+
+  /// The songs of VK's lists the library lacks, shared with the playlists
+  /// (plan 08): one id per song in both.
+  final OutsideSongs outside;
 
   /// Where the cache file and the dislike record are kept; null keeps
   /// nothing (tests).
@@ -374,53 +377,23 @@ class ForYou extends ChangeNotifier implements ListCatalog {
 
   // ---- Tracks ----
 
-  final _ids = <String, int>{};
-  final _byId = <int, VkRecSong>{};
-  final _sourceOfId = <int, int>{};
-
   /// [song] as a song outside the library, streamed through the account
   /// it was recommended to. The same song keeps its id while the app runs.
-  Track trackOf(VkRecSong song, [int? sourceId]) {
-    final source = sourceId ?? _sourceId ?? 0;
-    final id = _ids.putIfAbsent(
-      '$source:${song.key}',
-      () => _firstRecId - _ids.length,
-    );
-    _byId[id] = song;
-    _sourceOfId[id] = source;
-    final s = song.song;
-    return Track(
-      id: id,
-      sourceId: source,
-      source: TrackSource.vk,
-      artist: s.artist,
-      title: s.title,
-      album: s.album,
-      durationSec: s.durationSec,
-      sourceKey: s.sourceKey,
-      accessKey: s.accessKey,
-      coverUrl: s.coverUrl,
-      coverLargeUrl: s.coverLargeUrl,
-      coverMidUrl: s.coverMidUrl,
-      coverFullUrl: s.coverFullUrl,
-      tint: s.tint,
-    );
-  }
+  Track trackOf(VkRecSong song, [int? sourceId]) =>
+      outside.trackOf(song, sourceId ?? _sourceId ?? 0, recommended: true);
 
   /// The recommended song behind the outside track [id], or null.
-  VkRecSong? recSongOf(int id) => _byId[id];
+  VkRecSong? recSongOf(int id) => outside.songOf(id);
 
   /// Whether [id] is a recommended song outside the library.
-  bool isRec(int id) => _byId.containsKey(id);
+  bool isRec(int id) => outside.isRecommended(id);
 
   /// VK's restriction code of the outside track [id] (it cannot play);
   /// null for a song that plays and for any other song.
-  int? restrictionOf(int id) => _byId[id]?.restricted;
+  int? restrictionOf(int id) => outside.restrictionOf(id);
 
-  List<AlbumSong> _albumSongs(List<VkRecSong> songs) => [
-    for (final song in songs)
-      (track: trackOf(song), vkTrackId: song.song.vkTrackId),
-  ];
+  List<AlbumSong> _albumSongs(List<VkRecSong> songs) =>
+      outside.albumSongs(songs, _sourceId ?? 0, recommended: true);
 
   // ---- ListCatalog ----
 
@@ -432,29 +405,10 @@ class ForYou extends ChangeNotifier implements ListCatalog {
   }
 
   @override
-  Track? libraryCopyOf(AlbumSong song) {
-    final rec = _byId[song.track.id];
-    return rec == null ? null : libraryCopyOfSong(rec.song);
-  }
+  Track? libraryCopyOf(AlbumSong song) => outside.libraryCopyOf(song.track.id);
 
   @override
-  AlbumRef? albumOf(Track track) {
-    final song = _byId[track.id]?.song;
-    final title = song?.album;
-    final key = song?.vkAlbumKey;
-    if (song == null || title == null || title.isEmpty || key == null) {
-      return null;
-    }
-    return AlbumRef(
-      title: title,
-      artist: song.artist,
-      link: (
-        sourceId: _sourceOfId[track.id] ?? track.sourceId,
-        key: key,
-        accessKey: song.vkAlbumAccessKey,
-      ),
-    );
-  }
+  AlbumRef? albumOf(Track track) => outside.albumOf(track);
 
   @override
   List<int> libraryIds(AlbumRef album) => const [];
@@ -528,7 +482,7 @@ class ForYou extends ChangeNotifier implements ListCatalog {
       list.isNotEmpty && list.every((track) => _isMixSong(track.id));
 
   bool _isMixSong(int id) {
-    final song = _byId[id];
+    final song = outside.songOf(id);
     return song != null && mixSongs.any((s) => s.key == song.key);
   }
 
