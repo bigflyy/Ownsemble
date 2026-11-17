@@ -452,7 +452,20 @@ class _LibraryScreenState extends State<LibraryScreen> {
   /// pauses or resumes it instead of restarting it.
   void _play(int index) {
     library.notePlayedFrom();
-    if (_pausesAddedCopy(library.visible[index])) return;
+    final row = library.visible[index];
+    if (_pausesAddedCopy(row)) return;
+    // A VK list plays without the songs VK gives no file for (greyed rows):
+    // the player would stop on each of them.
+    final outside = _outside;
+    if (library.view.kind == ViewKind.vkList && outside != null) {
+      if (outside.restrictionOf(row.id) != null) return;
+      final playable = [
+        for (final track in library.visible)
+          if (outside.restrictionOf(track.id) == null) track,
+      ];
+      widget.playback.playFrom(playable, playable.indexOf(row));
+      return;
+    }
     widget.playback.playFrom(library.visible, index);
   }
 

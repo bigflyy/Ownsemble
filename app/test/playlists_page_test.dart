@@ -235,6 +235,25 @@ void main() {
     await tester.pump(const Duration(seconds: 5));
   });
 
+  testWidgets('a row click plays the playlist without the songs VK gives '
+      'no file for', (tester) async {
+    await openPlaylists(tester);
+    await tester.tap(find.byKey(const ValueKey('list-card-В дорогу')));
+    await tester.pumpAndSettle();
+    final second = library.visible[1];
+    await tester.tap(find.byKey(ValueKey('song-${second.id}')));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(player.current?.id, second.id);
+    expect(playback.queue.context, hasLength(3));
+    expect(
+      playback.queue.context.map((t) => t.title),
+      isNot(contains('Не в регионе')),
+    );
+    player.playing.value = false;
+    await tester.pump(const Duration(seconds: 5));
+  });
+
   testWidgets('no playlists on VK: the page says so', (tester) async {
     items = [];
     await openPlaylists(tester);
