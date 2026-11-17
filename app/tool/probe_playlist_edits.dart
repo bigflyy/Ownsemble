@@ -51,7 +51,16 @@ Future<void> main(List<String> args) async {
   ) async {
     await pause();
     try {
-      return await client.call(method, params);
+      final reply = await client.call(method, params);
+      // Small replies only (1, true, a list's length): never a whole reply.
+      print(
+        '    $method reply: ${reply is int || reply is bool
+            ? reply
+            : reply is List
+            ? 'list of ${reply.length}'
+            : reply.runtimeType}',
+      );
+      return reply;
     } on VkException catch (error) {
       print(
         '  $step: $method -> VK error ${error.code} '
@@ -424,6 +433,14 @@ Future<void> main(List<String> args) async {
           'audio_ids': y,
         });
         await show('5i5 removeFromPlaylist y');
+        await tryCall('re-add y', 'audio.addToPlaylist', {
+          'owner_id': '$me',
+          'playlist_id': '$playlistId',
+          'audio_ids': y,
+        });
+        await show('5i5b add the removed copy y again (undo)');
+        final back = await songsOf(playlistId);
+        print('  y back with its own key: ${back.contains(y) ? 'yes' : 'no'}');
       }
       // The key with its access key: "owner_id_id_accesskey".
       if (foreign.length > 1 && foreign.elementAt(1)['access_key'] is String) {
