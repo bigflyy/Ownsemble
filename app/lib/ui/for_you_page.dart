@@ -821,6 +821,9 @@ class _ListCard extends StatelessWidget {
 
 /// A song of a "Similar to" shelf: cover, title and artist, + or the check,
 /// length. A song VK gives no file for is greyed with VK's reason.
+/// The width of a shelf row's + or check: the + button's tap target.
+const _actionSlot = 40.0;
+
 class _ShelfRow extends StatelessWidget {
   const _ShelfRow({
     required this.track,
@@ -896,18 +899,33 @@ class _ShelfRow extends StatelessWidget {
               if (track.inLibrary)
                 Tooltip(
                   message: 'In your library',
-                  child: Padding(
-                    padding: const EdgeInsets.all(8),
-                    child: Icon(
-                      Icons.check_circle,
-                      key: const ValueKey('shelf-owned'),
-                      size: 20,
-                      color: colors.accent,
+                  // In the + button's slot (its 40 px tap target), so the
+                  // check and the + of the other rows stand in one column.
+                  child: SizedBox(
+                    width: _actionSlot,
+                    height: 28,
+                    child: Center(
+                      child: Icon(
+                        Icons.check_circle,
+                        key: const ValueKey('shelf-owned'),
+                        size: 21,
+                        color: colors.accent,
+                      ),
                     ),
                   ),
                 ),
               if (add != null && catalog != null)
-                foundAddButton(context, catalog!, add!, onAdd: onAdd),
+                SizedBox(
+                  width: _actionSlot,
+                  child: Center(
+                    child: foundAddButton(
+                      context,
+                      catalog!,
+                      add!,
+                      onAdd: onAdd,
+                    ),
+                  ),
+                ),
               SizedBox(
                 width: 52,
                 child: Text(

@@ -315,6 +315,16 @@ void main() {
           durationSec: 205,
           addedAt: 400,
         ),
+        // The own shelves' second song, so a shelf row shows the check
+        // next to the + of the others (and the playing mark).
+        if (forYouStep == 'own')
+          const NewTrack(
+            sourceKey: '1_61',
+            artist: 'Земфира',
+            title: 'Прогулка',
+            durationSec: 255,
+            addedAt: 401,
+          ),
       ]);
     }
     store.saveAudioFile(ids[1], 'cache/a.mp3', 10, pinned: true);

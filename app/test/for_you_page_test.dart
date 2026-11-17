@@ -257,6 +257,36 @@ void main() {
     await tester.pump(const Duration(seconds: 5));
   });
 
+  testWidgets('the owned check of a shelf row stands in the + column', (
+    tester,
+  ) async {
+    // The library gets the shelf's first song (same name and length).
+    await openForYou(tester, height: 3000);
+    final first = forYou.similar.first.songs.first.song;
+    store.upsertAll(source, [
+      NewTrack(
+        sourceKey: '42_9',
+        artist: first.artist,
+        title: first.title,
+        durationSec: first.durationSec,
+        addedAt: 4,
+      ),
+    ]);
+    final tracks = store.loadAll();
+    library.replaceTracks(tracks, SearchIndex(tracks));
+    await tester.tap(find.byKey(const ValueKey('nav-songs')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('nav-forYou')));
+    await tester.pumpAndSettle();
+    final check = find.byKey(const ValueKey('shelf-owned'));
+    final plus = find.byKey(const ValueKey('add-song'));
+    expect(check, findsOneWidget);
+    expect(
+      tester.getCenter(check).dx,
+      closeTo(tester.getCenter(plus.last).dx, 0.5),
+    );
+  });
+
   testWidgets('narrow: the cards wrap and nothing overflows', (tester) async {
     await openForYou(tester, width: 760);
     expect(tester.takeException(), isNull);
