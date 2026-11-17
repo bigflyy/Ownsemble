@@ -309,6 +309,156 @@ Future<void> main(List<String> args) async {
       'playlist_id': '$playlistId',
     });
     await show('5h audio.reorder c after a');
+
+    // 5i-5m. A song of another owner, not in the library (most playlist
+    // songs): add, move (song's owner, then the playlist's), remove.
+    final search = await tryCall('search', 'audio.search', {
+      'q': 'Кино',
+      'count': '30',
+    });
+    final ownKeys = {for (final item in items) keyOf(item)};
+    final foreign = search is Map
+        ? (search['items'] as List).cast<Map<String, dynamic>>().where(
+            (item) =>
+                item['owner_id'] != me &&
+                !ownKeys.contains(keyOf(item)) &&
+                '${item['url'] ?? ''}'.isNotEmpty,
+          )
+        : const <Map<String, dynamic>>[];
+    if (foreign.isNotEmpty) {
+      final x = keyOf(foreign.first);
+      letterOf[x] = 'x';
+      final [xOwner, xId] = x.split('_');
+      await tryCall('add x', 'audio.addToPlaylist', {
+        'owner_id': '$me',
+        'playlist_id': '$playlistId',
+        'audio_ids': x,
+      });
+      await show('5i add x (other owner)');
+      // The key the playlist itself gives for the new song.
+      final read = await tryCall('songs', 'audio.get', {
+        'owner_id': '$me',
+        'playlist_id': '$playlistId',
+        'count': '100',
+      });
+      final readItems = read is Map
+          ? (read['items'] as List).cast<Map<String, dynamic>>()
+          : const <Map<String, dynamic>>[];
+      final fresh = readItems
+          .where((item) => !letterOf.containsKey(keyOf(item)))
+          .firstOrNull;
+      if (fresh != null) {
+        final xItem = foreign.first;
+        print(
+          '  x as read: same title ${fresh['title'] == xItem['title'] ? 'yes' : 'no'}, '
+          'same artist ${fresh['artist'] == xItem['artist'] ? 'yes' : 'no'}, '
+          'same owner ${fresh['owner_id'] == xItem['owner_id'] ? 'yes' : 'no'}, '
+          'same id ${fresh['id'] == xItem['id'] ? 'yes' : 'no'}, '
+          'owner ${fresh['owner_id'] == me
+              ? 'me'
+              : (fresh['owner_id'] as int) < 0
+              ? 'group'
+              : 'user'}, '
+          'search owner ${xItem['owner_id'] == me
+              ? 'me'
+              : (xItem['owner_id'] as int) < 0
+              ? 'group'
+              : 'user'}',
+        );
+        // Which fields the copy shares with the original: names only.
+        final same = <String>[], differ = <String>[], only = <String>[];
+        for (final name in {...fresh.keys, ...xItem.keys}) {
+          if (!fresh.containsKey(name) || !xItem.containsKey(name)) {
+            only.add('$name(${fresh.containsKey(name) ? 'copy' : 'orig'})');
+          } else if (jsonEncode(fresh[name]) == jsonEncode(xItem[name])) {
+            same.add(name);
+          } else {
+            differ.add(name);
+          }
+        }
+        print('  copy vs original: same ${(same..sort()).join(',')}');
+        print(
+          '  differ ${(differ..sort()).join(',')}; only ${(only..sort()).join(',')}',
+        );
+        final y = keyOf(fresh);
+        letterOf[y] = 'y';
+        await show('5i1 read key named y');
+        await tryCall('add x again', 'audio.addToPlaylist', {
+          'owner_id': '$me',
+          'playlist_id': '$playlistId',
+          'audio_ids': x,
+        });
+        await show('5i1b add x again (search key)');
+        await tryCall('add y again', 'audio.addToPlaylist', {
+          'owner_id': '$me',
+          'playlist_id': '$playlistId',
+          'audio_ids': y,
+        });
+        await show('5i1c add y again (read key)');
+        final [yOwner, yId] = y.split('_');
+        final before = await songsOf(playlistId);
+        await tryCall('move y', 'audio.reorder', {
+          'owner_id': yOwner,
+          'audio_id': yId,
+          'after': before.last.split('_')[1],
+          'playlist_id': '$playlistId',
+        });
+        await show('5i2 reorder y after last, owner_id = y owner');
+        await tryCall('move y me', 'audio.reorder', {
+          'owner_id': '$me',
+          'audio_id': yId,
+          'before': before.first.split('_')[1],
+          'playlist_id': '$playlistId',
+        });
+        await show('5i3 reorder y before first, owner_id = me');
+        final whole = await songsOf(playlistId);
+        await tryCall('full list', 'audio.editPlaylist', {
+          'owner_id': '$me',
+          'playlist_id': '$playlistId',
+          'audio_ids': [...whole.where((k) => k != y), y].join(','),
+        });
+        await show('5i4 editPlaylist audio_ids with y last');
+        await tryCall('remove y', 'audio.removeFromPlaylist', {
+          'owner_id': '$me',
+          'playlist_id': '$playlistId',
+          'audio_ids': y,
+        });
+        await show('5i5 removeFromPlaylist y');
+      }
+      final now = await songsOf(playlistId);
+      await tryCall('move x', 'audio.reorder', {
+        'owner_id': xOwner,
+        'audio_id': xId,
+        'after': now.last.split('_')[1],
+        'playlist_id': '$playlistId',
+      });
+      await show('5j reorder x after last, owner_id = x owner');
+      final now2 = await songsOf(playlistId);
+      await tryCall('move x 2', 'audio.reorder', {
+        'owner_id': '$me',
+        'audio_id': xId,
+        'before': now2.first.split('_')[1],
+        'playlist_id': '$playlistId',
+      });
+      await show('5k reorder x before first, owner_id = me');
+      final now3 = await songsOf(playlistId);
+      final [firstOwner, firstId] = now3.first.split('_');
+      await tryCall('move first', 'audio.reorder', {
+        'owner_id': firstOwner,
+        'audio_id': firstId,
+        'after': xId,
+        'playlist_id': '$playlistId',
+      });
+      await show('5l reorder first after x (by x id only)');
+      await tryCall('remove x', 'audio.removeFromPlaylist', {
+        'owner_id': '$me',
+        'playlist_id': '$playlistId',
+        'audio_ids': x,
+      });
+      await show('5m removeFromPlaylist x');
+    } else {
+      print('5i no song of another owner found');
+    }
     print('library count now: ${await libraryCount()}');
 
     // 6. Follow and unfollow a public playlist.
