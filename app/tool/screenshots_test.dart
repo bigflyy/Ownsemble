@@ -192,6 +192,9 @@ void main() {
     // The first song gets three artists and a short title (the bottom bar
     // cuts the artist line at the title's width, user 2026-11-08).
     bool longNames = false,
+    // The first song gets a long title (the side panel's buttons squeezed
+    // one to three lines, user 2026-11-17).
+    bool longTitle = false,
     // The first song (the most played) plays, so its rows show the moving
     // playing mark (Stats lists, the Calendar panel, the year report).
     bool playingFirst = false,
@@ -241,6 +244,12 @@ void main() {
           'Сергей Канунников, Никита Алёшин, Илья Кудряшов',
           'Полыхала степь',
           'Зодчий',
+        )
+      else if (longTitle)
+        (
+          'Би-2, Brainstorm',
+          'Полковнику никто не пишет (Live at Олимпийский, remastered 2021)',
+          'Нечетный воин',
         )
       else
         ('Кино', 'Группа крови', 'Группа крови'),
@@ -1261,6 +1270,25 @@ void main() {
     ),
   );
   testWidgets('light, side panel', (t) => shoot(t, 'light-side', dark: false));
+  for (final (dark, size) in [
+    (true, const Size(1440, 900)),
+    (false, const Size(1440, 900)),
+    (true, const Size(980, 660)),
+    (false, const Size(980, 660)),
+  ]) {
+    final width = size.width < 1000 ? 'smallest' : 'wide';
+    testWidgets(
+      '${dark ? 'dark' : 'light'}, side panel, a long title, $width',
+      (t) => shoot(
+        t,
+        '${dark ? 'dark' : 'light'}-long-title-$width',
+        dark: dark,
+        size: size,
+        longTitle: true,
+        playingFirst: true,
+      ),
+    );
+  }
   testWidgets(
     'dark, bottom bar, rail',
     (t) => shoot(

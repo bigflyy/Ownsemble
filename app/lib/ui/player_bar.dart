@@ -31,6 +31,7 @@ class NowPlayingPanel extends StatelessWidget {
     this.onOpenAlbum,
     this.onOpenVersions,
     this.addButton,
+    this.songButtons,
   });
 
   final PlaybackController playback;
@@ -47,9 +48,13 @@ class NowPlayingPanel extends StatelessWidget {
   /// The versions button and the version tag: open the song's versions.
   final OpenVersions? onOpenVersions;
 
-  /// The + of a song found on VK that plays (plan 06, C3), in the heart's
-  /// place; null for any other song.
+  /// The + of a song found on VK that plays (plan 06, C3), at the right end
+  /// of the button row; null for any other song.
   final Widget? Function(Track track)? addButton;
+
+  /// Similar songs, or the thumb-down of a song VK recommended (plan 07),
+  /// first on the button row; null when neither applies.
+  final Widget? Function(Track track)? songButtons;
 
   @override
   Widget build(BuildContext context) {
@@ -73,99 +78,118 @@ class NowPlayingPanel extends StatelessWidget {
           initialData: player.current,
           builder: (context, snapshot) {
             final track = snapshot.data;
-            return ListView(
-              padding: const EdgeInsets.fromLTRB(24, 10, 24, 18),
-              children: [
-                Row(
-                  children: [
-                    const Expanded(child: SectionLabel('Now playing')),
-                    IconButton(
-                      key: const ValueKey('dock-bottom'),
-                      tooltip: 'Move the player to the bottom',
-                      onPressed: onDockBottom,
-                      icon: const Icon(Icons.call_to_action_outlined),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 8),
-                if (track == null)
-                  Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 40),
-                    child: Text(
-                      'Click a song to play it',
-                      textAlign: TextAlign.center,
-                      style: TextStyle(color: colors.dim),
-                    ),
-                  )
-                else ...[
-                  if (thumbnails)
-                    Center(
-                      child: OpensCover(
-                        track: track,
-                        child: TrackTile(track: track, size: 220, radius: 16),
-                      ),
-                    ),
-                  const SizedBox(height: 18),
+            return LayoutBuilder(
+              builder: (context, constraints) => ListView(
+                padding: const EdgeInsets.fromLTRB(24, 10, 24, 18),
+                children: [
                   Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Expanded(
-                        child: SongTitle(
+                      const Expanded(child: SectionLabel('Now playing')),
+                      IconButton(
+                        key: const ValueKey('dock-bottom'),
+                        tooltip: 'Move the player to the bottom',
+                        onPressed: onDockBottom,
+                        icon: const Icon(Icons.call_to_action_outlined),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  if (track == null)
+                    Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 40),
+                      child: Text(
+                        'Click a song to play it',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(color: colors.dim),
+                      ),
+                    )
+                  else ...[
+                    if (thumbnails)
+                      Center(
+                        child: OpensCover(
                           track: track,
-                          large: true,
-                          storage: player.storage,
-                          mark: VersionTag(
-                            playback: playback,
+                          child: TrackTile(
                             track: track,
-                            onOpen: onOpenVersions,
+                            size: _tileSize(constraints.maxHeight),
+                            radius: 16,
                           ),
-                          onGoToSong: onGoToSong,
-                          onOpenAlbum: onOpenAlbum == null
-                              ? null
-                              : () => onOpenAlbum!(track),
                         ),
                       ),
-                      // A song of an album that the library lacks has no row
-                      // for a Stack or a download to point at.
-                      ?addButton?.call(track),
-                      if (collections != null && track.inLibrary) ...[
-                        FavoriteHeart(
-                          key: const ValueKey('player-heart'),
-                          favorite: collections!.isFavorite(track.id),
-                          onPressed: () => collections!.toggleFavorite(track),
-                        ),
-                        StackMenuButton(
-                          track: track,
-                          collections: collections!,
-                        ),
-                      ],
-                      VersionsButton(
+                    const SizedBox(height: 18),
+                    // The title and artist take the full width; the buttons
+                    // go on their own row under them (user, 2026-11-17:
+                    // beside the title they squeezed a long one to three
+                    // lines).
+                    SongTitle(
+                      track: track,
+                      large: true,
+                      storage: player.storage,
+                      mark: VersionTag(
                         playback: playback,
                         track: track,
                         onOpen: onOpenVersions,
                       ),
-                      if (player.storage != null && track.inLibrary)
-                        DownloadButton(playback: playback, track: track),
-                    ],
-                  ),
-                  const SizedBox(height: 14),
-                  SeekRow(playback: playback, layout: SeekLayout.panel),
-                  const SizedBox(height: 10),
-                  TransportRow(playback: playback, large: true),
-                  const SizedBox(height: 12),
-                  VolumeRow(playback: playback, showValue: true),
-                  const SizedBox(height: 14),
-                  Divider(height: 1, color: colors.line),
-                  const SizedBox(height: 14),
-                  _UpNext(playback: playback, thumbnails: thumbnails),
+                      onGoToSong: onGoToSong,
+                      onOpenAlbum: onOpenAlbum == null
+                          ? null
+                          : () => onOpenAlbum!(track),
+                    ),
+                    const SizedBox(height: 8),
+                    Row(
+                      key: const ValueKey('player-buttons'),
+                      children: [
+                        ?songButtons?.call(track),
+                        // A song of an album that the library lacks has no
+                        // row for a Stack or a download to point at.
+                        if (collections != null && track.inLibrary) ...[
+                          FavoriteHeart(
+                            key: const ValueKey('player-heart'),
+                            favorite: collections!.isFavorite(track.id),
+                            onPressed: () => collections!.toggleFavorite(track),
+                          ),
+                          StackMenuButton(
+                            track: track,
+                            collections: collections!,
+                          ),
+                        ],
+                        VersionsButton(
+                          playback: playback,
+                          track: track,
+                          onOpen: onOpenVersions,
+                        ),
+                        if (player.storage != null && track.inLibrary)
+                          DownloadButton(playback: playback, track: track),
+                        const Spacer(),
+                        ?addButton?.call(track),
+                      ],
+                    ),
+                    const SizedBox(height: 14),
+                    SeekRow(playback: playback, layout: SeekLayout.panel),
+                    const SizedBox(height: 10),
+                    TransportRow(playback: playback, large: true),
+                    const SizedBox(height: 12),
+                    VolumeRow(playback: playback, showValue: true),
+                    const SizedBox(height: 14),
+                    Divider(height: 1, color: colors.line),
+                    const SizedBox(height: 14),
+                    _UpNext(playback: playback, thumbnails: thumbnails),
+                  ],
                 ],
-              ],
+              ),
             );
           },
         ),
       ),
     );
   }
+
+  /// The cover's size: smaller in a short panel, so the seek bar, the
+  /// buttons and the volume stay in sight under the button row.
+  static double _tileSize(double panelHeight) =>
+      panelHeight < _shortPanelHeight ? 168 : 220;
+
+  /// Shorter than this, the panel's cover is the smaller size.
+  static const _shortPanelHeight = 720.0;
 }
 
 /// The player as a bar at the bottom (B2 dock): song on the left,

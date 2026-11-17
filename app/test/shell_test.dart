@@ -1451,6 +1451,53 @@ void main() {
       );
     });
 
+    // User, 2026-11-17 (screenshot): the buttons beside the title squeezed a
+    // long title to three lines. Choice "Buttons on own row": the title and
+    // artist take the full width, the buttons go on one row under them.
+    testWidgets('a long title in the side panel keeps to two lines, with '
+        'the buttons on their own row under the artist', (tester) async {
+      const longTitle = 'Очень длинное название';
+      final vk = store.ensureSource(TrackSource.vk, account: '1', name: 'VK');
+      store.upsertAll(vk, [
+        const NewTrack(
+          sourceKey: '1_long',
+          artist: 'Исполнитель',
+          title: longTitle,
+          durationSec: 200,
+          addedAt: 1000,
+        ),
+      ]);
+      library = LibraryController(store.loadAll(), collections: collections);
+      await pumpWithSong(tester, const Size(1400, 900), dock: PlayerDock.side);
+      expect(tester.takeException(), isNull);
+      final panel = find.byType(NowPlayingPanel);
+      final title = find.descendant(of: panel, matching: find.text(longTitle));
+      expect(title, findsOneWidget);
+      // The test font draws every letter 23 px wide at the title's size, so
+      // this title needs the panel's full width to fit two lines.
+      expect(
+        tester.getSize(title).height,
+        lessThanOrEqualTo(2 * 23 * 1.2 + 1),
+        reason: 'the title wraps to more than two lines',
+      );
+      final artist = tester.getRect(
+        find.descendant(
+          of: panel,
+          matching: find.byKey(const ValueKey('player-artist')),
+        ),
+      );
+      final heart = tester.getRect(find.byKey(const ValueKey('player-heart')));
+      expect(heart.top, greaterThanOrEqualTo(artist.bottom));
+      final stack = tester.getRect(find.byType(StackMenuButton));
+      expect(stack.center.dy, closeTo(heart.center.dy, 1));
+      final volume = tester.getRect(find.byKey(const ValueKey('volume')));
+      expect(
+        volume.bottom,
+        lessThanOrEqualTo(tester.getRect(panel).bottom),
+        reason: 'the panel must not need scrolling to reach its controls',
+      );
+    });
+
     testWidgets('a side panel that would hide its controls moves to the '
         'bottom bar, and the choice stays', (tester) async {
       await pumpWithSong(

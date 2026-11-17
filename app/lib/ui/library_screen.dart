@@ -860,8 +860,9 @@ class _LibraryScreenState extends State<LibraryScreen> {
                               onGoToSong: _goToPlayingSong,
                               onOpenAlbum: library.openAlbum,
                               onOpenVersions: _openVersions,
-                              addButton: (track) =>
-                                  _playerAdd(track, roomy: true),
+                              addButton: _foundAdd,
+                              songButtons: (track) =>
+                                  _songButtons(track, roomy: true),
                             ),
                         ],
                       ),
@@ -1860,59 +1861,64 @@ class _LibraryScreenState extends State<LibraryScreen> {
     );
   }
 
-  /// The player's + for a found song that plays, for a song VK recommended
-  /// also the thumb-down, and Similar songs for other songs (plan 07). No
-  /// VK Mix tag: in the narrow bottom bar it pushed the title out (shot
-  /// 2026-11-17); the VK Mix card says "Playing now".
-  /// Null when none applies.
+  /// The bottom bar's buttons after the title: the thumb-down of a song VK
+  /// recommended, then the + of a found song. No VK Mix tag: in the narrow
+  /// bottom bar it pushed the title out (shot 2026-11-17); the VK Mix card
+  /// says "Playing now". Null when none applies.
+  Widget? _playerAdd(Track track) {
+    final add = _foundAdd(track);
+    final extra = _songButtons(track);
+    if (extra == null) return add;
+    return Row(mainAxisSize: MainAxisSize.min, children: [extra, ?add]);
+  }
+
+  /// The player's + for a found song that plays (plan 06, C3); null for any
+  /// other song.
+  Widget? _foundAdd(Track track) {
+    final catalog = widget.catalog;
+    if (catalog == null) return null;
+    if (catalog.foundById(track.id) == null) {
+      recFoundSong(_outside, catalog, track);
+    }
+    if (catalog.foundById(track.id) == null) return null;
+    return ListenableBuilder(
+      listenable: catalog,
+      builder: (context, _) => foundAddButton(
+        context,
+        catalog,
+        catalog.foundById(track.id)!,
+        onAdd: _addFound,
+        large: true,
+      ),
+    );
+  }
+
+  /// The thumb-down for a song VK recommended, else Similar songs (plan 07);
+  /// null when neither applies.
   ///
   /// Similar songs only in the side panel ([roomy]): beside the heart it
   /// pushed the bottom bar's title row over its width in the smallest
   /// window (acceptance-23).
-  Widget? _playerAdd(Track track, {bool roomy = false}) {
-    final catalog = widget.catalog;
+  Widget? _songButtons(Track track, {bool roomy = false}) {
     final forYou = widget.forYou;
-    if (catalog != null && catalog.foundById(track.id) == null) {
-      recFoundSong(_outside, catalog, track);
+    // A recommended song has the thumb-down instead (a narrow bar has room
+    // for two buttons beside +); its row menu offers Similar.
+    if (_outside?.isRecommended(track.id) ?? false) {
+      return IconButton(
+        key: const ValueKey('player-dislike'),
+        visualDensity: VisualDensity.compact,
+        tooltip: "Don't like it: skip, and tell VK",
+        icon: const Icon(Icons.thumb_down_outlined, size: 20),
+        onPressed: () => _dislike(track),
+      );
     }
-    final add = catalog == null || catalog.foundById(track.id) == null
-        ? null
-        : ListenableBuilder(
-            listenable: catalog,
-            builder: (context, _) => foundAddButton(
-              context,
-              catalog,
-              catalog.foundById(track.id)!,
-              onAdd: _addFound,
-              large: true,
-            ),
-          );
-    final recommended = _outside?.isRecommended(track.id) ?? false;
-    // A recommended song has the thumb-down there instead (a narrow bar
-    // has room for two buttons beside +); its row menu offers Similar.
-    final similar = roomy && !recommended && canFindSimilar(forYou, track);
-    if (!recommended && !similar) return add;
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        if (similar)
-          IconButton(
-            key: const ValueKey('player-similar'),
-            visualDensity: VisualDensity.compact,
-            tooltip: 'Similar songs',
-            icon: const Icon(Icons.auto_awesome_outlined, size: 20),
-            onPressed: () => openSimilar(context, forYou!, library, track),
-          ),
-        if (recommended)
-          IconButton(
-            key: const ValueKey('player-dislike'),
-            visualDensity: VisualDensity.compact,
-            tooltip: "Don't like it: skip, and tell VK",
-            icon: const Icon(Icons.thumb_down_outlined, size: 20),
-            onPressed: () => _dislike(track),
-          ),
-        ?add,
-      ],
+    if (!roomy || !canFindSimilar(forYou, track)) return null;
+    return IconButton(
+      key: const ValueKey('player-similar'),
+      visualDensity: VisualDensity.compact,
+      tooltip: 'Similar songs',
+      icon: const Icon(Icons.auto_awesome_outlined, size: 20),
+      onPressed: () => openSimilar(context, forYou!, library, track),
     );
   }
 
