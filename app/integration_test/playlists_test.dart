@@ -25,6 +25,7 @@ import 'package:flutter/gestures.dart' show kSecondaryMouseButton;
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
+import 'package:ownsemble/library/track.dart';
 import 'package:ownsemble/main.dart' as app;
 import 'package:ownsemble/playback/player_service.dart';
 import 'package:ownsemble/ui/library_controller.dart';
@@ -206,13 +207,22 @@ void main() {
     expect(own, hasLength(3), reason: 'made with 3 library songs');
     expect(find.text('Your playlist on VK. 3 in your library'), findsOneWidget);
 
+    // A row of the open place: a playlist's rows are keyed by entry (C4).
+    Finder rowOf(Track track) {
+      final index = library.visible.indexOf(track);
+      final entry = index < 0 ? null : library.entryIdAt(index);
+      return find.byKey(
+        ValueKey(entry == null ? 'song-${track.id}' : 'entry-$entry'),
+      );
+    }
+
     // 4. An outside song and an own song play (streamed, decoded).
     final timings = <PlayTiming>[];
     final listening = player.timings.listen(timings.add);
     addTearDown(listening.cancel);
     final outsideSong = rows.firstWhere((t) => !t.inLibrary);
     for (final pick in [outsideSong, own.first]) {
-      final row = find.byKey(ValueKey('song-${pick.id}'));
+      final row = rowOf(pick);
       final before = timings.length;
       await tester.tap(row);
       await tester.pump();
@@ -249,7 +259,7 @@ void main() {
     clock = Stopwatch()..start();
     await tester.tap(
       find.descendant(
-        of: find.byKey(ValueKey('song-${outsideSong.id}')),
+        of: rowOf(outsideSong),
         matching: find.byKey(const ValueKey('add-song')),
       ),
     );
@@ -270,7 +280,7 @@ void main() {
     );
     expect(library.visible.where((t) => t.inLibrary), hasLength(4));
     await tester.pump(const Duration(seconds: 7));
-    final ownRow = find.byKey(ValueKey('song-${copyOf.id}'));
+    final ownRow = rowOf(copyOf);
     await tester.tap(ownRow, buttons: kSecondaryMouseButton);
     await tester.pump();
     final remove = find.byKey(const ValueKey('menu-remove-from-library'));
