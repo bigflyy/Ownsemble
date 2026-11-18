@@ -228,7 +228,12 @@ void main() {
     // The Playlists place (plan 08) from a made-up VK: 'page' (made and
     // followed playlists, a long title), 'list' (a made playlist opened,
     // its second song playing, a song VK gives no file for), 'empty' (no
-    // playlists on VK).
+    // playlists on VK). Editing (Stage C), in the made playlist with its
+    // second song playing: 'drag' (the fourth row dragged up, mid-drag),
+    // 'rowMenu' (a row's menu), 'addMenu' (its Add to playlist... menu,
+    // "already in" greyed), 'undo' (a row taken out, the Undo bar);
+    // in the playlist with the long title: 'heading' (its menu), 'name'
+    // (Rename's dialog).
     String? playlistsStep,
   }) async {
     final store = LibraryStore.open(':memory:');
@@ -954,14 +959,80 @@ void main() {
       player.playing.value = true;
       await tester.pump(const Duration(milliseconds: 300));
     }
-    if (playlists != null && playlistsStep == 'list') {
+    const editSteps = {'drag', 'rowMenu', 'addMenu', 'undo'};
+    if (playlists != null &&
+        (playlistsStep == 'list' || editSteps.contains(playlistsStep))) {
       await tester.tap(find.byKey(const ValueKey('list-card-В дорогу')));
       await tester.pumpAndSettle();
       // A row click, so the player says where it plays from.
-      await tester.tap(find.byKey(ValueKey('song-${library.visible[1].id}')));
+      await tester.tap(
+        find.byKey(ValueKey('entry-${library.entryIdAt(1)}')),
+        warnIfMissed: false,
+      );
       await tester.pump();
       player.playing.value = true;
       await tester.pump(const Duration(milliseconds: 300));
+    }
+    // A song plays in these steps: its mark moves on, so nothing settles;
+    // fixed pumps let menus and bars come in.
+    Future<void> settle() async {
+      for (var i = 0; i < 8; i++) {
+        await tester.pump(const Duration(milliseconds: 50));
+      }
+    }
+
+    TestGesture? drag;
+    if (playlists != null && playlistsStep == 'drag') {
+      drag = await tester.startGesture(
+        tester.getCenter(
+          find.byKey(ValueKey('drag-entry-${library.entryIdAt(3)}')),
+        ),
+      );
+      await tester.pump();
+      for (var i = 0; i < 10; i++) {
+        await drag.moveBy(const Offset(0, -rowHeight * 1.6 / 10));
+        await tester.pump(const Duration(milliseconds: 16));
+      }
+      await tester.pump(const Duration(milliseconds: 300));
+    }
+    if (playlists != null &&
+        (playlistsStep == 'rowMenu' ||
+            playlistsStep == 'addMenu' ||
+            playlistsStep == 'undo')) {
+      // The first row: a library song that is in this playlist already.
+      await tester.tap(
+        find.byKey(ValueKey('entry-${library.entryIdAt(0)}')),
+        buttons: kSecondaryMouseButton,
+      );
+      await settle();
+      if (playlistsStep == 'addMenu') {
+        await tester.tap(find.byKey(const ValueKey('menu-add-to-playlist')));
+        await settle();
+      }
+      if (playlistsStep == 'undo') {
+        await tester.tap(
+          find.byKey(const ValueKey('menu-remove-from-playlist')),
+        );
+        await settle();
+      }
+    }
+    if (playlists != null &&
+        (playlistsStep == 'heading' || playlistsStep == 'name')) {
+      await tester.tap(
+        find.byKey(
+          const ValueKey(
+            'list-card-Вечер у моря, когда никуда не надо спешить и можно '
+            'слушать всё подряд',
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('playlist-menu')));
+      await tester.pumpAndSettle();
+      if (playlistsStep == 'name') {
+        await tester.tap(find.byKey(const ValueKey('playlist-rename')));
+        await tester.pumpAndSettle();
+      }
     }
     // The page with a playlist playing from its card (user, 2026-11-18:
     // "not very clear which playlist is playing now").
@@ -1035,6 +1106,9 @@ void main() {
           .writeAsBytesSync(png!.buffer.asUint8List());
     });
     library.jump.clear();
+    // The drag is called off: nothing is sent.
+    await drag?.cancel();
+    if (drag != null) await settle();
     // Stops the playing timer of the controller before the tree goes.
     if (playingFirst ||
         catalogPlays ||
@@ -1043,9 +1117,21 @@ void main() {
       player.playing.value = false;
     }
     // Lets the note at the bottom time out, so no timer is left.
-    if (catalogAdd || albumAddAll || removeStep != null) {
-      if (removeStep == 'menu') {
+    final menuOpen =
+        removeStep == 'menu' ||
+        const {'rowMenu', 'addMenu', 'heading', 'name'}.contains(playlistsStep);
+    if (catalogAdd ||
+        albumAddAll ||
+        removeStep != null ||
+        menuOpen ||
+        playlistsStep == 'undo') {
+      if (menuOpen) {
         await tester.tapAt(const Offset(5, 5));
+        await settle();
+      }
+      // The Undo bar goes Undo: nothing is sent to the made-up VK.
+      if (playlistsStep == 'undo') {
+        await tester.tap(find.byKey(const ValueKey('playlist-undo')));
       }
       await tester.pump(const Duration(seconds: 10));
     }
@@ -1065,6 +1151,16 @@ void main() {
     ('playing', true, const Size(1440, 900)),
     ('playing', false, const Size(1440, 900)),
     ('playing', false, const Size(760, 900)),
+    ('drag', false, const Size(1440, 900)),
+    ('drag', true, const Size(760, 900)),
+    ('rowMenu', true, const Size(1440, 900)),
+    ('addMenu', false, const Size(1440, 900)),
+    ('addMenu', true, const Size(760, 900)),
+    ('undo', false, const Size(1440, 900)),
+    ('undo', true, const Size(760, 900)),
+    ('heading', false, const Size(1440, 900)),
+    ('heading', true, const Size(760, 900)),
+    ('name', true, const Size(1440, 900)),
   ]) {
     final width = size.width < 1000 ? 'narrow' : 'wide';
     testWidgets(
