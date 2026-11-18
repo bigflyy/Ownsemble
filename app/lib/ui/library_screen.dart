@@ -88,6 +88,11 @@ const allPlayColumnsMinWidth = 1000.0;
 /// the room.
 const playColumnsMinWidth = 600.0;
 
+/// A song list narrower than this shows a VK list's Play and Shuffle as
+/// icons: with their labels and the playlist menu they left a short title
+/// four letters (a 760 window with the sidebar, 2026-11-18).
+const listActionsCompactWidth = 640.0;
+
 /// Which play columns the Songs list shows.
 enum PlayColumns { none, some, all }
 
@@ -1115,7 +1120,10 @@ class _LibraryScreenState extends State<LibraryScreen> {
                     actions: [
                       if (view.kind == ViewKind.versions) _versionsSearch(),
                       ?_albumAddAll(view, tight: tight),
-                      ?_listActions(view),
+                      ?_listActions(
+                        view,
+                        compact: listWidth < listActionsCompactWidth,
+                      ),
                       if (view.kind == ViewKind.playlists &&
                           widget.playlists != null)
                         NewPlaylistButton(
@@ -1496,134 +1504,232 @@ class _LibraryScreenState extends State<LibraryScreen> {
       initialData: widget.player.current,
       builder: (context, current) => ValueListenableBuilder(
         valueListenable: widget.player.playing,
-        builder: (context, playing, _) => Scrollbar(
-          controller: library.scroll,
-          child: ListView.builder(
+        builder: (context, playing, _) {
+          Widget songRow(int index, {Widget? handle}) {
+            final track = library.visible[index];
+            final entryId = library.entryIdAt(index);
+            final version = library.versionOf(track);
+            final outside = _outsideSong(track, version);
+            final remover = widget.remover;
+            // History and Stacks keep a removed song: its row stays.
+            final keepsRemoved =
+                library.view.kind == ViewKind.history ||
+                library.view.kind == ViewKind.stack;
+            return LeavingRow(
+              key: ValueKey(
+                entryId == null ? 'song-${track.id}' : 'entry-$entryId',
+              ),
+              leaving:
+                  !keepsRemoved &&
+                  (remover?.leaving.contains(track.id) ?? false),
+              flashing: remover?.flashing == track.id,
+              child: _SongRow(
+                number: index + 1,
+                dragHandle: handle,
+                track: track,
+                playColumns: playColumns,
+                periodPlays: filters?.periodPlays(track.id),
+                allTimePlays: filters?.allTimePlays(track.id),
+                now: filters?.now,
+                cover: library.rowCover(track),
+                stored:
+                    _storage?.stateOf(track) ??
+                    (path: track.localPath, pinned: track.pinned),
+                downloading: _storage?.isDownloading(track) ?? false,
+                saving: _storage?.isSaving(track) ?? false,
+                storage: _storage,
+                thumbnails: _settings.thumbnails,
+                showAlbum: showAlbum,
+                isCurrent: _isPlaying(track, current.data),
+                isJump: index == library.jump.row,
+                playing: playing,
+                onTap: () {
+                  library.jump.clear();
+                  _play(index);
+                },
+                onMenu: (position) => _showSongMenu(index, position),
+                favorite: widget.collections?.isFavorite(track.id) ?? false,
+                onFavorite:
+                    widget.collections == null ||
+                        !track.inLibrary ||
+                        version != null
+                    ? null
+                    : () => widget.collections!.toggleFavorite(track),
+                versionTag: (compact) => version == null
+                    ? restrictedTag(_outside, track, compact: compact) ??
+                          (outside == null
+                              ? null
+                              : _otherVersionTag(
+                                  widget.catalog!,
+                                  outside,
+                                  compact: compact,
+                                )) ??
+                          VersionTag(
+                            playback: widget.playback,
+                            track: track,
+                            compact: compact,
+                            onOpen: _openVersions,
+                          )
+                    : _VersionTags(
+                        version: version,
+                        row: library.versionsRow!,
+                        list: library.versionList,
+                        choice: widget.playback.player.versions?.choiceFor(
+                          library.versionsRow!,
+                        ),
+                        compact: compact,
+                      ),
+                // The "another version" tag is too long for the album
+                // column: it goes under the title, as Versions tags do.
+                tagsUnderTitle:
+                    version != null ||
+                    (_outside?.restrictionOf(track.id) != null) ||
+                    outside != null &&
+                        widget.catalog!.otherVersionOf(outside) != null,
+                action: outside == null
+                    ? null
+                    : foundAddButton(
+                        context,
+                        widget.catalog!,
+                        outside,
+                        onAdd: _addFound,
+                      ),
+                outsideMeaning: version == null
+                    ? null
+                    : version.isCurrentFile
+                    ? "VK's file for your song: streams, nothing is saved "
+                          'while you listen here'
+                    : 'Another upload of the song on VK: streams, nothing '
+                          'is saved while you listen here',
+                // An upload VK gives no album link for shows its album as
+                // plain text. Asked only for those rows: for a library song
+                // it costs a database read per row.
+                // In an album's place the name is that album: nothing to open.
+                onOpenAlbum:
+                    library.view.kind == ViewKind.album ||
+                        version != null && library.albumOf(track) == null
+                    ? null
+                    : () {
+                        library.jump.clear();
+                        library.openAlbum(track);
+                      },
+              ),
+            );
+          }
+
+          final reorder = part == null ? _playlistReorder() : null;
+          if (reorder != null) {
+            return Scrollbar(
+              controller: library.scroll,
+              child: ReorderableListView.builder(
+                key: const ValueKey('playlist-reorder'),
+                scrollController: library.scroll,
+                padding: const EdgeInsets.fromLTRB(8, 0, 8, 12),
+                itemExtent: rowHeight,
+                buildDefaultDragHandles: false,
+                proxyDecorator: (child, index, animation) =>
+                    _DraggedRow(animation: animation, child: child),
+                itemCount: own,
+                onReorderItem: (from, to) => _moveEntry(reorder, from, to),
+                itemBuilder: (context, index) => songRow(
+                  index,
+                  handle: _DragHandle(
+                    key: ValueKey('drag-entry-${library.entryIdAt(index)}'),
+                    index: index,
+                  ),
+                ),
+              ),
+            );
+          }
+          return Scrollbar(
             controller: library.scroll,
-            padding: const EdgeInsets.fromLTRB(8, 0, 8, 12),
-            itemExtent: rowHeight,
-            itemCount: lead + shownOwn + extras.length,
-            itemBuilder: (context, item) {
-              if (item < lead) {
-                return OwnResultsHeader(catalog: part!, count: own, wide: wide);
-              }
-              final index = item - lead;
-              if (index >= shownOwn) {
-                return extras[index - shownOwn](playing, current.data);
-              }
-              final track = library.visible[index];
-              final entryId = library.entryIdAt(index);
-              final version = library.versionOf(track);
-              final outside = _outsideSong(track, version);
-              final remover = widget.remover;
-              // History and Stacks keep a removed song: its row stays.
-              final keepsRemoved =
-                  library.view.kind == ViewKind.history ||
-                  library.view.kind == ViewKind.stack;
-              return LeavingRow(
-                key: ValueKey(
-                  entryId == null ? 'song-${track.id}' : 'entry-$entryId',
-                ),
-                leaving:
-                    !keepsRemoved &&
-                    (remover?.leaving.contains(track.id) ?? false),
-                flashing: remover?.flashing == track.id,
-                child: _SongRow(
-                  number: index + 1,
-                  track: track,
-                  playColumns: playColumns,
-                  periodPlays: filters?.periodPlays(track.id),
-                  allTimePlays: filters?.allTimePlays(track.id),
-                  now: filters?.now,
-                  cover: library.rowCover(track),
-                  stored:
-                      _storage?.stateOf(track) ??
-                      (path: track.localPath, pinned: track.pinned),
-                  downloading: _storage?.isDownloading(track) ?? false,
-                  saving: _storage?.isSaving(track) ?? false,
-                  storage: _storage,
-                  thumbnails: _settings.thumbnails,
-                  showAlbum: showAlbum,
-                  isCurrent: _isPlaying(track, current.data),
-                  isJump: index == library.jump.row,
-                  playing: playing,
-                  onTap: () {
-                    library.jump.clear();
-                    _play(index);
-                  },
-                  onMenu: (position) => _showSongMenu(index, position),
-                  favorite: widget.collections?.isFavorite(track.id) ?? false,
-                  onFavorite:
-                      widget.collections == null ||
-                          !track.inLibrary ||
-                          version != null
-                      ? null
-                      : () => widget.collections!.toggleFavorite(track),
-                  versionTag: (compact) => version == null
-                      ? restrictedTag(_outside, track, compact: compact) ??
-                            (outside == null
-                                ? null
-                                : _otherVersionTag(
-                                    widget.catalog!,
-                                    outside,
-                                    compact: compact,
-                                  )) ??
-                            VersionTag(
-                              playback: widget.playback,
-                              track: track,
-                              compact: compact,
-                              onOpen: _openVersions,
-                            )
-                      : _VersionTags(
-                          version: version,
-                          row: library.versionsRow!,
-                          list: library.versionList,
-                          choice: widget.playback.player.versions?.choiceFor(
-                            library.versionsRow!,
-                          ),
-                          compact: compact,
-                        ),
-                  // The "another version" tag is too long for the album
-                  // column: it goes under the title, as Versions tags do.
-                  tagsUnderTitle:
-                      version != null ||
-                      (_outside?.restrictionOf(track.id) != null) ||
-                      outside != null &&
-                          widget.catalog!.otherVersionOf(outside) != null,
-                  action: outside == null
-                      ? null
-                      : foundAddButton(
-                          context,
-                          widget.catalog!,
-                          outside,
-                          onAdd: _addFound,
-                        ),
-                  outsideMeaning: version == null
-                      ? null
-                      : version.isCurrentFile
-                      ? "VK's file for your song: streams, nothing is saved "
-                            'while you listen here'
-                      : 'Another upload of the song on VK: streams, nothing '
-                            'is saved while you listen here',
-                  // An upload VK gives no album link for shows its album as
-                  // plain text. Asked only for those rows: for a library song
-                  // it costs a database read per row.
-                  // In an album's place the name is that album: nothing to open.
-                  onOpenAlbum:
-                      library.view.kind == ViewKind.album ||
-                          version != null && library.albumOf(track) == null
-                      ? null
-                      : () {
-                          library.jump.clear();
-                          library.openAlbum(track);
-                        },
-                ),
-              );
-            },
-          ),
-        ),
+            child: ListView.builder(
+              controller: library.scroll,
+              padding: const EdgeInsets.fromLTRB(8, 0, 8, 12),
+              itemExtent: rowHeight,
+              itemCount: lead + shownOwn + extras.length,
+              itemBuilder: (context, item) {
+                if (item < lead) {
+                  return OwnResultsHeader(
+                    catalog: part!,
+                    count: own,
+                    wide: wide,
+                  );
+                }
+                final index = item - lead;
+                if (index >= shownOwn) {
+                  return extras[index - shownOwn](playing, current.data);
+                }
+                return songRow(index);
+              },
+            ),
+          );
+        },
       ),
     );
+  }
+
+  /// The open playlist when its rows can be dragged to new places (plan 08
+  /// C5): one the account made, logged in, its entries listed, and nothing
+  /// narrowing the rows (a search or a source filter hides neighbours, so
+  /// a drop could not name the right one). Null otherwise.
+  ({VkPlaylists playlists, int sourceId, String key})? _playlistReorder() {
+    final playlists = widget.playlists;
+    final view = library.view;
+    final ref = view.album;
+    if (playlists == null ||
+        view.kind != ViewKind.vkList ||
+        ref == null ||
+        !isPlaylistRef(ref) ||
+        library.searchText.text.trim().isNotEmpty ||
+        library.sourceFilter != null ||
+        library.visible.isEmpty ||
+        library.entryIdAt(0) == null) {
+      return null;
+    }
+    final list = playlists.playlistOf(ref);
+    final sourceId = ref.link!.sourceId;
+    if (list == null ||
+        !list.editable ||
+        playlists.apiOfSource(sourceId) == null) {
+      return null;
+    }
+    return (playlists: playlists, sourceId: sourceId, key: list.key);
+  }
+
+  /// The VK key of the entry shown in the row [index] of a playlist.
+  String? _entryKeyAt(int index) {
+    final entryId = library.entryIdAt(index);
+    return entryId == null ? null : _outside?.songOf(entryId)?.key;
+  }
+
+  /// Moves the row [from] to the place [to] (its index once moved). VK is
+  /// told the entry and its new neighbour by key: the row after it, or the
+  /// one before it at the end.
+  Future<void> _moveEntry(
+    ({VkPlaylists playlists, int sourceId, String key}) reorder,
+    int from,
+    int to,
+  ) async {
+    if (to == from) return;
+    final rest = [
+      for (var i = 0; i < library.visible.length; i++)
+        if (i != from) i,
+    ];
+    final moving = _entryKeyAt(from);
+    final beforeKey = to < rest.length ? _entryKeyAt(rest[to]) : null;
+    final afterKey = to < rest.length ? null : _entryKeyAt(rest[to - 1]);
+    if (moving == null || (beforeKey ?? afterKey) == null) return;
+    final messenger = ScaffoldMessenger.of(context);
+    final edit = await reorder.playlists.moveSong(
+      reorder.sourceId,
+      reorder.key,
+      moving,
+      beforeKey: beforeKey,
+      afterKey: afterKey,
+    );
+    // A move that went through says nothing: the row is already there.
+    if (!edit.ok) showPlaylistNote(messenger, edit.note);
   }
 
   /// The items of the On VK part after the own rows, each one row tall: a
@@ -1898,8 +2004,9 @@ class _LibraryScreenState extends State<LibraryScreen> {
 
   /// The heading's buttons of a VK list (recommended or a playlist): Play,
   /// and for similar songs "More" (VK gives a few new ones each time it is
-  /// asked).
-  Widget? _listActions(LibraryView view) {
+  /// asked). [compact] (a narrow list) shows Play and Shuffle as icons, so
+  /// the title keeps its room (shot 2026-11-18: "В дорогу" cut to 4 letters).
+  Widget? _listActions(LibraryView view, {bool compact = false}) {
     final forYou = widget.forYou;
     final ref = view.album;
     if (ref == null || view.kind != ViewKind.vkList) return null;
@@ -1935,20 +2042,22 @@ class _LibraryScreenState extends State<LibraryScreen> {
             label: const Text('More'),
           ),
         if (songs.isNotEmpty)
-          TextButton.icon(
+          _ListButton(
             key: const ValueKey('list-play'),
+            compact: compact,
             onPressed: () {
               library.notePlayedFrom();
               widget.playback.playFrom(songs, 0, from: _playedFrom(view));
             },
-            icon: const Icon(Icons.play_arrow, size: 18),
-            label: const Text('Play'),
+            icon: Icons.play_arrow,
+            label: 'Play',
           ),
         // A playlist also plays shuffled: shuffle turns on, from a random
         // song.
         if (songs.length > 1 && isPlaylistRef(ref))
-          TextButton.icon(
+          _ListButton(
             key: const ValueKey('list-shuffle'),
+            compact: compact,
             onPressed: () {
               final playback = widget.playback;
               if (!playback.shuffle) playback.toggleShuffle();
@@ -1959,8 +2068,8 @@ class _LibraryScreenState extends State<LibraryScreen> {
                 from: _playedFrom(view),
               );
             },
-            icon: const Icon(Icons.shuffle, size: 18),
-            label: const Text('Shuffle'),
+            icon: Icons.shuffle,
+            label: 'Shuffle',
           ),
         // Rename and Delete, or Unfollow (plan 08, C4).
         if (isPlaylistRef(ref) && widget.playlists != null)
@@ -2818,6 +2927,7 @@ class _SongRow extends StatelessWidget {
   const _SongRow({
     super.key,
     required this.number,
+    this.dragHandle,
     required this.track,
     required this.cover,
     required this.stored,
@@ -2885,6 +2995,10 @@ class _SongRow extends StatelessWidget {
 
   /// Position in the list, shown when thumbnails are off.
   final int number;
+
+  /// The grip that moves the row, before its cover; only in a playlist the
+  /// account made, with nothing narrowing it (plan 08 C5).
+  final Widget? dragHandle;
   final Track track;
 
   /// The song with the cover and album name its row shows: in an album's
@@ -3018,9 +3132,13 @@ class _SongRow extends StatelessWidget {
             child: Opacity(
               opacity: unplayable ? 0.5 : 1,
               child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 14),
+                padding: EdgeInsets.only(
+                  left: dragHandle == null ? 14 : 0,
+                  right: 14,
+                ),
                 child: Row(
                   children: [
+                    ?dragHandle,
                     SizedBox(
                       width: 44,
                       child: thumbnails
@@ -3409,6 +3527,98 @@ class _RemoveFrom {
 /// A song row that slides out to the side while it is being removed
 /// ([leaving]; back in if the remove failed), and flashes in the accent
 /// colour when Undo brought it back ([flashing]).
+/// A heading button of a VK list: icon and label, or the icon alone with
+/// the label as its tooltip when [compact].
+class _ListButton extends StatelessWidget {
+  const _ListButton({
+    super.key,
+    required this.compact,
+    required this.onPressed,
+    required this.icon,
+    required this.label,
+  });
+
+  final bool compact;
+  final VoidCallback onPressed;
+  final IconData icon;
+  final String label;
+
+  @override
+  Widget build(BuildContext context) => compact
+      ? IconButton(
+          onPressed: onPressed,
+          tooltip: label,
+          color: Theme.of(context).colorScheme.primary,
+          icon: Icon(icon, size: 20),
+        )
+      : TextButton.icon(
+          onPressed: onPressed,
+          icon: Icon(icon, size: 18),
+          label: Text(label),
+        );
+}
+
+/// The grip at the start of a playlist row that moves it (plan 08 C5). A
+/// press on it starts the drag at once; a click on it does not play the
+/// song.
+class _DragHandle extends StatelessWidget {
+  const _DragHandle({super.key, required this.index});
+
+  final int index;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = OwnColors.of(context);
+    return ReorderableDragStartListener(
+      index: index,
+      child: MouseRegion(
+        cursor: SystemMouseCursors.grab,
+        child: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap: () {},
+          child: Semantics(
+            label: 'Drag to move',
+            child: SizedBox(
+              width: 30,
+              height: rowHeight,
+              child: Icon(
+                Icons.drag_indicator,
+                size: 18,
+                color: RowHoverScope.of(context) ? colors.dim : colors.dim2,
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// A playlist row while it is dragged: lifted, on the list's background so
+/// the rows under it do not show through.
+class _DraggedRow extends StatelessWidget {
+  const _DraggedRow({required this.animation, required this.child});
+
+  final Animation<double> animation;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = OwnColors.of(context);
+    return AnimatedBuilder(
+      animation: animation,
+      builder: (context, child) => Material(
+        color: colors.raised,
+        elevation: 6 * Curves.easeOut.transform(animation.value),
+        shadowColor: colors.shadow,
+        borderRadius: BorderRadius.circular(10),
+        child: child,
+      ),
+      child: child,
+    );
+  }
+}
+
 class LeavingRow extends StatefulWidget {
   const LeavingRow({
     super.key,

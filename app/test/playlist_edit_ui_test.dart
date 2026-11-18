@@ -286,6 +286,74 @@ void main() {
     expect(find.text('Deleted Новое имя'), findsOneWidget);
   });
 
+  /// Drags the row [from] of the open list by its handle [rows] rows down
+  /// (up when negative), in small steps as a mouse does.
+  Future<void> dragRow(WidgetTester tester, int from, double rows) async {
+    final handle = find.byKey(
+      ValueKey('drag-entry-${library.entryIdAt(from)}'),
+    );
+    final gesture = await tester.startGesture(tester.getCenter(handle));
+    await tester.pump();
+    const steps = 12;
+    for (var i = 0; i < steps; i++) {
+      await gesture.moveBy(Offset(0, rows * rowHeight / steps));
+      await tester.pump(const Duration(milliseconds: 16));
+    }
+    await gesture.up();
+    await tester.pumpAndSettle();
+    for (var i = 0; i < 20; i++) {
+      await tester.pump(const Duration(milliseconds: 10));
+    }
+    await tester.pumpAndSettle();
+  }
+
+  List<String> titles() => [for (final t in library.visible) t.title];
+
+  testWidgets('a made playlist\'s rows move by their handle: the row goes '
+      'there at once and VK gets the move by key', (tester) async {
+    mine.songs.add(vk.known['10000_3']!);
+    await openApp(tester);
+    await openPlaylist(tester, 'Мой');
+    expect(titles(), ['Песня 1', 'Песня 2', 'Песня 3']);
+    // The last row to the top: named before the first one.
+    await dragRow(tester, 2, -2.2);
+    expect(titles(), ['Песня 3', 'Песня 1', 'Песня 2']);
+    expect(vk.keysOf(mine), ['10000_3', '10000_1', '10000_2']);
+    expect(find.text('VK did not move the song'), findsNothing);
+    // The first row to the bottom: named after the last one.
+    await dragRow(tester, 0, 2.6);
+    expect(vk.keysOf(mine), ['10000_1', '10000_2', '10000_3']);
+    expect(titles(), ['Песня 1', 'Песня 2', 'Песня 3']);
+  });
+
+  testWidgets('two copies of one library song: the drag moves the copy '
+      'that was dragged', (tester) async {
+    mine.songs.add(vk.song(10000, 50, trackId: 101));
+    await openApp(tester);
+    await openPlaylist(tester, 'Мой');
+    expect(titles(), ['Песня 1', 'Песня 2', 'Песня 1']);
+    await dragRow(tester, 2, -2.2);
+    expect(vk.keysOf(mine), ['10000_50', '10000_1', '10000_2']);
+  });
+
+  testWidgets('no handles in a followed playlist, or while a search '
+      'narrows a made one', (tester) async {
+    await openApp(tester);
+    await openPlaylist(tester, 'Чужой');
+    expect(find.byKey(const ValueKey('playlist-reorder')), findsNothing);
+    expect(find.byIcon(Icons.drag_indicator), findsNothing);
+    await tester.tap(find.byKey(const ValueKey('nav-playlists')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('list-card-Мой')));
+    await tester.pumpAndSettle();
+    expect(find.byIcon(Icons.drag_indicator), findsNWidgets(2));
+    library.searchText.text = '2';
+    await tester.pump(const Duration(milliseconds: 500));
+    await tester.pumpAndSettle();
+    expect(titles(), ['Песня 2']);
+    expect(find.byIcon(Icons.drag_indicator), findsNothing);
+  });
+
   testWidgets('the Playlists page\'s New playlist makes one and opens it', (
     tester,
   ) async {
