@@ -238,6 +238,27 @@ void main() {
     await tester.pump(const Duration(seconds: 5));
   });
 
+  // Real check playlists-29a: Shuffle's random pick was the song already
+  // playing, and the press paused it instead of starting a shuffled play.
+  testWidgets('Shuffle while a song of the playlist plays starts another '
+      'song, never pauses', (tester) async {
+    await openPlaylists(tester);
+    await tester.tap(find.byKey(const ValueKey('list-card-В дорогу')));
+    await tester.pumpAndSettle();
+    // Three songs play: with the bug, 20 presses pause at least once in
+    // all but 3 runs in 10,000.
+    for (var press = 0; press < 20; press++) {
+      final before = player.current;
+      await tester.tap(find.byKey(const ValueKey('list-shuffle')));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 100));
+      expect(player.pauseToggles, 0, reason: 'press ${press + 1} paused');
+      if (before != null) expect(player.current?.id, isNot(before.id));
+    }
+    player.playing.value = false;
+    await tester.pump(const Duration(seconds: 5));
+  });
+
   // User, 2026-11-18: "not very clear which playlist is playing now".
   testWidgets('the playing playlist is marked: its card after Shuffle, and '
       'the player says where it plays from', (tester) async {

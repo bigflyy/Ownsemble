@@ -2062,9 +2062,20 @@ class _LibraryScreenState extends State<LibraryScreen> {
               final playback = widget.playback;
               if (!playback.shuffle) playback.toggleShuffle();
               library.notePlayedFrom();
+              // Never the song playing now: playFrom takes that one as
+              // play / pause, and the press paused the music (real check
+              // playlists-29a).
+              final playingId = widget.player.current?.id;
+              var picks = [
+                for (var i = 0; i < songs.length; i++)
+                  if (songs[i].id != playingId) i,
+              ];
+              // Every entry is the playing song (two copies of it).
+              if (picks.isEmpty)
+                picks = [for (var i = 0; i < songs.length; i++) i];
               playback.playFrom(
                 songs,
-                Random().nextInt(songs.length),
+                picks[Random().nextInt(picks.length)],
                 from: _playedFrom(view),
               );
             },
