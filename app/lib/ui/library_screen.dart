@@ -2071,8 +2071,9 @@ class _LibraryScreenState extends State<LibraryScreen> {
                   if (songs[i].id != playingId) i,
               ];
               // Every entry is the playing song (two copies of it).
-              if (picks.isEmpty)
+              if (picks.isEmpty) {
                 picks = [for (var i = 0; i < songs.length; i++) i];
+              }
               playback.playFrom(
                 songs,
                 picks[Random().nextInt(picks.length)],
