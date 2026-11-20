@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ownsemble/library/artist_credit.dart';
 import 'package:ownsemble/library/library_store.dart';
+import 'package:ownsemble/library/song_version.dart';
 import 'package:ownsemble/library/track.dart';
 import 'package:ownsemble/vk/vk_sync.dart';
 import 'package:path/path.dart' as p;
@@ -172,5 +173,35 @@ void main() {
       credited('1_1', 'Люди', artists: const [tank]),
     ]);
     expect(migrated.artistCredits()[id], [tank]);
+  });
+
+  test('version 15 gains artists on found uploads; lists found before are '
+      'searched again', () {
+    final dir = Directory.systemTemp.createTempSync('ownsemble_artists');
+    addTearDown(() => dir.deleteSync(recursive: true));
+    final path = p.join(dir.path, 'library.db');
+    final old = LibraryStore.open(path);
+    final vk = old.ensureSource(TrackSource.vk, account: '1', name: 'VK');
+    final id = old.upsertAll(vk, [credited('1_1', 'Люди')]).single;
+    old.saveFoundVersions(id, [
+      const SongVersion(
+        key: '-5_1',
+        artist: 'Дайте танк (!)',
+        title: 'Люди',
+        listedSec: 200,
+      ),
+    ], atMs: 1000);
+    old.close();
+    final db = sqlite3.open(path);
+    db.execute('ALTER TABLE found_versions DROP COLUMN artists');
+    db.execute('PRAGMA user_version = 15');
+    db.close();
+
+    final migrated = LibraryStore.open(path);
+    addTearDown(migrated.close);
+    final found = migrated.foundVersions(id)!;
+    expect(found.versions.single.title, 'Люди');
+    expect(found.versions.single.artists, isEmpty);
+    expect(found.foundAtMs, 0);
   });
 }

@@ -36,7 +36,7 @@ import '../vk/vk_playlists.dart';
 import '../vk/vk_recommendations.dart';
 import '../vk/vk_sync.dart' show describeSyncError;
 import 'albums.dart';
-import 'for_you.dart' show recSongFromJson, recSongToJson;
+import 'for_you.dart' show recSongFromJson, recSongToJson, songCacheVersion;
 import 'outside_songs.dart';
 
 /// Keys of playlist places start with this (VK's recommended lists have
@@ -839,7 +839,7 @@ class VkPlaylists extends ChangeNotifier implements ListCatalog {
     if (file == null || !file.existsSync()) return;
     try {
       final json = jsonDecode(file.readAsStringSync()) as Map<String, dynamic>;
-      if (json['version'] != 1) return;
+      if (json['version'] != songCacheVersion) return;
       for (final MapEntry(:key, :value)
           in (json['accounts'] as Map<String, dynamic>).entries) {
         final account = value as Map<String, dynamic>;
@@ -872,7 +872,7 @@ class VkPlaylists extends ChangeNotifier implements ListCatalog {
     final file = _cacheFile;
     if (file == null) return;
     final json = {
-      'version': 1,
+      'version': songCacheVersion,
       'accounts': {
         for (final MapEntry(:key, :value) in _lists.entries)
           '$key': {

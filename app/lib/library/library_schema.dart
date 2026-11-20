@@ -6,7 +6,7 @@ import 'package:sqlite3/sqlite3.dart';
 /// Schema version this build reads and writes (`PRAGMA user_version`).
 ///
 /// 0 is the speed-gate build's single `tracks` table (or an empty file).
-const librarySchemaVersion = 15;
+const librarySchemaVersion = 16;
 
 /// How many colors sources can have; the theme has one per slot, from 1.
 const sourceColorCount = 6;
@@ -55,6 +55,7 @@ void migrateLibrary(Database db, {String? dataDir}) {
     if (version < 13) _addFavorites(db);
     if (version < 14) _addRemovedMarks(db);
     if (version < 15) _addArtistCredits(db);
+    if (version < 16) _addFoundVersionArtists(db);
     db.execute('PRAGMA user_version = $librarySchemaVersion');
     db.execute('COMMIT');
   } catch (_) {
@@ -328,6 +329,20 @@ void _addArtistCredits(Database db) {
       missing INTEGER NOT NULL DEFAULT 0
     )
   ''');
+}
+
+/// Version 16: the artists of each found upload (JSON, as the list caches
+/// keep them), so + on a stored upload stores them too (plan 09, C2 review).
+/// Lists found before have none: expired, they are searched again the next
+/// time the song's versions open.
+void _addFoundVersionArtists(Database db) {
+  final columns = {
+    for (final row in db.select('PRAGMA table_info(found_versions)'))
+      row['name'] as String,
+  };
+  if (columns.contains('artists')) return;
+  db.execute('ALTER TABLE found_versions ADD COLUMN artists TEXT');
+  db.execute('UPDATE found_versions SET found_at_ms = 0');
 }
 
 void _createVersion1(Database db) {

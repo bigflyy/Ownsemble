@@ -12,6 +12,7 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 
+import '../library/artist_credit.dart';
 import '../library/found_match.dart';
 import '../library/library_store.dart';
 import '../library/track.dart';
@@ -318,7 +319,13 @@ class CatalogSearch extends ChangeNotifier {
     Set<int> except = const {},
   }) {
     final kept = _byId[track.id];
-    if (kept != null && kept.key == track.sourceKey) return kept;
+    // A fresh VK answer may name artists an older cached one lacked: then
+    // the song is made again, so + stores them (C2 review).
+    if (kept != null &&
+        kept.key == track.sourceKey &&
+        sameCredits(kept.song.artists, track.artists)) {
+      return kept;
+    }
     final found = FoundSong(
       song: NewTrack(
         artist: track.artist,
@@ -740,6 +747,7 @@ class CatalogSearch extends ChangeNotifier {
         coverMidUrl: song.coverMidUrl,
         coverFullUrl: song.coverFullUrl,
         tint: song.tint,
+        artists: song.artists,
       ),
     );
     _byId[id] = found;

@@ -607,7 +607,7 @@ class ForYou extends ChangeNotifier implements ListCatalog {
     if (file == null || !file.existsSync()) return;
     try {
       final json = jsonDecode(file.readAsStringSync()) as Map<String, dynamic>;
-      if (json['version'] != 1) return;
+      if (json['version'] != songCacheVersion) return;
       final page = json['page'] as Map<String, dynamic>;
       _page = VkMusicPage(
         lists: [
@@ -658,7 +658,7 @@ class ForYou extends ChangeNotifier implements ListCatalog {
     final page = _page;
     if (file == null || page == null) return;
     final json = {
-      'version': 1,
+      'version': songCacheVersion,
       'sourceId': _sourceId,
       'savedAtMs': (_fetchedAt ?? _now()).millisecondsSinceEpoch,
       'page': {
@@ -711,6 +711,11 @@ class ForYou extends ChangeNotifier implements ListCatalog {
   }
 }
 
+/// The format of the For you and playlists cache files. 2 (plan 09, C2
+/// review): songs keep their artists; a file of 1 has none, and a followed
+/// playlist VK did not change would keep it forever, so it is read again.
+const songCacheVersion = 2;
+
 /// A recommended song as the cache file keeps it: the library's fields, its
 /// artists and the restriction code, no stream link.
 Map<String, Object?> recSongToJson(VkRecSong song) {
@@ -732,16 +737,7 @@ Map<String, Object?> recSongToJson(VkRecSong song) {
     'albumKey': s.vkAlbumKey,
     'albumAccessKey': s.vkAlbumAccessKey,
     'restricted': song.restricted,
-    if (s.artists.isNotEmpty)
-      'artists': [
-        for (final artist in s.artists)
-          {
-            'id': artist.vkId,
-            'name': artist.name,
-            'domain': ?artist.domain,
-            if (artist.featured) 'featured': true,
-          },
-      ],
+    'artists': ?creditsToJson(s.artists),
   };
 }
 
@@ -762,16 +758,7 @@ VkRecSong recSongFromJson(Map<String, dynamic> json) => VkRecSong(
     vkTrackId: json['trackId'] as int?,
     vkAlbumKey: json['albumKey'] as String?,
     vkAlbumAccessKey: json['albumAccessKey'] as String?,
-    artists: [
-      for (final artist in json['artists'] as List? ?? const [])
-        if (artist case {'id': final String id, 'name': final String name})
-          ArtistCredit(
-            vkId: id,
-            name: name,
-            domain: artist['domain'] as String?,
-            featured: artist['featured'] == true,
-          ),
-    ],
+    artists: creditsFromJson(json['artists']),
   ),
   restricted: json['restricted'] as int?,
 );

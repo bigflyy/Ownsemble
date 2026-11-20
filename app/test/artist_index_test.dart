@@ -149,6 +149,41 @@ void main() {
       });
     });
 
+    test("removing the listed row's account: the copy that takes its place "
+        'keeps its own artists', () {
+      store.upsertAll(first, [
+        credited('1_1', [namesake]),
+      ]);
+      final b = store.upsertAll(second, [
+        credited('2_1', [tank]),
+      ]).single;
+      mergeSameFiles(store);
+      store.removeSource(first);
+      final listed = store.loadAll().single;
+      expect(listed.id, b);
+      expect(store.songArtistCredits(), {
+        b: [tank],
+      });
+    });
+
+    test('album keys: the listed row first, else a copy', () {
+      NewTrack inAlbum(String key, String? album) => NewTrack(
+        sourceKey: key,
+        artist: 'Дайте танк (!)',
+        title: 'Утро',
+        durationSec: 200,
+        addedAt: 0,
+        vkTrackId: 7,
+        vkAlbumKey: album,
+      );
+      final a = store.upsertAll(first, [inAlbum('1_1', null)]).single;
+      store.upsertAll(second, [inAlbum('2_1', '-5_9')]);
+      mergeSameFiles(store);
+      expect(store.listedVkAlbumKeys(), {a: '-5_9'});
+      store.updateQuietDetails(first, [inAlbum('1_1', '-5_8')]);
+      expect(store.listedVkAlbumKeys(), {a: '-5_8'});
+    });
+
     test('an unmerged copy has its own artists again', () {
       final a = store.upsertAll(first, [
         credited('1_1', [tank]),
@@ -244,20 +279,48 @@ void main() {
     });
 
     test('a song with no id joins the one VK artist of that name, in any '
-        'case or punctuation', () {
+        'case, with yo as ye and any spaces', () {
+      const yolka = ArtistCredit(vkId: '444', name: 'Ёлка');
       final known = song('Дайте танк (!)');
-      final plain = song('дайте танк');
+      final plain = song('дайте   ТАНК (!)');
+      final singer = song('Ёлка');
+      final loose = song('елка');
       final index = ArtistIndex.build(
-        [known, plain],
+        [known, plain, singer, loose],
         {
           known.id: [tank],
+          singer.id: [yolka],
         },
       );
-      expect(index.length, 1);
+      expect(index.length, 2);
       expect(index['vk:111']!.songs, [known, plain]);
       expect(index.artistsOf(plain.id).single.key, 'vk:111');
       // Its spelling counts too: one each, so the newer song's wins.
       expect(index['vk:111']!.name, 'Дайте танк (!)');
+      expect(index['vk:444']!.songs, [singer, loose]);
+    });
+
+    test('punctuation keeps names apart: no join without VK (C2 review)', () {
+      const plus = ArtistCredit(vkId: '601', name: 'A+');
+      const four = ArtistCredit(vkId: '602', name: '4');
+      final known = song('Дайте танк (!)');
+      final bare = song('Дайте танк');
+      final aPlus = song('A+');
+      final a = song('A');
+      final number = song('4');
+      final broken = song('???4???');
+      final index = ArtistIndex.build(
+        [known, bare, aPlus, a, number, broken],
+        {
+          known.id: [tank],
+          aPlus.id: [plus],
+          number.id: [four],
+        },
+      );
+      expect(index.artistsOf(bare.id).single.key, 'name:дайте танк');
+      expect(index.artistsOf(a.id).single.key, 'name:a');
+      expect(index.artistsOf(broken.id).single.key, 'name:???4???');
+      expect(index['vk:602']!.songs, [number]);
     });
 
     test('a name two ids share joins neither: a name-only artist', () {
@@ -315,7 +378,7 @@ void main() {
         },
       );
       expect(index.artistsOf(loose.id).single.key, 'vk:555');
-      expect(index.artistsOf(other.id).single.key, 'name:nobody feat tank');
+      expect(index.artistsOf(other.id).single.key, 'name:nobody feat. tank');
     });
 
     test('a join is computed, never kept: a second namesake undoes it', () {
@@ -369,8 +432,70 @@ void main() {
         [('Человеко-часы', 2), ('Глаза', 1)],
       );
       expect(artist.albums.first.first, a);
+      expect(artist.albums.first.artist, 'Дайте танк (!)');
       expect(artist.newestAddedAt, 30);
       expect(artist.tint, 0xFF112233);
+    });
+
+    test("albums go by VK's album key when songs have one, as the album "
+        'place opens them (C2 review)', () {
+      final solo = song('Дайте танк (!)', album: 'Человеко-часы');
+      final duet = song(
+        'Дайте танк (!) feat. Рита Вихрия',
+        album: 'Человеко-часы',
+      );
+      final first = song('Дайте танк (!)', album: 'Демо');
+      final second = song('Дайте танк (!)', album: 'Демо');
+      final index = ArtistIndex.build(
+        [solo, duet, first, second],
+        {
+          solo.id: [tank],
+          duet.id: [tank, rita],
+          first.id: [tank],
+          second.id: [tank],
+        },
+        albumKeys: {
+          solo.id: '-5_9',
+          duet.id: '-5_9',
+          first.id: '-5_10',
+          second.id: '-5_11',
+        },
+      );
+      final albums = index['vk:111']!.albums;
+      expect(
+        [
+          for (final album in albums)
+            (album.title, album.vkAlbumKey, album.songs),
+        ],
+        [
+          ('Человеко-часы', '-5_9', 2),
+          ('Демо', '-5_10', 1),
+          ('Демо', '-5_11', 1),
+        ],
+      );
+      expect(albums.first.first, solo);
+      // The featured artist has the release once, with its one song.
+      expect([for (final album in index['vk:222']!.albums) album.songs], [1]);
+    });
+
+    test('per-song credits keep their spelling and role for name links', () {
+      final a = song('ДАЙТЕ ТАНК (!) feat. Рита Вихрия');
+      final b = song('Дайте танк (!)');
+      final c = song('Дайте танк (!)');
+      final index = ArtistIndex.build(
+        [a, b, c],
+        {
+          a.id: [tankOther, rita],
+          b.id: [tank],
+          c.id: [tank],
+        },
+      );
+      expect(index.creditsOf(a.id), [tankOther, rita]);
+      expect(
+        index['vk:${index.creditsOf(a.id).first.vkId}']!.name,
+        'Дайте танк (!)',
+      );
+      expect(index.creditsOf(-1), isEmpty);
     });
   });
 
@@ -411,8 +536,16 @@ void main() {
         c1.id: plays(2, 500),
       };
       expect(names(ArtistSort.mostHeard, heard), ['Альфа', 'Гамма', 'beta']);
-      expect(index['name:альфа']!.heard(heard), (plays: 2, lastMs: 900));
-      expect(index['name:beta']!.heard(heard), (plays: 0, lastMs: null));
+      expect(index['name:альфа']!.heard(heard), (
+        plays: 2,
+        listenedMs: 0,
+        lastMs: 900,
+      ));
+      expect(index['name:beta']!.heard(heard), (
+        plays: 0,
+        listenedMs: 0,
+        lastMs: null,
+      ));
       // A new counted play shows the next time it is asked (R5).
       heard[b1.id] = plays(3, 1000);
       expect(names(ArtistSort.mostHeard, heard).first, 'beta');

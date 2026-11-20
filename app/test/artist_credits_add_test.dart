@@ -70,6 +70,7 @@ void main() {
         library.replaceTracks(tracks, SearchIndex(tracks));
       },
       reloadAfter: const Duration(milliseconds: 10),
+      pause: const Duration(milliseconds: 20),
     );
   });
 
@@ -173,7 +174,7 @@ void main() {
     expect(recSongFromJson(old).song.artists, isEmpty);
   });
 
-  test("a song's own cover swap keeps its artists", () {
+  test("a song's own cover swap keeps its artists, not the donor's", () {
     const track = Track(
       id: -5,
       sourceId: 1,
@@ -183,6 +184,68 @@ void main() {
       durationSec: 180,
       artists: _expected,
     );
-    expect(track.withCoversOf(track).artists, _expected);
+    const donor = Track(
+      id: -6,
+      sourceId: 1,
+      source: TrackSource.vk,
+      artist: 'Кино',
+      title: 'Люди',
+      durationSec: 180,
+      coverUrl: 'https://covers.invalid/1.jpg',
+      artists: [ArtistCredit(vkId: '9', name: 'Кино')],
+    );
+    final swapped = track.withCoversOf(donor);
+    expect(swapped.coverUrl, donor.coverUrl);
+    expect(swapped.artists, _expected);
+  });
+
+  test("a stored Versions list keeps each upload's artists, so + on it "
+      'after a restart stores them (C2 review)', () async {
+    final row = store.upsertAll(source, [
+      vkItemToTrack(vkAudio(41, 1, title: 'Утро')),
+    ]).single;
+    store.saveFoundVersions(row, [
+      versionFromItem(_credited(vkAudio(-7, 6))),
+      versionFromItem(vkAudio(-7, 7)),
+    ]);
+    final stored = store.foundVersions(row)!.versions;
+    expect(stored.first.artists, _expected);
+    expect(stored.last.artists, isEmpty);
+    final book = VersionBook(
+      store: store,
+      find: (track, route, progress) async => const [],
+      measure: (route) async => null,
+    );
+    final own = store.loadAll().single;
+    final track = book.versionTrack(own, stored.first);
+    expect(await addAndRead(catalog.outsideSong(track)), _expected);
+  });
+
+  test('a fresh answer with artists replaces an outside song first shown '
+      'without them (an old cache), so + stores them (C2 review)', () async {
+    final outside = OutsideSongs(libraryCopyOfSong: (_) => null);
+    final bare = vkItemToTrack(vkAudio(-7, 8));
+    final stale = catalog.outsideSong(outside.trackOf(VkRecSong(bare), source));
+    expect(stale.song.artists, isEmpty);
+    final fresh = outside.trackOf(
+      VkRecSong(vkItemToTrack(_credited(vkAudio(-7, 8)))),
+      source,
+    );
+    expect(fresh.id, stale.track.id);
+    final found = catalog.outsideSong(fresh);
+    expect(found.song.artists, _expected);
+    expect(catalog.foundById(fresh.id), same(found));
+    // Asked again with the same artists: the same song, as before.
+    expect(catalog.outsideSong(fresh), same(found));
+    expect(await addAndRead(found), _expected);
+  });
+
+  test("a song VK's search finds shows its artists on its row too", () async {
+    vk.catalog.add(_credited(vkAudio(-7, 9)));
+    library.searchText.text = 'танк';
+    await Future<void>.delayed(const Duration(milliseconds: 120));
+    final found = catalog.songs.single;
+    expect(found.track.artists, _expected);
+    expect(found.song.artists, _expected);
   });
 }

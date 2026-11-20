@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:path/path.dart' as p;
 import 'package:sqlite3/sqlite3.dart';
 
@@ -828,6 +830,24 @@ class LibraryStore implements PlayLog, PlayStatsSource {
     };
   }
 
+  /// The VK album key of each listed song that has one, by the listed row's
+  /// id: the row [vkAlbumOf] opens the album through (the song's own row
+  /// first, then a copy not gone, then the oldest).
+  Map<int, String> listedVkAlbumKeys() {
+    final keys = <int, String>{};
+    for (final row in _db.select('''
+      SELECT coalesce(same_as, id) AS listed, vk_album_key FROM tracks
+      WHERE vk_album_key IS NOT NULL
+      ORDER BY same_as IS NOT NULL, gone_at_ms IS NOT NULL, id
+    ''')) {
+      keys.putIfAbsent(
+        row['listed'] as int,
+        () => row['vk_album_key'] as String,
+      );
+    }
+    return keys;
+  }
+
   /// Stores the cover links, VK track ids and album links of [tracks], for
   /// songs that exist already. No change the UI has to know about: a new host
   /// of the same image only matters the next time the library loads, a track
@@ -1622,8 +1642,8 @@ class LibraryStore implements PlayLog, PlayStatsSource {
         INSERT OR IGNORE INTO found_versions (track_id, position, file_key,
           access_key, artist, title, album, cover_url, cover_large_url,
           listed_sec, seconds, bytes, official, vk_track_id, found_at_ms,
-          album_key, album_access_key)
-        SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+          album_key, album_access_key, artists)
+        SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
         WHERE EXISTS (SELECT 1 FROM tracks WHERE id = ?1)
       ''');
       try {
@@ -1648,6 +1668,10 @@ class LibraryStore implements PlayLog, PlayStatsSource {
             at,
             version.albumKey,
             version.albumAccessKey,
+            switch (creditsToJson(version.artists)) {
+              null => null,
+              final credits => jsonEncode(credits),
+            },
           ]);
         }
       } finally {
@@ -1687,6 +1711,10 @@ class LibraryStore implements PlayLog, PlayStatsSource {
             },
             official: row['official'] == 1,
             vkTrackId: row['vk_track_id'] as int?,
+            artists: switch (row['artists']) {
+              final String json => creditsFromJson(jsonDecode(json)),
+              _ => const [],
+            },
           ),
       ],
       foundAtMs: rows.first['found_at_ms'] as int,

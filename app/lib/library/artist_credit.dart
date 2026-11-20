@@ -79,3 +79,32 @@ bool sameCredits(List<ArtistCredit> a, List<ArtistCredit> b) {
   }
   return true;
 }
+
+/// [credits] as JSON-ready maps, for the list caches and stored versions;
+/// null when there are none.
+List<Map<String, Object>>? creditsToJson(List<ArtistCredit> credits) =>
+    credits.isEmpty
+    ? null
+    : [
+        for (final credit in credits)
+          {
+            'id': credit.vkId,
+            'name': credit.name,
+            'domain': ?credit.domain,
+            if (credit.featured) 'featured': true,
+          },
+      ];
+
+/// The credits [creditsToJson] wrote; entries without an id or a name are
+/// skipped, and anything that is not a list gives none.
+List<ArtistCredit> creditsFromJson(Object? json) => [
+  if (json is List)
+    for (final entry in json)
+      if (entry case {'id': final String id, 'name': final String name})
+        ArtistCredit(
+          vkId: id,
+          name: name,
+          domain: entry['domain'] as String?,
+          featured: entry['featured'] == true,
+        ),
+];
