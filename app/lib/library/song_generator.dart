@@ -1,12 +1,16 @@
 import 'dart:math';
 
+import 'artist_credit.dart';
 import 'library_store.dart';
 
 /// Generates a realistic-looking library for speed checks: Russian and English
 /// artists and titles (including "ё"), varied lengths and dates.
 ///
 /// The same [seed] always gives the same songs. They have no audio of their
-/// own; the gate tool lets them borrow cached files.
+/// own; the gate tool lets them borrow cached files. Seven of every ten
+/// artists have a made-up VK artist id on their songs, as about 71% of a
+/// real library has (plan 09, probe of 2026-11-20), so the gate measures
+/// the stored credits too.
 List<NewTrack> generateSongs(int count, {int seed = 2026}) {
   final random = Random(seed);
   String pick(List<String> words) => words[random.nextInt(words.length)];
@@ -43,9 +47,10 @@ List<NewTrack> generateSongs(int count, {int seed = 2026}) {
     final title = capitalize(
       List.generate(1 + random.nextInt(4), (_) => pick(words)).join(' '),
     );
+    final artist = random.nextInt(artists.length);
     return NewTrack(
       sourceKey: 'gen-$seed-$index',
-      artist: artists[random.nextInt(artists.length)],
+      artist: artists[artist],
       title: random.nextInt(10) == 0 ? '$title (Remix)' : title,
       album: random.nextInt(3) == 0 ? null : capitalize(pick(words)),
       durationSec: 120 + random.nextInt(300),
@@ -56,6 +61,11 @@ List<NewTrack> generateSongs(int count, {int seed = 2026}) {
       coverLargeUrl: generatedCoverUrl(seed, index, size: 600),
       coverFullUrl: generatedCoverUrl(seed, index, size: 1200),
       tint: 0xFF000000 | random.nextInt(0x1000000),
+      // Decided by the artist's number, not by [random], so the songs stay
+      // the ones earlier gates measured.
+      artists: artist % 10 < 7
+          ? [ArtistCredit(vkId: 'gen-$seed-$artist', name: artists[artist])]
+          : const [],
     );
   });
 }

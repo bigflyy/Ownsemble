@@ -781,6 +781,53 @@ class LibraryStore implements PlayLog, PlayStatsSource {
     return byRow;
   }
 
+  /// The artists of each listed song (plan 09, review R9), by the listed
+  /// row's id: one row's credits, never a mix of rows, so a likely merge of
+  /// two different recordings cannot give a song both artists. The row is
+  /// the song's own when it is not removed and has credits, else its copy
+  /// merged for certain, else a likely copy; the oldest row first among
+  /// equals. Removed rows give none. Read again after every change, so a
+  /// removal, a promotion or an unmerge shows on the next index.
+  Map<int, List<ArtistCredit>> songArtistCredits() {
+    final rows = <int, List<ArtistCredit>>{};
+    final rankOf = <int, int>{};
+    final listedOf = <int, int>{};
+    for (final row in _db.select('''
+      SELECT a.track_id, a.vk_artist_id, a.name, a.domain, a.featured,
+             t.same_as, t.same_likely
+      FROM track_artists a JOIN tracks t ON t.id = a.track_id
+      WHERE t.removed_at_ms IS NULL
+      ORDER BY a.track_id, a.position
+    ''')) {
+      final id = row['track_id'] as int;
+      final sameAs = row['same_as'] as int?;
+      listedOf[id] = sameAs ?? id;
+      rankOf[id] = sameAs == null
+          ? 0
+          : row['same_likely'] == 1
+          ? 2
+          : 1;
+      (rows[id] ??= []).add(
+        ArtistCredit(
+          vkId: row['vk_artist_id'] as String,
+          name: row['name'] as String,
+          domain: row['domain'] as String?,
+          featured: row['featured'] == 1,
+        ),
+      );
+    }
+    final chosen = <int, int>{};
+    for (final id in rows.keys) {
+      final listed = listedOf[id]!;
+      final best = chosen[listed];
+      if (best == null || rankOf[id]! < rankOf[best]!) chosen[listed] = id;
+    }
+    return {
+      for (final MapEntry(key: listed, value: id) in chosen.entries)
+        listed: rows[id]!,
+    };
+  }
+
   /// Stores the cover links, VK track ids and album links of [tracks], for
   /// songs that exist already. No change the UI has to know about: a new host
   /// of the same image only matters the next time the library loads, a track
