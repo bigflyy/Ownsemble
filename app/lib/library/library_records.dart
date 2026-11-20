@@ -179,6 +179,10 @@ typedef KnownTrack = ({
 /// its songs.
 typedef VkAlbumLink = ({int sourceId, String key, String? accessKey});
 
+/// A VK artist's stored photo (plan 09): small and large links, both null
+/// when VK had none, and when that was read (Unix milliseconds).
+typedef StoredArtistPhoto = ({String? small, String? large, int fetchedAtMs});
+
 /// What [LibraryStore.mergeSameSongs] did.
 class MergeResult {
   const MergeResult(

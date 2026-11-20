@@ -9,6 +9,7 @@
 library;
 
 import 'artist_credit.dart';
+import 'library_records.dart' show StoredArtistPhoto;
 import 'play_stats.dart';
 import 'track.dart';
 
@@ -277,4 +278,28 @@ class ArtistIndex {
     }
     return list;
   }
+}
+
+/// The artists of [inOrder] (the grid's order: visible tiles first) whose
+/// photo is not stored, or was read longer than [lifetime] ago, at most
+/// [limit] of them. Name-only artists have no VK photo to ask for.
+List<Artist> artistsWantingPhotos(
+  Iterable<Artist> inOrder,
+  Map<String, StoredArtistPhoto> stored, {
+  required int nowMs,
+  required Duration lifetime,
+  int? limit,
+}) {
+  final wanted = <Artist>[];
+  for (final artist in inOrder) {
+    final id = artist.vkId;
+    if (id == null) continue;
+    final photo = stored[id];
+    if (photo != null && nowMs - photo.fetchedAtMs < lifetime.inMilliseconds) {
+      continue;
+    }
+    wanted.add(artist);
+    if (limit != null && wanted.length >= limit) break;
+  }
+  return wanted;
 }

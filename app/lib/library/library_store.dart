@@ -830,6 +830,59 @@ class LibraryStore implements PlayLog, PlayStatsSource {
     };
   }
 
+  /// How long a VK artist's photo, or the word that it has none, is kept
+  /// before it is asked again (plan 09, B1 point 4).
+  static const artistPhotoLifetime = Duration(days: 30);
+
+  /// The stored photos of VK artists by artist id: small (about 135 px)
+  /// and large (about 270 px) links, both null when VK had none, and when
+  /// that was read.
+  Map<String, StoredArtistPhoto> artistPhotos() => {
+    for (final row in _db.select(
+      'SELECT vk_artist_id, small_url, large_url, fetched_at_ms, missing '
+      'FROM artist_photos',
+    ))
+      row['vk_artist_id'] as String: (
+        small: row['missing'] == 1 ? null : row['small_url'] as String?,
+        large: row['missing'] == 1 ? null : row['large_url'] as String?,
+        fetchedAtMs: row['fetched_at_ms'] as int,
+      ),
+  };
+
+  /// Stores what one photo lookup gave for each artist id of [photos]: its
+  /// links, or null when VK has no photo for it. An artist whose lookup
+  /// failed is not in [photos] and keeps what it had.
+  void saveArtistPhotos(
+    Map<String, ({String small, String large})?> photos, {
+    int? atMs,
+  }) {
+    if (photos.isEmpty) return;
+    final at = atMs ?? _now();
+    final upsert = _db.prepare('''
+      INSERT INTO artist_photos
+        (vk_artist_id, small_url, large_url, fetched_at_ms, missing)
+      VALUES (?, ?, ?, ?, ?)
+      ON CONFLICT (vk_artist_id) DO UPDATE SET
+        small_url = excluded.small_url, large_url = excluded.large_url,
+        fetched_at_ms = excluded.fetched_at_ms, missing = excluded.missing
+    ''');
+    try {
+      _transaction(() {
+        for (final MapEntry(key: id, value: photo) in photos.entries) {
+          upsert.execute([
+            id,
+            photo?.small,
+            photo?.large,
+            at,
+            if (photo == null) 1 else 0,
+          ]);
+        }
+      });
+    } finally {
+      upsert.close();
+    }
+  }
+
   /// The VK album key of each listed song that has one, by the listed row's
   /// id: the row [vkAlbumOf] opens the album through (the song's own row
   /// first, then a copy not gone, then the oldest).
