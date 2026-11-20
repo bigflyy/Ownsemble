@@ -177,7 +177,10 @@ Future<SyncOutcome> _syncAll(
     final merge = store.mergeSameSongs();
     _deleteUnused(store, merge.unusedFiles, p.dirname(dbPath));
     LoadedLibrary? library;
-    if (merge.changed || results.any((result) => result.changedLibrary)) {
+    if (merge.changed ||
+        results.any(
+          (result) => result.changedLibrary || result.artistsChanged,
+        )) {
       final tracks = store.loadAll();
       library = LoadedLibrary(tracks, SearchIndex(tracks));
     }

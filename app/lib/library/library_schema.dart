@@ -6,7 +6,7 @@ import 'package:sqlite3/sqlite3.dart';
 /// Schema version this build reads and writes (`PRAGMA user_version`).
 ///
 /// 0 is the speed-gate build's single `tracks` table (or an empty file).
-const librarySchemaVersion = 14;
+const librarySchemaVersion = 15;
 
 /// How many colors sources can have; the theme has one per slot, from 1.
 const sourceColorCount = 6;
@@ -54,6 +54,7 @@ void migrateLibrary(Database db, {String? dataDir}) {
     if (version < 12) _addPlaysByTime(db);
     if (version < 13) _addFavorites(db);
     if (version < 14) _addRemovedMarks(db);
+    if (version < 15) _addArtistCredits(db);
     db.execute('PRAGMA user_version = $librarySchemaVersion');
     db.execute('COMMIT');
   } catch (_) {
@@ -295,6 +296,38 @@ void _addRemovedMarks(Database db) {
   };
   if (columns.contains('removed_at_ms')) return;
   db.execute('ALTER TABLE tracks ADD COLUMN removed_at_ms INTEGER');
+}
+
+/// Version 15: the artists VK names on each row (plan 09), main ones first,
+/// then featured ones, and the photos of VK artists. Every sync writes the
+/// artists of every row it reads, so the first one after the upgrade fills
+/// them in. A photo row with `missing` set means VK's page of that artist had
+/// no photo when it was read.
+void _addArtistCredits(Database db) {
+  db.execute('''
+    CREATE TABLE IF NOT EXISTS track_artists (
+      track_id INTEGER NOT NULL REFERENCES tracks (id) ON DELETE CASCADE,
+      position INTEGER NOT NULL,
+      vk_artist_id TEXT NOT NULL,
+      name TEXT NOT NULL,
+      domain TEXT,
+      featured INTEGER NOT NULL DEFAULT 0,
+      PRIMARY KEY (track_id, position)
+    )
+  ''');
+  db.execute(
+    'CREATE INDEX IF NOT EXISTS track_artists_by_artist '
+    'ON track_artists (vk_artist_id)',
+  );
+  db.execute('''
+    CREATE TABLE IF NOT EXISTS artist_photos (
+      vk_artist_id TEXT PRIMARY KEY,
+      small_url TEXT,
+      large_url TEXT,
+      fetched_at_ms INTEGER NOT NULL,
+      missing INTEGER NOT NULL DEFAULT 0
+    )
+  ''');
 }
 
 void _createVersion1(Database db) {

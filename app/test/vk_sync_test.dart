@@ -444,6 +444,31 @@ void main() {
       );
     });
 
+    test(
+      'a sync that only fills in artists says so, counting no song',
+      () async {
+        vk.library.addAll([vk.song(1), vk.song(2)]);
+        await sync();
+        vk.itemOverride = (song) => song.toItem()
+          ..['main_artists'] = [
+            {
+              'id': '9${song.id}',
+              'name': 'Исполнитель',
+              'domain': 'a${song.id}',
+            },
+          ];
+        final filled = await sync();
+        expect(filled.artistsChanged, isTrue);
+        expect(filled.updated, 0);
+        expect(filled.changedLibrary, isFalse);
+        expect(store.artistCredits().values.map((c) => c.single.name), [
+          'Исполнитель',
+          'Исполнитель',
+        ]);
+        expect((await sync()).artistsChanged, isFalse);
+      },
+    );
+
     test('a cover served from another host is not a change', () async {
       Map<String, dynamic> withCover(FakeSong song, String host, String sign) =>
           song.toItem()

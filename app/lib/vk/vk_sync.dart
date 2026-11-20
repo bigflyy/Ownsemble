@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 import 'dart:math';
 
+import '../library/artist_credit.dart';
 import '../library/library_store.dart';
 import '../library/track.dart';
 import 'vk_client.dart';
@@ -222,6 +223,7 @@ class VkSyncResult {
     required this.back,
     required this.newlyGone,
     this.albumsSkipped = 0,
+    this.artistsChanged = false,
   });
 
   final int sourceId;
@@ -244,6 +246,10 @@ class VkSyncResult {
 
   /// "Unnamed" albums a first sync did not ask about; see [syncVkSource].
   final int albumsSkipped;
+
+  /// Whether the artists VK names on any song changed (plan 09); not a song
+  /// change, but the library must be reloaded for the artist places (R1).
+  final bool artistsChanged;
 
   /// Whether the library the UI shows is out of date after this sync.
   bool get changedLibrary => added + updated + back + newlyGone > 0;
@@ -342,6 +348,7 @@ Future<VkSyncResult> syncVkSource({
       back: back,
       newlyGone: newlyGone,
       albumsSkipped: known.isEmpty ? unnamed.length : 0,
+      artistsChanged: written.creditsChanged,
     );
   } catch (error) {
     store.recordSync(sourceId, error: describeSyncError(error));
@@ -464,6 +471,7 @@ NewTrack vkItemToTrack(
     },
     vkAlbumKey: albumLink == null ? null : vkAlbumKey(albumLink),
     vkAlbumAccessKey: albumLink?['access_key'] as String?,
+    artists: vkArtistCredits(item),
   );
 }
 

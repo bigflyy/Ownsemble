@@ -146,7 +146,7 @@ class StackEntry {
 
 /// What [LibraryStore.upsertTracks] wrote.
 class UpsertResult {
-  const UpsertResult(this.ids, this.changedIds);
+  const UpsertResult(this.ids, this.changedIds, {this.creditsChanged = false});
 
   /// Library ids of all given songs, in input order.
   final List<int> ids;
@@ -154,6 +154,10 @@ class UpsertResult {
   /// Ids of songs that were added or whose stored fields changed (a cleared
   /// gone mark counts as a change).
   final List<int> changedIds;
+
+  /// Whether the stored artists of any given song changed (plan 09). Not a
+  /// song change, but the artist places must be rebuilt.
+  final bool creditsChanged;
 }
 
 /// A song key's state in the library: its VK access key, stored cover links

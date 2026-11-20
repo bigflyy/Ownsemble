@@ -3,6 +3,7 @@ import 'package:sqlite3/sqlite3.dart';
 
 import '../playback/mp3_length.dart' show FileFacts, otherRecordingSeconds;
 
+import 'artist_credit.dart';
 import 'file_print.dart';
 import 'library_records.dart';
 import 'library_schema.dart';
@@ -35,6 +36,7 @@ class NewTrack {
     this.vkTrackId,
     this.vkAlbumKey,
     this.vkAlbumAccessKey,
+    this.artists = const [],
   });
 
   final String artist;
@@ -62,6 +64,9 @@ class NewTrack {
   final String? vkAlbumKey;
   final String? vkAlbumAccessKey;
 
+  /// The artists VK names on the song (plan 09), main ones first.
+  final List<ArtistCredit> artists;
+
   /// This song with other cover links.
   NewTrack withCovers({
     required String? coverUrl,
@@ -84,6 +89,7 @@ class NewTrack {
     vkTrackId: vkTrackId,
     vkAlbumKey: vkAlbumKey,
     vkAlbumAccessKey: vkAlbumAccessKey,
+    artists: artists,
   );
 
   /// The account's own copy of this found song, as the add answered: the
@@ -106,6 +112,7 @@ class NewTrack {
     vkTrackId: vkTrackId,
     vkAlbumKey: vkAlbumKey,
     vkAlbumAccessKey: vkAlbumAccessKey,
+    artists: artists,
   );
 }
 
@@ -708,10 +715,12 @@ class LibraryStore implements PlayLog, PlayStatsSource {
     final findId = _db.prepare(
       'SELECT id FROM tracks WHERE source_id = ? AND source_key = ?',
     );
+    final credits = _ArtistCreditWriter(_db);
     try {
       return _transaction(() {
         final ids = <int>[];
         final changedIds = <int>[];
+        var creditsChanged = false;
         for (final track in tracks) {
           final written = upsert.select([
             sourceId,
@@ -731,22 +740,45 @@ class LibraryStore implements PlayLog, PlayStatsSource {
             track.vkAlbumKey,
             track.vkAlbumAccessKey,
           ]);
+          final int id;
           if (written.isNotEmpty) {
-            final id = written.first['id'] as int;
-            ids.add(id);
+            id = written.first['id'] as int;
             changedIds.add(id);
           } else {
-            ids.add(
-              findId.select([sourceId, track.sourceKey]).first['id'] as int,
-            );
+            id = findId.select([sourceId, track.sourceKey]).first['id'] as int;
           }
+          ids.add(id);
+          // Written for every row, unchanged songs too: the first sync after
+          // the upgrade to version 15 fills the artists in this way (R1).
+          if (credits.write(id, track.artists)) creditsChanged = true;
         }
-        return UpsertResult(ids, changedIds);
+        return UpsertResult(ids, changedIds, creditsChanged: creditsChanged);
       });
     } finally {
       upsert.close();
       findId.close();
+      credits.close();
     }
+  }
+
+  /// The artists VK names on each row that has any (plan 09), by library
+  /// row id, copies included, in VK's order: main artists, then featured.
+  Map<int, List<ArtistCredit>> artistCredits() {
+    final byRow = <int, List<ArtistCredit>>{};
+    for (final row in _db.select(
+      'SELECT track_id, vk_artist_id, name, domain, featured '
+      'FROM track_artists ORDER BY track_id, position',
+    )) {
+      (byRow[row['track_id'] as int] ??= []).add(
+        ArtistCredit(
+          vkId: row['vk_artist_id'] as String,
+          name: row['name'] as String,
+          domain: row['domain'] as String?,
+          featured: row['featured'] == 1,
+        ),
+      );
+    }
+    return byRow;
   }
 
   /// Stores the cover links, VK track ids and album links of [tracks], for
@@ -1661,4 +1693,55 @@ class LibraryStore implements PlayLog, PlayStatsSource {
         );
 
   void close() => _db.close();
+}
+
+/// Replaces the stored artists of one library row when they differ.
+class _ArtistCreditWriter {
+  _ArtistCreditWriter(Database db)
+    : _read = db.prepare(
+        'SELECT vk_artist_id, name, domain, featured FROM track_artists '
+        'WHERE track_id = ? ORDER BY position',
+      ),
+      _clear = db.prepare('DELETE FROM track_artists WHERE track_id = ?'),
+      _insert = db.prepare(
+        'INSERT INTO track_artists '
+        '(track_id, position, vk_artist_id, name, domain, featured) '
+        'VALUES (?, ?, ?, ?, ?, ?)',
+      );
+
+  final PreparedStatement _read;
+  final PreparedStatement _clear;
+  final PreparedStatement _insert;
+
+  /// Stores [credits] for row [trackId]; true when that changed anything.
+  bool write(int trackId, List<ArtistCredit> credits) {
+    final stored = [
+      for (final row in _read.select([trackId]))
+        ArtistCredit(
+          vkId: row['vk_artist_id'] as String,
+          name: row['name'] as String,
+          domain: row['domain'] as String?,
+          featured: row['featured'] == 1,
+        ),
+    ];
+    if (sameCredits(stored, credits)) return false;
+    _clear.execute([trackId]);
+    for (final (position, credit) in credits.indexed) {
+      _insert.execute([
+        trackId,
+        position,
+        credit.vkId,
+        credit.name,
+        credit.domain,
+        if (credit.featured) 1 else 0,
+      ]);
+    }
+    return true;
+  }
+
+  void close() {
+    _read.close();
+    _clear.close();
+    _insert.close();
+  }
 }
