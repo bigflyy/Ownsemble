@@ -55,6 +55,7 @@ class OutsideSongs {
       coverMidUrl: s.coverMidUrl,
       coverFullUrl: s.coverFullUrl,
       tint: s.tint,
+      artists: s.artists,
     );
   }
 

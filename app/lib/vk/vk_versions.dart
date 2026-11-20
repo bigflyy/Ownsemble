@@ -8,6 +8,7 @@ library;
 import 'dart:async';
 import 'dart:io';
 
+import '../library/artist_credit.dart';
 import '../library/song_version.dart';
 import '../playback/mp3_length.dart';
 import 'vk_client.dart';
@@ -67,6 +68,7 @@ SongVersion versionFromItem(
     official: official == true || official == 1,
     vkTrackId: _intOf(item['track_id']),
     isCurrentFile: isCurrentFile,
+    artists: vkArtistCredits(item),
   );
 }
 

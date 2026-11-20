@@ -279,6 +279,7 @@ class VersionBook extends ChangeNotifier {
       accessKey: version.accessKey,
       coverUrl: version.coverUrl,
       coverLargeUrl: version.coverLargeUrl,
+      artists: version.artists,
     );
   }
 

@@ -182,6 +182,7 @@ class LibraryAlbums implements AlbumCatalog {
         coverMidUrl: song.coverMidUrl,
         coverFullUrl: song.coverFullUrl,
         tint: song.tint,
+        artists: song.artists,
       ),
       vkTrackId: song.vkTrackId,
     );

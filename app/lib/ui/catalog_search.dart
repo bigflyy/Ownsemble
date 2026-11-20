@@ -308,8 +308,8 @@ class CatalogSearch extends ChangeNotifier {
   /// [track], a song outside the library (an album's song, another upload
   /// in a song's Versions), as a song + can add. The same song gives the
   /// same object every time, so its + state and the player's + follow it.
-  /// [vkTrackId] and the album key go into the added row, as a sync would
-  /// write them; [except] as [FoundSong.except].
+  /// [vkTrackId], the album key and the track's artists go into the added
+  /// row, as a sync would write them; [except] as [FoundSong.except].
   FoundSong outsideSong(
     Track track, {
     int? vkTrackId,
@@ -336,6 +336,7 @@ class CatalogSearch extends ChangeNotifier {
         vkTrackId: vkTrackId,
         vkAlbumKey: vkAlbumKey,
         vkAlbumAccessKey: vkAlbumAccessKey,
+        artists: track.artists,
       ),
       track: track,
       except: except,

@@ -20,6 +20,7 @@ import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 
+import '../library/artist_credit.dart';
 import '../library/library_store.dart';
 import '../library/similar_seeds.dart';
 import '../library/track.dart';
@@ -710,8 +711,8 @@ class ForYou extends ChangeNotifier implements ListCatalog {
   }
 }
 
-/// A recommended song as the cache file keeps it: the library's fields and
-/// the restriction code, no stream link.
+/// A recommended song as the cache file keeps it: the library's fields, its
+/// artists and the restriction code, no stream link.
 Map<String, Object?> recSongToJson(VkRecSong song) {
   final s = song.song;
   return {
@@ -731,6 +732,16 @@ Map<String, Object?> recSongToJson(VkRecSong song) {
     'albumKey': s.vkAlbumKey,
     'albumAccessKey': s.vkAlbumAccessKey,
     'restricted': song.restricted,
+    if (s.artists.isNotEmpty)
+      'artists': [
+        for (final artist in s.artists)
+          {
+            'id': artist.vkId,
+            'name': artist.name,
+            'domain': ?artist.domain,
+            if (artist.featured) 'featured': true,
+          },
+      ],
   };
 }
 
@@ -751,6 +762,16 @@ VkRecSong recSongFromJson(Map<String, dynamic> json) => VkRecSong(
     vkTrackId: json['trackId'] as int?,
     vkAlbumKey: json['albumKey'] as String?,
     vkAlbumAccessKey: json['albumAccessKey'] as String?,
+    artists: [
+      for (final artist in json['artists'] as List? ?? const [])
+        if (artist case {'id': final String id, 'name': final String name})
+          ArtistCredit(
+            vkId: id,
+            name: name,
+            domain: artist['domain'] as String?,
+            featured: artist['featured'] == true,
+          ),
+    ],
   ),
   restricted: json['restricted'] as int?,
 );

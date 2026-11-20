@@ -1,3 +1,5 @@
+import 'artist_credit.dart';
+
 /// What kind of place a song comes from.
 enum TrackSource {
   /// Synthetic song made by the speed-gate generator.
@@ -53,7 +55,14 @@ class Track {
     this.copies = const [],
     this.addedAt = 0,
     this.ownRemoved = false,
+    this.artists = const [],
   });
+
+  /// The artists VK names on a song outside the library (a VK list's, an
+  /// album's, another upload's), main ones first, so + stores them on the
+  /// added row (plan 09, R3). Empty on library rows: those keep theirs in
+  /// the store (LibraryStore.artistCredits), read only when needed.
+  final List<ArtistCredit> artists;
 
   /// Whether the user removed this row's own copy ([sourceId]'s) while
   /// another account's copy keeps the song listed (plan 06, C5): that
@@ -187,5 +196,6 @@ class Track {
     copies: copies,
     addedAt: addedAt,
     ownRemoved: ownRemoved,
+    artists: artists,
   );
 }

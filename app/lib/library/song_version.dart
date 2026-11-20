@@ -10,6 +10,7 @@
 library;
 
 import '../playback/mp3_length.dart';
+import 'artist_credit.dart';
 import 'same_song.dart' show songMatchText;
 
 /// How the version that plays for a song was chosen.
@@ -93,6 +94,7 @@ class SongVersion {
     this.official = false,
     this.vkTrackId,
     this.isCurrentFile = false,
+    this.artists = const [],
   });
 
   /// "ownerId_audioId".
@@ -126,6 +128,10 @@ class SongVersion {
   /// VK's file for the library row now (the swapped one, usually).
   final bool isCurrentFile;
 
+  /// The artists VK names on this upload (plan 09), for + to store. Not
+  /// kept in the library's stored versions.
+  final List<ArtistCredit> artists;
+
   /// This upload with its file measured as [facts].
   SongVersion withFile(FileFacts facts) => SongVersion(
     key: key,
@@ -142,6 +148,7 @@ class SongVersion {
     official: official,
     vkTrackId: vkTrackId,
     isCurrentFile: isCurrentFile,
+    artists: artists,
   );
 
   /// Whether the file plays within [matchSeconds] of [listedSec] seconds.
