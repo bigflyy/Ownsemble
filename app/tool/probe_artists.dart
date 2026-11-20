@@ -102,7 +102,7 @@ Future<void> main(List<String> args) async {
       return (reply, clock.elapsedMilliseconds);
     } on VkException catch (error) {
       print(
-        '  $method: VK error ${blank(error.message)} '
+        '  $method: VK error ${error.code ?? 'other'} '
         '(${clock.elapsedMilliseconds} ms)',
       );
       return (null, clock.elapsedMilliseconds);
