@@ -75,6 +75,13 @@ void main() {
       isTrue,
       reason: 'a data folder inside .local/v2-test only',
     );
+    // The copy "<data dir>-lyrics" is deleted on every run: it must be a
+    // folder inside .local/v2-test too, never v2-test itself (Codex review).
+    expect(
+      p.basename(p.dirname(p.normalize(dataDir))),
+      'v2-test',
+      reason: 'a data folder directly inside .local/v2-test',
+    );
 
     final copy = Directory('$dataDir-lyrics');
     if (copy.existsSync()) copy.deleteSync(recursive: true);
@@ -344,9 +351,8 @@ void main() {
 
     // 7. A download keeps a song's lyrics (never shown before).
     final spare = spareSong;
-    if (spare == null) {
-      say('download: no spare song with lyrics found: NOT CHECKED');
-    } else {
+    expect(spare, isNotNull, reason: 'a second song with lyrics to download');
+    if (spare != null) {
       expect(rows.containsKey(spare.sourceKey), isFalse);
       clock = Stopwatch()..start();
       final error = await playback.download(spare);
