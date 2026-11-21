@@ -16,7 +16,8 @@
 // Printed: per song only its index, VK's kind and each source's verdict
 // (length difference, timed or plain, ms); then the totals and the gaps
 // (songs no source has timed lyrics for). No song name, lyric line, link,
-// key or token is printed. Outside services get a generic User-Agent.
+// key or token is printed. LRCLIB, which asks apps to name themselves,
+// gets "Ownsemble" (user, 2026-11-22); the others a generic User-Agent.
 // ignore_for_file: avoid_print
 import 'dart:convert';
 import 'dart:io';
@@ -167,6 +168,9 @@ var only = <int>{};
 
 Future<void> pause(int ms) => Future<void>.delayed(Duration(milliseconds: ms));
 
+/// LRCLIB asks apps to name themselves and allows a named app more calls.
+const lrclibHeaders = {'User-Agent': 'Ownsemble v2 (lyrics probe)'};
+
 /// LRCLIB: /api/get by artist, title, album and length; else /api/search.
 Future<Verdict> askLrclib(Song song) async {
   final clock = Stopwatch()..start();
@@ -179,6 +183,7 @@ Future<Verdict> askLrclib(Song song) async {
         if (song.album.isNotEmpty) 'album_name': song.album,
         'duration': '${song.seconds}',
       }),
+      headers: lrclibHeaders,
     );
     var rows = <Map<String, dynamic>>[if (exact is Map<String, dynamic>) exact];
     if (rows.isEmpty) {
@@ -188,6 +193,7 @@ Future<Verdict> askLrclib(Song song) async {
           'track_name': song.title,
           'artist_name': song.artist,
         }),
+        headers: lrclibHeaders,
       );
       rows = (found as List? ?? const []).cast<Map<String, dynamic>>();
     }
@@ -493,7 +499,7 @@ Future<void> main(List<String> args) async {
         };
         verdicts[source]!.add(verdict);
         line.write(' | $source: $verdict');
-        // LRCLIB allows about 45 calls a minute without a named app.
+        // LRCLIB: about 45 calls a minute anonymous, 90 for a named app.
         await pause(source == 'lrclib' ? 1400 : 700);
       }
       print(line);
