@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:path/path.dart' as p;
 import 'package:sqlite3/sqlite3.dart';
 
+import '../lyrics/lyrics.dart';
 import '../playback/mp3_length.dart' show FileFacts, otherRecordingSeconds;
 
 import 'artist_credit.dart';
@@ -881,6 +882,54 @@ class LibraryStore implements PlayLog, PlayStatsSource {
     } finally {
       upsert.close();
     }
+  }
+
+  /// The lyrics stored for the song [ref] at [source] (plan 10): found
+  /// lyrics, the word that the source has none, or null when never asked.
+  StoredLyrics? lyricsOf(String source, String ref) {
+    final row = _db.select(
+      'SELECT found, body, md5, fetched_at_ms FROM lyrics '
+      'WHERE source = ? AND ref = ?',
+      [source, ref],
+    ).firstOrNull;
+    if (row == null) return null;
+    final body = row['body'] as String?;
+    return (
+      lyrics: row['found'] == 1 && body != null
+          ? Lyrics(source: source, lines: Lyrics.linesFromJson(body))
+          : null,
+      md5: row['md5'] as String?,
+      fetchedAtMs: row['fetched_at_ms'] as int,
+    );
+  }
+
+  /// Stores what [source] answered for the song [ref]: its [lyrics], or
+  /// null when it has none.
+  void saveLyrics(
+    String source,
+    String ref,
+    Lyrics? lyrics, {
+    String? md5,
+    int? atMs,
+  }) {
+    _db.execute(
+      '''
+      INSERT INTO lyrics (source, ref, found, timed, body, md5, fetched_at_ms)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT (source, ref) DO UPDATE SET
+        found = excluded.found, timed = excluded.timed, body = excluded.body,
+        md5 = excluded.md5, fetched_at_ms = excluded.fetched_at_ms
+    ''',
+      [
+        source,
+        ref,
+        if (lyrics == null) 0 else 1,
+        if (lyrics?.timed ?? false) 1 else 0,
+        lyrics?.linesToJson(),
+        md5,
+        atMs ?? _now(),
+      ],
+    );
   }
 
   /// The VK album key of each listed song that has one, by the listed row's

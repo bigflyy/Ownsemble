@@ -1,3 +1,4 @@
+import '../lyrics/lyrics.dart';
 import 'track.dart';
 
 /// One place songs come from: a VK account, the generator, later a folder.
@@ -182,6 +183,10 @@ typedef VkAlbumLink = ({int sourceId, String key, String? accessKey});
 /// A VK artist's stored photo (plan 09): small and large links, both null
 /// when VK had none, and when that was read (Unix milliseconds).
 typedef StoredArtistPhoto = ({String? small, String? large, int fetchedAtMs});
+
+/// A song's stored lyrics from one source (plan 10): the lyrics, or null
+/// when the source said it has none; VK's change mark; when it was asked.
+typedef StoredLyrics = ({Lyrics? lyrics, String? md5, int fetchedAtMs});
 
 /// What [LibraryStore.mergeSameSongs] did.
 class MergeResult {

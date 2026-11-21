@@ -6,7 +6,7 @@ import 'package:sqlite3/sqlite3.dart';
 /// Schema version this build reads and writes (`PRAGMA user_version`).
 ///
 /// 0 is the speed-gate build's single `tracks` table (or an empty file).
-const librarySchemaVersion = 16;
+const librarySchemaVersion = 17;
 
 /// How many colors sources can have; the theme has one per slot, from 1.
 const sourceColorCount = 6;
@@ -56,6 +56,7 @@ void migrateLibrary(Database db, {String? dataDir}) {
     if (version < 14) _addRemovedMarks(db);
     if (version < 15) _addArtistCredits(db);
     if (version < 16) _addFoundVersionArtists(db);
+    if (version < 17) _addLyrics(db);
     db.execute('PRAGMA user_version = $librarySchemaVersion');
     db.execute('COMMIT');
   } catch (_) {
@@ -343,6 +344,26 @@ void _addFoundVersionArtists(Database db) {
   if (columns.contains('artists')) return;
   db.execute('ALTER TABLE found_versions ADD COLUMN artists TEXT');
   db.execute('UPDATE found_versions SET found_at_ms = 0');
+}
+
+/// Version 17: songs' lyrics as fetched (plan 10), kept for offline use.
+/// `source` is where they came from ('vk'), `ref` the song there (VK: the
+/// song's key "ownerId_id"). `found` 0 records that the source has none, so
+/// it is not asked again at once. `body` is the lines as JSON
+/// (Lyrics.linesToJson); `md5` is VK's mark that changes with its lyrics.
+void _addLyrics(Database db) {
+  db.execute('''
+    CREATE TABLE IF NOT EXISTS lyrics (
+      source TEXT NOT NULL,
+      ref TEXT NOT NULL,
+      found INTEGER NOT NULL,
+      timed INTEGER NOT NULL DEFAULT 0,
+      body TEXT,
+      md5 TEXT,
+      fetched_at_ms INTEGER NOT NULL,
+      PRIMARY KEY (source, ref)
+    )
+  ''');
 }
 
 void _createVersion1(Database db) {
