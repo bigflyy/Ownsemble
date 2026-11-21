@@ -771,7 +771,14 @@ class LibraryController extends ChangeNotifier {
       _showList(const LibraryView(ViewKind.lyrics), '', _source);
       return;
     }
-    final before = _places.back(_here);
+    // Back past every Lyrics place (a search typed there made another).
+    var here = _here;
+    Place? before;
+    while (true) {
+      before = _places.back(here);
+      if (before == null || before.view.kind != ViewKind.lyrics) break;
+      here = before;
+    }
     if (before == null) {
       showView(LibraryView.songs);
     } else {
@@ -1338,7 +1345,16 @@ class LibraryController extends ChangeNotifier {
   void _onSearchChanged() {
     final query = searchText.text;
     if (query == _appliedQuery) return;
-    if (_isNewSearch(_appliedQuery, query)) _places.leave(_here);
+    if (_view.kind == ViewKind.lyrics && query.isNotEmpty) {
+      // Lyrics shows no list: a search there leaves for the songs it finds
+      // (Back returns to Lyrics), as in Spotify.
+      _places.leave(_here);
+      _view = LibraryView.songs;
+      _writeSetting?.call(viewSetting, _encodeView(_view));
+      _rebuildBase();
+    } else if (_isNewSearch(_appliedQuery, query)) {
+      _places.leave(_here);
+    }
     _appliedQuery = query;
     final clock = Stopwatch()..start();
     _applySearch();

@@ -384,12 +384,14 @@ class DockBar extends StatelessWidget {
                               ),
                             ),
                             // Without the right-hand group (a narrow
-                            // bar) Up Next follows the heart.
-                            if (compact)
+                            // bar) Up Next and the mic follow the heart.
+                            if (compact) ...[
                               UpNextButton(
                                 playback: playback,
                                 thumbnails: thumbnails,
                               ),
+                              ?lyricsButton,
+                            ],
                           ],
                         ),
                 ),

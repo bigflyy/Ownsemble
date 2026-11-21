@@ -74,14 +74,18 @@ void main() {
 
   testWidgets('the mic button opens Lyrics and closes it again, wide and '
       'narrow (plan 10)', (tester) async {
-    for (final size in const [Size(1400, 900), Size(760, 900)]) {
+    for (final size in const [
+      Size(1400, 900),
+      Size(760, 900),
+      Size(640, 700),
+    ]) {
       tester.view.physicalSize = size;
       tester.view.devicePixelRatio = 1;
       addTearDown(tester.view.reset);
       final lyrics = LyricsController(
         load: (source, ref) => null,
         save: (source, ref, lyrics, {md5}) {},
-        apiOfSource: (sourceId) => null,
+        routeOf: lyricsRouteBySource((sourceId) => null),
       );
       // The player's buttons show with a song: one restored from before.
       final player = PlayerService(muted: true, dataDir: '.')
@@ -122,6 +126,44 @@ void main() {
     }
   });
 
+  testWidgets('a search typed on Lyrics shows the songs it finds; Back '
+      'returns to Lyrics and the mic closes it (Codex review)', (tester) async {
+    tester.view.physicalSize = const Size(1400, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final player = PlayerService(muted: true, dataDir: '.')
+      ..restore(library.all.last, Duration.zero);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: LibraryScreen(
+          library: library,
+          playback: PlaybackController(player: player),
+          lyrics: LyricsController(
+            load: (source, ref) => null,
+            save: (source, ref, lyrics, {md5}) {},
+            routeOf: lyricsRouteBySource((sourceId) => null),
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+    await tester.tap(find.byKey(const ValueKey('lyrics')));
+    await tester.pump();
+    expect(library.view.kind, ViewKind.lyrics);
+    await tester.enterText(find.byType(TextField), 'Song 2');
+    await tester.pump();
+    expect(library.view.kind, ViewKind.songs);
+    expect(find.text('Song 29'), findsOneWidget);
+    // Songs has no Back button: Alt+Left goes back.
+    library.goBack();
+    await tester.pump();
+    expect(library.view.kind, ViewKind.lyrics);
+    await tester.tap(find.byKey(const ValueKey('lyrics')));
+    await tester.pump();
+    expect(library.view.kind, ViewKind.songs);
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('the bottom bar keeps a usable volume slider with the mic '
       'button (plan 10; acceptance-36a tapped beside a 7 px slider)', (
     tester,
@@ -146,7 +188,7 @@ void main() {
             lyrics: LyricsController(
               load: (source, ref) => null,
               save: (source, ref, lyrics, {md5}) {},
-              apiOfSource: (sourceId) => null,
+              routeOf: lyricsRouteBySource((sourceId) => null),
             ),
           ),
         ),
