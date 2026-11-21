@@ -484,7 +484,11 @@ String? _keysExcuse(Map<String, Object?> result) {
     return 'outside modifier';
   }
   final seen = (result['jumpTextsSeen'] as List?) ?? const [];
-  if (seen.any((text) => '$text'.endsWith('a'))) return 'lost letter';
+  // The key's own letter in the Windows layout of the moment: "a", or "ф"
+  // with the Russian layout on (gate-36a typed "Дф" for "До").
+  if (seen.any((text) => '$text'.endsWith('a') || '$text'.endsWith('ф'))) {
+    return 'lost letter';
+  }
   return null;
 }
 
