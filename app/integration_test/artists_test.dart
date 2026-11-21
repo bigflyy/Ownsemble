@@ -35,6 +35,7 @@ import 'package:ownsemble/ui/artists.dart';
 import 'package:ownsemble/ui/card_play.dart';
 import 'package:ownsemble/ui/library_controller.dart';
 import 'package:ownsemble/ui/library_screen.dart';
+import 'package:ownsemble/ui/playing_mark.dart' show PlayingMark;
 import 'package:ownsemble/vk/vk_catalog.dart';
 import 'package:ownsemble/vk/vk_client.dart';
 import 'package:ownsemble/vk/vk_sync.dart';
@@ -562,9 +563,9 @@ void main() {
       expect(playback.queue.context.length, inInclusiveRange(1, releaseSongs));
       await tester.pump(const Duration(milliseconds: 300));
       expect(
-        find.descendant(of: cardPlay, matching: find.byIcon(Icons.pause)),
+        find.descendant(of: cardPlay, matching: find.byType(PlayingMark)),
         findsOneWidget,
-        reason: 'the playing card keeps Pause without hover',
+        reason: 'the playing card keeps its Play, with moving bars',
       );
       say(
         'release card Play: ${playback.queue.context.length} songs, sound in '

@@ -417,6 +417,8 @@ void main() {
         await tester.runAsync(() => Future<void>.delayed(Duration.zero));
         await settle();
       }
+      // Sound plays: the playing card's Play shows moving bars.
+      player.playing.value = true;
       await mouse.moveTo(tester.getCenter(album.at(1)));
       await settle();
     }

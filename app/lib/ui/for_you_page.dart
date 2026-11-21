@@ -864,23 +864,17 @@ class ListCard extends StatelessWidget {
                 ],
               ),
               const SizedBox(height: 6),
-              // The list that plays: its title in the accent colour after the
-              // moving mark, as a playing row's (user, 2026-11-18: "not very
-              // clear which playlist is playing now").
+              // The list that plays: its title in the accent colour (user,
+              // 2026-11-18: "not very clear which playlist is playing now");
+              // its moving bars are in the card's Play (user, 2026-11-21).
               Row(
                 children: [
-                  if (state != null) ...[
-                    PlayingMark(
-                      key: ValueKey('list-playing-$title'),
-                      playing: state,
-                      size: 12,
-                      color: colors.accent,
-                    ),
-                    const SizedBox(width: 6),
-                  ],
                   Expanded(
                     child: Text(
                       title,
+                      key: state != null
+                          ? ValueKey('list-playing-$title')
+                          : null,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(

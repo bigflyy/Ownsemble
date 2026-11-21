@@ -86,12 +86,23 @@ void main() {
     expect(opacity(tester), 0);
   });
 
-  testWidgets('the playing card keeps it as Pause and a press pauses', (
+  testWidgets('the playing card keeps it, with moving bars that turn into '
+      'Pause when pointed at; paused it shows Play (user 2026-11-21)', (
     tester,
   ) async {
     await show(tester, state: true);
     expect(opacity(tester), 1);
+    expect(find.byType(PlayingMark), findsOne);
+    expect(find.byIcon(Icons.pause), findsNothing);
+
+    final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
+    await mouse.addPointer(
+      location: tester.getCenter(find.byKey(const ValueKey('card'))),
+    );
+    addTearDown(mouse.removePointer);
+    await tester.pump(const Duration(milliseconds: 200));
     expect(find.byIcon(Icons.pause), findsOne);
+    expect(find.byType(PlayingMark), findsNothing);
     await tester.tap(find.byKey(const ValueKey('play')));
     await tester.pump();
     expect(toggles, 1);
@@ -100,6 +111,11 @@ void main() {
     await show(tester, state: false);
     expect(opacity(tester), 1);
     expect(find.byIcon(Icons.play_arrow), findsOne);
+    await mouse.moveTo(const Offset(1, 1));
+    await tester.pump(const Duration(milliseconds: 200));
+    expect(opacity(tester), 1, reason: 'the paused list keeps it too');
+    expect(find.byIcon(Icons.play_arrow), findsOne);
+    expect(find.byType(PlayingMark), findsNothing);
   });
 
   testWidgets('a spinner shows while the list starts', (tester) async {

@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-import 'playing_mark.dart' show NowPlaying;
+import 'playing_mark.dart' show NowPlaying, PlayingMark;
 import 'theme.dart';
 
 /// A card's Play: the `PlayedFrom.key` its list plays under, and what
@@ -57,8 +57,9 @@ class _CardHoverScope extends InheritedWidget {
 /// cards on an artist page), the look the user picked on 2026-11-21 (board
 /// A, as Spotify's on a computer): a solid accent circle at the cover's
 /// bottom right, shown only while the card is pointed at or focused, so the
-/// cover stays clean. The card whose list plays keeps it, as Pause, and a
-/// click then pauses or resumes instead of starting over. With no mouse (a
+/// cover stays clean. The card whose list plays keeps it: moving bars, Pause
+/// while pointed at, Play while paused; a click then pauses or resumes
+/// instead of starting over. With no mouse (a
 /// phone) it shows only on the playing card: a tap opens the card.
 class CardPlayButton extends StatefulWidget {
   const CardPlayButton({
@@ -101,7 +102,12 @@ class _CardPlayButtonState extends State<CardPlayButton> {
   Widget build(BuildContext context) {
     final colors = OwnColors.of(context);
     final state = widget.state;
-    final shown = CardHover.of(context) || state != null || _busy;
+    final pointed = CardHover.of(context);
+    final shown = pointed || state != null || _busy;
+    // While its list plays the circle shows moving bars, as the playing
+    // row's thumbnail does; pointed at, it says what a click does: Pause
+    // (user, 2026-11-21).
+    final bars = state == true && !pointed;
     final playing = state == true;
     final size = widget.size;
     const duration = Duration(milliseconds: 150);
@@ -132,6 +138,14 @@ class _CardPlayButtonState extends State<CardPlayButton> {
                           padding: EdgeInsets.all(size * 0.28),
                           child: CircularProgressIndicator(
                             strokeWidth: 2,
+                            color: colors.onAccent,
+                          ),
+                        )
+                      : bars
+                      ? Center(
+                          child: PlayingMark(
+                            playing: true,
+                            size: size * 0.42,
                             color: colors.onAccent,
                           ),
                         )

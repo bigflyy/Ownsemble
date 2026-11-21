@@ -27,7 +27,7 @@ import 'cover_tile.dart';
 import 'for_you_page.dart' show SectionTitle, songCountText;
 import 'library_controller.dart';
 import 'outside_songs.dart';
-import 'playing_mark.dart' show NowPlaying, PlayingMark;
+import 'playing_mark.dart' show NowPlaying;
 import 'theme.dart';
 
 /// Builds one song row of a page with every usual action (the library
@@ -881,14 +881,6 @@ class _Card extends StatelessWidget {
                   children: [
                     Row(
                       children: [
-                        if (state != null) ...[
-                          PlayingMark(
-                            playing: state,
-                            size: 12,
-                            color: colors.accent,
-                          ),
-                          const SizedBox(width: 6),
-                        ],
                         Expanded(
                           child: Text(
                             title,
