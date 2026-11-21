@@ -2232,6 +2232,35 @@ class _LibraryScreenState extends State<LibraryScreen> {
       for (final track in library.visible)
         if (_outside?.restrictionOf(track.id) == null) track,
     ];
+    return NowPlayingScope(
+      playback: widget.playback,
+      child: ListenableBuilder(
+        listenable: widget.playback,
+        builder: (context, _) => _listButtons(
+          context,
+          view,
+          songs: songs,
+          similar: similar,
+          compact: compact,
+        ),
+      ),
+    );
+  }
+
+  Widget _listButtons(
+    BuildContext context,
+    LibraryView view, {
+    required List<Track> songs,
+    required bool similar,
+    required bool compact,
+  }) {
+    final forYou = widget.forYou;
+    final ref = view.album!;
+    final listState = NowPlaying.listStateFor(
+      context,
+      songs,
+      key: view.playKey,
+    );
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
@@ -2240,7 +2269,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
             key: const ValueKey('list-more'),
             onPressed: () async {
               final messenger = ScaffoldMessenger.of(context);
-              final count = await forYou.moreSimilar(ref);
+              final count = await forYou!.moreSimilar(ref);
               library.listChanged(ref);
               messenger.showSnackBar(
                 SnackBar(
@@ -2257,25 +2286,34 @@ class _LibraryScreenState extends State<LibraryScreen> {
             icon: const Icon(Icons.add, size: 18),
             label: const Text('More'),
           ),
+        // Play shows Pause while this list plays, and a click then pauses
+        // or resumes instead of starting over (user, 2026-11-21, of the
+        // artist page's Play: "unresponsive", as the year report's was).
         if (songs.isNotEmpty)
           _ListButton(
             key: const ValueKey('list-play'),
             compact: compact,
             onPressed: () {
+              if (listState != null && NowPlaying.playOrPause(context)) {
+                return;
+              }
               library.notePlayedFrom();
               widget.playback.playFrom(songs, 0, from: _playedFrom(view));
             },
-            icon: Icons.play_arrow,
-            label: 'Play',
+            icon: listState == true ? Icons.pause : Icons.play_arrow,
+            label: listState == true ? 'Pause' : 'Play',
           ),
         // A playlist also plays shuffled: shuffle turns on, from a random
-        // song.
+        // song. While the playlist plays, Shuffle shows whether shuffle is
+        // on and turns it off and on, as Spotify's.
         if (songs.length > 1 && isPlaylistRef(ref))
           _ListButton(
             key: const ValueKey('list-shuffle'),
             compact: compact,
+            selected: listState != null && widget.playback.shuffle,
             onPressed: () {
               final playback = widget.playback;
+              if (listState != null) return playback.toggleShuffle();
               if (!playback.shuffle) playback.toggleShuffle();
               library.notePlayedFrom();
               // Never the song playing now: playFrom takes that one as
@@ -2297,7 +2335,9 @@ class _LibraryScreenState extends State<LibraryScreen> {
               );
             },
             icon: Icons.shuffle,
-            label: 'Shuffle',
+            label: listState != null && widget.playback.shuffle
+                ? 'Shuffle on'
+                : 'Shuffle',
           ),
         // Rename and Delete, or Unfollow (plan 08, C4).
         if (isPlaylistRef(ref) && widget.playlists != null)
@@ -3768,6 +3808,7 @@ class _ListButton extends StatelessWidget {
     required this.onPressed,
     required this.icon,
     required this.label,
+    this.selected = false,
   });
 
   final bool compact;
@@ -3775,19 +3816,28 @@ class _ListButton extends StatelessWidget {
   final IconData icon;
   final String label;
 
+  /// A mode that is on (Shuffle while its list plays): an accent fill.
+  final bool selected;
+
   @override
-  Widget build(BuildContext context) => compact
-      ? IconButton(
-          onPressed: onPressed,
-          tooltip: label,
-          color: Theme.of(context).colorScheme.primary,
-          icon: Icon(icon, size: 20),
-        )
-      : TextButton.icon(
-          onPressed: onPressed,
-          icon: Icon(icon, size: 18),
-          label: Text(label),
-        );
+  Widget build(BuildContext context) {
+    final colors = OwnColors.of(context);
+    final fill = selected ? colors.accentBg : null;
+    return compact
+        ? IconButton(
+            onPressed: onPressed,
+            tooltip: label,
+            color: Theme.of(context).colorScheme.primary,
+            style: IconButton.styleFrom(backgroundColor: fill),
+            icon: Icon(icon, size: 20),
+          )
+        : TextButton.icon(
+            onPressed: onPressed,
+            style: TextButton.styleFrom(backgroundColor: fill),
+            icon: Icon(icon, size: 18),
+            label: Text(label),
+          );
+  }
 }
 
 /// The grip at the start of a playlist row that moves it (plan 08 C5). A

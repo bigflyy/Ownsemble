@@ -152,6 +152,7 @@ void main() {
     final screen = tester.widget<LibraryScreen>(find.byType(LibraryScreen));
     final library = screen.library;
     final player = screen.player;
+    final playback = screen.playback;
     final sync = screen.sync!;
     final artists = screen.artists!;
     await waitUntil(tester, () => player.isReady, what: 'player ready');
@@ -324,6 +325,63 @@ void main() {
       'Play: ${player.current?.artist} - ${player.current?.title}: sound in '
       '${timing.toSoundMs} ms, ${timing.sampleRate} Hz',
     );
+
+    // 3b. While the artist plays, Play shows Pause and pauses and resumes
+    // the same song; Shuffle shows it is on and turns it off and on (user,
+    // 2026-11-21: "play and shuffle are unresponsive").
+    final play = find.byKey(const ValueKey('artist-play'));
+    final shuffle = find.byKey(const ValueKey('artist-shuffle'));
+    Finder labelled(Finder button, String text) =>
+        find.descendant(of: button, matching: find.text(text));
+    await tester.pump();
+    expect(labelled(play, 'Pause'), findsOneWidget, reason: 'Pause shown');
+    final playingSong = player.current;
+    await tester.tap(play);
+    await waitUntil(
+      tester,
+      () => !player.playing.value,
+      timeout: const Duration(seconds: 5),
+      what: 'Pause to pause',
+    );
+    expect(labelled(play, 'Play'), findsOneWidget, reason: 'Play again');
+    final pausedAt = player.position;
+    await tester.tap(play);
+    await waitUntil(
+      tester,
+      () => player.playing.value,
+      timeout: const Duration(seconds: 5),
+      what: 'Play to resume',
+    );
+    expect(
+      identical(player.current, playingSong) ||
+          player.current?.id == playingSong?.id,
+      isTrue,
+      reason: 'same song',
+    );
+    expect(
+      player.position >= pausedAt - const Duration(seconds: 1),
+      isTrue,
+      reason: 'resumed, not started over',
+    );
+    expect(labelled(play, 'Pause'), findsOneWidget);
+    final shuffleWas = playback.shuffle;
+    if (shuffleWas) playback.toggleShuffle();
+    await tester.pump();
+    await tester.tap(shuffle);
+    await tester.pump();
+    expect(playback.shuffle, isTrue);
+    expect(labelled(shuffle, 'Shuffle on'), findsOneWidget);
+    expect(
+      player.current?.id == playingSong?.id,
+      isTrue,
+      reason: 'Shuffle on the playing artist keeps the song',
+    );
+    await tester.tap(shuffle);
+    await tester.pump();
+    expect(playback.shuffle, isFalse);
+    expect(labelled(shuffle, 'Shuffle'), findsOneWidget);
+    if (shuffleWas) playback.toggleShuffle();
+    say('Play/Pause and Shuffle on/off on the playing artist: OK');
 
     // 4. A Popular song the library lacks streams.
     final song = artists

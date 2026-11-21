@@ -240,22 +240,57 @@ void main() {
 
   // Real check playlists-29a: Shuffle's random pick was the song already
   // playing, and the press paused it instead of starting a shuffled play.
-  testWidgets('Shuffle while a song of the playlist plays starts another '
-      'song, never pauses', (tester) async {
+  // Since 2026-11-21 Shuffle on the playing list turns shuffle off and on,
+  // as Spotify's: it never pauses and never starts another song.
+  testWidgets('Shuffle while the playlist plays turns shuffle off and on, '
+      'never pauses or restarts', (tester) async {
     await openPlaylists(tester);
     await tester.tap(find.byKey(const ValueKey('list-card-В дорогу')));
     await tester.pumpAndSettle();
-    // Three songs play: with the bug, 20 presses pause at least once in
-    // all but 3 runs in 10,000.
-    for (var press = 0; press < 20; press++) {
-      final before = player.current;
-      await tester.tap(find.byKey(const ValueKey('list-shuffle')));
+    final shuffle = find.byKey(const ValueKey('list-shuffle'));
+    await tester.tap(shuffle);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(playback.shuffle, isTrue);
+    expect(
+      find.descendant(of: shuffle, matching: find.text('Shuffle on')),
+      findsOne,
+    );
+    final started = player.current;
+    expect(started, isNotNull);
+    for (var press = 0; press < 4; press++) {
+      await tester.tap(shuffle);
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 100));
-      expect(player.pauseToggles, 0, reason: 'press ${press + 1} paused');
-      if (before != null) expect(player.current?.id, isNot(before.id));
+      expect(playback.shuffle, press.isOdd, reason: 'press ${press + 2}');
+      expect(player.pauseToggles, 0, reason: 'press ${press + 2} paused');
+      expect(player.current, started);
     }
     player.playing.value = false;
+    await tester.pump(const Duration(seconds: 5));
+  });
+
+  // User, 2026-11-21: the artist page's Play gave no sign it played, the
+  // same as this heading's.
+  testWidgets('the heading Play shows Pause while the playlist plays and '
+      'a second click pauses instead of starting over', (tester) async {
+    await openPlaylists(tester);
+    await tester.tap(find.byKey(const ValueKey('list-card-В дорогу')));
+    await tester.pumpAndSettle();
+    final play = find.byKey(const ValueKey('list-play'));
+    expect(find.descendant(of: play, matching: find.text('Play')), findsOne);
+    await tester.tap(play);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(find.descendant(of: play, matching: find.text('Pause')), findsOne);
+    final started = player.current;
+    await tester.tap(play);
+    await tester.pump();
+    expect(player.pauseToggles, 1);
+    expect(player.current, started);
+    player.playing.value = false;
+    await tester.pump();
+    expect(find.descendant(of: play, matching: find.text('Play')), findsOne);
     await tester.pump(const Duration(seconds: 5));
   });
 

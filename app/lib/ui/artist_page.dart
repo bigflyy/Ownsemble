@@ -26,6 +26,7 @@ import 'cover_tile.dart';
 import 'for_you_page.dart' show SectionTitle, songCountText;
 import 'library_controller.dart';
 import 'outside_songs.dart';
+import 'playing_mark.dart' show NowPlaying;
 import 'theme.dart';
 
 /// Builds one song row of a page with every usual action (the library
@@ -262,12 +263,18 @@ class _ArtistPageState extends State<ArtistPage> {
                   ].join('. '),
                   narrow: narrow,
                   onBack: widget.library.goBack,
-                  onPlay: artist == null || artist.songs.isEmpty
+                  buttons: artist == null || artist.songs.isEmpty
                       ? null
-                      : () => _playLibrary(artist!, 0),
-                  onShuffle: artist == null || artist.songs.length < 2
-                      ? null
-                      : () => _shuffleLibrary(artist!),
+                      : _PlayButtons(
+                          songs: artist.songs,
+                          fromKey: _fromLibrary(artist).key,
+                          playback: widget.playback,
+                          onPlay: () => _playLibrary(artist!, 0),
+                          onShuffle: artist.songs.length < 2
+                              ? null
+                              : () => _shuffleLibrary(artist!),
+                          colors: colors,
+                        ),
                   colors: colors,
                 ),
                 if (artist != null && artist.songs.isNotEmpty)
@@ -574,8 +581,7 @@ class _Header extends StatelessWidget {
     required this.detail,
     required this.narrow,
     required this.onBack,
-    required this.onPlay,
-    required this.onShuffle,
+    required this.buttons,
     required this.colors,
   });
 
@@ -585,8 +591,9 @@ class _Header extends StatelessWidget {
   final String detail;
   final bool narrow;
   final VoidCallback onBack;
-  final VoidCallback? onPlay;
-  final VoidCallback? onShuffle;
+
+  /// Play and Shuffle; null when the library has none of the artist's songs.
+  final Widget? buttons;
   final OwnColors colors;
 
   @override
@@ -652,27 +659,9 @@ class _Header extends StatelessWidget {
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(fontSize: 13, color: colors.dim),
                   ),
-                  if (onPlay != null) ...[
+                  if (buttons != null) ...[
                     const SizedBox(height: 12),
-                    Wrap(
-                      spacing: 10,
-                      runSpacing: 8,
-                      children: [
-                        FilledButton.icon(
-                          key: const ValueKey('artist-play'),
-                          onPressed: onPlay,
-                          icon: const Icon(Icons.play_arrow, size: 20),
-                          label: const Text('Play'),
-                        ),
-                        if (onShuffle != null)
-                          OutlinedButton.icon(
-                            key: const ValueKey('artist-shuffle'),
-                            onPressed: onShuffle,
-                            icon: const Icon(Icons.shuffle, size: 18),
-                            label: const Text('Shuffle'),
-                          ),
-                      ],
-                    ),
+                    buttons!,
                   ],
                 ],
               ),
@@ -682,6 +671,79 @@ class _Header extends StatelessWidget {
       ),
     );
   }
+}
+
+/// The artist's Play and Shuffle. As in Spotify, Play shows Pause while the
+/// artist's library songs play and a click then pauses or resumes instead of
+/// starting over (user, 2026-11-21: "play and shuffle are unresponsive", as
+/// the year report's Play was). Shuffle starts the artist shuffled; while the
+/// artist plays it shows whether shuffle is on and turns it off and on.
+class _PlayButtons extends StatelessWidget {
+  const _PlayButtons({
+    required this.songs,
+    required this.fromKey,
+    required this.playback,
+    required this.onPlay,
+    required this.onShuffle,
+    required this.colors,
+  });
+
+  final List<Track> songs;
+
+  /// The `PlayedFrom.key` the artist's songs play under.
+  final String fromKey;
+  final PlaybackController playback;
+  final VoidCallback onPlay;
+
+  /// Null when the artist has fewer than two songs.
+  final VoidCallback? onShuffle;
+  final OwnColors colors;
+
+  @override
+  Widget build(BuildContext context) => ListenableBuilder(
+    listenable: playback,
+    builder: (context, _) {
+      final state = NowPlaying.listStateFor(context, songs, key: fromKey);
+      final playing = state == true;
+      final shuffleOn = state != null && playback.shuffle;
+      final onShuffle = this.onShuffle;
+      return Wrap(
+        spacing: 10,
+        runSpacing: 8,
+        children: [
+          FilledButton.icon(
+            key: const ValueKey('artist-play'),
+            onPressed: () {
+              if (state != null && NowPlaying.playOrPause(context)) return;
+              onPlay();
+            },
+            icon: Icon(playing ? Icons.pause : Icons.play_arrow, size: 20),
+            label: Text(playing ? 'Pause' : 'Play'),
+          ),
+          if (onShuffle != null)
+            shuffleOn
+                ? FilledButton.tonalIcon(
+                    key: const ValueKey('artist-shuffle'),
+                    style: FilledButton.styleFrom(
+                      backgroundColor: colors.accentBg,
+                      foregroundColor: colors.accent,
+                    ),
+                    onPressed: playback.toggleShuffle,
+                    icon: const Icon(Icons.shuffle, size: 18),
+                    label: const Text('Shuffle on'),
+                  )
+                : OutlinedButton.icon(
+                    key: const ValueKey('artist-shuffle'),
+                    onPressed: state != null
+                        ? playback.toggleShuffle
+                        : onShuffle,
+                    icon: const Icon(Icons.shuffle, size: 18),
+                    label: const Text('Shuffle'),
+                  ),
+        ],
+      );
+    },
+  );
 }
 
 /// A card of an album or a release: its cover, title and one line.

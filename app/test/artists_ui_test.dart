@@ -465,6 +465,66 @@ void main() {
       await tester.pump(const Duration(seconds: 5));
     });
 
+    testWidgets('Play turns into Pause while the artist plays and a second '
+        'click pauses instead of starting over (user 2026-11-21: "play and '
+        'shuffle are unresponsive")', (tester) async {
+      await show(tester);
+      await openTank(tester);
+      final play = find.byKey(const ValueKey('artist-play'));
+      expect(find.descendant(of: play, matching: find.text('Play')), findsOne);
+
+      await tester.tap(play);
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 100));
+      expect(find.descendant(of: play, matching: find.text('Pause')), findsOne);
+      final started = playback.player.current;
+
+      await tester.tap(play);
+      await tester.pump();
+      expect(player.pauseToggles, 1);
+      expect(playback.player.current, started);
+
+      player.playing.value = false;
+      await tester.pump();
+      expect(find.descendant(of: play, matching: find.text('Play')), findsOne);
+      await tester.pump(const Duration(seconds: 5));
+    });
+
+    testWidgets('Shuffle starts the artist shuffled, then shows it is on and '
+        'turns shuffle off and on while the artist plays', (tester) async {
+      await show(tester);
+      await openTank(tester);
+      expect(playback.shuffle, isFalse);
+      final shuffle = find.byKey(const ValueKey('artist-shuffle'));
+
+      await tester.tap(shuffle);
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 100));
+      expect(playback.shuffle, isTrue);
+      expect(playback.queue.from?.label, 'Дайте танк (!)');
+      expect(
+        find.descendant(of: shuffle, matching: find.text('Shuffle on')),
+        findsOne,
+      );
+      final started = playback.player.current;
+
+      await tester.tap(shuffle);
+      await tester.pump();
+      expect(playback.shuffle, isFalse);
+      expect(playback.player.current, started);
+      expect(
+        find.descendant(of: shuffle, matching: find.text('Shuffle')),
+        findsOne,
+      );
+
+      await tester.tap(shuffle);
+      await tester.pump();
+      expect(playback.shuffle, isTrue);
+      expect(playback.player.current, started);
+      player.playing.value = false;
+      await tester.pump(const Duration(seconds: 5));
+    });
+
     testWidgets('VK not answering: the library part stays, Try again asks '
         'again', (tester) async {
       pageError = const SocketException('no network');
