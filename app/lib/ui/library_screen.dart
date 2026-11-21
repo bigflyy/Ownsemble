@@ -10,6 +10,7 @@ import '../library/play_stats.dart';
 import '../library/song_filter.dart';
 import '../library/song_version.dart';
 import '../library/track.dart';
+import '../lyrics/lyrics_controller.dart';
 import '../playback/playback_controller.dart';
 import '../playback/play_queue.dart';
 import '../playback/version_book.dart';
@@ -32,6 +33,7 @@ import 'filter_bar.dart';
 import 'for_you.dart';
 import 'for_you_page.dart';
 import 'library_controller.dart';
+import 'lyrics_page.dart';
 import 'outside_songs.dart';
 import 'playing_mark.dart';
 import 'player_bar.dart';
@@ -124,6 +126,7 @@ class LibraryScreen extends StatefulWidget {
     this.forYou,
     this.playlists,
     this.artists,
+    this.lyrics,
     this._settings,
   });
 
@@ -158,6 +161,9 @@ class LibraryScreen extends StatefulWidget {
 
   /// The library's artists (plan 09); no Artists place when null.
   final LibraryArtists? artists;
+
+  /// The Lyrics place's lyrics (plan 10); null hides the mic button.
+  final LyricsController? lyrics;
 
   final ShellSettings? _settings;
 
@@ -958,6 +964,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
                         onOpenVersions: _openVersions,
                         addButton: _playerAdd,
                         compact: !roomForSidebar,
+                        lyricsButton: _lyricsButton(),
                       ),
                     if (widget.sync case final sync?)
                       SyncStatusBar(
@@ -1022,6 +1029,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
                               onOpenFrom: _openPlayedFrom,
                               songButtons: (track) =>
                                   _songButtons(track, roomy: true),
+                              lyricsButton: _lyricsButton(),
                             ),
                         ],
                       ),
@@ -1125,6 +1133,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
             listenable: Listenable.merge([
               library,
               library.jump,
+              ?widget.lyrics,
               ?_storage,
               ?widget.collections,
               ?widget.player.versions,
@@ -1196,6 +1205,8 @@ class _LibraryScreenState extends State<LibraryScreen> {
                       onBack: view.hasBack ? library.goBack : null,
                       detail: view.kind == ViewKind.versions
                           ? _versionsDetail()
+                          : view.kind == ViewKind.lyrics
+                          ? _lyricsDetail()
                           : _albumDetail(view),
                       actions: [
                         if (view.kind == ViewKind.artists && artists != null)
@@ -1276,7 +1287,18 @@ class _LibraryScreenState extends State<LibraryScreen> {
                       filters: filters,
                     ),
                   Expanded(
-                    child: statsFilters != null
+                    child: view.kind == ViewKind.lyrics && widget.lyrics != null
+                        ? LyricsPage(
+                            lyrics: widget.lyrics!,
+                            current: () => widget.player.current,
+                            currentStream: widget.player.currentStream,
+                            position: () => widget.player.position,
+                            positions: widget.player.isReady
+                                ? widget.player.positions
+                                : null,
+                            seek: widget.playback.seek,
+                          )
+                        : statsFilters != null
                         ? NowPlayingScope(
                             playback: widget.playback,
                             child: StatsPage(
@@ -1382,6 +1404,29 @@ class _LibraryScreenState extends State<LibraryScreen> {
   }
 
   /// The line under an album's title: its artist and how far its list got.
+  /// The Lyrics place's line under its title: the song it shows.
+  String? _lyricsDetail() {
+    final track = widget.lyrics?.track;
+    if (track == null) return null;
+    return track.artist.isEmpty
+        ? track.title
+        : '${track.title} - ${track.artist}';
+  }
+
+  /// The mic button of the player (plan 10): lit while Lyrics is open.
+  Widget? _lyricsButton() => widget.lyrics == null
+      ? null
+      : ListenableBuilder(
+          listenable: library,
+          builder: (context, _) => LyricsButton(
+            open: library.view.kind == ViewKind.lyrics,
+            onPressed: () {
+              library.jump.clear();
+              library.toggleLyrics();
+            },
+          ),
+        );
+
   String? _albumDetail(LibraryView view) {
     if (view.kind == ViewKind.forYou) return forYouDetail(widget.forYou);
     if (view.kind == ViewKind.playlists) {
@@ -1505,6 +1550,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
     ViewKind.playlists => 'Playlists',
     ViewKind.history => 'History',
     ViewKind.stats => 'Stats',
+    ViewKind.lyrics => 'Lyrics',
     ViewKind.yearReport => 'Your ${view.year}',
     ViewKind.album => view.album?.title ?? 'Album',
     ViewKind.versions =>

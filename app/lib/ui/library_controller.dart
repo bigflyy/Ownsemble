@@ -66,6 +66,9 @@ enum ViewKind {
   /// What VK recommends: VK Mix, VK's lists, similar songs (plan 07).
   forYou,
 
+  /// The playing song's lyrics (plan 10), opened by the mic button.
+  lyrics,
+
   /// One recommended list (a VK list, "Similar to", VK Mix), opened from
   /// For you or a song's "Similar songs" (plan 07).
   vkList,
@@ -124,11 +127,13 @@ class LibraryView {
       kind == ViewKind.playlists ||
       kind == ViewKind.stats ||
       kind == ViewKind.yearReport ||
-      kind == ViewKind.forYou;
+      kind == ViewKind.forYou ||
+      kind == ViewKind.lyrics;
 
   /// Whether the view is opened from another one and shows a Back button.
   bool get hasBack =>
       listsOutside ||
+      kind == ViewKind.lyrics ||
       kind == ViewKind.yearReport ||
       kind == ViewKind.artist ||
       kind == ViewKind.artistSongs;
@@ -252,10 +257,12 @@ class LibraryController extends ChangeNotifier {
     if (text == null) return null;
     final parts = text.split(':');
     final kind = ViewKind.values.asNameMap()[parts.first];
+    // Lyrics follow the playing song: a new run starts at the list.
     if (kind == null ||
         kind == ViewKind.album ||
         kind == ViewKind.versions ||
-        kind == ViewKind.vkList) {
+        kind == ViewKind.vkList ||
+        kind == ViewKind.lyrics) {
       return null;
     }
     // A year report opens from Stats, and Back has nothing to return to
@@ -754,6 +761,22 @@ class LibraryController extends ChangeNotifier {
     if (view == _view) return;
     _places.leave(_here);
     _showList(view, '', null);
+  }
+
+  /// Opens the Lyrics place (Back returns), or closes it when it is open:
+  /// the mic button (plan 10).
+  void toggleLyrics() {
+    if (_view.kind != ViewKind.lyrics) {
+      _places.leave(_here);
+      _showList(const LibraryView(ViewKind.lyrics), '', _source);
+      return;
+    }
+    final before = _places.back(_here);
+    if (before == null) {
+      showView(LibraryView.songs);
+    } else {
+      _showPlace(before);
+    }
   }
 
   /// Shows the report of [year] in place of the one shown (its arrows):
@@ -1450,7 +1473,8 @@ class LibraryController extends ChangeNotifier {
           ViewKind.playlists ||
           ViewKind.stats ||
           ViewKind.yearReport ||
-          ViewKind.forYou:
+          ViewKind.forYou ||
+          ViewKind.lyrics:
         _base = const [];
     }
     _filterBaseBySource();

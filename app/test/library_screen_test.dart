@@ -3,10 +3,12 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ownsemble/library/library_store.dart';
 import 'package:ownsemble/library/track.dart';
+import 'package:ownsemble/lyrics/lyrics_controller.dart';
 import 'package:ownsemble/playback/playback_controller.dart';
 import 'package:ownsemble/playback/player_service.dart';
 import 'package:ownsemble/ui/library_controller.dart';
 import 'package:ownsemble/ui/library_screen.dart';
+import 'package:ownsemble/ui/lyrics_page.dart';
 
 void main() {
   late LibraryStore store;
@@ -67,6 +69,56 @@ void main() {
     await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
     await tester.pump();
   }
+
+  testWidgets('the mic button opens Lyrics and closes it again, wide and '
+      'narrow (plan 10)', (tester) async {
+    for (final size in const [Size(1400, 900), Size(760, 900)]) {
+      tester.view.physicalSize = size;
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      final lyrics = LyricsController(
+        load: (source, ref) => null,
+        save: (source, ref, lyrics, {md5}) {},
+        apiOfSource: (sourceId) => null,
+      );
+      // The player's buttons show with a song: one restored from before.
+      final player = PlayerService(muted: true, dataDir: '.')
+        ..restore(library.all.last, Duration.zero);
+      await tester.pumpWidget(
+        MaterialApp(
+          home: LibraryScreen(
+            key: ValueKey(size),
+            library: library,
+            playback: PlaybackController(player: player),
+            lyrics: lyrics,
+          ),
+        ),
+      );
+      await tester.pump();
+      expect(find.text('Song 29'), findsOneWidget, reason: '$size');
+
+      await tester.tap(find.byKey(const ValueKey('lyrics')));
+      await tester.pump();
+      await tester.pump();
+      expect(library.view.kind, ViewKind.lyrics, reason: '$size');
+      // No account here to ask VK: the place says so.
+      expect(find.byType(LyricsPage), findsOneWidget);
+      expect(find.textContaining('Log in to the VK account'), findsOneWidget);
+      expect(find.text('Song 29'), findsNothing);
+
+      // The mic button closes it; then it opens again and Back closes it.
+      await tester.tap(find.byKey(const ValueKey('lyrics')));
+      await tester.pump();
+      expect(library.view.kind, ViewKind.songs, reason: '$size');
+      expect(find.text('Song 29'), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey('lyrics')));
+      await tester.pump();
+      await tester.tap(find.byKey(const ValueKey('album-back')));
+      await tester.pump();
+      expect(library.view.kind, ViewKind.songs, reason: '$size');
+      expect(tester.takeException(), isNull);
+    }
+  });
 
   testWidgets('Ctrl+F focuses search after clicking a song', (tester) async {
     await pumpScreen(tester);

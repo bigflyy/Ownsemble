@@ -244,6 +244,10 @@ class PlaybackController extends ChangeNotifier {
     if (track != null) await _play(track, start: PlayStart.queued);
   }
 
+  /// Called after a song is downloaded, so its lyrics are kept for offline
+  /// use too (plan 10). Its failures are its own.
+  Future<void> Function(Track track)? onDownloaded;
+
   /// Downloads [track] (keeps its audio for good). Returns why it failed,
   /// or null on success.
   Future<String?> download(Track track) async {
@@ -264,6 +268,8 @@ class PlaybackController extends ChangeNotifier {
         }
         return resolved.stream.link;
       });
+      final downloaded = onDownloaded;
+      if (downloaded != null) unawaited(downloaded(track));
       return null;
     } catch (error) {
       return describePlayError(error);

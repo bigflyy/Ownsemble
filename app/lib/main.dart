@@ -12,6 +12,7 @@ import 'library/library_store.dart';
 import 'library/search_index.dart';
 import 'library/similar_seeds.dart';
 import 'library/track.dart';
+import 'lyrics/lyrics_controller.dart';
 import 'playback/playback_controller.dart';
 import 'platform/end_process.dart';
 import 'playback/player_service.dart';
@@ -397,6 +398,15 @@ Future<void> main(List<String> args) async {
     writeSetting: store.writeSetting,
     log: logPerf,
   );
+  // Lyrics of the playing song (plan 10), asked only when shown or when a
+  // song is downloaded, through the song's own account.
+  final lyrics = LyricsController(
+    load: store.lyricsOf,
+    save: store.saveLyrics,
+    apiOfSource: (sourceId) => clientOfSource(sourceId)?.call,
+    log: logPerf,
+  );
+  playback.onDownloaded = lyrics.keepFor;
   artists.onListChanged = library.listChanged;
   library.artistSongsOf = artists.songsOf;
   library.vkLists = CombinedLists(
@@ -491,6 +501,7 @@ Future<void> main(List<String> args) async {
       forYou: forYou,
       playlists: playlists,
       artists: artists,
+      lyrics: lyrics,
       settings: settings,
     ),
   );
@@ -710,6 +721,7 @@ class OwnsembleApp extends StatelessWidget {
     this.forYou,
     this.playlists,
     this.artists,
+    this.lyrics,
   });
 
   final CoverStore covers;
@@ -725,6 +737,7 @@ class OwnsembleApp extends StatelessWidget {
   final ForYou? forYou;
   final VkPlaylists? playlists;
   final LibraryArtists? artists;
+  final LyricsController? lyrics;
 
   @override
   Widget build(BuildContext context) {
@@ -748,6 +761,7 @@ class OwnsembleApp extends StatelessWidget {
             forYou: forYou,
             playlists: playlists,
             artists: artists,
+            lyrics: lyrics,
             settings: settings,
           ),
         ),

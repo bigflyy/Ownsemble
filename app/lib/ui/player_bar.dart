@@ -33,12 +33,16 @@ class NowPlayingPanel extends StatelessWidget {
     this.addButton,
     this.songButtons,
     this.onOpenFrom,
+    this.lyricsButton,
   });
 
   final PlaybackController playback;
   final CollectionsController? collections;
   final bool thumbnails;
   final VoidCallback onDockBottom;
+
+  /// Opens and closes the Lyrics place (plan 10), after Download.
+  final Widget? lyricsButton;
 
   /// A click on the title: shows the song in its list.
   final VoidCallback onGoToSong;
@@ -171,6 +175,7 @@ class NowPlayingPanel extends StatelessWidget {
                         ),
                         if (player.storage != null && track.inLibrary)
                           DownloadButton(playback: playback, track: track),
+                        ?lyricsButton,
                         const Spacer(),
                         ?addButton?.call(track),
                       ],
@@ -270,12 +275,16 @@ class DockBar extends StatelessWidget {
     this.onOpenAlbum,
     this.onOpenVersions,
     this.addButton,
+    this.lyricsButton,
   });
 
   final PlaybackController playback;
   final CollectionsController? collections;
   final bool thumbnails;
   final bool canDockSide;
+
+  /// Opens and closes the Lyrics place (plan 10), after Download.
+  final Widget? lyricsButton;
   final VoidCallback onDockSide;
 
   /// A click on the title: shows the song in its list.
@@ -399,52 +408,72 @@ class DockBar extends StatelessWidget {
                   const SizedBox(width: 20),
                   Expanded(
                     flex: 2,
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.end,
-                      children: [
-                        // Up Next leads the right-hand buttons, as the
-                        // queue button does in Spotify.
-                        if (track != null)
-                          UpNextButton(
-                            playback: playback,
-                            thumbnails: thumbnails,
-                          ),
-                        // A song of an album that the library lacks has no
-                        // row for a Stack or a download to point at.
-                        if (track != null &&
-                            track.inLibrary &&
-                            collections != null)
-                          StackMenuButton(
-                            track: track,
-                            collections: collections!,
-                          ),
-                        if (track != null)
-                          VersionsButton(
-                            playback: playback,
-                            track: track,
-                            onOpen: onOpenVersions,
-                          ),
-                        if (track != null &&
-                            track.inLibrary &&
-                            player.storage != null)
-                          DownloadButton(playback: playback, track: track),
-                        Flexible(
-                          child: SizedBox(
-                            width: 150,
-                            child: VolumeRow(
-                              playback: playback,
-                              showValue: false,
+                    child: LayoutBuilder(
+                      builder: (context, box) {
+                        final inLibrary = track != null && track.inLibrary;
+                        final upNext = track != null;
+                        final stack = inLibrary && collections != null;
+                        final versions = track != null;
+                        final download = inLibrary && player.storage != null;
+                        // Buttons are 40 px and the volume keeps at least
+                        // its icon. Short of room, the Stack menu and then
+                        // Versions are left out first: a song's row menu
+                        // has both (plan 10 added the mic here).
+                        final fixed = [
+                          upNext,
+                          download,
+                          lyricsButton != null,
+                          canDockSide,
+                        ].where((shown) => shown).length;
+                        final room = (box.maxWidth / 40).floor() - 1 - fixed;
+                        final showVersions = versions && room >= 1;
+                        final showStack =
+                            stack && room >= (showVersions ? 2 : 1);
+                        return Row(
+                          mainAxisAlignment: MainAxisAlignment.end,
+                          children: [
+                            // Up Next leads the right-hand buttons, as the
+                            // queue button does in Spotify.
+                            if (upNext)
+                              UpNextButton(
+                                playback: playback,
+                                thumbnails: thumbnails,
+                              ),
+                            // A song of an album that the library lacks has
+                            // no row for a Stack or a download to point at.
+                            if (showStack)
+                              StackMenuButton(
+                                track: track,
+                                collections: collections!,
+                              ),
+                            if (showVersions)
+                              VersionsButton(
+                                playback: playback,
+                                track: track,
+                                onOpen: onOpenVersions,
+                              ),
+                            if (download)
+                              DownloadButton(playback: playback, track: track),
+                            ?lyricsButton,
+                            Flexible(
+                              child: SizedBox(
+                                width: 150,
+                                child: VolumeRow(
+                                  playback: playback,
+                                  showValue: false,
+                                ),
+                              ),
                             ),
-                          ),
-                        ),
-                        if (canDockSide)
-                          IconButton(
-                            key: const ValueKey('dock-side'),
-                            tooltip: 'Move the player to the side panel',
-                            onPressed: onDockSide,
-                            icon: const Icon(Icons.view_sidebar_outlined),
-                          ),
-                      ],
+                            if (canDockSide)
+                              IconButton(
+                                key: const ValueKey('dock-side'),
+                                tooltip: 'Move the player to the side panel',
+                                onPressed: onDockSide,
+                                icon: const Icon(Icons.view_sidebar_outlined),
+                              ),
+                          ],
+                        );
+                      },
                     ),
                   ),
                 ],
@@ -1089,6 +1118,32 @@ class DownloadButton extends StatelessWidget {
               downloaded ? Icons.download_done : Icons.download_outlined,
               color: downloaded ? colors.accent : null,
             ),
+    );
+  }
+}
+
+/// The mic button: opens the Lyrics place, or closes it when it is open
+/// (plan 10). Lit while the place is open.
+class LyricsButton extends StatelessWidget {
+  const LyricsButton({super.key, required this.open, required this.onPressed});
+
+  final bool open;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = OwnColors.of(context);
+    return IconButton(
+      key: const ValueKey('lyrics'),
+      tooltip: open ? 'Close lyrics' : 'Lyrics',
+      onPressed: onPressed,
+      style: open
+          ? IconButton.styleFrom(backgroundColor: colors.accentBg)
+          : null,
+      icon: Icon(
+        open ? Icons.mic : Icons.mic_none,
+        color: open ? colors.accent : null,
+      ),
     );
   }
 }
