@@ -10,7 +10,8 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:ui' as ui;
 
-import 'package:flutter/gestures.dart' show kSecondaryMouseButton;
+import 'package:flutter/gestures.dart'
+    show PointerDeviceKind, kSecondaryMouseButton;
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
@@ -1037,14 +1038,18 @@ void main() {
     // The page with a playlist playing from its card (user, 2026-11-18:
     // "not very clear which playlist is playing now").
     if (playlists != null && playlistsStep == 'playing') {
-      await tester.tap(
-        find.byKey(
-          const ValueKey(
-            'list-play-Вечер у моря, когда никуда не надо спешить и можно '
-            'слушать всё подряд',
-          ),
+      // The card's Play shows only while the card is pointed at.
+      final cardPlay = find.byKey(
+        const ValueKey(
+          'list-play-Вечер у моря, когда никуда не надо спешить и можно '
+          'слушать всё подряд',
         ),
       );
+      final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
+      await mouse.addPointer(location: tester.getCenter(cardPlay));
+      await tester.pump(const Duration(milliseconds: 200));
+      await tester.tap(cardPlay);
+      await mouse.removePointer();
       await tester.pump();
       player.playing.value = true;
       await tester.pump(const Duration(milliseconds: 300));

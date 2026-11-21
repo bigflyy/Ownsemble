@@ -19,6 +19,7 @@ import 'package:ownsemble/ui/playlists.dart';
 import 'package:ownsemble/ui/shell_settings.dart';
 import 'package:ownsemble/ui/sources_scope.dart';
 
+import 'card_support.dart';
 import 'catalog_support.dart';
 import 'recs_support.dart';
 
@@ -210,7 +211,7 @@ void main() {
   testWidgets('a card\'s Play plays the playlist without the restricted '
       'song, the library\'s own song first', (tester) async {
     await openPlaylists(tester);
-    await tester.tap(find.byKey(const ValueKey('list-play-В дорогу')));
+    await tapCardPlay(tester, find.byKey(const ValueKey('list-play-В дорогу')));
     // The playing card's mark moves: nothing settles.
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 100));
@@ -328,7 +329,10 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('album-back')));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 100));
-    await tester.tap(find.byKey(const ValueKey('list-play-Чужой плейлист')));
+    await tapCardPlay(
+      tester,
+      find.byKey(const ValueKey('list-play-Чужой плейлист')),
+    );
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 100));
     expect(
@@ -420,7 +424,7 @@ void main() {
       'as the library\'s song from the card too', (tester) async {
     songs['42_1']![0] = recSong(-7, 10, restricted: 2);
     await openPlaylists(tester);
-    await tester.tap(find.byKey(const ValueKey('list-play-В дорогу')));
+    await tapCardPlay(tester, find.byKey(const ValueKey('list-play-В дорогу')));
     // The playing card's mark moves: nothing settles.
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 100));

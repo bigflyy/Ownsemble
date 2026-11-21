@@ -29,6 +29,7 @@ import 'package:ownsemble/playback/player_service.dart';
 import 'package:ownsemble/storage/audio_storage.dart';
 import 'package:ownsemble/ui/albums.dart';
 import 'package:ownsemble/ui/artists.dart';
+import 'package:ownsemble/ui/card_play.dart';
 import 'package:ownsemble/ui/catalog_search.dart';
 import 'package:ownsemble/ui/collections_controller.dart';
 import 'package:ownsemble/ui/library_controller.dart';
@@ -353,7 +354,13 @@ void main() {
       case 'grid' || 'heard' || 'search':
         library.showView(const LibraryView(ViewKind.artists));
         if (step == 'search') library.searchText.text = 'да';
-      case 'page' || 'loading' || 'failed' || 'songs' || 'popular':
+      case 'page' ||
+          'loading' ||
+          'failed' ||
+          'songs' ||
+          'popular' ||
+          'playing' ||
+          'cards':
         library.openArtist('vk:10000');
       case 'nameOnly':
         library.openArtist('name:старый рок-клуб');
@@ -379,6 +386,40 @@ void main() {
       await settle();
     }
     TestGesture? mouse;
+    // The artist plays from the header: Play shows Pause, Shuffle is on.
+    if (step == 'playing') {
+      await tester.tap(find.byKey(const ValueKey('artist-shuffle')));
+      await settle();
+    }
+    // An album plays from its card (outlined, Pause kept), and the mouse
+    // rests on a release card (its Play shown).
+    if (step == 'cards') {
+      // Real soft shadows, not the test's solid outlines.
+      debugDisableShadows = false;
+      final scroll = find.byType(Scrollable).first;
+      final album = find.byWidgetPredicate(
+        (w) =>
+            w.key is ValueKey<String> &&
+            (w.key! as ValueKey<String>).value.startsWith('artist-album-'),
+      );
+      await tester.scrollUntilVisible(album.first, 300, scrollable: scroll);
+      await tester.drag(scroll, const Offset(0, -120));
+      await settle();
+      mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
+      final albumPlay = find.descendant(
+        of: album.first,
+        matching: find.byType(CardPlayButton),
+      );
+      await mouse.addPointer(location: tester.getCenter(albumPlay));
+      await settle();
+      await tester.tap(albumPlay);
+      for (var i = 0; i < 4; i++) {
+        await tester.runAsync(() => Future<void>.delayed(Duration.zero));
+        await settle();
+      }
+      await mouse.moveTo(tester.getCenter(album.at(1)));
+      await settle();
+    }
     if (step == 'links') {
       final duet = library.all.firstWhere((t) => t.title == 'Вдвоём');
       final line = find.byKey(ValueKey('artist-line-${duet.id}'));
@@ -408,6 +449,7 @@ void main() {
           .writeAsBytesSync(png!.buffer.asUint8List());
     });
     await mouse?.removePointer();
+    debugDisableShadows = true;
     player.playing.value = false;
     await tester.pump(const Duration(seconds: 5));
     artists.dispose();
@@ -432,6 +474,9 @@ void main() {
     ('songs', true, const Size(1440, 900)),
     ('popular', false, const Size(1440, 900)),
     ('links', true, const Size(1440, 900)),
+    ('playing', true, const Size(1440, 900)),
+    ('cards', true, const Size(1440, 900)),
+    ('cards', false, const Size(760, 900)),
   ]) {
     final width = size.width < 1000 ? 'narrow' : 'wide';
     testWidgets(

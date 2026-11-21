@@ -962,6 +962,32 @@ class LibraryController extends ChangeNotifier {
     ).tracks.where((track) => track.inLibrary).length;
   }
 
+  /// The songs of [album] in the order its place lists them, for a card's
+  /// Play (user, 2026-11-21: Play on an album card plays the whole album).
+  /// VK's list of it is asked first when it is not in yet; when VK cannot
+  /// list it, the library's songs of it.
+  Future<List<Track>> albumPlaySongs(AlbumRef album) async {
+    final catalog = albums;
+    if (catalog == null) return const [];
+    var listed = _listOf(album);
+    if (listed == null && catalog.canFetch(album)) {
+      try {
+        listed = await catalog.fetch(album);
+        _cardLists[album] = listed;
+        if (_cardLists.length > _cardListsKept) {
+          _cardLists.remove(_cardLists.keys.first);
+        }
+        _cardFailed.remove(album);
+        if (!_disposed) notifyListeners();
+      } catch (_) {
+        listed = null;
+      }
+    }
+    final libraryIds = catalog.libraryIds(album);
+    if (listed == null) return [for (final id in libraryIds) ?_byId[id]];
+    return _matchAlbum(catalog, libraryIds, listed, source: null).tracks;
+  }
+
   /// Asks VK for the lists of [cards] that are not in yet, one after
   /// another in the background, in place of what was still waiting from
   /// another page. Each list that comes in redraws the cards.

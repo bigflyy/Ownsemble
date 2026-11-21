@@ -20,6 +20,7 @@ import 'package:ownsemble/ui/library_screen.dart';
 import 'package:ownsemble/ui/shell_settings.dart';
 import 'package:ownsemble/ui/sources_scope.dart';
 
+import 'card_support.dart';
 import 'catalog_support.dart';
 import 'recs_support.dart';
 
@@ -189,7 +190,7 @@ void main() {
     tester,
   ) async {
     await openForYou(tester);
-    await tester.tap(find.byKey(const ValueKey('list-play-For you')));
+    await tapCardPlay(tester, find.byKey(const ValueKey('list-play-For you')));
     // The playing card's mark moves: nothing settles.
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 100));
@@ -247,7 +248,7 @@ void main() {
     tester,
   ) async {
     await openForYou(tester);
-    await tester.tap(find.byKey(const ValueKey('list-play-For you')));
+    await tapCardPlay(tester, find.byKey(const ValueKey('list-play-For you')));
     // The playing card's mark moves: nothing settles.
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 100));

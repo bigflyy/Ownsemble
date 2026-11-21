@@ -21,6 +21,7 @@ import 'package:ownsemble/playback/playback_controller.dart';
 import 'package:ownsemble/ui/albums.dart';
 import 'package:ownsemble/ui/artists.dart';
 import 'package:ownsemble/ui/artists_page.dart' show ArtistPhoto;
+import 'package:ownsemble/ui/card_play.dart';
 import 'package:ownsemble/ui/cover_tile.dart' show TrackTile;
 import 'package:ownsemble/ui/catalog_search.dart';
 import 'package:ownsemble/ui/library_controller.dart';
@@ -30,6 +31,7 @@ import 'package:ownsemble/ui/shell_settings.dart';
 import 'package:ownsemble/ui/sources_scope.dart';
 import 'package:ownsemble/vk/vk_artists.dart';
 
+import 'card_support.dart';
 import 'catalog_support.dart';
 
 const tank = ArtistCredit(vkId: '10000', name: 'Дайте танк (!)');
@@ -402,6 +404,48 @@ void main() {
         findsOneWidget,
       );
       expect(calls.where((c) => c == 'audio.get'), hasLength(1));
+    });
+
+    testWidgets('Play on an album card plays the whole album as its place '
+        'lists it, and the card then shows it plays (user 2026-11-21)', (
+      tester,
+    ) async {
+      await show(tester);
+      await openTank(tester);
+      await tester.runAsync(() => pumpEventQueue());
+      await tester.pumpAndSettle();
+      final own = library.all.firstWhere((t) => t.title == 'Утро');
+      final card = find.byKey(ValueKey('artist-album-${own.id}'));
+      await tester.scrollUntilVisible(
+        card,
+        300,
+        scrollable: find.byType(Scrollable).first,
+      );
+      final play = find.descendant(
+        of: card,
+        matching: find.byType(CardPlayButton),
+      );
+      await tapCardPlay(tester, play);
+      await tester.runAsync(() => pumpEventQueue());
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 100));
+      final album = library.albumOf(own)!;
+      expect(playback.queue.from?.label, album.title);
+      expect(
+        playback.queue.from?.place,
+        LibraryView(ViewKind.album, album: album),
+      );
+      // The whole album: the two songs the card counts as yours and the one
+      // the library does not have.
+      expect(playback.queue.context, hasLength(3));
+      expect(playback.queue.context.where((t) => t.inLibrary), hasLength(2));
+      expect(playback.queue.context.map((t) => t.id), contains(own.id));
+      expect(
+        find.descendant(of: play, matching: find.byIcon(Icons.pause)),
+        findsOne,
+      );
+      player.playing.value = false;
+      await tester.pump(const Duration(seconds: 5));
     });
 
     testWidgets('releases past the first ten come in after the page '

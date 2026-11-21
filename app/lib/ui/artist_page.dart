@@ -22,11 +22,12 @@ import '../vk/vk_artists.dart';
 import 'albums.dart';
 import 'artists.dart';
 import 'artists_page.dart' show ArtistPhoto;
+import 'card_play.dart';
 import 'cover_tile.dart';
 import 'for_you_page.dart' show SectionTitle, songCountText;
 import 'library_controller.dart';
 import 'outside_songs.dart';
-import 'playing_mark.dart' show NowPlaying;
+import 'playing_mark.dart' show NowPlaying, PlayingMark;
 import 'theme.dart';
 
 /// Builds one song row of a page with every usual action (the library
@@ -156,6 +157,55 @@ class _ArtistPageState extends State<ArtistPage> {
     // 2026-11-21); the one on its way is kept for the next visit.
     widget.library.stopAlbumCards();
     super.dispose();
+  }
+
+  /// The album of [release] on the page of the artist [artistName].
+  AlbumRef _releaseRef(
+    VkArtistRelease release,
+    String artistName,
+    int sourceId,
+  ) => AlbumRef(
+    title: release.title,
+    artist: artistName,
+    link: (sourceId: sourceId, key: release.key, accessKey: release.accessKey),
+  );
+
+  /// The Play of an album or release card: plays the whole album, as its
+  /// place lists it, under that place's "Playing from".
+  CardPlay _albumPlay(AlbumRef ref) {
+    final view = LibraryView(ViewKind.album, album: ref);
+    return (
+      key: view.playKey,
+      onPlay: () async {
+        final songs = await widget.library.albumPlaySongs(ref);
+        final playable = [
+          for (final song in songs)
+            if (widget.outside?.restrictionOf(song.id) == null) song,
+        ];
+        if (!mounted) return;
+        // Never a click that seems to do nothing.
+        if (playable.isEmpty) {
+          ScaffoldMessenger.of(context)
+            ..hideCurrentSnackBar()
+            ..showSnackBar(
+              SnackBar(
+                content: Text(
+                  songs.isEmpty
+                      ? 'Nothing to play: VK did not list "${ref.title}"'
+                      : 'VK gives no file for the songs of "${ref.title}"',
+                ),
+              ),
+            );
+          return;
+        }
+        widget.library.notePlayedFrom(view: view);
+        await widget.playback.playFrom(
+          playable,
+          0,
+          from: PlayedFrom(label: ref.title, key: view.playKey, place: view),
+        );
+      },
+    );
   }
 
   /// The "Playing from" of the artist's library songs: their song list,
@@ -359,6 +409,10 @@ class _ArtistPageState extends State<ArtistPage> {
               ),
               tooltip: 'Open the album',
               onOpen: () => widget.library.openAlbum(album.first),
+              play: switch (widget.library.albumOf(album.first)) {
+                final ref? => _albumPlay(ref),
+                null => null,
+              },
               colors: colors,
             ),
         ],
@@ -520,16 +574,9 @@ class _ArtistPageState extends State<ArtistPage> {
                   line: releaseLine(release),
                   tooltip: 'Open the release',
                   onOpen: () => widget.library.openAlbumRef(
-                    AlbumRef(
-                      title: release.title,
-                      artist: page.name,
-                      link: (
-                        sourceId: sourceId,
-                        key: release.key,
-                        accessKey: release.accessKey,
-                      ),
-                    ),
+                    _releaseRef(release, page.name, sourceId),
                   ),
+                  play: _albumPlay(_releaseRef(release, page.name, sourceId)),
                   colors: colors,
                 ),
             ],
@@ -756,6 +803,7 @@ class _Card extends StatelessWidget {
     required this.tooltip,
     required this.onOpen,
     required this.colors,
+    this.play,
     this.side = _Card.wide,
   });
 
@@ -768,40 +816,108 @@ class _Card extends StatelessWidget {
   final String tooltip;
   final VoidCallback onOpen;
   final OwnColors colors;
+
+  /// Plays the whole album; null when there is nothing to play it from.
+  final CardPlay? play;
   final double side;
 
   @override
-  Widget build(BuildContext context) => SizedBox(
-    width: side,
-    child: Tooltip(
-      message: tooltip,
-      waitDuration: const Duration(milliseconds: 600),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(10),
-        hoverColor: colors.hover,
-        onTap: onOpen,
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            tile,
-            const SizedBox(height: 6),
-            Text(
-              title,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
-            ),
-            Text(
-              line,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(fontSize: 12, color: colors.dim),
-            ),
-          ],
+  Widget build(BuildContext context) {
+    final play = this.play;
+    // The playing album's cover is outlined and its title is in the
+    // accent colour, as a playing list card's.
+    final state = play == null
+        ? null
+        : NowPlaying.listStateFor(context, const [], key: play.key);
+    return SizedBox(
+      width: side,
+      child: CardHover(
+        child: InkWell(
+          borderRadius: BorderRadius.circular(10),
+          hoverColor: colors.hover,
+          onTap: onOpen,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              if (play == null)
+                tile
+              else
+                Stack(
+                  children: [
+                    tile,
+                    if (state != null)
+                      Positioned.fill(
+                        child: IgnorePointer(
+                          child: DecoratedBox(
+                            decoration: BoxDecoration(
+                              borderRadius: BorderRadius.circular(10),
+                              border: Border.all(
+                                color: colors.accent,
+                                width: 2,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    Positioned(
+                      right: 8,
+                      bottom: 8,
+                      child: CardPlayButton(
+                        key: ValueKey('card-play-${play.key}'),
+                        state: state,
+                        onPlay: play.onPlay,
+                      ),
+                    ),
+                  ],
+                ),
+              const SizedBox(height: 6),
+              // The tip is on the name only: over the cover it would hide
+              // the Play there.
+              Tooltip(
+                message: tooltip,
+                waitDuration: const Duration(milliseconds: 600),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        if (state != null) ...[
+                          PlayingMark(
+                            playing: state,
+                            size: 12,
+                            color: colors.accent,
+                          ),
+                          const SizedBox(width: 6),
+                        ],
+                        Expanded(
+                          child: Text(
+                            title,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              fontSize: 14,
+                              fontWeight: FontWeight.w600,
+                              color: state != null ? colors.accent : null,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    Text(
+                      line,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(fontSize: 12, color: colors.dim),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
         ),
       ),
-    ),
-  );
+    );
+  }
 }
 
 /// An artist VK suggests: round photo, name, how many of their songs the

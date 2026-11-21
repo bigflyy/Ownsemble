@@ -16,6 +16,7 @@ import '../vk/vk_recommendations.dart';
 import 'albums.dart';
 import 'catalog_part.dart';
 import 'catalog_search.dart';
+import 'card_play.dart';
 import 'cover_tile.dart';
 import 'for_you.dart';
 import 'library_controller.dart';
@@ -793,113 +794,111 @@ class ListCard extends StatelessWidget {
     final color = tint == null ? colors.accentBg : Color(tint);
     return SizedBox(
       width: side,
-      child: InkWell(
-        key: ValueKey('list-card-$title'),
-        borderRadius: BorderRadius.circular(10),
-        onTap: onOpen,
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Stack(
-              children: [
-                Container(
-                  width: side,
-                  height: side,
-                  decoration: BoxDecoration(
-                    color: color.withValues(alpha: 0.35),
-                    borderRadius: BorderRadius.circular(10),
+      child: CardHover(
+        child: InkWell(
+          key: ValueKey('list-card-$title'),
+          borderRadius: BorderRadius.circular(10),
+          onTap: onOpen,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Stack(
+                children: [
+                  Container(
+                    width: side,
+                    height: side,
+                    decoration: BoxDecoration(
+                      color: color.withValues(alpha: 0.35),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    alignment: Alignment.center,
+                    child: coverUrl != null
+                        ? TrackTile(
+                            track: Track(
+                              id: -1,
+                              sourceId: 0,
+                              source: TrackSource.vk,
+                              artist: title,
+                              title: title,
+                              album: title,
+                              durationSec: 0,
+                              coverUrl: coverUrl,
+                              coverMidUrl: coverUrl,
+                              coverLargeUrl: coverUrl,
+                            ),
+                            size: side,
+                            radius: 10,
+                          )
+                        : Text(
+                            _initials,
+                            style: TextStyle(
+                              fontSize: 28,
+                              fontWeight: FontWeight.w700,
+                              color: colors.text.withValues(alpha: 0.7),
+                            ),
+                          ),
                   ),
-                  alignment: Alignment.center,
-                  child: coverUrl != null
-                      ? TrackTile(
-                          track: Track(
-                            id: -1,
-                            sourceId: 0,
-                            source: TrackSource.vk,
-                            artist: title,
-                            title: title,
-                            album: title,
-                            durationSec: 0,
-                            coverUrl: coverUrl,
-                            coverMidUrl: coverUrl,
-                            coverLargeUrl: coverUrl,
+                  // The playing list's cover is outlined in the accent colour.
+                  if (state != null)
+                    Positioned.fill(
+                      child: IgnorePointer(
+                        child: DecoratedBox(
+                          decoration: BoxDecoration(
+                            borderRadius: BorderRadius.circular(10),
+                            border: Border.all(color: colors.accent, width: 2),
                           ),
-                          size: side,
-                          radius: 10,
-                        )
-                      : Text(
-                          _initials,
-                          style: TextStyle(
-                            fontSize: 28,
-                            fontWeight: FontWeight.w700,
-                            color: colors.text.withValues(alpha: 0.7),
-                          ),
-                        ),
-                ),
-                // The playing list's cover is outlined in the accent colour.
-                if (state != null)
-                  Positioned.fill(
-                    child: IgnorePointer(
-                      child: DecoratedBox(
-                        decoration: BoxDecoration(
-                          borderRadius: BorderRadius.circular(10),
-                          border: Border.all(color: colors.accent, width: 2),
                         ),
                       ),
                     ),
-                  ),
-                Positioned(
-                  right: 8,
-                  bottom: 8,
-                  child: _RoundPlay(
-                    key: ValueKey('list-play-$title'),
-                    playing: state ?? false,
-                    size: 34,
-                    onPressed: playable.isEmpty
-                        ? null
-                        : () => state != null
-                              ? NowPlaying.playOrPause(context)
-                              : onPlay(playable, 0),
-                    colors: colors,
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 6),
-            // The list that plays: its title in the accent colour after the
-            // moving mark, as a playing row's (user, 2026-11-18: "not very
-            // clear which playlist is playing now").
-            Row(
-              children: [
-                if (state != null) ...[
-                  PlayingMark(
-                    key: ValueKey('list-playing-$title'),
-                    playing: state,
-                    size: 12,
-                    color: colors.accent,
-                  ),
-                  const SizedBox(width: 6),
-                ],
-                Expanded(
-                  child: Text(
-                    title,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w600,
-                      color: state != null ? colors.accent : null,
+                  Positioned(
+                    right: 8,
+                    bottom: 8,
+                    child: CardPlayButton(
+                      key: ValueKey('list-play-$title'),
+                      state: state,
+                      onPlay: playable.isEmpty
+                          ? null
+                          : () => onPlay(playable, 0),
                     ),
                   ),
-                ),
-              ],
-            ),
-            Text(
-              detail,
-              maxLines: 1,
-              style: TextStyle(fontSize: 12, color: colors.dim),
-            ),
-          ],
+                ],
+              ),
+              const SizedBox(height: 6),
+              // The list that plays: its title in the accent colour after the
+              // moving mark, as a playing row's (user, 2026-11-18: "not very
+              // clear which playlist is playing now").
+              Row(
+                children: [
+                  if (state != null) ...[
+                    PlayingMark(
+                      key: ValueKey('list-playing-$title'),
+                      playing: state,
+                      size: 12,
+                      color: colors.accent,
+                    ),
+                    const SizedBox(width: 6),
+                  ],
+                  Expanded(
+                    child: Text(
+                      title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                        color: state != null ? colors.accent : null,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              Text(
+                detail,
+                maxLines: 1,
+                style: TextStyle(fontSize: 12, color: colors.dim),
+              ),
+            ],
+          ),
         ),
       ),
     );

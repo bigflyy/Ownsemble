@@ -22,7 +22,8 @@
 
 import 'dart:io';
 
-import 'package:flutter/gestures.dart' show kSecondaryMouseButton;
+import 'package:flutter/gestures.dart'
+    show PointerDeviceKind, kSecondaryMouseButton;
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
@@ -31,6 +32,7 @@ import 'package:ownsemble/main.dart' as app;
 import 'package:ownsemble/playback/player_service.dart';
 import 'package:ownsemble/ui/artist_page.dart' show artistPopularShown, vkRefOf;
 import 'package:ownsemble/ui/artists.dart';
+import 'package:ownsemble/ui/card_play.dart';
 import 'package:ownsemble/ui/library_controller.dart';
 import 'package:ownsemble/ui/library_screen.dart';
 import 'package:ownsemble/vk/vk_catalog.dart';
@@ -533,10 +535,41 @@ void main() {
         'in the library',
       );
       expect(library.visible, isNotEmpty);
+      final releaseSongs = library.visible.length;
       library.goBack();
       await tester.pump();
       expect(library.view.kind, ViewKind.artist);
       expect(library.view.artist == artist.key, isTrue, reason: 'Back');
+
+      // 6b. The card's Play (user pick A, 2026-11-21) shows on hover and
+      // plays the whole release; the card then shows Pause.
+      await tester.scrollUntilVisible(card, 200, scrollable: pageScroll);
+      await tester.pump();
+      final cardPlay = find.descendant(
+        of: card,
+        matching: find.byType(CardPlayButton),
+      );
+      final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
+      await mouse.addPointer(location: tester.getCenter(cardPlay));
+      await tester.pump(const Duration(milliseconds: 300));
+      before = timings.length;
+      await tester.tap(cardPlay);
+      await tester.pump();
+      timing = await sounded('the release from its card', before);
+      await mouse.removePointer();
+      expect(playback.queue.from?.label, release.title);
+      // Every song its place lists, less those VK gives no file for.
+      expect(playback.queue.context.length, inInclusiveRange(1, releaseSongs));
+      await tester.pump(const Duration(milliseconds: 300));
+      expect(
+        find.descendant(of: cardPlay, matching: find.byIcon(Icons.pause)),
+        findsOneWidget,
+        reason: 'the playing card keeps Pause without hover',
+      );
+      say(
+        'release card Play: ${playback.queue.context.length} songs, sound in '
+        '${timing.toSoundMs} ms (${timing.cached ? 'cached' : 'streamed'})',
+      );
     }
 
     // 7. A similar artist's page, by its address name.
