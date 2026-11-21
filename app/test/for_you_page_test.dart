@@ -7,6 +7,7 @@
 
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ownsemble/library/library_store.dart';
 import 'package:ownsemble/library/search_index.dart';
@@ -18,6 +19,7 @@ import 'package:ownsemble/ui/catalog_search.dart';
 import 'package:ownsemble/ui/for_you.dart';
 import 'package:ownsemble/ui/library_controller.dart';
 import 'package:ownsemble/ui/library_screen.dart';
+import 'package:ownsemble/ui/player_bar.dart';
 import 'package:ownsemble/ui/shell_settings.dart';
 import 'package:ownsemble/ui/sources_scope.dart';
 
@@ -228,8 +230,10 @@ void main() {
     await tester.pump(const Duration(seconds: 5));
   });
 
-  testWidgets('the smallest window fits a VK Mix song\'s thumb-down and + '
-      'beside Up Next and the mic (B24)', (tester) async {
+  testWidgets('the smallest window keeps a VK Mix song\'s title whole: the '
+      'thumb-down, + and the mic go into one More menu (B24, B25)', (
+    tester,
+  ) async {
     await openForYou(
       tester,
       width: 480,
@@ -249,8 +253,86 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('vk-mix-play')));
     await tester.pumpAndSettle();
     expect(player.current?.title, 'Микс 1');
+    playback.extendList(forYou.isMixList, await forYou.moreMix());
+    final title = find.descendant(
+      of: find.byType(DockBar),
+      matching: find.text('Микс 1'),
+    );
+    expect(title, findsWidgets);
+    expect(
+      tester.renderObject<RenderParagraph>(title.first).didExceedMaxLines,
+      isFalse,
+      reason: 'B25: the title was squeezed to 16 px',
+    );
+    expect(find.byKey(const ValueKey('player-dislike')), findsNothing);
+    expect(find.byKey(const ValueKey('lyrics')), findsNothing);
+    expect(find.byKey(const ValueKey('player-more')), findsOneWidget);
+    expect(tester.takeException(), isNull);
+
+    await tester.tap(find.byKey(const ValueKey('player-more')));
+    await tester.pumpAndSettle();
+    expect(find.text('Add to library'), findsOneWidget);
+    expect(find.text('Lyrics'), findsOneWidget);
+    await tester.tap(find.text("Don't like it"));
+    await tester.pumpAndSettle();
+    expect(
+      recs.calls.where((c) => c.startsWith('audio.addDislike')),
+      hasLength(1),
+    );
+    expect(player.current?.title, isNot('Микс 1'));
+
+    await tester.tap(find.byKey(const ValueKey('player-more')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Lyrics'));
+    await tester.pumpAndSettle();
+    expect(library.view.kind, ViewKind.lyrics);
+    await tester.tap(find.byKey(const ValueKey('player-more')));
+    await tester.pumpAndSettle();
+    expect(find.text('Close lyrics'), findsOneWidget);
+    await tester.tapAt(Offset.zero);
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+    player.playing.value = false;
+    await tester.pump(const Duration(seconds: 5));
+  });
+
+  testWidgets('a 760 px window folds a VK Mix song\'s thumb-down and + '
+      'into More beside the sidebar; a wide one keeps them (B25)', (
+    tester,
+  ) async {
+    await openForYou(tester, width: 760, height: 640, dock: PlayerDock.bottom);
+    await tester.tap(find.byKey(const ValueKey('vk-mix-play')));
+    await tester.pumpAndSettle();
+    final title = find.descendant(
+      of: find.byType(DockBar),
+      matching: find.text('Микс 1'),
+    );
+    expect(
+      tester.renderObject<RenderParagraph>(title.first).didExceedMaxLines,
+      isFalse,
+      reason: 'the 760 px bar left the title one letter',
+    );
+    expect(find.byKey(const ValueKey('player-dislike')), findsNothing);
+    await tester.tap(find.byKey(const ValueKey('player-more')));
+    await tester.pumpAndSettle();
+    expect(find.text("Don't like it"), findsOneWidget);
+    expect(find.text('Add to library'), findsOneWidget);
+    expect(
+      find.text('Lyrics'),
+      findsNothing,
+      reason: 'the mic is on the right',
+    );
+    await tester.tapAt(Offset.zero);
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+    player.playing.value = false;
+    await tester.pump(const Duration(seconds: 5));
+
+    await openForYou(tester, width: 1400, height: 900, dock: PlayerDock.bottom);
+    await tester.tap(find.byKey(const ValueKey('vk-mix-play')));
+    await tester.pumpAndSettle();
     expect(find.byKey(const ValueKey('player-dislike')), findsOneWidget);
-    expect(find.byKey(const ValueKey('lyrics')), findsOneWidget);
+    expect(find.byKey(const ValueKey('player-more')), findsNothing);
     expect(tester.takeException(), isNull);
     player.playing.value = false;
     await tester.pump(const Duration(seconds: 5));

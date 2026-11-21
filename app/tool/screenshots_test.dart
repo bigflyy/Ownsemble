@@ -1061,12 +1061,18 @@ void main() {
       player.playing.value = true;
       await tester.pump(const Duration(milliseconds: 300));
     }
-    if (forYou != null && forYouStep == 'mix') {
+    if (forYou != null && (forYouStep?.startsWith('mix') ?? false)) {
       await tester.tap(find.byKey(const ValueKey('vk-mix-play')));
       await tester.pump();
       await tester.pump();
       player.playing.value = true;
       await tester.pump(const Duration(milliseconds: 300));
+      // B25: the narrow bar's More menu with the song's buttons.
+      if (forYouStep == 'mix-menu') {
+        await tester.tap(find.byKey(const ValueKey('player-more')));
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 400));
+      }
     }
     if (removeStep != null) {
       final target = ids[twoAccounts ? 0 : 2];
@@ -1488,7 +1494,7 @@ void main() {
       ),
     );
   }
-  for (final step in ['mix', 'loading']) {
+  for (final step in ['mix', 'mix-menu', 'loading']) {
     testWidgets(
       'For you: $step, dark, smallest window',
       (t) => shoot(
@@ -1499,6 +1505,21 @@ void main() {
         dock: PlayerDock.bottom,
         view: const LibraryView(ViewKind.forYou),
         forYouStep: step,
+        pixelRatio: 2,
+      ),
+    );
+  }
+  for (final width in [640.0, 760.0]) {
+    testWidgets(
+      'For you: mix, light, ${width.round()} px',
+      (t) => shoot(
+        t,
+        'light-for-you-mix-${width.round()}',
+        dark: false,
+        size: Size(width, 640),
+        dock: PlayerDock.bottom,
+        view: const LibraryView(ViewKind.forYou),
+        forYouStep: 'mix',
         pixelRatio: 2,
       ),
     );

@@ -278,6 +278,7 @@ class DockBar extends StatelessWidget {
     this.onOpenVersions,
     this.addButton,
     this.lyricsButton,
+    this.moreItems,
   });
 
   final PlaybackController playback;
@@ -304,6 +305,17 @@ class DockBar extends StatelessWidget {
 
   /// Very narrow window: the right column (volume and menus) is left out.
   final bool compact;
+
+  /// The song's buttons as menu entries (thumb-down, +, and with [lyrics]
+  /// the mic), for a song part too short to show them beside the title
+  /// (B25: the smallest window left a VK Mix song's title 16 px, a 760 px
+  /// one a letter); null when the song has no buttons beside the heart, so
+  /// nothing needs to give way.
+  final List<BarMenuItem>? Function(Track track, {required bool lyrics})?
+  moreItems;
+
+  /// A thumb-down and + (40 + 48) beside a title one can read (112).
+  static const _songButtonsWanted = 88 + 112.0;
 
   /// Whether the 52 px cover (and its 12 px gap) fits in a left part of
   /// [width] beside [trailing] 48 px buttons (Up Next, the mic), while the
@@ -369,79 +381,116 @@ class DockBar extends StatelessWidget {
                               style: TextStyle(color: colors.dim),
                             )
                           : LayoutBuilder(
-                              builder: (context, box) => Row(
-                                children: [
-                                  // The small cover goes first when the title
-                                  // row would be squeezed under the heart (the
-                                  // smallest window with Up Next and the mic:
-                                  // B24, acceptance-36g).
-                                  if (thumbnails &&
-                                      _coverFits(
-                                        box.maxWidth,
-                                        trailing: compact
-                                            ? (lyricsButton == null ? 1 : 2)
-                                            : 0,
-                                      )) ...[
-                                    OpensCover(
-                                      track: track,
-                                      child: TrackTile(
+                              builder: (context, box) {
+                                // Short of room, the song's buttons and the
+                                // mic go into one More menu (B25).
+                                // A narrow bar also has Up Next and the mic
+                                // here; a wide one the small cover.
+                                final more = moreItems?.call(
+                                  track,
+                                  lyrics: compact,
+                                );
+                                final besides = compact
+                                    ? 96.0
+                                    : (thumbnails ? 64.0 : 0.0);
+                                final folded =
+                                    more != null &&
+                                    more.isNotEmpty &&
+                                    box.maxWidth < besides + _songButtonsWanted;
+                                return Row(
+                                  children: [
+                                    // The small cover goes first when the title
+                                    // row would be squeezed under the heart (the
+                                    // smallest window with Up Next and the mic:
+                                    // B24, acceptance-36g).
+                                    if (thumbnails &&
+                                        _coverFits(
+                                          box.maxWidth,
+                                          trailing: !compact
+                                              ? (folded ? 1 : 0)
+                                              : folded || lyricsButton != null
+                                              ? 2
+                                              : 1,
+                                        )) ...[
+                                      OpensCover(
                                         track: track,
-                                        size: 52,
-                                        radius: 8,
+                                        child: TrackTile(
+                                          track: track,
+                                          size: 52,
+                                          radius: 8,
+                                        ),
                                       ),
-                                    ),
-                                    const SizedBox(width: 12),
-                                  ],
-                                  // The heart follows the title, as in Spotify;
-                                  // Up Next keeps its place at the end.
-                                  Expanded(
-                                    child: Align(
-                                      alignment: Alignment.centerLeft,
-                                      child: Row(
-                                        mainAxisSize: MainAxisSize.min,
-                                        children: [
-                                          Flexible(
-                                            child: SongTitle(
-                                              track: track,
-                                              mark: VersionTag(
-                                                playback: playback,
+                                      const SizedBox(width: 12),
+                                    ],
+                                    // The heart follows the title, as in Spotify;
+                                    // Up Next keeps its place at the end.
+                                    Expanded(
+                                      child: Align(
+                                        alignment: Alignment.centerLeft,
+                                        child: Row(
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: [
+                                            Flexible(
+                                              child: SongTitle(
                                                 track: track,
-                                                onOpen: onOpenVersions,
+                                                mark: VersionTag(
+                                                  playback: playback,
+                                                  track: track,
+                                                  onOpen: onOpenVersions,
+                                                ),
+                                                onGoToSong: onGoToSong,
+                                                onOpenAlbum: onOpenAlbum == null
+                                                    ? null
+                                                    : () => onOpenAlbum!(track),
                                               ),
-                                              onGoToSong: onGoToSong,
-                                              onOpenAlbum: onOpenAlbum == null
-                                                  ? null
-                                                  : () => onOpenAlbum!(track),
                                             ),
-                                          ),
-                                          ?addButton?.call(track),
-                                          if (collections != null &&
-                                              track.inLibrary)
-                                            FavoriteHeart(
-                                              key: const ValueKey(
-                                                'player-heart',
+                                            if (!folded)
+                                              ?addButton?.call(track),
+                                            if (collections != null &&
+                                                track.inLibrary)
+                                              FavoriteHeart(
+                                                key: const ValueKey(
+                                                  'player-heart',
+                                                ),
+                                                favorite: collections!
+                                                    .isFavorite(track.id),
+                                                onPressed: () => collections!
+                                                    .toggleFavorite(track),
                                               ),
-                                              favorite: collections!.isFavorite(
-                                                track.id,
-                                              ),
-                                              onPressed: () => collections!
-                                                  .toggleFavorite(track),
-                                            ),
-                                        ],
+                                          ],
+                                        ),
                                       ),
                                     ),
-                                  ),
-                                  // Without the right-hand group (a narrow
-                                  // bar) Up Next and the mic follow the heart.
-                                  if (compact) ...[
-                                    UpNextButton(
-                                      playback: playback,
-                                      thumbnails: thumbnails,
-                                    ),
-                                    ?lyricsButton,
+                                    // Without the right-hand group (a narrow
+                                    // bar) Up Next and the mic follow the heart.
+                                    if (compact) ...[
+                                      UpNextButton(
+                                        playback: playback,
+                                        thumbnails: thumbnails,
+                                      ),
+                                      if (folded)
+                                        _BarMoreButton(
+                                          items: () =>
+                                              moreItems?.call(
+                                                track,
+                                                lyrics: true,
+                                              ) ??
+                                              const [],
+                                        )
+                                      else
+                                        ?lyricsButton,
+                                    ] else if (folded)
+                                      _BarMoreButton(
+                                        items: () =>
+                                            moreItems?.call(
+                                              track,
+                                              lyrics: false,
+                                            ) ??
+                                            const [],
+                                      ),
                                   ],
-                                ],
-                              ),
+                                );
+                              },
                             ),
                     ),
                     SizedBox(width: _gap),
@@ -742,6 +791,52 @@ class SongTitle extends StatelessWidget {
 
   /// The bottom bar's song text never takes more than this.
   static const _blockMaxWidth = 280.0;
+}
+
+/// One entry of the narrow bar's More menu (B25).
+class BarMenuItem {
+  const BarMenuItem({required this.label, required this.icon, this.onSelected});
+
+  final String label;
+  final IconData icon;
+
+  /// Null shows the entry dimmed (a song being added, or added).
+  final VoidCallback? onSelected;
+}
+
+/// The narrow bar's More button: the song's buttons that did not fit.
+class _BarMoreButton extends StatelessWidget {
+  const _BarMoreButton({required this.items});
+
+  /// Asked when the menu opens, so it shows the current state (the mic's
+  /// Lyrics or Close lyrics, a + that was clicked).
+  final List<BarMenuItem> Function() items;
+
+  @override
+  Widget build(BuildContext context) {
+    return PopupMenuButton<BarMenuItem>(
+      key: const ValueKey('player-more'),
+      tooltip: 'More',
+      icon: const Icon(Icons.more_horiz),
+      // The entry itself is the value: the bar may rebuild while the menu
+      // is open.
+      itemBuilder: (context) => [
+        for (final item in items())
+          PopupMenuItem<BarMenuItem>(
+            value: item,
+            enabled: item.onSelected != null,
+            child: Row(
+              children: [
+                Icon(item.icon, size: 20),
+                const SizedBox(width: 12),
+                Text(item.label),
+              ],
+            ),
+          ),
+      ],
+      onSelected: (item) => item.onSelected?.call(),
+    );
+  }
 }
 
 /// Shuffle, previous, play or pause, next, repeat.

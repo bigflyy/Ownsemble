@@ -211,7 +211,9 @@ class _LyricsPageState extends State<LyricsPage> {
       builder: (context, constraints) {
         final narrow = constraints.maxWidth < lyricsNarrowWidth;
         final side = narrow ? 24.0 : 56.0;
-        Widget message(String text, {Widget? action}) => Padding(
+        // Scrolls in a window too short for the text and its button (the
+        // smallest window over For You left 132 px: B25's test).
+        Widget message(String text, {Widget? action}) => SingleChildScrollView(
           padding: EdgeInsets.fromLTRB(side, 48, 24, 24),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,

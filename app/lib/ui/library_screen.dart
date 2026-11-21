@@ -966,6 +966,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
                         addButton: _playerAdd,
                         compact: !roomForSidebar,
                         lyricsButton: _lyricsButton(),
+                        moreItems: _playerMore,
                       ),
                     if (widget.sync case final sync?)
                       SyncStatusBar(
@@ -2407,6 +2408,58 @@ class _LibraryScreenState extends State<LibraryScreen> {
     final extra = _songButtons(track);
     if (extra == null) return add;
     return Row(mainAxisSize: MainAxisSize.min, children: [extra, ?add]);
+  }
+
+  /// The bottom bar's More menu when its song buttons do not fit (B25):
+  /// the thumb-down of a song VK recommended, the + of a found song, then
+  /// with [lyrics] the mic (a narrow bar has no right-hand group). Null for
+  /// a song with neither, whose title has room.
+  List<BarMenuItem>? _playerMore(Track track, {required bool lyrics}) {
+    final recommended = _outside?.isRecommended(track.id) ?? false;
+    final catalog = widget.catalog;
+    if (catalog != null && catalog.foundById(track.id) == null) {
+      recFoundSong(_outside, catalog, track);
+    }
+    final found = catalog?.foundById(track.id);
+    if (!recommended && found == null) return null;
+    final lyricsOpen = library.view.kind == ViewKind.lyrics;
+    return [
+      if (recommended)
+        BarMenuItem(
+          label: "Don't like it",
+          icon: Icons.thumb_down_outlined,
+          onSelected: () => _dislike(track),
+        ),
+      if (found != null)
+        switch (catalog!.stateOf(found)) {
+          FoundState.addable when catalog.targets.isEmpty => const BarMenuItem(
+            label: 'Log in to VK to add songs',
+            icon: Icons.add,
+          ),
+          FoundState.addable => BarMenuItem(
+            label: 'Add to library',
+            icon: Icons.add,
+            onSelected: () => _addFound(found),
+          ),
+          FoundState.adding => const BarMenuItem(
+            label: 'Adding...',
+            icon: Icons.add,
+          ),
+          FoundState.inLibrary => const BarMenuItem(
+            label: 'In your library',
+            icon: Icons.check,
+          ),
+        },
+      if (lyrics && widget.lyrics != null)
+        BarMenuItem(
+          label: lyricsOpen ? 'Close lyrics' : 'Lyrics',
+          icon: lyricsOpen ? Icons.mic : Icons.mic_none,
+          onSelected: () {
+            library.jump.clear();
+            library.toggleLyrics();
+          },
+        ),
+    ];
   }
 
   /// The player's + for a found song that plays (plan 06, C3); null for any
