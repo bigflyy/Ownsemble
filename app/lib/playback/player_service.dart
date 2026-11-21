@@ -195,6 +195,20 @@ class PlayerService {
   /// comes mpv is moved there if it started elsewhere.
   Duration? _wantedAt;
 
+  /// Whether the user paused the song while it was still starting (B24:
+  /// the start's own unpause after loadfile undid such a pause). The start
+  /// then loads it paused, and it counts as started once mpv has the file.
+  /// One value for the whole request, like [_wantedAt].
+  bool _holdPaused = false;
+
+  /// Whether mpv was asked to load the current request's file, so an
+  /// unpause now plays this song and not the one before it.
+  bool _fileAsked = false;
+
+  /// Ends the current start's wait for sound when it is held paused and
+  /// mpv has the file (a paused song makes no sound); null between starts.
+  void Function()? _checkHeldStart;
+
   /// Whether [_current] is a restored song no play request has touched yet:
   /// mpv's own state says nothing about it.
   bool _restored = false;
@@ -343,8 +357,13 @@ class PlayerService {
     final generation = ++_generation;
     _loading = true;
     // A new request starts where it is asked to; its next round keeps
-    // where the user moved meanwhile.
-    if (round == 0) _wantedAt = from;
+    // where the user moved meanwhile, and a pause asked meanwhile.
+    if (round == 0) {
+      _wantedAt = from;
+      _holdPaused = false;
+    }
+    _fileAsked = false;
+    _checkHeldStart = null;
     // The last song's play time ends here, before anything is awaited.
     _heard.stop();
     final skipped = _currentStream;
@@ -503,6 +522,21 @@ class PlayerService {
           sound.complete();
         }
       });
+      // Held paused (the user paused it while it started), the song makes
+      // no sound: mpv knowing the new file's length is then enough. Lengths
+      // reported after mpv switched to the file belong to it.
+      var newLength = false;
+      void checkHeldStart() {
+        if (_holdPaused && newLength && opened && !sound.isCompleted) {
+          sound.complete();
+        }
+      }
+
+      final lengths = _player.stream.duration.listen((length) {
+        if (_loadingUriActive && length > Duration.zero) newLength = true;
+        checkHeldStart();
+      });
+      _checkHeldStart = checkHeldStart;
       // mpv reports files it cannot open or decode as error log lines.
       final errors = _player.stream.error.listen((message) {
         if (opened && !sound.isCompleted) {
@@ -531,20 +565,25 @@ class PlayerService {
         // mpv runs with keep-open, so right after a song ended the first
         // unpause hits the old song's end again and mpv pauses once more.
         // mpv keeps 'start' for every later file, so each play sets it.
+        // A pause the user asked meanwhile is kept by both (B24).
         await _mpv.setProperty(
           'start',
           startAt == null
               ? 'none'
               : (startAt.inMilliseconds / 1000).toStringAsFixed(3),
         );
-        await _mpv.setProperty('pause', 'no');
+        await _mpv.setProperty('pause', _holdPaused ? 'yes' : 'no');
         await _mpv.command(['loadfile', uri, 'replace']);
-        await _mpv.setProperty('pause', 'no');
+        _fileAsked = true;
+        await _mpv.setProperty('pause', _holdPaused ? 'yes' : 'no');
         opened = true;
+        checkHeldStart();
         await sound.future.timeout(const Duration(seconds: 20));
       } finally {
         await positions.cancel();
+        await lengths.cancel();
         await errors.cancel();
+        if (generation == _generation) _checkHeldStart = null;
       }
       if (generation == _generation) {
         _loaded = true;
@@ -751,8 +790,19 @@ class PlayerService {
   Future<RoutedStream?> resolveStream(Track track) =>
       resolveRouted(routesFor(track));
 
+  /// Pauses or resumes. While a song still starts, a pause holds it paused
+  /// through the start (B24); a resume before mpv has its file is left to
+  /// the start, or the song before it would sound under this title.
   Future<void> playOrPause() async {
     if (_current == null) return;
+    if (_loading) {
+      _holdPaused = playing.value;
+      if (_holdPaused || _fileAsked) {
+        await _mpv.setProperty('pause', _holdPaused ? 'yes' : 'no');
+      }
+      _checkHeldStart?.call();
+      return;
+    }
     await _mpv.setProperty('pause', playing.value ? 'yes' : 'no');
   }
 

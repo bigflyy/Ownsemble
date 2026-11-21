@@ -54,8 +54,9 @@ class FakePlayer implements PlayerService {
   Future<PlayTiming> play(Track track, {Duration? from}) async {
     played.add(track.id);
     startedFrom.add(from);
-    await holdPlay?.future;
+    // The real player shows the song at once, while it loads.
     _current = track;
+    await holdPlay?.future;
     final ok = !failing.contains(track.id);
     _loaded = ok;
     playing.value = ok;
@@ -229,6 +230,21 @@ void main() {
     await playback.playFrom(list, 2);
     expect(player.played, [2]);
     expect(player.pauseToggles, 1);
+  });
+
+  test('Pause while a song still starts from a saved place pauses it, not '
+      'starts it again (B24: acceptance-36g, the Calendar Pause)', () async {
+    final list = songs(3);
+    player.holdPlay = Completer<void>();
+    final started = playback.playFrom(list, 1);
+    // The player now loads it, from where it was left.
+    player.loading = true;
+    player.resumeAt = const Duration(seconds: 30);
+    await playback.playOrPause();
+    expect(player.played, [1], reason: 'no second request for the song');
+    expect(player.pauseToggles, 1);
+    player.holdPlay!.complete();
+    await started;
   });
 
   test('a song that ends moves on in its list and stops at the end', () async {

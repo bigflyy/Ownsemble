@@ -141,11 +141,15 @@ class PlaybackController extends ChangeNotifier {
 
   /// Pauses or resumes. A song restored from the last run starts here, at
   /// its saved position; that is not a new play, so History does not change.
+  /// A song that is still starting is paused or let go by the player: a
+  /// start from a saved place is not asked again (B24).
   Future<void> playOrPause() async {
     if (!player.isReady) return;
     final track = player.current;
     final resumeAt = player.resumeAt;
-    if (track == null || resumeAt == null) return player.playOrPause();
+    if (track == null || resumeAt == null || player.loading) {
+      return player.playOrPause();
+    }
     if (_resuming) return;
     _resuming = true;
     try {
