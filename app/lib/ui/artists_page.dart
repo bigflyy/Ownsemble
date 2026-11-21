@@ -16,6 +16,7 @@ import '../library/library_records.dart' show StoredArtistPhoto;
 import '../library/track.dart';
 import 'artists.dart';
 import 'cover_tile.dart';
+import 'cover_viewer.dart';
 import 'for_you_page.dart' show PageMessage, songCountText;
 import 'library_controller.dart';
 import 'theme.dart';
@@ -46,6 +47,7 @@ class ArtistPhoto extends StatelessWidget {
     this.photoUrl,
     this.tint,
     this.nameOnly = false,
+    this.opens = false,
   });
 
   final String name;
@@ -59,24 +61,48 @@ class ArtistPhoto extends StatelessWidget {
   final int? tint;
   final bool nameOnly;
 
+  /// Whether a click opens the photo big, as a cover opens (the artist
+  /// page's header; user, 2026-11-21: "i want to be able to" click it).
+  final bool opens;
+
+  /// VK's artist photos are at most 270 px: shown bigger than this they
+  /// only blur.
+  static const viewerSide = 480.0;
+
   @override
   Widget build(BuildContext context) {
     final small = photo?.small ?? photoUrl;
-    final tile = TrackTile(
-      track: Track(
-        id: 0,
-        sourceId: 0,
-        source: TrackSource.vk,
-        artist: name,
-        title: name,
-        durationSec: 0,
-        coverUrl: small,
-        coverLargeUrl: photo?.large,
-        tint: small == null ? null : tint,
-      ),
-      size: size,
-      radius: size / 2,
+    final track = Track(
+      id: 0,
+      sourceId: 0,
+      source: TrackSource.vk,
+      artist: name,
+      title: name,
+      durationSec: 0,
+      coverUrl: small,
+      coverLargeUrl: photo?.large,
+      tint: small == null ? null : tint,
     );
+    Widget tile = TrackTile(track: track, size: size, radius: size / 2);
+    if (opens && small != null) {
+      tile = MouseRegion(
+        cursor: SystemMouseCursors.click,
+        child: Tooltip(
+          message: 'Show the photo bigger',
+          waitDuration: const Duration(milliseconds: 600),
+          child: GestureDetector(
+            key: const ValueKey('artist-photo-open'),
+            onTap: () => showCoverViewer(
+              context,
+              track,
+              // The whole square photo, not the round crop of the tiles.
+              maxSide: viewerSide,
+            ),
+            child: tile,
+          ),
+        ),
+      );
+    }
     if (!nameOnly) return tile;
     final colors = OwnColors.of(context);
     return Tooltip(

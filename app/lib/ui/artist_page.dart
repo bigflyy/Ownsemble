@@ -590,6 +590,7 @@ class _Header extends StatelessWidget {
               photo: photo,
               tint: artist?.tint,
               nameOnly: artist?.nameOnly ?? false,
+              opens: true,
             ),
           ),
           SizedBox(width: narrow ? 16 : 24),
