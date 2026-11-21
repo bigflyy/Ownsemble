@@ -636,8 +636,7 @@ String? artistListDetail(
   final total = artists?.popularTotal(ref);
   final paging = artists?.pagingPopular(ref) ?? false;
   return [
-    'Their popular songs on VK',
-    if (total != null) '$total on VK',
+    if (total != null) '${total == 1 ? '1 song' : '$total songs'} on VK',
     yours,
     if (paging) 'getting more from VK...',
   ].join(', ');
