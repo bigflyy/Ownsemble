@@ -206,6 +206,24 @@ Map<String, String?> accessKeys(String dir) {
   }
 }
 
+/// Each song's album name and album link, by its VK key.
+Map<String, (String?, String?)> albumNames(String dir) {
+  final db = sqlite3.open(p.join(dir, 'library.db'), mode: OpenMode.readOnly);
+  try {
+    return {
+      for (final row in db.select(
+        'SELECT source_key, album, vk_album_key FROM tracks',
+      ))
+        row['source_key'] as String: (
+          row['album'] as String?,
+          row['vk_album_key'] as String?,
+        ),
+    };
+  } finally {
+    db.close();
+  }
+}
+
 void main() {
   IntegrationTestWidgetsFlutterBinding.ensureInitialized();
 
@@ -2696,6 +2714,7 @@ void main() {
     // library as it is.
     final before = library.all;
     final keysBefore = accessKeys(copyDir);
+    final albumsBefore = albumNames(copyDir);
     await tester.tap(find.byKey(const ValueKey('sync-now')));
     await tester.pump();
     expect(sync.running, isTrue, reason: 'Sync now starts a sync');
@@ -2721,8 +2740,54 @@ void main() {
     final newKeys = keysAfter.keys
         .where((key) => keysAfter[key] != keysBefore[key])
         .length;
-    expect(again.result!.updated, newKeys, reason: 'only new access keys');
-    if (newKeys == 0) {
+    // VK now and then drops an album's title: the reply names the album
+    // with an empty title and the album itself no longer answers
+    // (acceptance-34b, one song, 18:21 -> 18:27). The song then loses its
+    // album name and keeps the album link; only that may count too.
+    final albumsAfter = albumNames(copyDir);
+    final dropped = albumsAfter.keys
+        .where(
+          (key) =>
+              keysAfter[key] == keysBefore[key] &&
+              albumsBefore[key]?.$1 != null &&
+              albumsAfter[key]!.$1 == null &&
+              albumsAfter[key]!.$2 != null &&
+              albumsAfter[key]!.$2 == albumsBefore[key]?.$2,
+        )
+        .toSet();
+    if (dropped.isNotEmpty) {
+      // Only what VK's own reply says now, not the app's copy of it: the
+      // album is there with an empty title.
+      final reply = await vkClient.call('audio.get', {
+        'owner_id': '${vkClient.userId}',
+        'count': '1000',
+      }) as Map<String, dynamic>;
+      final emptyOnVk = {
+        for (final item
+            in (reply['items'] as List).cast<Map<String, dynamic>>())
+          if (dropped.contains(vkSourceKey(item)) &&
+              item['album'] is Map<String, dynamic> &&
+              ((item['album'] as Map<String, dynamic>)['title'] as String? ??
+                      '')
+                  .trim()
+                  .isEmpty)
+            vkSourceKey(item),
+      };
+      expect(
+        emptyOnVk.length == dropped.length,
+        isTrue,
+        reason: 'a blanked album name is one VK gives empty',
+      );
+      // ignore: avoid_print
+      print('Sync now: VK dropped the album title of ${dropped.length} songs');
+    }
+    final droppedNames = dropped.length;
+    expect(
+      again.result!.updated,
+      newKeys + droppedNames,
+      reason: 'only new access keys and album titles VK dropped',
+    );
+    if (newKeys + droppedNames == 0) {
       expect(identical(library.all, before), isTrue, reason: 'not reloaded');
       expect(find.textContaining('no changes'), findsOneWidget);
     } else {
