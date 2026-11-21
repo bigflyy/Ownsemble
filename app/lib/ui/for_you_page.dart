@@ -491,8 +491,11 @@ class _Loading extends StatelessWidget {
         borderRadius: BorderRadius.circular(10),
       ),
     );
-    return Padding(
+    // Shapes only: a short window cuts them off instead of overflowing
+    // (the smallest window, 440 px high).
+    return SingleChildScrollView(
       key: const ValueKey('for-you-loading'),
+      physics: const NeverScrollableScrollPhysics(),
       padding: const EdgeInsets.fromLTRB(24, 4, 24, 24),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
