@@ -1587,6 +1587,16 @@ void main() {
 
     // Artist chip: the playing song's artist, picked in its menu.
     final artist = player.current!.artist;
+    await tester.pump();
+    if (find.byKey(const ValueKey('chip-artist')).evaluate().isEmpty) {
+      // ignore: avoid_print
+      print(
+        'no artist chip: view ${library.view.kind.name}, window client '
+        '${OwnWindow.find().clientSize}, Filters button '
+        '${find.byKey(const ValueKey('filters-button')).evaluate().length}, '
+        'side panel ${find.byKey(const ValueKey('dock-bottom')).evaluate().length}',
+      );
+    }
     await tester.tap(find.byKey(const ValueKey('chip-artist')));
     await tester.pumpAndSettle();
     await tester.enterText(find.byKey(const ValueKey('artist-search')), artist);
