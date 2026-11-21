@@ -6,6 +6,8 @@ import 'package:ownsemble/library/track.dart';
 import 'package:ownsemble/lyrics/lyrics_controller.dart';
 import 'package:ownsemble/playback/playback_controller.dart';
 import 'package:ownsemble/playback/player_service.dart';
+import 'package:ownsemble/storage/audio_storage.dart';
+import 'package:ownsemble/ui/collections_controller.dart';
 import 'package:ownsemble/ui/library_controller.dart';
 import 'package:ownsemble/ui/library_screen.dart';
 import 'package:ownsemble/ui/lyrics_page.dart';
@@ -117,6 +119,52 @@ void main() {
       await tester.pump();
       expect(library.view.kind, ViewKind.songs, reason: '$size');
       expect(tester.takeException(), isNull);
+    }
+  });
+
+  testWidgets('the bottom bar keeps a usable volume slider with the mic '
+      'button (plan 10; acceptance-36a tapped beside a 7 px slider)', (
+    tester,
+  ) async {
+    for (final width in const [1100.0, 900.0, 760.0]) {
+      tester.view.physicalSize = Size(width, 760);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      // As in the app: Stack and Download buttons too.
+      final player = PlayerService(
+        muted: true,
+        dataDir: '.',
+        storage: AudioStorage(dataDir: '.', store: store),
+      )..restore(library.all.last, Duration.zero);
+      await tester.pumpWidget(
+        MaterialApp(
+          home: LibraryScreen(
+            key: ValueKey(width),
+            library: library,
+            playback: PlaybackController(player: player),
+            collections: CollectionsController(store),
+            lyrics: LyricsController(
+              load: (source, ref) => null,
+              save: (source, ref, lyrics, {md5}) {},
+              apiOfSource: (sourceId) => null,
+            ),
+          ),
+        ),
+      );
+      await tester.pump();
+      expect(find.byKey(const ValueKey('lyrics')), findsOneWidget);
+      // A slider is wide enough to hit, or only the mute button shows.
+      final slider = find.byKey(const ValueKey('volume'));
+      expect(find.byKey(const ValueKey('mute')), findsOneWidget);
+      if (width >= 900) expect(slider, findsOneWidget, reason: '$width px');
+      if (slider.evaluate().isNotEmpty) {
+        expect(
+          tester.getSize(slider).width,
+          greaterThanOrEqualTo(40),
+          reason: 'volume slider at a $width px window',
+        );
+      }
+      expect(tester.takeException(), isNull, reason: '$width px');
     }
   });
 

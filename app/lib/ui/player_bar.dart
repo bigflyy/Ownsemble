@@ -415,17 +415,19 @@ class DockBar extends StatelessWidget {
                         final stack = inLibrary && collections != null;
                         final versions = track != null;
                         final download = inLibrary && player.storage != null;
-                        // Buttons are 40 px and the volume keeps at least
-                        // its icon. Short of room, the Stack menu and then
-                        // Versions are left out first: a song's row menu
-                        // has both (plan 10 added the mic here).
+                        // Buttons are 48 px; the volume keeps its icon and
+                        // a slider of about 40 px (a 7 px one was missed by
+                        // clicks: acceptance-36a). Short of room, the Stack
+                        // menu and then Versions are left out first: a
+                        // song's row menu has both (plan 10 added the mic
+                        // here).
                         final fixed = [
                           upNext,
                           download,
                           lyricsButton != null,
                           canDockSide,
                         ].where((shown) => shown).length;
-                        final room = (box.maxWidth / 40).floor() - 1 - fixed;
+                        final room = ((box.maxWidth - 88) / 48).floor() - fixed;
                         final showVersions = versions && room >= 1;
                         final showStack =
                             stack && room >= (showVersions ? 2 : 1);
@@ -894,47 +896,54 @@ class VolumeRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final colors = OwnColors.of(context);
     final shown = playback.mutedByUser ? 0.0 : playback.volume;
-    return Row(
-      children: [
-        IconButton(
-          key: const ValueKey('mute'),
-          tooltip: playback.mutedByUser ? 'Unmute (Ctrl+M)' : 'Mute (Ctrl+M)',
-          onPressed: playback.toggleMute,
-          icon: Icon(
-            shown == 0
-                ? Icons.volume_off_outlined
-                : shown < 50
-                ? Icons.volume_down_outlined
-                : Icons.volume_up_outlined,
-          ),
-        ),
-        Expanded(
-          child: SliderTheme(
-            data: SliderTheme.of(context).copyWith(
-              trackHeight: 4,
-              activeTrackColor: colors.dim,
-              thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6),
-            ),
-            child: Slider(
-              key: const ValueKey('volume'),
-              value: shown,
-              max: 100,
-              label: 'Volume ${shown.round()}',
-              onChanged: playback.setVolume,
-              onChangeEnd: (_) => playback.saveVolume(),
+    return LayoutBuilder(
+      // Too narrow for a slider one can hit: the mute button alone (Up and
+      // Down still change the volume).
+      builder: (context, box) => Row(
+        children: [
+          IconButton(
+            key: const ValueKey('mute'),
+            tooltip: playback.mutedByUser ? 'Unmute (Ctrl+M)' : 'Mute (Ctrl+M)',
+            onPressed: playback.toggleMute,
+            icon: Icon(
+              shown == 0
+                  ? Icons.volume_off_outlined
+                  : shown < 50
+                  ? Icons.volume_down_outlined
+                  : Icons.volume_up_outlined,
             ),
           ),
-        ),
-        if (showValue)
-          SizedBox(
-            width: 28,
-            child: Text(
-              '${shown.round()}',
-              textAlign: TextAlign.right,
-              style: TextStyle(fontSize: 13, color: colors.dim),
+          if (box.maxWidth >= 48 + 40 + (showValue ? 28 : 0))
+            Expanded(
+              child: SliderTheme(
+                data: SliderTheme.of(context).copyWith(
+                  trackHeight: 4,
+                  activeTrackColor: colors.dim,
+                  thumbShape: const RoundSliderThumbShape(
+                    enabledThumbRadius: 6,
+                  ),
+                ),
+                child: Slider(
+                  key: const ValueKey('volume'),
+                  value: shown,
+                  max: 100,
+                  label: 'Volume ${shown.round()}',
+                  onChanged: playback.setVolume,
+                  onChangeEnd: (_) => playback.saveVolume(),
+                ),
+              ),
             ),
-          ),
-      ],
+          if (showValue)
+            SizedBox(
+              width: 28,
+              child: Text(
+                '${shown.round()}',
+                textAlign: TextAlign.right,
+                style: TextStyle(fontSize: 13, color: colors.dim),
+              ),
+            ),
+        ],
+      ),
     );
   }
 }
