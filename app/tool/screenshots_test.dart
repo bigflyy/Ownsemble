@@ -24,6 +24,7 @@ import 'package:ownsemble/library/search_index.dart';
 import 'package:ownsemble/library/similar_seeds.dart';
 import 'package:ownsemble/library/song_filter.dart';
 import 'package:ownsemble/library/track.dart';
+import 'package:ownsemble/lyrics/lyrics_controller.dart';
 import 'package:ownsemble/playback/playback_controller.dart';
 import 'package:ownsemble/playback/player_service.dart';
 import 'package:ownsemble/storage/audio_storage.dart';
@@ -809,6 +810,12 @@ void main() {
               remover: remover,
               forYou: forYou,
               playlists: playlists,
+              // The mic button shows in every bar, as in the app.
+              lyrics: LyricsController(
+                load: (source, ref) => null,
+                save: (source, ref, lyrics, {md5}) {},
+                routeOf: lyricsRouteBySource((sourceId) => null),
+              ),
             ),
           ),
         ),
@@ -1460,6 +1467,42 @@ void main() {
       pixelRatio: 2,
     ),
   );
+  // The narrow bar beside Up Next and the mic (B24: the title row
+  // overflowed at the smallest window).
+  for (final (name, size) in [
+    ('smallest', const Size(480, 440)),
+    ('640', const Size(640, 700)),
+  ]) {
+    testWidgets(
+      'dark, bottom bar, long artist names, $name',
+      (t) => shoot(
+        t,
+        'dark-long-names-$name',
+        dark: true,
+        saving: true,
+        longNames: true,
+        rail: true,
+        dock: PlayerDock.bottom,
+        size: size,
+        pixelRatio: 2,
+      ),
+    );
+  }
+  for (final step in ['mix', 'loading']) {
+    testWidgets(
+      'For you: $step, dark, smallest window',
+      (t) => shoot(
+        t,
+        'dark-for-you-$step-smallest',
+        dark: true,
+        size: const Size(480, 440),
+        dock: PlayerDock.bottom,
+        view: const LibraryView(ViewKind.forYou),
+        forYouStep: step,
+        pixelRatio: 2,
+      ),
+    );
+  }
   testWidgets(
     'dark, shortcuts list',
     (t) => shoot(t, 'dark-shortcuts', dark: true, shortcutsList: true),
