@@ -2568,7 +2568,8 @@ void main() {
     // integration_test/catalog_test.dart checks the rest of adding songs.
     final catalog = screen.catalog!;
     final vkClient = VkClient(SessionCookie.loadAll(File(sessionFile)));
-    await vkClient.ensureToken();
+    // login.vk.ru refused connections now and then (acceptance-36d).
+    await retryTransient(vkClient.ensureToken);
     Future<Set<String>> vkKeys() async {
       final reply = await vkClient.call('audio.get', {
         'owner_id': '${vkClient.userId}',

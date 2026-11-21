@@ -116,14 +116,8 @@ void main() {
     // Which songs have what: asked by the test itself, spaced out (VK
     // answers error 9 to many calls in a row).
     final client = VkClient(SessionCookie.loadAll(File(session)));
-    // The network refused login.vk.ru once (lyrics-36a): one more try.
-    try {
-      await client.ensureToken();
-    } on Object catch (error) {
-      say('test login failed once (${error.runtimeType}): again');
-      await Future<void>.delayed(const Duration(seconds: 3));
-      await client.ensureToken();
-    }
+    // login.vk.ru refused connections now and then (lyrics-36a).
+    await retryTransient(client.ensureToken);
     Track? timedSong, plainSong, noneSong, spareSong;
     Lyrics? timedLyrics;
     var asked = 0;
