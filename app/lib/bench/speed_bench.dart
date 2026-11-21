@@ -11,6 +11,7 @@ import 'package:flutter/services.dart'
 import 'package:flutter/widgets.dart';
 import 'package:media_kit/media_kit.dart' show NativePlayer;
 
+import '../library/artist_index.dart' show Artist;
 import '../library/play_period.dart';
 import '../library/search_text.dart';
 import '../library/song_filter.dart';
@@ -19,6 +20,8 @@ import '../playback/playback_controller.dart';
 import '../playback/player_service.dart';
 import '../playback/stream_proxy.dart' show ProxyRequestLog;
 import '../storage/cover_store.dart';
+import '../ui/artist_page.dart' show vkRefOf;
+import '../ui/artists.dart';
 import '../ui/catalog_search.dart';
 import '../ui/collections_controller.dart';
 import '../ui/cover_tile.dart';
@@ -45,6 +48,7 @@ class SpeedBench {
     this.forYou,
     this.catalog,
     this.remover,
+    this.artists,
     this.resultFile,
     this.volume = 100,
   });
@@ -70,6 +74,9 @@ class SpeedBench {
   /// Search on VK and Remove from library (plan 06), for the catalog parts.
   final CatalogSearch? catalog;
   final SongRemover? remover;
+
+  /// The Artists place (plan 09), for the artists part; null when not needed.
+  final LibraryArtists? artists;
 
   /// The result file; the restart check writes it while the app stays open.
   final String? resultFile;
@@ -152,6 +159,9 @@ class SpeedBench {
     }
     if (parts?.contains('catalogAdd') ?? false) {
       result['catalogAdd'] = await _catalogAddBench();
+    }
+    if (parts?.contains('artists') ?? false) {
+      result['artists'] = await _artistsBench();
     }
     await player.setVolume(volume);
     result['volume'] = volume;
@@ -676,6 +686,185 @@ class SpeedBench {
 
   /// Scrolls the full list at constant speeds, one jump per frame, and
   /// collects the engine's frame timings for each speed.
+  /// The Artists place (plan 09, R13), best run with no stored photos: the
+  /// first usable grid and the first photo timed apart, fast scrolling and
+  /// search keystrokes while photos arrive, then 32 artist pages with VK's
+  /// part and the memory after going back to Songs.
+  Future<Map<String, Object?>> _artistsBench() async {
+    final artists = this.artists;
+    if (artists == null) return {'skipped': 'no artists'};
+    library.searchText.clear();
+    final indexBuiltBefore = artists.builtIndex != null;
+    final rssBeforeMB = ProcessInfo.currentRss / (1024 * 1024);
+    final open = Stopwatch()..start();
+    library.showView(const LibraryView(ViewKind.artists));
+    await WidgetsBinding.instance.endOfFrame;
+    final gridMs = open.elapsedMilliseconds;
+    final shown = artists.shown('');
+    final withId = shown.where((a) => !a.nameOnly).toList();
+    bool hasPhoto(Artist a) => artists.photoOf(a)?.large != null;
+    int asked() => withId.where((a) => artists.photoOf(a) != null).length;
+    final photosAtOpen = asked();
+    const gridKey = ValueKey('artists-grid');
+    // The first photo VK names (any artist), and the first one the grid
+    // draws (decoded, in sight), apart.
+    int? firstPhotoMs, firstShownMs;
+    while (open.elapsed < const Duration(seconds: 30)) {
+      if (firstPhotoMs == null && withId.any(hasPhoto)) {
+        firstPhotoMs = open.elapsedMilliseconds;
+      }
+      if (_imagesShownUnder(gridKey) > 0) {
+        firstShownMs = open.elapsedMilliseconds;
+        break;
+      }
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+    }
+    final shownAtFirst = _imagesShownUnder(gridKey);
+
+    // Fast scrolling at once, while the photos keep coming (each request
+    // asks the tiles from the first one in sight on): coversDecoded says
+    // how many photos were decoded during each run.
+    final grid = _scrollPositionUnder(gridKey);
+    final scroll = <String, Object?>{};
+    if (grid != null) {
+      for (final pixelsPerSecond in [6000, 20000]) {
+        scroll['${pixelsPerSecond}pxPerSec'] = await _scrollRun(
+          pixelsPerSecond,
+          seconds: 4,
+          positionOf: () => _scrollPositionUnder(gridKey) ?? grid,
+        );
+      }
+      _scrollPositionUnder(gridKey)?.jumpTo(0);
+    }
+    final photosBeforeSearch = asked();
+    final search = await _typeQueries(const [
+      'дайте',
+      'кино',
+      'the',
+      'arctic',
+      'ёлка',
+    ]);
+    final photosAfterSearch = asked();
+
+    // 32 artist pages: VK's part of each, as a visit asks it. The test
+    // account's own artists first (real VK ids), then generated ones.
+    final real = [
+      for (final a in withId)
+        if (a.songs.any((t) => t.source == TrackSource.vk)) a,
+    ];
+    final picks = [
+      ...real,
+      ...withId.where((a) => !real.contains(a)),
+    ].take(32).toList();
+    final pages = <Map<String, Object?>>[];
+    for (final artist in picks) {
+      final ref = vkRefOf(artist.key, artist)!;
+      final clock = Stopwatch()..start();
+      library.openArtist(artist.key);
+      await WidgetsBinding.instance.endOfFrame;
+      final frameMs = clock.elapsedMilliseconds;
+      while (artists.vkOf(ref).load == ArtistVkLoad.loading &&
+          clock.elapsed < const Duration(seconds: 20)) {
+        await Future<void>.delayed(const Duration(milliseconds: 20));
+      }
+      final vk = artists.vkOf(ref);
+      pages.add({
+        'real': real.contains(artist),
+        'songs': artist.songs.length,
+        'toFrameMs': frameMs,
+        'vkMs': clock.elapsedMilliseconds,
+        'load': vk.load.name,
+        'popular': vk.page?.popular.songs.length,
+        'releases': vk.page?.releases.length,
+      });
+    }
+    final rssAfterPagesMB = ProcessInfo.currentRss / (1024 * 1024);
+    library.showView(LibraryView.songs);
+    await WidgetsBinding.instance.endOfFrame;
+    await Future<void>.delayed(const Duration(seconds: 10));
+    await _settle();
+    final loaded = [
+      for (final page in pages)
+        if (page['load'] == 'loaded') (page['vkMs']! as int).toDouble(),
+    ];
+    return {
+      'artists': shown.length,
+      'withId': withId.length,
+      'indexBuiltBeforeOpen': indexBuiltBefore,
+      'gridToFrameMs': gridMs,
+      'firstPhotoMs': firstPhotoMs,
+      'firstPhotoShownMs': firstShownMs,
+      'photosShownAtFirst': shownAtFirst,
+      'photosStoredAtOpen': photosAtOpen,
+      'scroll': grid == null ? {'error': 'no grid'} : scroll,
+      'photosAskedBeforeSearch': photosBeforeSearch,
+      'search': search,
+      'photosAskedAfterSearch': photosAfterSearch,
+      'photosFound': withId.where(hasPhoto).length,
+      'pages': pages.length,
+      'pagesLoaded': loaded.length,
+      'pageVkMs': _stats(loaded),
+      'pageToFrameMs': _stats([
+        for (final page in pages) (page['toFrameMs']! as int).toDouble(),
+      ]),
+      'pageLoads': {
+        for (final load in ArtistVkLoad.values)
+          load.name: pages.where((p) => p['load'] == load.name).length,
+      },
+      'rssMB': {
+        'before': rssBeforeMB.round(),
+        'after32Pages': rssAfterPagesMB.round(),
+        'backOnSongs10s': (ProcessInfo.currentRss / (1024 * 1024)).round(),
+      },
+    };
+  }
+
+  /// How many decoded images are drawn inside the widget keyed [key].
+  int _imagesShownUnder(Key key) {
+    var count = 0;
+    void inside(Element element) {
+      final widget = element.widget;
+      if (widget is RawImage && widget.image != null) count++;
+      element.visitChildren(inside);
+    }
+
+    void visit(Element element) {
+      if (element.widget.key == key) {
+        inside(element);
+        return;
+      }
+      element.visitChildren(visit);
+    }
+
+    WidgetsBinding.instance.rootElement?.visitChildren(visit);
+    return count;
+  }
+
+  /// The scroll position of the scrollable inside the widget keyed [key].
+  ScrollPosition? _scrollPositionUnder(Key key) {
+    ScrollPosition? found;
+    void inside(Element element) {
+      if (found != null) return;
+      if (element is StatefulElement && element.state is ScrollableState) {
+        found = (element.state as ScrollableState).position;
+        return;
+      }
+      element.visitChildren(inside);
+    }
+
+    void visit(Element element) {
+      if (found != null) return;
+      if (element.widget.key == key) {
+        inside(element);
+        return;
+      }
+      element.visitChildren(visit);
+    }
+
+    WidgetsBinding.instance.rootElement?.visitChildren(visit);
+    return found;
+  }
+
   Future<Map<String, Object?>> _scrollBench() async {
     library.searchText.clear();
     final results = <String, Object?>{};
@@ -730,8 +919,10 @@ class SpeedBench {
   Future<Map<String, Object?>> _scrollRun(
     int pixelsPerSecond, {
     required int seconds,
+    ScrollPosition Function()? positionOf,
   }) async {
-    library.scroll.jumpTo(0);
+    final scrolled = positionOf ?? () => library.scroll.position;
+    scrolled().jumpTo(0);
     await _settle();
     _frames.clear();
     final decodesBefore = CoverFileImage.decodeCount;
@@ -739,7 +930,7 @@ class SpeedBench {
     final done = Completer<void>();
     void onFrame(Duration _) {
       final elapsed = (Timeline.now - startUs) / 1e6;
-      final position = library.scroll.position;
+      final position = scrolled();
       final target = min(elapsed * pixelsPerSecond, position.maxScrollExtent);
       position.jumpTo(target);
       if (elapsed >= seconds || target >= position.maxScrollExtent) {

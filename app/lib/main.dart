@@ -473,6 +473,7 @@ Future<void> main(List<String> args) async {
         forYou: forYou,
         catalog: catalog,
         remover: remover,
+        artists: artists,
       ),
     );
   });
@@ -513,6 +514,7 @@ Future<void> _afterFirstFrame({
   required ForYou forYou,
   required CatalogSearch catalog,
   required SongRemover remover,
+  required LibraryArtists artists,
 }) async {
   final firstFrameAt = DateTime.now();
   if (options.metricsFile != null) {
@@ -564,6 +566,7 @@ Future<void> _afterFirstFrame({
       forYou: forYou,
       catalog: catalog,
       remover: remover,
+      artists: artists,
       resultFile: options.benchFile,
       volume: options.benchVolume,
     ).run(parts: options.benchParts);
