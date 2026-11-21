@@ -12,6 +12,7 @@ import 'package:ownsemble/library/library_store.dart';
 import 'package:ownsemble/library/search_index.dart';
 import 'package:ownsemble/library/similar_seeds.dart';
 import 'package:ownsemble/library/track.dart';
+import 'package:ownsemble/lyrics/lyrics_controller.dart';
 import 'package:ownsemble/playback/playback_controller.dart';
 import 'package:ownsemble/ui/catalog_search.dart';
 import 'package:ownsemble/ui/for_you.dart';
@@ -115,6 +116,8 @@ void main() {
     WidgetTester tester, {
     double width = 1400,
     double height = 900,
+    LyricsController? lyrics,
+    PlayerDock dock = PlayerDock.side,
   }) async {
     tester.view.physicalSize = Size(width, height);
     tester.view.devicePixelRatio = 1;
@@ -128,8 +131,9 @@ void main() {
             playback: playback,
             catalog: catalog,
             forYou: forYou,
+            lyrics: lyrics,
             // The side panel: Similar songs shows there, not in the bar.
-            settings: ShellSettings.inMemory()..dockTo(PlayerDock.side),
+            settings: ShellSettings.inMemory()..dockTo(dock),
           ),
         ),
       ),
@@ -220,6 +224,34 @@ void main() {
     );
     expect(player.current?.title, 'Микс б');
     expect(find.textContaining('Skipped.'), findsOneWidget);
+    player.playing.value = false;
+    await tester.pump(const Duration(seconds: 5));
+  });
+
+  testWidgets('the smallest window fits a VK Mix song\'s thumb-down and + '
+      'beside Up Next and the mic (B24)', (tester) async {
+    await openForYou(
+      tester,
+      width: 480,
+      height: 440,
+      dock: PlayerDock.bottom,
+      lyrics: LyricsController(
+        load: (source, ref) => null,
+        save: (source, ref, lyrics, {md5}) {},
+        routeOf: lyricsRouteBySource((sourceId) => null),
+      ),
+    );
+    expect(
+      tester.takeException(),
+      isNull,
+      reason: 'the page while VK answers fits too',
+    );
+    await tester.tap(find.byKey(const ValueKey('vk-mix-play')));
+    await tester.pumpAndSettle();
+    expect(player.current?.title, 'Микс 1');
+    expect(find.byKey(const ValueKey('player-dislike')), findsOneWidget);
+    expect(find.byKey(const ValueKey('lyrics')), findsOneWidget);
+    expect(tester.takeException(), isNull);
     player.playing.value = false;
     await tester.pump(const Duration(seconds: 5));
   });

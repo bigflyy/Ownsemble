@@ -126,6 +126,37 @@ void main() {
     }
   });
 
+  testWidgets('the smallest window fits the bottom bar with the heart, Up '
+      'Next and the mic (B24: acceptance-36g, a 16 px overflow of the title '
+      'row)', (tester) async {
+    for (final size in const [Size(480, 440), Size(560, 440)]) {
+      tester.view.physicalSize = size;
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      final player = PlayerService(muted: true, dataDir: '.')
+        ..restore(library.all.last, Duration.zero);
+      await tester.pumpWidget(
+        MaterialApp(
+          home: LibraryScreen(
+            key: ValueKey(size),
+            library: library,
+            playback: PlaybackController(player: player),
+            collections: CollectionsController(store),
+            lyrics: LyricsController(
+              load: (source, ref) => null,
+              save: (source, ref, lyrics, {md5}) {},
+              routeOf: lyricsRouteBySource((sourceId) => null),
+            ),
+          ),
+        ),
+      );
+      await tester.pump();
+      expect(find.byKey(const ValueKey('player-heart')), findsOneWidget);
+      expect(find.byKey(const ValueKey('lyrics')), findsOneWidget);
+      expect(tester.takeException(), isNull, reason: '$size');
+    }
+  });
+
   testWidgets('a search typed on Lyrics shows the songs it finds; Back '
       'returns to Lyrics and the mic closes it (Codex review)', (tester) async {
     tester.view.physicalSize = const Size(1400, 900);

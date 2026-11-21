@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 
 import '../library/track.dart';
@@ -303,6 +305,24 @@ class DockBar extends StatelessWidget {
   /// Very narrow window: the right column (volume and menus) is left out.
   final bool compact;
 
+  /// Whether the 52 px cover (and its 12 px gap) fits in a left part of
+  /// [width] beside [trailing] 48 px buttons (Up Next, the mic), while the
+  /// title row keeps room for its 48 px heart and some title.
+  static bool _coverFits(double width, {required int trailing}) =>
+      width - 64 - trailing * 48 >= 48 + 40;
+
+  /// The transport row's width: five buttons, each with a 48 px tap area.
+  static const _transportWidth = 240.0;
+
+  /// The bar's side padding and the gap between its parts; a narrow bar
+  /// keeps less of both.
+  double get _gap => compact ? 12 : 20;
+
+  /// What a narrow bar's song part is given before the controls keep
+  /// their 3 / 5: Up Next, the mic, a thumb-down and + (40 + 48) and some
+  /// title.
+  static const _songPartWanted = 48 + 48 + 88 + 40.0;
+
   @override
   Widget build(BuildContext context) {
     final colors = OwnColors.of(context);
@@ -312,7 +332,7 @@ class DockBar extends StatelessWidget {
         color: colors.surface,
         border: Border(top: BorderSide(color: colors.line)),
       ),
-      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+      padding: EdgeInsets.symmetric(horizontal: _gap, vertical: 8),
       child: ListenableBuilder(
         listenable: Listenable.merge([
           playback,
@@ -325,163 +345,220 @@ class DockBar extends StatelessWidget {
           initialData: player.current,
           builder: (context, snapshot) {
             final track = snapshot.data;
-            return Row(
-              children: [
-                Expanded(
-                  flex: 2,
-                  child: track == null
-                      ? Text(
-                          'Click a song to play it',
-                          style: TextStyle(color: colors.dim),
-                        )
-                      : Row(
-                          children: [
-                            if (thumbnails) ...[
-                              OpensCover(
-                                track: track,
-                                child: TrackTile(
-                                  track: track,
-                                  size: 52,
-                                  radius: 8,
-                                ),
-                              ),
-                              const SizedBox(width: 12),
-                            ],
-                            // The heart follows the title, as in Spotify;
-                            // Up Next keeps its place at the end.
-                            Expanded(
-                              child: Align(
-                                alignment: Alignment.centerLeft,
-                                child: Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    Flexible(
-                                      child: SongTitle(
+            return LayoutBuilder(
+              builder: (context, bar) {
+                // A narrow bar parts its room 2 : 3 between the song and
+                // the controls, but a short song part takes what the
+                // controls do not need (B24: at the smallest window a
+                // VK Mix song's thumb-down and + did not fit beside Up Next
+                // and the mic).
+                final room = bar.maxWidth - _gap;
+                final controls = compact
+                    ? math.max(
+                        _transportWidth,
+                        math.min(room * 3 / 5, room - _songPartWanted),
+                      )
+                    : null;
+                return Row(
+                  children: [
+                    Expanded(
+                      flex: 2,
+                      child: track == null
+                          ? Text(
+                              'Click a song to play it',
+                              style: TextStyle(color: colors.dim),
+                            )
+                          : LayoutBuilder(
+                              builder: (context, box) => Row(
+                                children: [
+                                  // The small cover goes first when the title
+                                  // row would be squeezed under the heart (the
+                                  // smallest window with Up Next and the mic:
+                                  // B24, acceptance-36g).
+                                  if (thumbnails &&
+                                      _coverFits(
+                                        box.maxWidth,
+                                        trailing: compact
+                                            ? (lyricsButton == null ? 1 : 2)
+                                            : 0,
+                                      )) ...[
+                                    OpensCover(
+                                      track: track,
+                                      child: TrackTile(
                                         track: track,
-                                        mark: VersionTag(
-                                          playback: playback,
-                                          track: track,
-                                          onOpen: onOpenVersions,
-                                        ),
-                                        onGoToSong: onGoToSong,
-                                        onOpenAlbum: onOpenAlbum == null
-                                            ? null
-                                            : () => onOpenAlbum!(track),
+                                        size: 52,
+                                        radius: 8,
                                       ),
                                     ),
-                                    ?addButton?.call(track),
-                                    if (collections != null && track.inLibrary)
-                                      FavoriteHeart(
-                                        key: const ValueKey('player-heart'),
-                                        favorite: collections!.isFavorite(
-                                          track.id,
-                                        ),
-                                        onPressed: () =>
-                                            collections!.toggleFavorite(track),
-                                      ),
+                                    const SizedBox(width: 12),
                                   ],
-                                ),
+                                  // The heart follows the title, as in Spotify;
+                                  // Up Next keeps its place at the end.
+                                  Expanded(
+                                    child: Align(
+                                      alignment: Alignment.centerLeft,
+                                      child: Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          Flexible(
+                                            child: SongTitle(
+                                              track: track,
+                                              mark: VersionTag(
+                                                playback: playback,
+                                                track: track,
+                                                onOpen: onOpenVersions,
+                                              ),
+                                              onGoToSong: onGoToSong,
+                                              onOpenAlbum: onOpenAlbum == null
+                                                  ? null
+                                                  : () => onOpenAlbum!(track),
+                                            ),
+                                          ),
+                                          ?addButton?.call(track),
+                                          if (collections != null &&
+                                              track.inLibrary)
+                                            FavoriteHeart(
+                                              key: const ValueKey(
+                                                'player-heart',
+                                              ),
+                                              favorite: collections!.isFavorite(
+                                                track.id,
+                                              ),
+                                              onPressed: () => collections!
+                                                  .toggleFavorite(track),
+                                            ),
+                                        ],
+                                      ),
+                                    ),
+                                  ),
+                                  // Without the right-hand group (a narrow
+                                  // bar) Up Next and the mic follow the heart.
+                                  if (compact) ...[
+                                    UpNextButton(
+                                      playback: playback,
+                                      thumbnails: thumbnails,
+                                    ),
+                                    ?lyricsButton,
+                                  ],
+                                ],
                               ),
                             ),
-                            // Without the right-hand group (a narrow
-                            // bar) Up Next and the mic follow the heart.
-                            if (compact) ...[
-                              UpNextButton(
-                                playback: playback,
-                                thumbnails: thumbnails,
-                              ),
-                              ?lyricsButton,
-                            ],
+                    ),
+                    SizedBox(width: _gap),
+                    if (controls != null)
+                      SizedBox(
+                        width: controls,
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            TransportRow(playback: playback, large: false),
+                            SeekRow(
+                              playback: playback,
+                              layout: SeekLayout.dock,
+                            ),
                           ],
                         ),
-                ),
-                const SizedBox(width: 20),
-                Expanded(
-                  flex: 3,
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      TransportRow(playback: playback, large: false),
-                      SeekRow(playback: playback, layout: SeekLayout.dock),
-                    ],
-                  ),
-                ),
-                if (!compact) ...[
-                  const SizedBox(width: 20),
-                  Expanded(
-                    flex: 2,
-                    child: LayoutBuilder(
-                      builder: (context, box) {
-                        final inLibrary = track != null && track.inLibrary;
-                        final upNext = track != null;
-                        final stack = inLibrary && collections != null;
-                        final versions = track != null;
-                        final download = inLibrary && player.storage != null;
-                        // Buttons are 48 px; the volume keeps its icon and
-                        // a slider of about 40 px (a 7 px one was missed by
-                        // clicks: acceptance-36a). Short of room, the Stack
-                        // menu and then Versions are left out first: a
-                        // song's row menu has both (plan 10 added the mic
-                        // here).
-                        final fixed = [
-                          upNext,
-                          download,
-                          lyricsButton != null,
-                          canDockSide,
-                        ].where((shown) => shown).length;
-                        final room = ((box.maxWidth - 88) / 48).floor() - fixed;
-                        final showVersions = versions && room >= 1;
-                        final showStack =
-                            stack && room >= (showVersions ? 2 : 1);
-                        return Row(
-                          mainAxisAlignment: MainAxisAlignment.end,
+                      )
+                    else
+                      Expanded(
+                        flex: 3,
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
                           children: [
-                            // Up Next leads the right-hand buttons, as the
-                            // queue button does in Spotify.
-                            if (upNext)
-                              UpNextButton(
-                                playback: playback,
-                                thumbnails: thumbnails,
-                              ),
-                            // A song of an album that the library lacks has
-                            // no row for a Stack or a download to point at.
-                            if (showStack)
-                              StackMenuButton(
-                                track: track,
-                                collections: collections!,
-                              ),
-                            if (showVersions)
-                              VersionsButton(
-                                playback: playback,
-                                track: track,
-                                onOpen: onOpenVersions,
-                              ),
-                            if (download)
-                              DownloadButton(playback: playback, track: track),
-                            ?lyricsButton,
-                            Flexible(
-                              child: SizedBox(
-                                width: 150,
-                                child: VolumeRow(
-                                  playback: playback,
-                                  showValue: false,
-                                ),
-                              ),
+                            TransportRow(playback: playback, large: false),
+                            SeekRow(
+                              playback: playback,
+                              layout: SeekLayout.dock,
                             ),
-                            if (canDockSide)
-                              IconButton(
-                                key: const ValueKey('dock-side'),
-                                tooltip: 'Move the player to the side panel',
-                                onPressed: onDockSide,
-                                icon: const Icon(Icons.view_sidebar_outlined),
-                              ),
                           ],
-                        );
-                      },
-                    ),
-                  ),
-                ],
-              ],
+                        ),
+                      ),
+                    if (!compact) ...[
+                      const SizedBox(width: 20),
+                      Expanded(
+                        flex: 2,
+                        child: LayoutBuilder(
+                          builder: (context, box) {
+                            final inLibrary = track != null && track.inLibrary;
+                            final upNext = track != null;
+                            final stack = inLibrary && collections != null;
+                            final versions = track != null;
+                            final download =
+                                inLibrary && player.storage != null;
+                            // Buttons are 48 px; the volume keeps its icon and
+                            // a slider of about 40 px (a 7 px one was missed by
+                            // clicks: acceptance-36a). Short of room, the Stack
+                            // menu and then Versions are left out first: a
+                            // song's row menu has both (plan 10 added the mic
+                            // here).
+                            final fixed = [
+                              upNext,
+                              download,
+                              lyricsButton != null,
+                              canDockSide,
+                            ].where((shown) => shown).length;
+                            final room =
+                                ((box.maxWidth - 88) / 48).floor() - fixed;
+                            final showVersions = versions && room >= 1;
+                            final showStack =
+                                stack && room >= (showVersions ? 2 : 1);
+                            return Row(
+                              mainAxisAlignment: MainAxisAlignment.end,
+                              children: [
+                                // Up Next leads the right-hand buttons, as the
+                                // queue button does in Spotify.
+                                if (upNext)
+                                  UpNextButton(
+                                    playback: playback,
+                                    thumbnails: thumbnails,
+                                  ),
+                                // A song of an album that the library lacks has
+                                // no row for a Stack or a download to point at.
+                                if (showStack)
+                                  StackMenuButton(
+                                    track: track,
+                                    collections: collections!,
+                                  ),
+                                if (showVersions)
+                                  VersionsButton(
+                                    playback: playback,
+                                    track: track,
+                                    onOpen: onOpenVersions,
+                                  ),
+                                if (download)
+                                  DownloadButton(
+                                    playback: playback,
+                                    track: track,
+                                  ),
+                                ?lyricsButton,
+                                Flexible(
+                                  child: SizedBox(
+                                    width: 150,
+                                    child: VolumeRow(
+                                      playback: playback,
+                                      showValue: false,
+                                    ),
+                                  ),
+                                ),
+                                if (canDockSide)
+                                  IconButton(
+                                    key: const ValueKey('dock-side'),
+                                    tooltip:
+                                        'Move the player to the side panel',
+                                    onPressed: onDockSide,
+                                    icon: const Icon(
+                                      Icons.view_sidebar_outlined,
+                                    ),
+                                  ),
+                              ],
+                            );
+                          },
+                        ),
+                      ),
+                    ],
+                  ],
+                );
+              },
             );
           },
         ),
