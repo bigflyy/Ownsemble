@@ -1694,7 +1694,24 @@ void main() {
       contains('| ${counted.length} |'),
       reason: 'Songs played tile equals History',
     );
+    // Artists by identity (plan 09, R5): a song with two artists counts for
+    // each, two spellings of one VK artist are one; a song with no credit
+    // counts its artist text.
+    final artistIndex = screen.artists!.index;
+    List<({String key, String name})> identitiesOf(int id) {
+      final known = artistIndex.artistsOf(id);
+      if (known.isNotEmpty) {
+        return [for (final a in known) (key: a.key, name: a.name)];
+      }
+      final text = library.byId(id)!.artist;
+      return [(key: 'text:$text', name: text)];
+    }
+
     final countedArtists = {
+      for (final id in counted.keys)
+        for (final artist in identitiesOf(id)) artist.key,
+    };
+    final countedTexts = {
       for (final id in counted.keys) library.byId(id)!.artist,
     };
     expect(
@@ -1716,23 +1733,32 @@ void main() {
     );
     await tester.tap(find.byKey(const ValueKey('stats-tab-artists')));
     await tester.pump();
-    final topArtist = library.all
-        .firstWhere(
-          (t) =>
-              countedArtists.contains(t.artist) &&
-              textsOf(find.byKey(const ValueKey('stats-row-0')))
-                  .contains('| ${t.artist} | '),
-        )
-        .artist;
+    final topRow = textsOf(find.byKey(const ValueKey('stats-row-0')));
+    final topArtist = [for (final id in counted.keys) ...identitiesOf(id)]
+        .firstWhere((a) => topRow.contains('| ${a.name} | '));
     await tester.tap(find.byKey(const ValueKey('stats-row-0')));
     await tester.pump();
-    expect(library.view, LibraryView.songs);
-    expect(filters.filter.ruleFor(FilterField.artist)?.values, {topArtist});
-    expect(
-      library.visible.every((t) => t.artist == topArtist),
-      isTrue,
-      reason: 'an artist row opens that artist',
-    );
+    var artistOpened = 'artist row opened ';
+    if (topArtist.key.startsWith('text:')) {
+      // No credit: Songs with that artist text's chip.
+      final text = topArtist.name;
+      expect(library.view, LibraryView.songs);
+      expect(filters.filter.ruleFor(FilterField.artist)?.values, {text});
+      expect(
+        library.visible.every((t) => t.artist == text),
+        isTrue,
+        reason: 'an artist row opens that artist',
+      );
+      artistOpened += 'Songs filtered';
+    } else {
+      // An artist the index knows: its page (D3).
+      expect(library.view, LibraryView(ViewKind.artist, artist: topArtist.key));
+      expect(find.byKey(const ValueKey('artist-page-name')), findsOneWidget);
+      library.goBack();
+      await tester.pump();
+      expect(library.view.kind, ViewKind.stats, reason: 'Back returns');
+      artistOpened += 'its artist page';
+    }
     await tester.tap(find.byKey(const ValueKey('nav-stats')));
     await tester.pump();
     await tester.tap(find.byKey(const ValueKey('stats-tab-albums')));
@@ -1751,8 +1777,8 @@ void main() {
     print(
       'Stats: opened in ${statsClock.elapsedMilliseconds} ms; tiles equal '
       'History ($countedPlays plays, ${counted.length} songs, '
-      '${countedArtists.length} artists); top song played on click; '
-      'artist row opened Songs filtered; $albumOpened',
+      '${countedArtists.length} artists by identity, ${countedTexts.length} '
+      'artist texts); top song played on click; $artistOpened; $albumOpened',
     );
 
     // Calendar tab and year report (plan 04, D2), against a count made here
