@@ -18,7 +18,7 @@
 // (VK back to its count); a release opens as an album place; a similar
 // artist's page opens by its address name; an artist name in a song row
 // opens that artist's page. Prints names, counts and times only: no link,
-// key, token or id.
+// key, token or id (failures compare ids in memory).
 
 import 'dart:io';
 
@@ -69,7 +69,16 @@ void main() {
       'release, similar, name link', (tester) async {
     expect(dataDir, isNotEmpty, reason: 'pass --dart-define=OWNSEMBLE_DATA');
     expect(session, isNotEmpty, reason: 'pass OWNSEMBLE_SESSION');
-    expect(session, isNot(contains('session-2')), reason: 'test account');
+    expect(
+      session.toLowerCase().contains('session-2'),
+      isFalse,
+      reason: 'test account',
+    );
+    expect(
+      p.split(p.normalize(dataDir)).contains('v2-test'),
+      isTrue,
+      reason: 'a data folder inside .local/v2-test only',
+    );
     tester.platformDispatcher.accessibilityFeaturesTestValue =
         const FakeAccessibilityFeatures(disableAnimations: true);
     addTearDown(tester.platformDispatcher.clearAccessibilityFeaturesTestValue);
@@ -121,12 +130,15 @@ void main() {
 
     final (vkBefore, keysBefore) = await vkLibrary();
     say('VK before: $vkBefore songs');
+    // The copy + makes: the only song cleanup may delete.
+    String? addedKey;
     addTearDown(() async {
+      final key = addedKey;
+      if (key == null) return;
       final (_, keysNow) = await vkLibrary();
-      for (final key in keysNow.difference(keysBefore)) {
-        final ok = await deleteVkSong(client.call, key);
-        say('cleanup: removed a copy left behind: $ok');
-      }
+      if (!keysNow.contains(key)) return;
+      final ok = await deleteVkSong(client.call, key);
+      say('cleanup: removed the copy left behind: $ok');
     });
 
     await app.main([
@@ -145,6 +157,7 @@ void main() {
     await waitUntil(tester, () => player.isReady, what: 'player ready');
     await sync.idle.timeout(const Duration(minutes: 5));
     await tester.pump();
+    expect(sync.lastOutcome?.error, isNull, reason: 'the start sync worked');
     final listedBefore = library.all.length;
     say('library before: $listedBefore songs listed');
 
@@ -152,9 +165,9 @@ void main() {
     final listening = player.timings.listen(timings.add);
     addTearDown(listening.cancel);
 
-    /// Waits for the next play to sound and checks it was decoded.
-    Future<PlayTiming> sounded(String what) async {
-      final before = timings.length;
+    /// Waits for a play after [before] timings to sound and checks it was
+    /// decoded.
+    Future<PlayTiming> sounded(String what, int before) async {
       await waitUntil(
         tester,
         () => timings.length > before,
@@ -193,21 +206,45 @@ void main() {
     );
     expect(withId, isNotEmpty);
     clock = Stopwatch()..start();
+    int drawn() => find
+        .descendant(of: grid, matching: find.byType(RawImage))
+        .evaluate()
+        .where((e) => (e.widget as RawImage).image != null)
+        .length;
     await waitUntil(
       tester,
-      () => artists.photoOf(withId.first) != null,
+      () => drawn() > 0,
       timeout: const Duration(seconds: 60),
-      what: 'the first photos',
+      what: 'the grid to draw a photo',
     );
     final firstPhotoMs = clock.elapsedMilliseconds;
+    Iterable<Artist> tilesInSight() => shown.where(
+      (a) => find.byKey(ValueKey('artist-${a.key}')).evaluate().isNotEmpty,
+    );
+    int inSight() => tilesInSight().length;
+    int inSightWithPhoto() =>
+        tilesInSight().where((a) => artists.photoOf(a)?.large != null).length;
     // The ones the place asks for while it is open (the tiles in sight
-    // first, then the rest).
-    await tester.pump(const Duration(seconds: 5));
+    // first, then the rest), and how many of those in sight are drawn.
+    final timeline = <String>[];
+    for (var second = 1; second <= 20; second++) {
+      await Future<void>.delayed(const Duration(seconds: 1));
+      await tester.pump();
+      timeline.add('${drawn()}/${inSightWithPhoto()}');
+    }
+    say('photos drawn / in sight with one, each second: ${timeline.join(' ')}');
+    expect(
+      drawn() >= inSightWithPhoto(),
+      isTrue,
+      reason: 'every tile in sight with a photo draws it within 20 s',
+    );
     final asked = withId.where((a) => artists.photoOf(a) != null).toList();
     final found = asked.where((a) => artists.photoOf(a)!.large != null);
     say(
-      'photos: first in $firstPhotoMs ms; after 5 s more ${asked.length} of '
-      '${withId.length} asked, ${found.length} with a photo',
+      'photos: first drawn in $firstPhotoMs ms; after 5 s more '
+      '${asked.length} of ${withId.length} asked, ${found.length} with a '
+      'photo, ${drawn()} drawn of ${inSightWithPhoto()} tiles in sight that '
+      'have one (${inSight()} tiles in sight)',
     );
     expect(found, isNotEmpty, reason: 'VK gives photos for some artists');
 
@@ -229,7 +266,7 @@ void main() {
       await tester.tap(tile);
       await tester.pump();
       expect(library.view.kind, ViewKind.artist);
-      expect(library.view.artist, candidate.key);
+      expect(library.view.artist == candidate.key, isTrue, reason: 'its page');
       expect(find.byKey(const ValueKey('artist-page-name')), findsOneWidget);
       final ref = vkRefOf(candidate.key, candidate)!;
       await waitUntil(
@@ -274,9 +311,10 @@ void main() {
     }
 
     // 3. Play: a library song of the artist, decoded.
+    var before = timings.length;
     await tester.tap(find.byKey(const ValueKey('artist-play')));
     await tester.pump();
-    var timing = await sounded('the artist\'s library song');
+    var timing = await sounded('the artist\'s library song', before);
     expect(player.current?.inLibrary, isTrue);
     expect(
       artists.index.artistsOf(player.current!.id).map((a) => a.key),
@@ -297,10 +335,14 @@ void main() {
     final row = find.byKey(ValueKey('page-song-${song.id}'));
     await tester.scrollUntilVisible(row, 200, scrollable: pageScroll);
     await tester.pump();
+    before = timings.length;
     await tester.tap(row);
     await tester.pump();
-    timing = await sounded('a Popular song');
+    timing = await sounded('a Popular song', before);
     expect(player.current?.inLibrary, isFalse);
+    expect(player.current?.id == song.id, isTrue, reason: 'the clicked song');
+    expect(timing.cached, isFalse, reason: 'streamed');
+    expect(timing.networkFirstChunkMs, isNotNull, reason: 'streamed');
     say(
       'Popular: ${song.artist} - ${song.title}: sound in ${timing.toSoundMs} '
       'ms (network first chunk ${timing.networkFirstChunkMs} ms), '
@@ -326,8 +368,11 @@ void main() {
       what: 'the library to list the added song',
     );
     final addMs = clock.elapsedMilliseconds;
-    final (vkAdded, _) = await vkLibrary();
+    final (vkAdded, keysAdded) = await vkLibrary();
     expect(vkAdded, vkBefore + 1);
+    final newKeys = keysAdded.difference(keysBefore);
+    expect(newKeys.length, 1, reason: 'one copy on VK');
+    addedKey = newKeys.single;
     await waitUntil(
       tester,
       () => (artists.artistOf(artist.key)?.songs.length ?? 0) == ownBefore + 1,
@@ -349,17 +394,33 @@ void main() {
     final heading = find.text('IN YOUR LIBRARY (${ownBefore + 1})');
     await tester.scrollUntilVisible(heading, -300, scrollable: pageScroll);
     await tester.pump();
-    final ownRow = find.byKey(ValueKey('page-song-${added.id}'));
-    expect(ownRow, findsWidgets, reason: 'the library part lists the copy');
+    final ownRows = find.byKey(ValueKey('page-song-${added.id}'));
+    final check = find.byKey(ValueKey('have-${added.id}'));
+    final libraryRows = ownRows.evaluate().where(
+      (row) => find
+          .descendant(
+            of: find.byElementPredicate((e) => e == row),
+            matching: check,
+          )
+          .evaluate()
+          .isEmpty,
+    );
+    expect(
+      libraryRows,
+      hasLength(1),
+      reason: 'the library part lists the copy',
+    );
+    final libraryRow = libraryRows.single;
+    final ownRow = find.byElementPredicate((e) => e == libraryRow);
     say(
       '+ added in $addMs ms; VK $vkAdded songs; the page lists '
       '${ownBefore + 1} own songs, the Popular row has a check',
     );
     // The add's Undo-free settling time, as the other real checks wait.
     await tester.pump(const Duration(seconds: 7));
-    await tester.ensureVisible(ownRow.first);
+    await tester.ensureVisible(ownRow);
     await tester.pump();
-    await tester.tap(ownRow.first, buttons: kSecondaryMouseButton);
+    await tester.tap(ownRow, buttons: kSecondaryMouseButton);
     await tester.pump();
     final remove = find.byKey(const ValueKey('menu-remove-from-library'));
     await waitUntil(
@@ -377,14 +438,21 @@ void main() {
       timeout: const Duration(seconds: 30),
       what: 'VK to remove the song',
     );
-    final (vkAfter, _) = await vkLibrary();
+    final (vkAfter, keysAfter) = await vkLibrary();
     say('removed: VK $vkAfter songs, library ${library.all.length}');
     expect(vkAfter, vkBefore);
+    expect(
+      keysAfter.length == keysBefore.length &&
+          keysAfter.containsAll(keysBefore),
+      isTrue,
+      reason: 'Remove took out the added copy, nothing else',
+    );
     await tester.pump(const Duration(seconds: 7));
     expect(artists.artistOf(artist.key)?.songs.length, ownBefore);
 
     // 6. A release opens as an album place with VK's songs.
-    if (page.releases.isNotEmpty) {
+    expect(page.releases, isNotEmpty, reason: 'the picked page has releases');
+    {
       final release = page.releases.first;
       final card = find.byKey(ValueKey('artist-release-${release.key}'));
       await tester.scrollUntilVisible(card, 200, scrollable: pageScroll);
@@ -393,6 +461,7 @@ void main() {
       await tester.tap(card);
       await tester.pump();
       expect(library.view.kind, ViewKind.album);
+      expect(library.view.album?.title, release.title);
       await waitUntil(
         tester,
         () => library.albumStatus?.load != AlbumLoad.loading,
@@ -409,13 +478,14 @@ void main() {
       library.goBack();
       await tester.pump();
       expect(library.view.kind, ViewKind.artist);
-      expect(library.view.artist, artist.key);
-    } else {
-      say('release: the page has none (skipped)');
+      expect(library.view.artist == artist.key, isTrue, reason: 'Back');
     }
 
     // 7. A similar artist's page, by its address name.
-    final similar = page.similar.first;
+    final similar = page.similar.firstWhere(
+      (s) => s.domain != null && s.domain!.isNotEmpty,
+      orElse: () => fail('no similar artist with an address name'),
+    );
     final similarCard = find.byKey(
       ValueKey('artist-similar-${similar.domain ?? similar.name}'),
     );
@@ -425,8 +495,15 @@ void main() {
     await tester.tap(similarCard);
     await tester.pump();
     expect(library.view.kind, ViewKind.artist);
-    final similarKey = library.view.artist!;
-    final similarRef = vkRefOf(similarKey, artists.artistOf(similarKey))!;
+    expect(
+      library.view.artist == 'domain:${similar.domain}',
+      isTrue,
+      reason: 'the clicked similar artist',
+    );
+    final similarRef = vkRefOf(
+      library.view.artist!,
+      artists.artistOf(library.view.artist!),
+    )!;
     await waitUntil(
       tester,
       () => artists.vkOf(similarRef).load != ArtistVkLoad.loading,
@@ -443,7 +520,7 @@ void main() {
     );
     library.goBack();
     await tester.pump();
-    expect(library.view.artist, artist.key);
+    expect(library.view.artist == artist.key, isTrue, reason: 'Back');
 
     // 8. An artist name in a song row opens that artist's page.
     await tester.tap(find.byKey(const ValueKey('nav-songs')));
@@ -453,9 +530,10 @@ void main() {
         .take(8)
         .firstWhere(
           (t) =>
-              artists.index.artistsOf(t.id).any((a) => !a.nameOnly) &&
+              artists.index.artistsOf(t.id).length == 1 &&
+              !artists.index.artistsOf(t.id).single.nameOnly &&
               find.byKey(ValueKey('artist-line-${t.id}')).evaluate().isNotEmpty,
-          orElse: () => fail('no row with a VK artist in sight'),
+          orElse: () => fail('no row with one VK artist in sight'),
         );
     final line = find.byKey(ValueKey('artist-line-${linked.id}'));
     final box = tester.getRect(line);
@@ -464,8 +542,9 @@ void main() {
     await tester.pump();
     expect(library.view.kind, ViewKind.artist);
     expect(
-      artists.index.artistsOf(linked.id).map((a) => a.key),
-      contains(library.view.artist),
+      library.view.artist == artists.index.artistsOf(linked.id).single.key,
+      isTrue,
+      reason: "the row's artist",
     );
     say(
       'name link: "${linked.artist}" opened '
@@ -476,8 +555,13 @@ void main() {
     await tester.pump();
     expect(library.view.kind, ViewKind.songs);
 
-    final (vkEnd, _) = await vkLibrary();
+    final (vkEnd, keysEnd) = await vkLibrary();
     expect(vkEnd, vkBefore, reason: 'the account ends as it started');
+    expect(
+      keysEnd.length == keysBefore.length && keysEnd.containsAll(keysBefore),
+      isTrue,
+      reason: 'the account has the same songs',
+    );
     expect(library.all.length, listedBefore);
     player.player.pause();
     await tester.pump(const Duration(seconds: 1));
