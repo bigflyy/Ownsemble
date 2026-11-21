@@ -163,3 +163,33 @@ class _CardPlayButtonState extends State<CardPlayButton> {
     );
   }
 }
+
+/// The icon of a heading's Play / Pause button (the artist page, a list,
+/// the year report's song): while its songs play, moving bars as on the
+/// playing card; pointed at or focused, the pause icon of what a click
+/// does. The label beside it keeps saying "Pause" (user, 2026-11-21: "Bars
+/// icon + Pause"). Wrap the button in a [CardHover].
+class PlayStateIcon extends StatelessWidget {
+  const PlayStateIcon({super.key, required this.playing, this.size = 20});
+
+  final bool playing;
+  final double size;
+
+  @override
+  Widget build(BuildContext context) {
+    if (playing && !CardHover.of(context)) {
+      return SizedBox.square(
+        dimension: size,
+        child: Center(
+          child: PlayingMark(
+            key: const ValueKey('play-state-bars'),
+            playing: true,
+            size: size * 0.8,
+            color: IconTheme.of(context).color ?? OwnColors.of(context).text,
+          ),
+        ),
+      );
+    }
+    return Icon(playing ? Icons.pause : Icons.play_arrow, size: size);
+  }
+}

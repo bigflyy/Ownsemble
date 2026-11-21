@@ -9,6 +9,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:flutter/gestures.dart' show PointerDeviceKind;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -521,6 +522,24 @@ void main() {
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 100));
       expect(find.descendant(of: play, matching: find.text('Pause')), findsOne);
+      // Moving bars while it plays; the pause icon when pointed at (user,
+      // 2026-11-21: "Bars icon + Pause").
+      expect(
+        find.descendant(
+          of: play,
+          matching: find.byKey(const ValueKey('play-state-bars')),
+        ),
+        findsOne,
+      );
+      final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
+      await mouse.addPointer(location: tester.getCenter(play));
+      await tester.pump();
+      expect(
+        find.descendant(of: play, matching: find.byIcon(Icons.pause)),
+        findsOne,
+      );
+      await mouse.removePointer();
+      await tester.pump();
       final started = playback.player.current;
 
       await tester.tap(play);

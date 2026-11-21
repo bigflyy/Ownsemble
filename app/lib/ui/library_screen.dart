@@ -22,6 +22,7 @@ import 'artist_links.dart';
 import 'artist_page.dart';
 import 'artists.dart';
 import 'artists_page.dart';
+import 'card_play.dart';
 import 'catalog_part.dart';
 import 'catalog_search.dart';
 import 'collections_controller.dart';
@@ -2348,6 +2349,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
             },
             icon: listState == true ? Icons.pause : Icons.play_arrow,
             label: listState == true ? 'Pause' : 'Play',
+            playing: listState == true,
           ),
         // A playlist also plays shuffled: shuffle turns on, from a random
         // song. While the playlist plays, Shuffle shows whether shuffle is
@@ -3855,12 +3857,17 @@ class _ListButton extends StatelessWidget {
     required this.icon,
     required this.label,
     this.selected = false,
+    this.playing,
   });
 
   final bool compact;
   final VoidCallback onPressed;
   final IconData icon;
   final String label;
+
+  /// For Play: whether its list plays, which shows moving bars in place of
+  /// [icon] (PlayStateIcon); null for other buttons.
+  final bool? playing;
 
   /// A mode that is on (Shuffle while its list plays): an accent fill.
   final bool selected;
@@ -3869,20 +3876,25 @@ class _ListButton extends StatelessWidget {
   Widget build(BuildContext context) {
     final colors = OwnColors.of(context);
     final fill = selected ? colors.accentBg : null;
-    return compact
+    final playing = this.playing;
+    Widget glyph(double size) => playing == null
+        ? Icon(icon, size: size)
+        : PlayStateIcon(playing: playing, size: size);
+    final button = compact
         ? IconButton(
             onPressed: onPressed,
             tooltip: label,
             color: Theme.of(context).colorScheme.primary,
             style: IconButton.styleFrom(backgroundColor: fill),
-            icon: Icon(icon, size: 20),
+            icon: glyph(20),
           )
         : TextButton.icon(
             onPressed: onPressed,
             style: TextButton.styleFrom(backgroundColor: fill),
-            icon: Icon(icon, size: 18),
+            icon: glyph(18),
             label: Text(label),
           );
+    return playing == null ? button : CardHover(child: button);
   }
 }
 

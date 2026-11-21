@@ -389,6 +389,8 @@ void main() {
     // The artist plays from the header: Play shows Pause, Shuffle is on.
     if (step == 'playing') {
       await tester.tap(find.byKey(const ValueKey('artist-shuffle')));
+      // Sound plays: Play shows moving bars and "Pause".
+      player.playing.value = true;
       await settle();
     }
     // An album plays from its card (outlined, Pause kept), and the mouse

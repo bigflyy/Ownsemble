@@ -758,14 +758,16 @@ class _PlayButtons extends StatelessWidget {
         spacing: 10,
         runSpacing: 8,
         children: [
-          FilledButton.icon(
-            key: const ValueKey('artist-play'),
-            onPressed: () {
-              if (state != null && NowPlaying.playOrPause(context)) return;
-              onPlay();
-            },
-            icon: Icon(playing ? Icons.pause : Icons.play_arrow, size: 20),
-            label: Text(playing ? 'Pause' : 'Play'),
+          CardHover(
+            child: FilledButton.icon(
+              key: const ValueKey('artist-play'),
+              onPressed: () {
+                if (state != null && NowPlaying.playOrPause(context)) return;
+                onPlay();
+              },
+              icon: PlayStateIcon(playing: playing),
+              label: Text(playing ? 'Pause' : 'Play'),
+            ),
           ),
           if (onShuffle != null)
             shuffleOn

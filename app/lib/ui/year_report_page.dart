@@ -12,6 +12,7 @@ import 'song_filters.dart';
 import 'stat_text.dart';
 import 'stats_calendar.dart';
 import 'theme.dart';
+import 'card_play.dart';
 
 /// The report of one year (plan 04, D2; board 3 of the D2 canvas, opened
 /// from a button on Stats, user 2026-11-08): six tiles, song of the year,
@@ -333,11 +334,13 @@ class _YearReportPageState extends State<YearReportPage> {
             // Pause while the song plays, as Spotify's; a click on the
             // current song pauses or resumes it (playFrom does that).
             if (NowPlaying.stateFor(context, topSongs.first.id) == true)
-              FilledButton.icon(
-                key: const ValueKey('year-play-song'),
-                onPressed: () => widget.onPlay(topSongs, 0),
-                icon: const Icon(Icons.pause_rounded),
-                label: const Text('Pause'),
+              CardHover(
+                child: FilledButton.icon(
+                  key: const ValueKey('year-play-song'),
+                  onPressed: () => widget.onPlay(topSongs, 0),
+                  icon: const PlayStateIcon(playing: true),
+                  label: const Text('Pause'),
+                ),
               )
             else
               FilledButton.icon(
