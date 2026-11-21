@@ -22,6 +22,8 @@ class Sidebar extends StatelessWidget {
     this.changed = 0,
     this.showForYou = false,
     this.showPlaylists = false,
+    this.showArtists = false,
+    this.artists,
     required this.rail,
     required this.canExpand,
     required this.onToggleRail,
@@ -44,6 +46,13 @@ class Sidebar extends StatelessWidget {
 
   /// Whether the Playlists place has its page (plan 08); else "later".
   final bool showPlaylists;
+
+  /// Whether the Artists place has its page (plan 09); else "later".
+  final bool showArtists;
+
+  /// How many artists the library has; null until they are counted (the
+  /// index is built after the first frame).
+  final int? artists;
 
   /// Shown as an icon rail.
   final bool rail;
@@ -78,7 +87,11 @@ class Sidebar extends StatelessWidget {
           (view == target ||
               // A year report is opened from Stats.
               (view.kind == ViewKind.yearReport &&
-                  target.kind == ViewKind.stats)) &&
+                  target.kind == ViewKind.stats) ||
+              // An artist's page and songs are opened from Artists.
+              ((view.kind == ViewKind.artist ||
+                      view.kind == ViewKind.artistSongs) &&
+                  target.kind == ViewKind.artists)) &&
           (target != LibraryView.songs || savedView == null),
       rail: rail,
       sub: sub,
@@ -148,7 +161,8 @@ class Sidebar extends StatelessWidget {
                   'Artists',
                   Icons.person_outline,
                   const LibraryView(ViewKind.artists),
-                  later: true,
+                  count: showArtists ? artists : null,
+                  later: !showArtists,
                 ),
                 item(
                   'Downloads',

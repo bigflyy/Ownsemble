@@ -29,13 +29,19 @@ class YearReportPage extends StatefulWidget {
     required this.year,
     required this.onPlay,
     required this.onOpenArtist,
+    this.artistsOf,
   });
 
   final SongFilters filters;
   final List<Track> songs;
   final int year;
   final void Function(List<Track> list, int index) onPlay;
-  final void Function(String artist) onOpenArtist;
+
+  /// A top artist was clicked: open the artist (its page, plan 09).
+  final void Function(RankedRow row) onOpenArtist;
+
+  /// The songs' artists by identity (plan 09, R5); null: by artist text.
+  final SongArtists? artistsOf;
 
   @override
   State<YearReportPage> createState() => _YearReportPageState();
@@ -88,6 +94,7 @@ class _YearReportPageState extends State<YearReportPage> {
       compared: compared == null
           ? null
           : (range: compared, plays: filters.songPlaysIn(compared)),
+      artistsOf: widget.artistsOf,
     );
     _kept = (year: year, version: version, report: report);
     return report;
@@ -407,7 +414,7 @@ class _YearReportPageState extends State<YearReportPage> {
                     '${row.songs.length == 1 ? '1 song' : '${row.songs.length} songs'}'
                     ', ${listenedText(row.listenedMs)}',
                 right: row.plays == 1 ? '1 play' : '${row.plays} plays',
-                onTap: () => widget.onOpenArtist(row.name),
+                onTap: () => widget.onOpenArtist(row),
               ),
           ],
           empty: 'No artist counted yet.',

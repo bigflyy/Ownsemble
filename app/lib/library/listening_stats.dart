@@ -7,6 +7,10 @@ import 'track.dart';
 /// tabs.
 enum RankBy { songs, artists, albums }
 
+/// The artists of a song as Stats ranks them (plan 09, R5): each one's
+/// identity (ArtistIndex key) and shown name. Empty: ranked by its text.
+typedef SongArtists = List<({String key, String name})> Function(Track track);
+
 /// The four tiles of the Stats place for one period.
 typedef PeriodTotals = ({int listenedMs, int plays, int songs, int artists});
 
@@ -19,7 +23,12 @@ class RankedRow {
     required this.plays,
     required this.listenedMs,
     required this.songs,
+    this.key,
   });
+
+  /// An artist row's identity (ArtistIndex key), when Stats knows the
+  /// artists; null for other rows.
+  final String? key;
 
   /// The song's title, the artist, or the album's title.
   final String name;
@@ -45,10 +54,22 @@ class RankedRow {
 /// library no longer lists still adds to the plays and time heard, but it
 /// cannot be named, so it is in no top list and adds no artist.
 class ListeningStats {
-  ListeningStats(this.songs, this.plays);
+  ListeningStats(this.songs, this.plays, {this.artistsOf});
 
   final Map<int, Track> songs;
   final Map<int, SongPlays> plays;
+
+  /// Each song's artists by identity (R5): a song with two artists counts
+  /// for each, and two spellings of one VK artist are one row. Without it
+  /// artists are the songs' artist texts.
+  final SongArtists? artistsOf;
+
+  /// The identities and names of [track]'s artists.
+  List<({String key, String name})> _artistsOf(Track track) {
+    final known = artistsOf?.call(track) ?? const [];
+    if (known.isNotEmpty) return known;
+    return [(key: 'text:${track.artist}', name: track.artist)];
+  }
 
   late final PeriodTotals totals = _totals();
 
@@ -60,7 +81,11 @@ class ListeningStats {
       counted += p.plays;
       if (p.plays == 0) continue;
       played++;
-      if (songs[id] case final track?) artists.add(track.artist);
+      if (songs[id] case final track?) {
+        for (final artist in _artistsOf(track)) {
+          artists.add(artist.key);
+        }
+      }
     }
     return (
       listenedMs: listened,
@@ -106,13 +131,7 @@ class ListeningStats {
             songs: [track],
           ),
       ],
-      RankBy.artists => _grouped(
-        (track) => track.artist,
-        name: (track) => track.artist,
-        detail: (songs) => songs.length == 1
-            ? '1 song played'
-            : '${songs.length} songs played',
-      ),
+      RankBy.artists => _byArtist(),
       RankBy.albums => _grouped(
         (track) => switch (track.album) {
           // The same title by two artists is two albums, as an album opens.
@@ -124,6 +143,34 @@ class ListeningStats {
       ),
     };
     return rows.length > limit ? rows.sublist(0, limit) : rows;
+  }
+
+  /// Artists by identity, each with the songs it is named on.
+  List<RankedRow> _byArtist() {
+    final groups = <String, ({String name, List<(Track, SongPlays)> of})>{};
+    for (final entry in _played) {
+      for (final artist in _artistsOf(entry.$1)) {
+        (groups[artist.key] ??= (name: artist.name, of: [])).of.add(entry);
+      }
+    }
+    final rows = [
+      for (final MapEntry(:key, value: group) in groups.entries)
+        RankedRow(
+          key: key.startsWith('text:') ? null : key,
+          name: group.name,
+          detail: group.of.length == 1
+              ? '1 song played'
+              : '${group.of.length} songs played',
+          plays: group.of.fold(0, (sum, m) => sum + m.$2.plays),
+          listenedMs: group.of.fold(0, (sum, m) => sum + m.$2.listenedMs),
+          songs: [for (final (track, _) in group.of) track],
+        ),
+    ];
+    rows.sort(
+      (a, b) =>
+          _order(a.plays, b.plays, a.listenedMs, b.listenedMs, a.name, b.name),
+    );
+    return rows;
   }
 
   List<RankedRow> _grouped(

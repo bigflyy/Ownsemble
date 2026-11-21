@@ -48,7 +48,13 @@ const breakDays = 60;
 /// counted play before the year ([before], for a break that spans New
 /// Year), and the days the year is compared with ([compared]).
 class YearReport {
-  YearReport._(this.year, this.stats, this._plays, this._songs);
+  YearReport._(
+    this.year,
+    this.stats,
+    this._plays,
+    this._songs,
+    this._artistsOf,
+  );
 
   factory YearReport.build({
     required int year,
@@ -59,12 +65,14 @@ class YearReport {
     required Map<int, SongPlays> allTime,
     required Map<int, SongPlays> before,
     required ({DayRange range, Map<int, SongPlays> plays})? compared,
+    SongArtists? artistsOf,
   }) {
     final report = YearReport._(
       year,
-      ListeningStats(songs, _sumBySong(plays)),
+      ListeningStats(songs, _sumBySong(plays), artistsOf: artistsOf),
       plays,
       songs,
+      artistsOf,
     );
     report._fill(now, firstPlayMs, allTime, before, compared);
     return report;
@@ -77,6 +85,9 @@ class YearReport {
 
   final List<PlayMoment> _plays;
   final Map<int, Track> _songs;
+
+  /// The songs' artists by identity (plan 09, R5).
+  final SongArtists? _artistsOf;
 
   PeriodTotals get totals => stats.totals;
 
@@ -237,7 +248,11 @@ class YearReport {
     if (compared != null) {
       this.compared = (
         range: compared.range,
-        totals: ListeningStats(_songs, compared.plays).totals,
+        totals: ListeningStats(
+          _songs,
+          compared.plays,
+          artistsOf: _artistsOf,
+        ).totals,
       );
     }
 
@@ -304,7 +319,11 @@ class YearReport {
       if (p.atMs >= range.endMs) break;
       if (p.atMs >= range.startMs) inMonth.add(p);
     }
-    final stats = ListeningStats(_songs, _sumBySong(inMonth));
+    final stats = ListeningStats(
+      _songs,
+      _sumBySong(inMonth),
+      artistsOf: _artistsOf,
+    );
     final first = DayRange(DateTime(year), range.first).dayCount - 1;
     BusyDay? busiest;
     for (var d = 0; d < range.dayCount; d++) {

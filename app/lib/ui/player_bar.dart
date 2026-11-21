@@ -534,6 +534,7 @@ class SongTitle extends StatelessWidget {
       albumStyle: TextStyle(fontSize: large ? 15 : 13, color: colors.dim),
       onOpenAlbum: onOpenAlbum,
       whole: whole,
+      track: track,
     );
     final stored =
         storage?.stateOf(track) ??

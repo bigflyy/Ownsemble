@@ -21,8 +21,7 @@ import 'type_jump.dart';
 /// Height of one song row; fixed so the list can skip layout of hidden rows.
 const rowHeight = 58.0;
 
-/// The views of the sidebar. Artists and Playlists are planned after the
-/// MVP and show a "later" page; Stats is a page of numbers, not a list.
+/// The views of the sidebar. Stats is a page of numbers, not a list.
 ///
 /// Downloads holds the songs kept for good; stored holds everything that
 /// plays without the network, cached songs too ("On this computer"). An
@@ -32,7 +31,17 @@ enum ViewKind {
 
   /// The user's favorite songs, the newest favorite first (plan 05).
   favorites,
+
+  /// Every artist of the library as a grid of round tiles (plan 09, D1).
   artists,
+
+  /// One artist's page: the library's songs and albums, then VK's
+  /// Popular, Releases and You may like (plan 09, D2).
+  artist,
+
+  /// One artist's library songs as an ordinary song list ("Show all" on
+  /// the artist's page, R6).
+  artistSongs,
   downloads,
   stored,
 
@@ -70,9 +79,15 @@ class LibraryView {
     this.album,
     this.versionsOf,
     this.year,
+    this.artist,
   });
 
   static const songs = LibraryView(ViewKind.songs);
+
+  /// The artist a page or its song list is about: `vk:<id>` or
+  /// `name:<name key>` (ArtistIndex), or `domain:<address name>` for an
+  /// artist VK suggested that is known only by its link.
+  final String? artist;
 
   final ViewKind kind;
   final int? stackId;
@@ -96,22 +111,25 @@ class LibraryView {
   bool get listsVkSongs => kind == ViewKind.album || kind == ViewKind.vkList;
 
   /// Whether this view is a page planned for later, without songs yet.
-  bool get isLater => switch (kind) {
-    ViewKind.artists => true,
-    _ => false,
-  };
+  bool get isLater => false;
 
-  /// Whether the view is a page instead of a song list: a later page,
-  /// Stats or a year report.
+  /// Whether the view is a page instead of a song list: Artists, an
+  /// artist's page, Playlists, Stats, a year report or For you.
   bool get isPage =>
       isLater ||
+      kind == ViewKind.artists ||
+      kind == ViewKind.artist ||
       kind == ViewKind.playlists ||
       kind == ViewKind.stats ||
       kind == ViewKind.yearReport ||
       kind == ViewKind.forYou;
 
   /// Whether the view is opened from another one and shows a Back button.
-  bool get hasBack => listsOutside || kind == ViewKind.yearReport;
+  bool get hasBack =>
+      listsOutside ||
+      kind == ViewKind.yearReport ||
+      kind == ViewKind.artist ||
+      kind == ViewKind.artistSongs;
 
   /// Whether a song can appear more than once (History, Stacks).
   bool get hasEntries => kind == ViewKind.history || kind == ViewKind.stack;
@@ -125,7 +143,7 @@ class LibraryView {
   /// songs changed.
   String get playKey =>
       '${kind.name}:${stackId ?? ''}:${album?.identity ?? ''}:'
-      '${versionsOf ?? ''}:${year ?? ''}';
+      '${versionsOf ?? ''}:${year ?? ''}${artist == null ? '' : ':$artist'}';
 
   @override
   bool operator ==(Object other) =>
@@ -134,10 +152,12 @@ class LibraryView {
       other.stackId == stackId &&
       other.album == album &&
       other.versionsOf == versionsOf &&
-      other.year == year;
+      other.year == year &&
+      other.artist == artist;
 
   @override
-  int get hashCode => Object.hash(kind, stackId, album, versionsOf, year);
+  int get hashCode =>
+      Object.hash(kind, stackId, album, versionsOf, year, artist);
 }
 
 /// The player's "Playing from" for the VK list [ref] (a For you list, a
@@ -217,7 +237,9 @@ class LibraryController extends ChangeNotifier {
 
   /// A view as stored in [viewSetting]: its kind, plus the id for a Stack.
   /// An album is stored as its kind alone, which reads back as no view.
-  static String _encodeView(LibraryView view) => view.stackId == null
+  static String _encodeView(LibraryView view) => view.artist != null
+      ? '${view.kind.name}:${view.artist}'
+      : view.stackId == null
       ? view.kind.name
       : '${view.kind.name}:${view.stackId}';
 
@@ -237,6 +259,15 @@ class LibraryController extends ChangeNotifier {
     // A year report opens from Stats, and Back has nothing to return to
     // in a new run: Stats opens instead.
     if (kind == ViewKind.yearReport) return const LibraryView(ViewKind.stats);
+    // An artist's page comes back by the artist's key, which has colons of
+    // its own ("vk:123"). Their song list comes back as the page: its
+    // songs need the artist index, built after the first frame (R12).
+    if (kind == ViewKind.artist || kind == ViewKind.artistSongs) {
+      final key = parts.skip(1).join(':');
+      return key.isEmpty
+          ? const LibraryView(ViewKind.artists)
+          : LibraryView(ViewKind.artist, artist: key);
+    }
     if (kind != ViewKind.stack || parts.length < 2) return LibraryView(kind);
     final stackId = int.tryParse(parts[1]);
     final exists = collections?.stacks.any((s) => s.id == stackId) ?? false;
@@ -309,6 +340,11 @@ class LibraryController extends ChangeNotifier {
   /// Recommended lists' songs (the For you place, plan 07); without it no
   /// such list opens.
   ListCatalog? vkLists;
+
+  /// The library songs of the artist with key [artist] (LibraryView.artist),
+  /// newest added first, for the artist's song list (plan 09, R6); without
+  /// it that list is empty.
+  List<Track> Function(String artist)? artistSongsOf;
 
   /// Whether a VK list lists every entry, each its own row with its own
   /// entry id ([entryIdAt]: the outside track id of the entry): the
@@ -615,6 +651,35 @@ class LibraryController extends ChangeNotifier {
     // Opening an album whose list failed asks again; Back and Forward to it
     // do not.
     _albumFailures.remove(album);
+    _places.leave(_here);
+    _showList(view, '', null);
+    if (scroll.hasClients) scroll.jumpTo(0);
+  }
+
+  /// Opens the album [album] as a new place, as [openAlbum] does for a
+  /// song's album: a release on an artist's page (plan 09, R11).
+  void openAlbumRef(AlbumRef album) {
+    final view = LibraryView(ViewKind.album, album: album);
+    if (view == _view && _appliedQuery.isEmpty && _source == null) return;
+    _albumFailures.remove(album);
+    _places.leave(_here);
+    _showList(view, '', null);
+    if (scroll.hasClients) scroll.jumpTo(0);
+  }
+
+  /// Opens the page of the artist [key] (LibraryView.artist) as a new
+  /// place. The search and the source filter stay with the place left.
+  void openArtist(String key) {
+    final view = LibraryView(ViewKind.artist, artist: key);
+    if (view == _view && _appliedQuery.isEmpty) return;
+    _places.leave(_here);
+    _showList(view, '', null);
+  }
+
+  /// Opens the artist [key]'s library songs as a song list ("Show all").
+  void openArtistSongs(String key) {
+    final view = LibraryView(ViewKind.artistSongs, artist: key);
+    if (view == _view && _appliedQuery.isEmpty && _source == null) return;
     _places.leave(_here);
     _showList(view, '', null);
     if (scroll.hasClients) scroll.jumpTo(0);
@@ -964,8 +1029,17 @@ class LibraryController extends ChangeNotifier {
     }
   }
 
-  /// Goes to the previous place, if there is one.
-  void goBack() => _showPlace(_places.back(_here));
+  /// Goes to the previous place, if there is one. An artist's page or songs
+  /// reopened from the last run have none: Back goes to Artists then.
+  void goBack() {
+    final place = _places.back(_here);
+    if (place == null &&
+        (_view.kind == ViewKind.artist || _view.kind == ViewKind.artistSongs)) {
+      showView(const LibraryView(ViewKind.artists));
+      return;
+    }
+    _showPlace(place);
+  }
 
   /// Goes to the next place, if going back left one.
   void goForward() => _showPlace(_places.forward(_here));
@@ -1186,7 +1260,13 @@ class LibraryController extends ChangeNotifier {
         _baseEntryIds = _albumEntryIds;
       case ViewKind.versions:
         _base = _versionSongs();
+      case ViewKind.artistSongs:
+        final key = _view.artist;
+        _base = key == null
+            ? const []
+            : artistSongsOf?.call(key) ?? const <Track>[];
       case ViewKind.artists ||
+          ViewKind.artist ||
           ViewKind.playlists ||
           ViewKind.stats ||
           ViewKind.yearReport ||

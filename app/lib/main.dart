@@ -22,6 +22,7 @@ import 'storage/stored_check.dart';
 import 'sync/background_sync.dart';
 import 'sync/file_check.dart';
 import 'ui/albums.dart';
+import 'ui/artists.dart';
 import 'ui/catalog_search.dart';
 import 'ui/collections_controller.dart';
 import 'ui/cover_tile.dart';
@@ -380,7 +381,30 @@ Future<void> main(List<String> args) async {
     cacheDir: options.dataDir,
     log: logPerf,
   );
-  library.vkLists = CombinedLists(playlists: playlists, others: forYou);
+  // The library's artists (plan 09): the index is built after the first
+  // frame (R12), VK's pages and photos through the first account.
+  final artists = LibraryArtists(
+    library: library,
+    credits: store.songArtistCredits,
+    albumKeys: store.listedVkAlbumKeys,
+    plays: () => filters.allTime,
+    loadPhotos: store.artistPhotos,
+    savePhotos: store.saveArtistPhotos,
+    outside: outside,
+    accounts: () => catalog.accounts,
+    apiOfSource: (sourceId) => clientOfSource(sourceId)?.call,
+    readSetting: store.readSetting,
+    writeSetting: store.writeSetting,
+    log: logPerf,
+  );
+  artists.onListChanged = library.listChanged;
+  library.artistSongsOf = artists.songsOf;
+  library.vkLists = CombinedLists(
+    playlists: playlists,
+    others: forYou,
+    artists: artists,
+    isArtistList: isArtistListRef,
+  );
   // Each sync run hands over a new outcome: the playlists are read then,
   // once per run. (`syncing` also blinks back on when the file check after
   // the sync ends, which asked VK twice per sync.)
@@ -425,6 +449,12 @@ Future<void> main(List<String> args) async {
   PaintingBinding.instance.imageCache
     ..maximumSize = maxDecodedCovers
     ..maximumSizeBytes = maxDecodedCoverBytes;
+  // Name links and the Artists count need the index: built a moment after
+  // the first frame, off the cold-start path (R12). A view of an artist
+  // kept from the last run builds it when the list asks.
+  WidgetsBinding.instance.addPostFrameCallback((_) {
+    Timer(const Duration(milliseconds: 600), artists.warmUp);
+  });
   WidgetsBinding.instance.addPostFrameCallback((_) {
     unawaited(
       _afterFirstFrame(
@@ -459,6 +489,7 @@ Future<void> main(List<String> args) async {
       remover: remover,
       forYou: forYou,
       playlists: playlists,
+      artists: artists,
       settings: settings,
     ),
   );
@@ -675,6 +706,7 @@ class OwnsembleApp extends StatelessWidget {
     this.remover,
     this.forYou,
     this.playlists,
+    this.artists,
   });
 
   final CoverStore covers;
@@ -689,6 +721,7 @@ class OwnsembleApp extends StatelessWidget {
   final SongRemover? remover;
   final ForYou? forYou;
   final VkPlaylists? playlists;
+  final LibraryArtists? artists;
 
   @override
   Widget build(BuildContext context) {
@@ -711,6 +744,7 @@ class OwnsembleApp extends StatelessWidget {
             remover: remover,
             forYou: forYou,
             playlists: playlists,
+            artists: artists,
             settings: settings,
           ),
         ),

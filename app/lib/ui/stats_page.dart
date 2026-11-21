@@ -28,6 +28,7 @@ class StatsPage extends StatefulWidget {
     required this.onOpenArtist,
     required this.onOpenAlbum,
     this.onOpenYear,
+    this.artistsOf,
   });
 
   final SongFilters filters;
@@ -37,7 +38,12 @@ class StatsPage extends StatefulWidget {
 
   /// A top song was clicked: play [list] from [index].
   final void Function(List<Track> list, int index) onPlay;
-  final void Function(String artist) onOpenArtist;
+
+  /// An artist row was clicked: open the artist (its page, plan 09).
+  final void Function(RankedRow row) onOpenArtist;
+
+  /// The songs' artists by identity (plan 09, R5); null: by artist text.
+  final SongArtists? artistsOf;
 
   /// An album row was clicked: open the album of its most played song.
   final void Function(Track track) onOpenAlbum;
@@ -75,6 +81,7 @@ class _StatsPageState extends State<StatsPage> {
     final stats = ListeningStats(
       byId,
       filters.songPlaysIn(DayRange.year(year)),
+      artistsOf: widget.artistsOf,
     );
     _yearKept = (year: year, version: version, stats: stats);
     return stats;
@@ -97,11 +104,19 @@ class _StatsPageState extends State<StatsPage> {
     final filters = widget.filters;
     if (!filters.loaded) return const SizedBox.shrink();
     final now = filters.now;
-    final stats = ListeningStats(byId, filters.inPeriod);
+    final stats = ListeningStats(
+      byId,
+      filters.inPeriod,
+      artistsOf: widget.artistsOf,
+    );
     final compared = filters.compared();
     final before = compared == null
         ? null
-        : ListeningStats(byId, compared.plays).totals;
+        : ListeningStats(
+            byId,
+            compared.plays,
+            artistsOf: widget.artistsOf,
+          ).totals;
     final first = filters.firstPlayMs;
     final totals = stats.totals;
     ({String text, bool? up})? change(int value, int? earlier) =>
@@ -276,12 +291,12 @@ class _StatsPageState extends State<StatsPage> {
                 RankBy.songs => widget.onPlay([
                   for (final r in rows) r.songs.single,
                 ], n),
-                RankBy.artists => widget.onOpenArtist(row.name),
+                RankBy.artists => widget.onOpenArtist(row),
                 RankBy.albums => widget.onOpenAlbum(row.songs.first),
               },
               tooltip: switch (_tab) {
                 RankBy.songs => 'Play the top songs from this one',
-                RankBy.artists => 'Open the songs of ${row.name}',
+                RankBy.artists => 'Open ${row.name}',
                 RankBy.albums => 'Open the album',
               },
             );

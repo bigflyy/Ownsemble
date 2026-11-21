@@ -34,6 +34,40 @@ void main() {
       t.id: t,
   };
 
+  group('artists by identity (plan 09, R5)', () {
+    // Song 1 is by two artists; songs 4 and 5 spell one VK artist two ways.
+    List<({String key, String name})> artistsOf(Track track) =>
+        switch (track.id) {
+          1 => [(key: 'vk:1', name: 'Кино'), (key: 'vk:2', name: 'Гость')],
+          4 => [(key: 'vk:3', name: 'Земфира')],
+          5 => [(key: 'vk:3', name: 'Zemfira')],
+          _ => const [],
+        };
+
+    test('a song counts for each of its artists; spellings of one id are '
+        'one row with its key', () {
+      final stats = ListeningStats(songs, {
+        1: plays(5),
+        2: plays(2),
+        4: plays(3),
+        5: plays(1),
+      }, artistsOf: artistsOf);
+      final rows = stats.top(RankBy.artists);
+      expect(
+        [for (final r in rows) (r.key, r.name, r.plays)],
+        [
+          // A tie goes by name.
+          ('vk:2', 'Гость', 5),
+          ('vk:1', 'Кино', 5),
+          ('vk:3', 'Земфира', 4),
+          // Song 2 has no known artist: its text, with no key to open.
+          (null, 'Кино', 2),
+        ],
+      );
+      expect(stats.totals.artists, 4);
+    });
+  });
+
   group('totals', () {
     test('add up counted plays, time heard, and the songs and artists '
         'with a counted play', () {

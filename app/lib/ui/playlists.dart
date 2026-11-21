@@ -909,12 +909,25 @@ class VkPlaylists extends ChangeNotifier implements ListCatalog {
 /// places, For you for its lists; both share one [OutsideSongs], so a song
 /// is the same in either.
 class CombinedLists implements ListCatalog {
-  const CombinedLists({required this.playlists, required this.others});
+  const CombinedLists({
+    required this.playlists,
+    required this.others,
+    this.artists,
+    this.isArtistList,
+  });
 
   final VkPlaylists playlists;
   final ListCatalog others;
 
-  ListCatalog _of(AlbumRef ref) => isPlaylistRef(ref) ? playlists : others;
+  /// Artists' Popular lists (plan 09), told apart by [isArtistList].
+  final ListCatalog? artists;
+  final bool Function(AlbumRef ref)? isArtistList;
+
+  ListCatalog _of(AlbumRef ref) => isPlaylistRef(ref)
+      ? playlists
+      : artists != null && (isArtistList?.call(ref) ?? false)
+      ? artists!
+      : others;
 
   @override
   List<AlbumSong>? cached(AlbumRef list) => _of(list).cached(list);

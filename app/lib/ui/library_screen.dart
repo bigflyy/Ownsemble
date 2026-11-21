@@ -5,6 +5,7 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../library/listening_stats.dart';
 import '../library/play_stats.dart';
 import '../library/song_filter.dart';
 import '../library/song_version.dart';
@@ -14,7 +15,12 @@ import '../playback/play_queue.dart';
 import '../playback/version_book.dart';
 import '../playback/player_service.dart';
 import '../storage/audio_storage.dart';
+import 'add_song_button.dart';
 import 'album_link.dart';
+import 'artist_links.dart';
+import 'artist_page.dart';
+import 'artists.dart';
+import 'artists_page.dart';
 import 'catalog_part.dart';
 import 'catalog_search.dart';
 import 'collections_controller.dart';
@@ -117,6 +123,7 @@ class LibraryScreen extends StatefulWidget {
     this.remover,
     this.forYou,
     this.playlists,
+    this.artists,
     this._settings,
   });
 
@@ -149,6 +156,9 @@ class LibraryScreen extends StatefulWidget {
   /// The accounts' VK playlists (plan 08); no Playlists place when null.
   final VkPlaylists? playlists;
 
+  /// The library's artists (plan 09); no Artists place when null.
+  final LibraryArtists? artists;
+
   final ShellSettings? _settings;
 
   @override
@@ -166,7 +176,9 @@ class _LibraryScreenState extends State<LibraryScreen> {
   /// The songs of VK's lists the library lacks (For you and the
   /// playlists share them).
   OutsideSongs? get _outside =>
-      widget.forYou?.outside ?? widget.playlists?.outside;
+      widget.forYou?.outside ??
+      widget.playlists?.outside ??
+      widget.artists?.outside;
   AudioStorage? get _storage => widget.player.storage;
 
   @override
@@ -532,9 +544,36 @@ class _LibraryScreenState extends State<LibraryScreen> {
     return true;
   }
 
-  /// A Stats artist row: Songs with that artist's chip only, most played
-  /// in the period first.
+  /// The artists of [track] by identity, for Stats and the year report
+  /// (plan 09, R5); null without the Artists place.
+  SongArtists? get _songArtists {
+    final artists = widget.artists;
+    if (artists == null) return null;
+    return (track) => [
+      for (final artist in artists.index.artistsOf(track.id))
+        (key: artist.key, name: artist.name),
+    ];
+  }
+
+  /// A Stats or year report artist row: its artist's page by identity.
+  void _openArtistRow(RankedRow row) {
+    final key = row.key;
+    if (key != null) {
+      library.openArtist(key);
+      return;
+    }
+    _openArtist(row.name);
+  }
+
+  /// A Stats artist row: the artist's page (plan 09, D3); without the
+  /// Artists place, or for a text no artist has, Songs with that artist's
+  /// chip only, most played in the period first.
   void _openArtist(String artist) {
+    final key = widget.artists?.keyForText(artist);
+    if (key != null) {
+      library.openArtist(key);
+      return;
+    }
     final filters = library.filters;
     if (filters == null) return;
     filters
@@ -643,11 +682,22 @@ class _LibraryScreenState extends State<LibraryScreen> {
   /// A song's right-click menu: Play next and Add to queue, View cover,
   /// Download or Remove download, put on top of a Stack, and in a Stack,
   /// remove this entry.
-  Future<void> _showSongMenu(int index, Offset position) async {
-    final track = library.visible[index];
+  Future<void> _showSongMenu(int index, Offset position) => _showTrackMenu(
+    library.visible[index],
+    position,
+    entryId: library.entryIdAt(index),
+  );
+
+  /// The right-click menu of [track], a row of the list or of a page (an
+  /// artist's page, plan 09), with [entryId] for a row of History, a Stack
+  /// or a playlist.
+  Future<void> _showTrackMenu(
+    Track track,
+    Offset position, {
+    int? entryId,
+  }) async {
     final version = library.versionOf(track);
     if (version != null) return _showVersionMenu(track, version, position);
-    final entryId = library.entryIdAt(index);
     final storage = _storage;
     final collections = widget.collections;
     final downloaded = storage?.stateOf(track).pinned ?? false;
@@ -841,6 +891,21 @@ class _LibraryScreenState extends State<LibraryScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final artists = widget.artists;
+    final screen = _screen(context);
+    return artists == null
+        ? screen
+        : ArtistLinkScope(
+            artists: artists,
+            onOpen: (key) {
+              library.jump.clear();
+              library.openArtist(key);
+            },
+            child: screen,
+          );
+  }
+
+  Widget _screen(BuildContext context) {
     return ListenableBuilder(
       listenable: _settings,
       builder: (context, _) => LayoutBuilder(
@@ -915,6 +980,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
                               ?_storage,
                               ?widget.player.versions,
                               ?library.filters,
+                              ?widget.artists,
                             ]),
                             builder: (context, _) {
                               final counts = _storedCounts();
@@ -926,6 +992,8 @@ class _LibraryScreenState extends State<LibraryScreen> {
                                 changed: library.changedCount,
                                 showForYou: widget.forYou != null,
                                 showPlaylists: widget.playlists != null,
+                                showArtists: widget.artists != null,
+                                artists: widget.artists?.builtIndex?.length,
                                 rail: rail,
                                 canExpand: roomForSidebar,
                                 onToggleRail: _settings.toggleRail,
@@ -1065,6 +1133,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
               ?widget.remover,
               ?widget.forYou,
               ?widget.playlists,
+              ?widget.artists,
             ]),
             builder: (context, _) {
               final view = library.view;
@@ -1105,76 +1174,92 @@ class _LibraryScreenState extends State<LibraryScreen> {
                               compact: tight,
                             ),
                     );
+              final artists = widget.artists;
               return Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  _ViewHeading(
-                    title: filters?.view?.name ?? _viewTitle(view),
-                    count: view.isPage ? null : _countLabel(),
-                    jump: library.jump,
-                    tight: tight,
-                    onBack: view.hasBack ? library.goBack : null,
-                    detail: view.kind == ViewKind.versions
-                        ? _versionsDetail()
-                        : _albumDetail(view),
-                    actions: [
-                      if (view.kind == ViewKind.versions) _versionsSearch(),
-                      ?_albumAddAll(view, tight: tight),
-                      ?_listActions(
-                        view,
-                        compact: listWidth < listActionsCompactWidth,
-                      ),
-                      if (view.kind == ViewKind.playlists &&
-                          widget.playlists != null)
-                        NewPlaylistButton(
-                          playlists: widget.playlists!,
-                          onMade: library.openList,
+                  // An artist's page draws its own heading: photo, name,
+                  // Play (plan 09, D2).
+                  if (view.kind != ViewKind.artist || artists == null)
+                    _ViewHeading(
+                      title: filters?.view?.name ?? _viewTitle(view),
+                      count: view.kind == ViewKind.artists && artists != null
+                          ? artistCountText(
+                              artists.shown(library.searchText.text).length,
+                              artists.index.length,
+                            )
+                          : view.isPage
+                          ? null
+                          : _countLabel(),
+                      jump: library.jump,
+                      tight: tight,
+                      onBack: view.hasBack ? library.goBack : null,
+                      detail: view.kind == ViewKind.versions
+                          ? _versionsDetail()
+                          : _albumDetail(view),
+                      actions: [
+                        if (view.kind == ViewKind.artists && artists != null)
+                          ArtistSortButtons(
+                            artists: artists,
+                            compact: listWidth < filterChipsMinWidth,
+                          ),
+                        if (view.kind == ViewKind.versions) _versionsSearch(),
+                        ?_albumAddAll(view, tight: tight),
+                        ?_listActions(
+                          view,
+                          compact: listWidth < listActionsCompactWidth,
                         ),
-                      if (view.kind == ViewKind.yearReport &&
-                          library.filters != null)
-                        YearArrows(
-                          year: view.year!,
-                          firstYear: switch (library.filters!.firstPlayMs) {
-                            final ms? => DateTime.fromMillisecondsSinceEpoch(
-                              ms,
-                            ).year,
-                            null => null,
-                          },
-                          thisYear: library.filters!.now.year,
-                          onYear: library.showYearReport,
-                        ),
-                      if (statsFilters != null)
-                        PeriodControls(
-                          filters: statsFilters,
-                          settings: _settings,
-                          narrow: listWidth < statsPeriodButtonsMinWidth,
-                          compact: tight,
-                        ),
-                      if (filters != null && periodBesideTitle && !tight)
-                        PeriodControls(
-                          filters: filters,
-                          settings: _settings,
-                          narrow: false,
-                        ),
-                      if (tight && filterBar != null)
-                        // One line that scrolls sideways, like the source
-                        // chips: the list keeps its rows.
-                        Flexible(
-                          flex: 3,
-                          child: Align(
-                            alignment: Alignment.centerRight,
-                            child: SingleChildScrollView(
-                              key: const ValueKey('filter-bar-scroll'),
-                              scrollDirection: Axis.horizontal,
-                              child: filterBar,
+                        if (view.kind == ViewKind.playlists &&
+                            widget.playlists != null)
+                          NewPlaylistButton(
+                            playlists: widget.playlists!,
+                            onMade: library.openList,
+                          ),
+                        if (view.kind == ViewKind.yearReport &&
+                            library.filters != null)
+                          YearArrows(
+                            year: view.year!,
+                            firstYear: switch (library.filters!.firstPlayMs) {
+                              final ms? => DateTime.fromMillisecondsSinceEpoch(
+                                ms,
+                              ).year,
+                              null => null,
+                            },
+                            thisYear: library.filters!.now.year,
+                            onYear: library.showYearReport,
+                          ),
+                        if (statsFilters != null)
+                          PeriodControls(
+                            filters: statsFilters,
+                            settings: _settings,
+                            narrow: listWidth < statsPeriodButtonsMinWidth,
+                            compact: tight,
+                          ),
+                        if (filters != null && periodBesideTitle && !tight)
+                          PeriodControls(
+                            filters: filters,
+                            settings: _settings,
+                            narrow: false,
+                          ),
+                        if (tight && filterBar != null)
+                          // One line that scrolls sideways, like the source
+                          // chips: the list keeps its rows.
+                          Flexible(
+                            flex: 3,
+                            child: Align(
+                              alignment: Alignment.centerRight,
+                              child: SingleChildScrollView(
+                                key: const ValueKey('filter-bar-scroll'),
+                                scrollDirection: Axis.horizontal,
+                                child: filterBar,
+                              ),
                             ),
                           ),
-                        ),
-                    ],
-                    // A song's versions are one song: nothing to filter.
-                    // On Songs the source chips join the filter chips.
-                    filter: filters == null ? sourceChips : null,
-                  ),
+                      ],
+                      // A song's versions are one song: nothing to filter.
+                      // On Songs the source chips join the filter chips.
+                      filter: filters == null ? sourceChips : null,
+                    ),
                   if (filterBar != null && !tight)
                     Padding(
                       padding: const EdgeInsets.fromLTRB(24, 0, 24, 10),
@@ -1199,7 +1284,8 @@ class _LibraryScreenState extends State<LibraryScreen> {
                               songs: library.all,
                               onPlay: (list, index) =>
                                   widget.playback.playFrom(list, index),
-                              onOpenArtist: _openArtist,
+                              onOpenArtist: _openArtistRow,
+                              artistsOf: _songArtists,
                               onOpenAlbum: library.openAlbum,
                               onOpenYear: library.openYearReport,
                             ),
@@ -1214,7 +1300,8 @@ class _LibraryScreenState extends State<LibraryScreen> {
                               year: view.year!,
                               onPlay: (list, index) =>
                                   widget.playback.playFrom(list, index),
-                              onOpenArtist: _openArtist,
+                              onOpenArtist: _openArtistRow,
+                              artistsOf: _songArtists,
                             ),
                           )
                         : view.kind == ViewKind.forYou && widget.forYou != null
@@ -1226,6 +1313,34 @@ class _LibraryScreenState extends State<LibraryScreen> {
                               playback: widget.playback,
                               catalog: widget.catalog,
                               onAdd: _addFound,
+                            ),
+                          )
+                        : view.kind == ViewKind.artists && artists != null
+                        ? ArtistsPage(artists: artists, library: library)
+                        : view.kind == ViewKind.artist &&
+                              artists != null &&
+                              view.artist != null
+                        ? NowPlayingScope(
+                            playback: widget.playback,
+                            child: ArtistPage(
+                              artistKey: view.artist!,
+                              artists: artists,
+                              library: library,
+                              playback: widget.playback,
+                              outside: _outside,
+                              songRow:
+                                  (
+                                    track, {
+                                    required number,
+                                    required onTap,
+                                    popular = false,
+                                  }) => _pageRow(
+                                    track,
+                                    number: number,
+                                    onTap: onTap,
+                                    popular: popular,
+                                    showAlbum: showAlbum,
+                                  ),
                             ),
                           )
                         : view.kind == ViewKind.playlists &&
@@ -1272,9 +1387,15 @@ class _LibraryScreenState extends State<LibraryScreen> {
     if (view.kind == ViewKind.playlists) {
       return playlistsDetail(widget.playlists);
     }
+    if (view.kind == ViewKind.artistSongs) {
+      return 'Your songs by this artist, newest added first';
+    }
     final status = library.albumStatus;
     final album = view.album;
     if (status == null || album == null) return null;
+    if (view.kind == ViewKind.vkList && isArtistListRef(album)) {
+      return artistListDetail(widget.artists, album, status);
+    }
     if (view.kind == ViewKind.vkList && isPlaylistRef(album)) {
       return playlistDetail(widget.playlists, album, status);
     }
@@ -1366,6 +1487,12 @@ class _LibraryScreenState extends State<LibraryScreen> {
     ViewKind.songs => 'All songs',
     ViewKind.favorites => 'Favorites',
     ViewKind.artists => 'Artists',
+    ViewKind.artist || ViewKind.artistSongs =>
+      switch (view.artist) {
+            final key? => widget.artists?.artistOf(key)?.name,
+            null => null,
+          } ??
+          'Artist',
     ViewKind.downloads => 'Downloads',
     ViewKind.stored => 'On this computer',
     ViewKind.changed => 'Changed on VK',
@@ -1441,6 +1568,8 @@ class _LibraryScreenState extends State<LibraryScreen> {
                 _ => 'No songs of this album to show.',
               },
               ViewKind.versions => 'No versions of this song to show.',
+              ViewKind.artistSongs =>
+                "None of this artist's songs are in your library now.",
               ViewKind.vkList => switch (library.albumStatus?.load) {
                 AlbumLoad.loading => 'Getting the songs from VK...',
                 AlbumLoad.failed =>
@@ -1805,6 +1934,93 @@ class _LibraryScreenState extends State<LibraryScreen> {
   int? _vkTrackIdOf(Track track) =>
       widget.catalog?.foundById(track.id)?.song.vkTrackId ??
       library.albumVkTrackIdOf(track);
+
+  /// A song row of a page (an artist's page, plan 09): the list's row with
+  /// every usual action, for a song of the library or one outside it (VK's
+  /// Popular: + adds it). In [popular] a song the library has shows a
+  /// check in the heart's slot.
+  Widget _pageRow(
+    Track track, {
+    required int number,
+    required VoidCallback onTap,
+    required bool showAlbum,
+    bool popular = false,
+  }) {
+    final catalog = widget.catalog;
+    final outside = catalog == null
+        ? null
+        : recFoundSong(_outside, catalog, track);
+    final filters = library.filters;
+    final remover = widget.remover;
+    return StreamBuilder<Track?>(
+      stream: widget.player.currentStream,
+      initialData: widget.player.current,
+      builder: (context, current) => ValueListenableBuilder(
+        valueListenable: widget.player.playing,
+        builder: (context, playing, _) => LeavingRow(
+          key: ValueKey('page-song-${track.id}'),
+          leaving: remover?.leaving.contains(track.id) ?? false,
+          flashing: remover?.flashing == track.id,
+          child: _SongRow(
+            number: number,
+            track: track,
+            periodPlays: filters?.periodPlays(track.id),
+            allTimePlays: filters?.allTimePlays(track.id),
+            now: filters?.now,
+            cover: track,
+            stored:
+                _storage?.stateOf(track) ??
+                (path: track.localPath, pinned: track.pinned),
+            downloading: _storage?.isDownloading(track) ?? false,
+            saving: _storage?.isSaving(track) ?? false,
+            storage: _storage,
+            thumbnails: _settings.thumbnails,
+            showAlbum: showAlbum,
+            isCurrent: _isPlaying(track, current.data),
+            isJump: false,
+            playing: playing,
+            onTap: () {
+              if (_pausesAddedCopy(track)) return;
+              onTap();
+            },
+            onMenu: (position) => _showTrackMenu(track, position),
+            favorite: widget.collections?.isFavorite(track.id) ?? false,
+            onFavorite: widget.collections == null || !track.inLibrary
+                ? null
+                : () => widget.collections!.toggleFavorite(track),
+            versionTag: (compact) =>
+                restrictedTag(_outside, track, compact: compact) ??
+                (outside == null
+                    ? null
+                    : _otherVersionTag(catalog!, outside, compact: compact)) ??
+                VersionTag(
+                  playback: widget.playback,
+                  track: track,
+                  compact: compact,
+                  onOpen: _openVersions,
+                ),
+            tagsUnderTitle:
+                (_outside?.restrictionOf(track.id) != null) ||
+                outside != null && catalog!.otherVersionOf(outside) != null,
+            action: outside != null
+                ? foundAddButton(context, catalog!, outside, onAdd: _addFound)
+                : popular && track.inLibrary
+                ? AddSongButton(
+                    key: ValueKey('have-${track.id}'),
+                    state: FoundState.inLibrary,
+                    colors: [sourceColor(context, track)],
+                    onAdd: null,
+                  )
+                : null,
+            outsideMeaning: 'Not in your library: streams from VK',
+            onOpenAlbum: library.albumOf(track) == null
+                ? null
+                : () => library.openAlbum(track),
+          ),
+        ),
+      ),
+    );
+  }
 
   /// A song VK found: plays with a click, the found songs as its list; +
   /// in the heart's slot.
@@ -3213,22 +3429,26 @@ class _SongRow extends StatelessWidget {
                             Row(
                               children: [
                                 Flexible(
-                                  child: Text(
-                                    track.artist,
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
+                                  child: ArtistAlbumLine(
+                                    key: ValueKey('artist-line-${track.id}'),
+                                    artist: track.artist,
+                                    album: '',
                                     style: dimStyle,
+                                    albumStyle: dimStyle,
+                                    track: track,
                                   ),
                                 ),
                                 ...tags(compact: false),
                               ],
                             )
                           else
-                            Text(
-                              track.artist,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
+                            ArtistAlbumLine(
+                              key: ValueKey('artist-line-${track.id}'),
+                              artist: track.artist,
+                              album: '',
                               style: dimStyle,
+                              albumStyle: dimStyle,
+                              track: track,
                             ),
                         ],
                       ),
