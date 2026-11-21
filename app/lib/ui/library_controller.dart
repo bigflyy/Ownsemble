@@ -580,6 +580,14 @@ class LibraryController extends ChangeNotifier {
   /// a song VK found in search (CatalogSearch.albumOfFound sets it, C4b).
   AlbumRef? Function(Track track)? outsideAlbumOf;
 
+  /// The library's song that an album's VK song is anywhere in the library
+  /// (same key, the same recording, or the same name and length, as + and
+  /// its check decide), or null. CatalogSearch sets it. The album place
+  /// shows that song as the user's own row even when the user's upload is
+  /// tied to no album or another one (user, 2026-11-21: 4 "in your library"
+  /// while 7 more rows had a check).
+  Track? Function(AlbumSong song)? albumSongCopyOf;
+
   /// Rows the list shows above the first song (the own songs' header in
   /// search, CatalogSearch sets it, C4d), so a row is scrolled to its
   /// real place.
@@ -830,12 +838,54 @@ class LibraryController extends ChangeNotifier {
       return null;
     }
 
+    // Last, the library's copy anywhere else (another upload, often with
+    // no album), as the row's check finds it. Rules (Codex review
+    // 2026-11-21):
+    // - a copy no album row shows yet, each copy for one album song only;
+    //   when several songs find one copy, the song that is that very
+    //   upload (same key) wins, else the first in the album's order;
+    // - not a copy gone from VK without stored audio: the album's upload
+    //   still streams;
+    // - with a source chip on, only that source's copy, so the song does
+    //   not drop out of the filtered album.
+    final placedHere = {...placed, for (final id in libraryIds) id};
+    final copyOf = <AlbumSong, Track>{};
+    final source = _source;
+    for (final song in listed) {
+      if (ownByTrackId(song) != null) continue;
+      final found = albumSongCopyOf?.call(song);
+      final copy = found == null ? null : _byId[found.id];
+      if (copy == null || placedHere.contains(copy.id)) continue;
+      if (copy.isGone && copy.localPath == null) continue;
+      if (source != null && !copy.isFrom(source)) continue;
+      copyOf[song] = copy;
+    }
+    final copyWinner = <int, AlbumSong>{};
+    for (final MapEntry(key: song, value: copy) in copyOf.entries) {
+      final had = copyWinner[copy.id];
+      final exact = song.track.sourceKey == copy.sourceKey;
+      if (had == null || exact && had.track.sourceKey != copy.sourceKey) {
+        copyWinner[copy.id] = song;
+      }
+    }
+    // Ids of album songs a copy stands for: VK listing the same entry
+    // twice shows it once, as before.
+    final standsFor = <int>{};
+    Track? copyElsewhere(AlbumSong song) {
+      final copy = copyOf[song];
+      if (copy == null || copyWinner[copy.id] != song) return null;
+      standsFor.add(song.track.id);
+      return copy;
+    }
+
     final shown = <int>{};
     final tracks = <Track>[];
     final covers = <int, Track>{};
     Track? firstCover;
     for (final song in listed) {
-      final own = ownByTrackId(song) ?? sameSongOf(song.track);
+      final own =
+          ownByTrackId(song) ?? sameSongOf(song.track) ?? copyElsewhere(song);
+      if (own == null && standsFor.contains(song.track.id)) continue;
       final track = own ?? song.track;
       if (!shown.add(track.id)) continue;
       tracks.add(track);

@@ -155,6 +155,130 @@ void main() {
     },
   );
 
+  test('an album song you have as another upload shows as your song', () async {
+    // "Бардак" is in the library as another upload with no album: VK's
+    // album row would say "in your library" with a check, yet the album
+    // counted only the songs tied to it (user, 2026-11-21: "wrong song
+    // count").
+    tracks.add(song(5, 'Бардак [live cut]', album: null));
+    final library = open()
+      ..albumSongCopyOf = (song) =>
+          song.track.title == 'Бардак' ? tracks[4] : null;
+    library.openAlbum(tracks.first);
+    catalog.answer.complete(vkList);
+    await pumpEventQueue();
+    expect(titles(library), [
+      'Профессионал',
+      'Альтернатива',
+      'Люди',
+      'Бардак [live cut]',
+      'Чужая',
+    ]);
+    expect(library.visible[3], same(tracks[4]));
+    expect(library.albumStatus?.inLibrary, 4);
+    // The album's cover on that row too.
+    expect(library.rowCover(tracks[4]).album, 'Человеко-часы');
+  });
+
+  test('a copy already shown in the album keeps the album row', () async {
+    // The library's "Люди" also matches "Бардак" (a wrong text match):
+    // the album must not lose its "Бардак" row for it.
+    final library = open()
+      ..albumSongCopyOf = (song) =>
+          song.track.title == 'Бардак' ? tracks[0] : null;
+    library.openAlbum(tracks.first);
+    catalog.answer.complete(vkList);
+    await pumpEventQueue();
+    expect(titles(library), [
+      'Профессионал',
+      'Альтернатива',
+      'Люди',
+      'Бардак',
+      'Чужая',
+    ]);
+    expect(library.visible[3].inLibrary, isFalse);
+  });
+
+  test('when two album songs find one copy, the very upload wins', () async {
+    // "Альтернатива" and "Бардак" both find the library's untied copy, by
+    // text for the first and as the very upload (same key) for the second:
+    // the second takes it, the first stays VK's.
+    tracks.add(
+      Track(
+        id: 5,
+        sourceId: 1,
+        source: TrackSource.vk,
+        artist: 'Дайте танк (!)',
+        title: 'Бардак',
+        durationSec: 200,
+        sourceKey: '-5_4',
+      ),
+    );
+    final library = open()
+      ..albumSongCopyOf = (song) =>
+          song.track.title == 'Альтернатива' || song.track.title == 'Бардак'
+          ? tracks[4]
+          : null;
+    library.openAlbum(tracks.first);
+    catalog.answer.complete(vkList);
+    await pumpEventQueue();
+    expect(library.visible[1].inLibrary, isFalse);
+    expect(library.visible[3], same(tracks[4]));
+    expect(library.albumStatus?.inLibrary, 4);
+  });
+
+  test("a copy gone from VK without stored audio keeps VK's row", () async {
+    tracks.add(
+      Track(
+        id: 5,
+        sourceId: 1,
+        source: TrackSource.vk,
+        artist: 'Дайте танк (!)',
+        title: 'Бардак',
+        durationSec: 200,
+        sourceKey: '1_5',
+        goneAtMs: 1,
+      ),
+    );
+    final library = open()
+      ..albumSongCopyOf = (song) =>
+          song.track.title == 'Бардак' ? tracks[4] : null;
+    library.openAlbum(tracks.first);
+    catalog.answer.complete(vkList);
+    await pumpEventQueue();
+    expect(library.visible[3].inLibrary, isFalse);
+    expect(library.albumStatus?.inLibrary, 3);
+  });
+
+  test("with a source chip on, another account's copy is not taken", () async {
+    tracks.add(
+      Track(
+        id: 5,
+        sourceId: 2,
+        source: TrackSource.vk,
+        artist: 'Дайте танк (!)',
+        title: 'Бардак',
+        durationSec: 200,
+        sourceKey: '2_5',
+      ),
+    );
+    final library = open()
+      ..albumSongCopyOf = (song) =>
+          song.track.title == 'Бардак' ? tracks[4] : null;
+    library.openAlbum(tracks.first);
+    catalog.answer.complete(vkList);
+    await pumpEventQueue();
+    expect(library.visible[3], same(tracks[4]));
+    library.showSource(1);
+    await pumpEventQueue();
+    // The album's own VK row, from account 1, stays in the filtered album.
+    expect(titles(library), contains('Бардак'));
+    expect(
+      library.visible.firstWhere((t) => t.title == 'Бардак').inLibrary,
+      isFalse,
+    );
+  });
+
   test("rows of an album show the album's cover, your songs too", () async {
     tracks[0] = Track(
       id: 1,

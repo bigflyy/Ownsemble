@@ -122,7 +122,8 @@ class CatalogSearch extends ChangeNotifier {
     library
       ..outsideAlbumOf = albumOfFound
       ..countRowsAbove = _rowsAbove
-      ..unfoldForReveal = _unfoldOwnForReveal;
+      ..unfoldForReveal = _unfoldOwnForReveal
+      ..albumSongCopyOf = _albumSongCopyOf;
     _sources.addListener(_onSourcesChanged);
     _onLibraryChanged();
   }
@@ -450,6 +451,22 @@ class CatalogSearch extends ChangeNotifier {
     return id == null ? null : library.byId(id);
   }
 
+  /// The library's song that the album's VK song [song] is, as its row's
+  /// check says (LibraryController.albumSongCopyOf).
+  Track? _albumSongCopyOf(AlbumSong song) {
+    final track = song.track;
+    return libraryCopyOfSong(
+      NewTrack(
+        artist: track.artist,
+        title: track.title,
+        durationSec: track.durationSec,
+        addedAt: 0,
+        sourceKey: track.sourceKey ?? '',
+        vkTrackId: song.vkTrackId,
+      ),
+    );
+  }
+
   /// The library's song with [found]'s name as another recording, while +
   /// still offers [found]: the row says "you have another version" (C4e,
   /// user 2026-11-12), and + adds this recording as well. Null otherwise.
@@ -764,6 +781,9 @@ class CatalogSearch extends ChangeNotifier {
     if (library.countRowsAbove == _rowsAbove) library.countRowsAbove = null;
     if (library.unfoldForReveal == _unfoldOwnForReveal) {
       library.unfoldForReveal = null;
+    }
+    if (library.albumSongCopyOf == _albumSongCopyOf) {
+      library.albumSongCopyOf = null;
     }
     _sources.removeListener(_onSourcesChanged);
     super.dispose();
