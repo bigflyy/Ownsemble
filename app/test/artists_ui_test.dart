@@ -18,6 +18,7 @@ import 'package:ownsemble/library/library_store.dart';
 import 'package:ownsemble/library/search_index.dart';
 import 'package:ownsemble/library/track.dart';
 import 'package:ownsemble/playback/playback_controller.dart';
+import 'package:ownsemble/ui/albums.dart';
 import 'package:ownsemble/ui/artists.dart';
 import 'package:ownsemble/ui/artists_page.dart' show ArtistPhoto;
 import 'package:ownsemble/ui/cover_tile.dart' show TrackTile;
@@ -81,6 +82,7 @@ void main() {
         durationSec: 147,
         addedAt: 10,
         album: 'Радио Пепел',
+        vkAlbumKey: '-7_62',
         artists: [tank],
       ),
       for (var i = 2; i <= 6; i++)
@@ -118,6 +120,26 @@ void main() {
         if (pageAnswer case final answer?) return answer(params);
         return _page();
       }
+      // The album "Радио Пепел" on VK: Утро, "Своя 2" (another upload of
+      // the library's song with no album) and a song the library lacks.
+      if (method == 'audio.get' && params['album_id'] == '62') {
+        Map<String, Object> item(int id, String title, int seconds) => {
+          'owner_id': -7,
+          'id': id,
+          'artist': 'Дайте танк (!)',
+          'title': title,
+          'duration': seconds,
+          'url': 'https://audio.invalid/$id.mp3',
+        };
+        return {
+          'count': 3,
+          'items': [
+            item(1, 'Утро', 147),
+            item(2, 'Своя 2', 202),
+            item(3, 'Чужая', 180),
+          ],
+        };
+      }
       if (method == 'catalog.getBlockItems' && blockItemsAnswer != null) {
         return blockItemsAnswer!(params);
       }
@@ -149,7 +171,13 @@ void main() {
       return vk.call(method, params);
     }
 
-    library = LibraryController(store.loadAll());
+    library = LibraryController(
+      store.loadAll(),
+      albums: LibraryAlbums(
+        store: store,
+        apiOfSource: (id) => id == source ? call : null,
+      ),
+    );
     sources = ValueNotifier(store.sources());
     player = ShowingPlayer();
     playback = PlaybackController(player: player);
@@ -353,6 +381,27 @@ void main() {
       await tester.runAsync(() => artists.fetch(ref));
       await tester.pumpAndSettle();
       expect(artists.vkOf('10000').page?.releases, hasLength(11));
+    });
+
+    testWidgets("an album card counts your songs as the album's place does "
+        '(user 2026-11-21: 4 on the tile, 11 in the album)', (tester) async {
+      await show(tester);
+      await openTank(tester);
+      await tester.runAsync(() => pumpEventQueue());
+      await tester.pumpAndSettle();
+      final own = library.all.firstWhere((t) => t.title == 'Утро');
+      final card = find.byKey(ValueKey('artist-album-${own.id}'));
+      await tester.scrollUntilVisible(
+        card,
+        300,
+        scrollable: find.byType(Scrollable).first,
+      );
+      // Утро tied to it, and "Своя 2" as another upload with no album.
+      expect(
+        find.descendant(of: card, matching: find.text('2 songs')),
+        findsOneWidget,
+      );
+      expect(calls.where((c) => c == 'audio.get'), hasLength(1));
     });
 
     testWidgets('releases past the first ten come in after the page '

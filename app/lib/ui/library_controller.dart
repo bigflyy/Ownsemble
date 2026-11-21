@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart';
 
@@ -767,7 +769,7 @@ class LibraryController extends ChangeNotifier {
     if (!_view.listsVkSongs || album == null) return null;
     final base = _base ?? const <Track>[];
     final inLibrary = base.where((track) => track.inLibrary).length;
-    if (_albumLists.containsKey(album)) {
+    if (_listOf(album) != null) {
       return (load: AlbumLoad.loaded, reason: null, inLibrary: inLibrary);
     }
     if (_albumsLoading.contains(album)) {
@@ -791,7 +793,7 @@ class LibraryController extends ChangeNotifier {
     final catalog = _catalogOf(_view);
     if (catalog == null) return const [];
     final libraryIds = catalog.libraryIds(album);
-    final listed = _albumLists[album];
+    final listed = _listOf(album);
     _albumCovers = const {};
     if (listed == null) {
       if (!_albumFailures.containsKey(album)) _fetchAlbum(album);
@@ -804,6 +806,23 @@ class LibraryController extends ChangeNotifier {
       }
       return _listSongs(catalog, listed);
     }
+    final matched = _matchAlbum(catalog, libraryIds, listed, source: _source);
+    _albumCovers = matched.covers;
+    return matched.tracks;
+  }
+
+  /// An album's rows once VK's list [listed] is in: in the album's order,
+  /// the library's own song in place of each one it has (also a copy tied
+  /// to no album or another one), then the library's songs of the album the
+  /// list does not name; with each own song the album song whose cover its
+  /// row shows. [source]: the source chip on, if any. The album place and
+  /// the artist page's album cards count the same rows.
+  ({List<Track> tracks, Map<int, Track> covers}) _matchAlbum(
+    AlbumCatalog catalog,
+    List<int> libraryIds,
+    List<AlbumSong> listed, {
+    required int? source,
+  }) {
     final byTrackId = catalog.libraryIdsByVkTrackId([
       for (final song in listed) ?song.vkTrackId,
     ]);
@@ -850,7 +869,6 @@ class LibraryController extends ChangeNotifier {
     //   not drop out of the filtered album.
     final placedHere = {...placed, for (final id in libraryIds) id};
     final copyOf = <AlbumSong, Track>{};
-    final source = _source;
     for (final song in listed) {
       if (ownByTrackId(song) != null) continue;
       final found = albumSongCopyOf?.call(song);
@@ -899,8 +917,94 @@ class LibraryController extends ChangeNotifier {
       tracks.add(track);
       if (firstCover != null) covers[id] = firstCover;
     }
-    _albumCovers = covers;
-    return tracks;
+    return (tracks: tracks, covers: covers);
+  }
+
+  // ---- Album cards of an artist page ----
+
+  /// VK's lists of the albums on an artist page's cards, asked in the
+  /// background so each card counts your songs as the album place does
+  /// (user, 2026-11-21: the tile said 4 for an album the place showed 11
+  /// of). Kept apart from [_albumLists], and more of them: an album list
+  /// is small.
+  final _cardLists = <AlbumRef, List<AlbumSong>>{};
+  static const _cardListsKept = 60;
+
+  /// Cards still to ask, one at a time; a card whose ask failed is not
+  /// asked again in this run.
+  var _cardQueue = <AlbumRef>[];
+  var _cardsRunning = false;
+  final _cardFailed = <AlbumRef>{};
+
+  /// Counted rows of each card, while the library stays the same.
+  final _cardCounts = <AlbumRef, int>{};
+  List<Track>? _cardCountsOf;
+
+  List<AlbumSong>? _listOf(AlbumRef album) =>
+      _albumLists[album] ?? _cardLists[album];
+
+  /// How many of [album]'s songs the library has, counted as its place
+  /// counts them (copies with no album too, no source chip); null until
+  /// VK's list of it is in.
+  int? albumCardCount(AlbumRef album) {
+    final catalog = albums;
+    final listed = _listOf(album);
+    if (catalog == null || listed == null) return null;
+    if (!identical(_cardCountsOf, _all)) {
+      _cardCounts.clear();
+      _cardCountsOf = _all;
+    }
+    return _cardCounts[album] ??= _matchAlbum(
+      catalog,
+      catalog.libraryIds(album),
+      listed,
+      source: null,
+    ).tracks.where((track) => track.inLibrary).length;
+  }
+
+  /// Asks VK for the lists of [cards] that are not in yet, one after
+  /// another in the background, in place of what was still waiting from
+  /// another page. Each list that comes in redraws the cards.
+  void askAlbumCards(List<AlbumRef> cards) {
+    final catalog = albums;
+    if (catalog == null) return;
+    _cardQueue = [
+      for (final album in cards)
+        if (_listOf(album) == null &&
+            !_cardFailed.contains(album) &&
+            catalog.canFetch(album))
+          album,
+    ];
+    if (!_cardsRunning) unawaited(_runAlbumCards());
+  }
+
+  /// The artist page closed: the cards not asked yet are dropped. One
+  /// already asked comes in and is kept; the next visit asks only the
+  /// missing ones.
+  void stopAlbumCards() => _cardQueue = [];
+
+  Future<void> _runAlbumCards() async {
+    _cardsRunning = true;
+    try {
+      while (_cardQueue.isNotEmpty && !_disposed) {
+        final album = _cardQueue.removeAt(0);
+        final catalog = albums;
+        if (catalog == null || _listOf(album) != null) continue;
+        try {
+          final songs = await catalog.fetch(album);
+          _cardLists[album] = songs;
+          if (_cardLists.length > _cardListsKept) {
+            _cardLists.remove(_cardLists.keys.first);
+          }
+        } catch (_) {
+          _cardFailed.add(album);
+          continue;
+        }
+        if (!_disposed) notifyListeners();
+      }
+    } finally {
+      _cardsRunning = false;
+    }
   }
 
   /// The songs of a recommended list in its order, the library's own song
@@ -931,7 +1035,7 @@ class LibraryController extends ChangeNotifier {
   int? albumVkTrackIdOf(Track track) {
     final album = _view.album;
     if (!_view.listsVkSongs || album == null) return null;
-    for (final song in _albumLists[album] ?? const <AlbumSong>[]) {
+    for (final song in _listOf(album) ?? const <AlbumSong>[]) {
       if (song.track.id == track.id) return song.vkTrackId;
     }
     return null;

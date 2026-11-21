@@ -279,6 +279,61 @@ void main() {
     );
   });
 
+  group("an artist page's album cards", () {
+    // The card counts the songs the album place shows as yours (user
+    // 2026-11-21: the tile said 4 while the album showed 11).
+    test('count as the album place once VK lists the album', () async {
+      tracks.add(song(5, 'Бардак [live cut]', album: null));
+      final library = open()
+        ..albumSongCopyOf = (song) =>
+            song.track.title == 'Бардак' ? tracks[4] : null;
+      expect(library.albumCardCount(album), isNull);
+      library.askAlbumCards([album]);
+      expect(catalog.fetches, 1);
+      catalog.answer.complete(vkList);
+      await pumpEventQueue();
+      // Люди, Профессионал, Чужая tied to it, Бардак's copy with no album.
+      expect(library.albumCardCount(album), 4);
+      // Opening the album then needs no other ask, and says the same.
+      library.openAlbum(tracks.first);
+      expect(catalog.fetches, 1);
+      expect(library.albumStatus?.inLibrary, 4);
+      expect(library.albumStatus?.load, AlbumLoad.loaded);
+    });
+
+    test('asked one at a time; a closed page drops what waits', () async {
+      const other = AlbumRef(
+        title: 'Другой',
+        artist: 'Дайте танк (!)',
+        link: (sourceId: 1, key: '-5_10', accessKey: null),
+      );
+      final library = open();
+      library.askAlbumCards([album, other]);
+      expect(catalog.fetches, 1);
+      library.stopAlbumCards();
+      catalog.answer.complete(vkList);
+      await pumpEventQueue();
+      // The one on its way is kept; the waiting one was never asked.
+      expect(catalog.fetches, 1);
+      expect(library.albumCardCount(album), 3);
+      expect(library.albumCardCount(other), isNull);
+      // The next visit asks only the missing one.
+      catalog.answer = Completer();
+      library.askAlbumCards([album, other]);
+      expect(catalog.fetches, 2);
+    });
+
+    test('a failed list is not asked again in the run', () async {
+      final library = open();
+      library.askAlbumCards([album]);
+      catalog.answer.completeError(const AlbumNotListed('no'));
+      await pumpEventQueue();
+      library.askAlbumCards([album]);
+      expect(catalog.fetches, 1);
+      expect(library.albumCardCount(album), isNull);
+    });
+  });
+
   test("rows of an album show the album's cover, your songs too", () async {
     tracks[0] = Track(
       id: 1,

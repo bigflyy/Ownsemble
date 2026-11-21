@@ -139,8 +139,22 @@ class _ArtistPageState extends State<ArtistPage> {
 
   void _loadVk({bool again = false}) {
     final key = widget.artistKey;
-    final ref = vkRefOf(key, artists.artistOf(key));
+    final artist = artists.artistOf(key);
+    final ref = vkRefOf(key, artist);
     if (ref != null) artists.loadVk(ref, again: again);
+    if (!again && artist != null) {
+      widget.library.askAlbumCards([
+        for (final album in artist.albums) ?widget.library.albumOf(album.first),
+      ]);
+    }
+  }
+
+  @override
+  void dispose() {
+    // Album lists not asked yet are dropped with the page (user,
+    // 2026-11-21); the one on its way is kept for the next visit.
+    widget.library.stopAlbumCards();
+    super.dispose();
   }
 
   /// The "Playing from" of the artist's library songs: their song list,
@@ -326,7 +340,16 @@ class _ArtistPageState extends State<ArtistPage> {
               key: ValueKey('artist-album-${album.first.id}'),
               tile: TrackTile(track: album.first, size: _Card.wide, radius: 10),
               title: album.title,
-              line: songCountText(album.songs),
+              // Once VK's list of the album is in, the songs its place
+              // shows as yours (copies tied to no album too); until then
+              // the songs tied to it.
+              line: songCountText(
+                switch (widget.library.albumOf(album.first)) {
+                      final ref? => widget.library.albumCardCount(ref),
+                      null => null,
+                    } ??
+                    album.songs,
+              ),
               tooltip: 'Open the album',
               onOpen: () => widget.library.openAlbum(album.first),
               colors: colors,
