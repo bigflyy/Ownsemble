@@ -4,6 +4,13 @@
 /// for a song being downloaded: VK refuses many calls in a row (error 9), so
 /// never all at once. What VK answers is kept in the library, so lyrics seen
 /// once show again at once and without a network.
+///
+/// Lyrics belong to one VK upload: they are asked for the upload that plays
+/// (the player's first stream route: the account that has the song, or the
+/// version chosen for it), so the words and their times fit what is heard.
+/// Asks go one at a time, an ask for the same upload is shared, and an ask
+/// for a song no longer shown is dropped before it starts (Codex review of
+/// session 36).
 library;
 
 import 'dart:async';
@@ -53,21 +60,37 @@ const lyricsRefreshAfter = Duration(days: 30);
 /// VK adds lyrics to songs now and then.
 const lyricsMissingRecheckAfter = Duration(days: 7);
 
-/// The source and the song there a [track]'s lyrics are kept under, or
-/// null when no source can have them yet (a generated song).
-({String source, String ref})? lyricsKeyOf(Track track) {
+/// The VK upload a song's lyrics are asked for: its key, its access key and
+/// the account to ask through (null when no account of it is logged in:
+/// stored lyrics still show).
+typedef LyricsRoute = ({String key, String? accessKey, VkApiCall? call});
+
+/// The route of [track]'s own row through [apiOfSource]: for tests and
+/// tools; the app asks the player which upload plays.
+LyricsRoute? Function(Track track) lyricsRouteBySource(
+  VkApiCall? Function(int sourceId) apiOfSource,
+) => (track) {
   final key = track.sourceKey;
   if (track.source != TrackSource.vk || key == null || key.isEmpty) {
     return null;
   }
-  return (source: 'vk', ref: key);
+  return (
+    key: key,
+    accessKey: track.accessKey,
+    call: apiOfSource(track.sourceId),
+  );
+};
+
+/// An ask dropped before it started: its song is no longer shown.
+class _Dropped implements Exception {
+  const _Dropped();
 }
 
 class LyricsController extends ChangeNotifier {
   LyricsController({
     required this.load,
     required this.save,
-    required this.apiOfSource,
+    required this.routeOf,
     int Function()? now,
     this.log,
   }) : _now = now ?? (() => DateTime.now().millisecondsSinceEpoch);
@@ -79,8 +102,9 @@ class LyricsController extends ChangeNotifier {
   final void Function(String source, String ref, Lyrics? lyrics, {String? md5})
   save;
 
-  /// The VK account a song of the given source streams through.
-  final VkApiCall? Function(int sourceId) apiOfSource;
+  /// The upload a song's lyrics come from; null when no source can have
+  /// them yet (a generated song).
+  final LyricsRoute? Function(Track track) routeOf;
 
   /// One line to perf.log: times and outcomes only, never words or keys.
   final void Function(String line)? log;
@@ -90,9 +114,18 @@ class LyricsController extends ChangeNotifier {
   Track? _track;
   LyricsState _state = const LyricsLoading();
 
-  /// Raised for every new ask, so an answer for a song no longer shown is
-  /// dropped.
+  /// Raised for every new ask for the place, so an answer for a song no
+  /// longer shown is dropped.
   int _asking = 0;
+
+  /// The upload whose lyrics the place shows (or waits for).
+  String? _shownKey;
+
+  /// Asks running or waiting, by upload key: a second ask shares the first.
+  final _asks = <String, Future<Lyrics?>>{};
+
+  /// The end of the line of asks: each waits for the one before.
+  Future<void> _line = Future<void>.value();
 
   /// The song the place shows.
   Track? get track => _track;
@@ -100,32 +133,37 @@ class LyricsController extends ChangeNotifier {
   LyricsState get state => _state;
 
   /// Shows the lyrics of [track] (the playing song; null for none): stored
-  /// ones at once, else asked. The same song again changes nothing.
-  void show(Track? track) {
+  /// ones at once, else asked. The same song again changes nothing, unless
+  /// [again] (the place opened anew): then a failure or an old answer is
+  /// looked at again.
+  void show(Track? track, {bool again = false}) {
     final sameSong =
         track != null &&
         _track != null &&
         track.id == _track!.id &&
         track.sourceKey == _track!.sourceKey;
-    if (sameSong) return;
+    if (sameSong && !(again && _state is! LyricsShown)) return;
     _track = track;
     _asking++;
     if (track == null) {
+      _shownKey = null;
       _set(const LyricsLoading());
       return;
     }
-    final key = lyricsKeyOf(track);
-    if (key == null) {
+    final route = routeOf(track);
+    if (route == null) {
+      _shownKey = null;
       _set(const LyricsMissing());
       return;
     }
-    final stored = load(key.source, key.ref);
+    _shownKey = route.key;
+    final stored = load('vk', route.key);
     final age = stored == null ? null : _now() - stored.fetchedAtMs;
     final lyrics = stored?.lyrics;
     if (lyrics != null) {
       final stale = age! > lyricsRefreshAfter.inMilliseconds;
       _set(LyricsShown(lyrics, refreshing: stale));
-      if (stale) unawaited(_ask(track, quiet: true));
+      if (stale) unawaited(_ask(route, quiet: true));
       return;
     }
     if (stored != null && age! <= lyricsMissingRecheckAfter.inMilliseconds) {
@@ -133,36 +171,55 @@ class LyricsController extends ChangeNotifier {
       return;
     }
     _set(const LyricsLoading());
-    unawaited(_ask(track));
+    unawaited(_ask(route));
   }
 
   /// Asks again for the song shown, after a failure.
   void retry() {
     final track = _track;
-    if (track == null) return;
+    final route = track == null ? null : routeOf(track);
+    if (route == null) return;
     _asking++;
     _set(const LyricsLoading());
-    unawaited(_ask(track));
+    unawaited(_ask(route));
   }
 
-  /// Fetches and keeps [track]'s lyrics when none are stored yet, so a
-  /// downloaded song has them offline. Failures are ignored.
+  /// Fetches and keeps [track]'s lyrics so a downloaded song has them
+  /// offline, unless they are stored already or VK said lately it has none.
+  /// Failures are ignored.
   Future<void> keepFor(Track track) async {
-    final key = lyricsKeyOf(track);
-    if (key == null || load(key.source, key.ref) != null) return;
-    try {
-      await _fetch(track, key);
-    } on Object {
-      // The place asks again when it is opened with a network.
+    final route = routeOf(track);
+    if (route == null) return;
+    final stored = load('vk', route.key);
+    if (stored != null &&
+        (stored.lyrics != null ||
+            _now() - stored.fetchedAtMs <=
+                lyricsMissingRecheckAfter.inMilliseconds)) {
+      return;
+    }
+    for (var attempt = 0; attempt < 2; attempt++) {
+      try {
+        await _shared(route);
+        return;
+      } on _Dropped {
+        // It shared an ask of the place that was dropped: ask on its own.
+        continue;
+      } on Object {
+        return; // The place asks again when it is opened with a network.
+      }
     }
   }
 
-  Future<void> _ask(Track track, {bool quiet = false}) async {
+  Future<void> _ask(LyricsRoute route, {bool quiet = false}) async {
     final asking = _asking;
-    final key = lyricsKeyOf(track)!;
     final clock = Stopwatch()..start();
     try {
-      final lyrics = await _fetch(track, key);
+      final lyrics = await _shared(
+        route,
+        // The upload shown when the ask's turn comes, whichever ask of the
+        // place started it (A, then B, then A again shares the first ask).
+        wanted: () => _shownKey == route.key,
+      );
       log?.call(
         'lyrics vk ${lyrics == null
             ? 'none'
@@ -173,6 +230,8 @@ class LyricsController extends ChangeNotifier {
       );
       if (asking != _asking) return;
       _set(lyrics == null ? const LyricsMissing() : LyricsShown(lyrics));
+    } on _Dropped {
+      return;
     } on Object catch (error) {
       log?.call(
         'lyrics vk failed ${error.runtimeType} '
@@ -197,21 +256,55 @@ class LyricsController extends ChangeNotifier {
     }
   }
 
-  /// Asks the source and keeps its answer; returns the lyrics or null.
-  Future<Lyrics?> _fetch(Track track, ({String source, String ref}) key) async {
-    final api = apiOfSource(track.sourceId);
-    if (api == null) throw StateError('no VK account for this song');
+  /// The ask for [route]'s upload: a running one is shared, a new one waits
+  /// its turn and, when [wanted] says no by then, is dropped unasked.
+  Future<Lyrics?> _shared(LyricsRoute route, {bool Function()? wanted}) {
+    final running = _asks[route.key];
+    if (running != null) return running;
+    final ask = _line.then((_) {
+      if (wanted != null && !wanted()) throw const _Dropped();
+      return _fetch(route);
+    });
+    _line = ask.then<void>((_) {}, onError: (Object _) {});
+    _asks[route.key] = ask;
+    // Block bodies: Map.remove returns the (failing) ask, which must not
+    // become this chain's result.
+    unawaited(
+      ask.then<void>(
+        (_) {
+          _asks.remove(route.key);
+        },
+        onError: (Object _) {
+          _asks.remove(route.key);
+        },
+      ),
+    );
+    return ask;
+  }
+
+  /// Asks VK and keeps its answer; returns the lyrics to show or null. A
+  /// "none" (or a reply without words) never erases lyrics stored before:
+  /// they stay for offline use, only their time moves.
+  Future<Lyrics?> _fetch(LyricsRoute route) async {
+    final call = route.call;
+    if (call == null) throw StateError('no VK account for this song');
     final answer = await fetchVkLyrics(
-      api,
-      sourceKey: key.ref,
-      accessKey: track.accessKey,
+      call,
+      sourceKey: route.key,
+      accessKey: route.accessKey,
     );
     switch (answer) {
       case VkLyricsFound(:final lyrics, :final md5):
-        save(key.source, key.ref, lyrics, md5: md5);
+        save('vk', route.key, lyrics, md5: md5);
         return lyrics;
       case VkLyricsNone():
-        save(key.source, key.ref, null);
+        final kept = load('vk', route.key);
+        final keptLyrics = kept?.lyrics;
+        if (keptLyrics != null) {
+          save('vk', route.key, keptLyrics, md5: kept!.md5);
+          return keptLyrics;
+        }
+        save('vk', route.key, null);
         return null;
     }
   }

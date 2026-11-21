@@ -221,7 +221,7 @@ void main() {
     final lyrics = LyricsController(
       load: store.lyricsOf,
       save: store.saveLyrics,
-      apiOfSource: (_) => fakeVk,
+      routeOf: lyricsRouteBySource((_) => fakeVk),
     );
     final settings = ShellSettings.inMemory();
     if (!dark) settings.toggleTheme();

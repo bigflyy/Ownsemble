@@ -40,9 +40,10 @@ class LyricsPage extends StatefulWidget {
   final Track? Function() current;
   final Stream<Track?> currentStream;
 
-  /// Where the playing song is now, and every position while it plays.
+  /// Where the playing song is now, and every position while it plays:
+  /// null until the player is ready, so it is asked again until it comes.
   final Duration Function() position;
-  final Stream<Duration>? positions;
+  final Stream<Duration>? Function() positions;
   final Future<void> Function(Duration to) seek;
 
   @override
@@ -67,20 +68,41 @@ class _LyricsPageState extends State<LyricsPage> {
   Timer? _spinnerTimer;
   bool _spinnerDue = false;
 
+  /// Ends the pause a hand scroll made; one at a time.
+  Timer? _handScrollTimer;
+
+  /// Asks for the player's positions until it is ready (the place can open
+  /// on a restored song while the player still starts: Codex review).
+  Timer? _positionsTimer;
+  StreamSubscription<Duration>? _positions;
+
   @override
   void initState() {
     super.initState();
     widget.lyrics.addListener(_onLyrics);
     _subscriptions.add(widget.currentStream.listen(widget.lyrics.show));
-    final positions = widget.positions;
-    if (positions != null) {
-      _subscriptions.add(positions.listen((at) => _follow(at)));
+    if (!_listenToPositions()) {
+      _positionsTimer = Timer.periodic(const Duration(milliseconds: 500), (
+        timer,
+      ) {
+        if (_listenToPositions()) timer.cancel();
+      });
     }
-    // The controller tells its listeners at once; not while building.
+    // The controller tells its listeners at once; not while building. A
+    // place opened anew looks again at a song whose ask failed before.
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) widget.lyrics.show(widget.current());
+      if (mounted) widget.lyrics.show(widget.current(), again: true);
     });
     _takeState();
+  }
+
+  /// Listens to the player's positions once it has them; true when it does.
+  bool _listenToPositions() {
+    if (_positions != null) return true;
+    final positions = widget.positions();
+    if (positions == null) return false;
+    _positions = positions.listen(_follow);
+    return true;
   }
 
   @override
@@ -89,6 +111,9 @@ class _LyricsPageState extends State<LyricsPage> {
     for (final subscription in _subscriptions) {
       unawaited(subscription.cancel());
     }
+    unawaited(_positions?.cancel());
+    _positionsTimer?.cancel();
+    _handScrollTimer?.cancel();
     _spinnerTimer?.cancel();
     _scroll.dispose();
     super.dispose();
@@ -156,10 +181,13 @@ class _LyricsPageState extends State<LyricsPage> {
         (notification is ScrollUpdateNotification &&
             notification.dragDetails != null)) {
       _handScrollUntil = DateTime.now().add(lyricsHandScrollPause);
-      Timer(lyricsHandScrollPause + const Duration(milliseconds: 50), () {
-        if (mounted && !DateTime.now().isBefore(_handScrollUntil)) {
-          _revealLine();
-        }
+      _handScrollTimer?.cancel();
+      _handScrollTimer = Timer(lyricsHandScrollPause, () {
+        if (!mounted) return;
+        _handScrollUntil = DateTime.fromMillisecondsSinceEpoch(0);
+        _revealLine();
+        // A paused song draws no frames by itself: ask for one.
+        WidgetsBinding.instance.scheduleFrame();
       });
     }
     return false;

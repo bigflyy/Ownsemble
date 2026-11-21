@@ -403,7 +403,20 @@ Future<void> main(List<String> args) async {
   final lyrics = LyricsController(
     load: store.lyricsOf,
     save: store.saveLyrics,
-    apiOfSource: (sourceId) => clientOfSource(sourceId)?.call,
+    // The upload that plays: the account that has the song, or the version
+    // chosen for it; logged out, the song's own key (stored lyrics show).
+    routeOf: (track) {
+      final routes = player.routesFor(track);
+      if (routes.isNotEmpty) {
+        final route = routes.first;
+        return (
+          key: route.sourceKey,
+          accessKey: route.accessKey,
+          call: route.client.call,
+        );
+      }
+      return lyricsRouteBySource((_) => null)(track);
+    },
     log: logPerf,
   );
   playback.onDownloaded = lyrics.keepFor;

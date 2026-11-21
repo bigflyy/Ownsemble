@@ -1294,7 +1294,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
                             current: () => widget.player.current,
                             currentStream: widget.player.currentStream,
                             position: () => widget.player.position,
-                            positions: widget.player.isReady
+                            positions: () => widget.player.isReady
                                 ? widget.player.positions
                                 : null,
                             seek: widget.playback.seek,

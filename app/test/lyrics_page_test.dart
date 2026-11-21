@@ -75,15 +75,17 @@ class Fixture {
     load: (source, ref) => stored['$source:$ref'],
     save: (source, ref, lyrics, {md5}) =>
         stored['$source:$ref'] = (lyrics: lyrics, md5: md5, fetchedAtMs: nowMs),
-    apiOfSource: (sourceId) => (method, params) async {
-      final key = params['audio_id']!;
-      asked.add(key);
-      await hold?.future;
-      final result = answer(key);
-      if (result is Exception) throw result;
-      if (result is Lyrics) return vkReplyOf(result);
-      throw VkException('audio.getLyrics error 104', code: 104);
-    },
+    routeOf: lyricsRouteBySource(
+      (sourceId) => (method, params) async {
+        final key = params['audio_id']!;
+        asked.add(key);
+        await hold?.future;
+        final result = answer(key);
+        if (result is Exception) throw result;
+        if (result is Lyrics) return vkReplyOf(result);
+        throw VkException('audio.getLyrics error 104', code: 104);
+      },
+    ),
     now: () => nowMs,
   );
 }
@@ -178,8 +180,97 @@ void main() {
       await pumpEventQueue();
       expect((f.controller.state as LyricsShown).lyrics, plain);
       expect(f.controller.track!.id, 2);
-      // Both answers are still kept for later.
-      expect(f.stored.keys, containsAll(['vk:1_1', 'vk:2_2']));
+      // Song 1 was no longer shown when its turn came: never asked.
+      expect(f.asked, ['2_2']);
+      expect(f.stored.keys, ['vk:2_2']);
+    });
+
+    test('A, B, then A again: one ask per song, one at a time, and the '
+        'row of A is what VK said last', () async {
+      final f = Fixture()
+        ..hold = Completer<void>()
+        ..answer = (key) => key == '1_1' ? timed : plain;
+      f.controller.show(song(1));
+      f.controller.show(song(2, key: '2_2'));
+      f.controller.show(song(1));
+      await pumpEventQueue();
+      expect(f.asked, ['1_1'], reason: 'B waits its turn; A is shared');
+      f.hold!.complete();
+      await pumpEventQueue();
+      expect((f.controller.state as LyricsShown).lyrics, timed);
+      expect(f.asked, ['1_1'], reason: 'B was dropped: no longer shown');
+      expect(f.stored['vk:1_1']!.lyrics, timed);
+    });
+
+    test('a download while the place asks shares the ask', () async {
+      final f = Fixture()
+        ..hold = Completer<void>()
+        ..answer = (_) => timed;
+      f.controller.show(song(1));
+      final kept = f.controller.keepFor(song(1));
+      f.hold!.complete();
+      await kept;
+      await pumpEventQueue();
+      expect(f.asked, ['1_1']);
+    });
+
+    test('a "none" never erases lyrics stored before', () async {
+      final f = Fixture();
+      f.stored['vk:1_1'] = (
+        lyrics: plain,
+        md5: 'm',
+        fetchedAtMs: f.nowMs - 31 * day,
+      );
+      f.controller.show(song(1));
+      await pumpEventQueue();
+      expect((f.controller.state as LyricsShown).lyrics, plain);
+      expect(f.stored['vk:1_1']!.lyrics, plain);
+      expect(f.stored['vk:1_1']!.fetchedAtMs, f.nowMs, reason: 'time moved');
+    });
+
+    test('a download asks again when VK said "none" a while ago', () async {
+      final f = Fixture()..answer = (_) => timed;
+      f.stored['vk:1_1'] = (
+        lyrics: null,
+        md5: null,
+        fetchedAtMs: f.nowMs - 8 * day,
+      );
+      await f.controller.keepFor(song(1));
+      expect(f.stored['vk:1_1']!.lyrics, timed);
+    });
+
+    test('opened anew, a song whose ask failed is looked at again', () async {
+      final f = Fixture()..answer = (_) => VkException('x', code: 9);
+      f.controller.show(song(1));
+      await pumpEventQueue();
+      expect(f.controller.state, isA<LyricsFailed>());
+      f.answer = (_) => timed;
+      f.controller.show(song(1));
+      expect(f.controller.state, isA<LyricsFailed>(), reason: 'same song');
+      f.controller.show(song(1), again: true);
+      await pumpEventQueue();
+      expect(f.controller.state, isA<LyricsShown>());
+    });
+
+    test('lyrics come from the upload that plays', () async {
+      final asked = <String>[];
+      final controller = LyricsController(
+        load: (source, ref) => null,
+        save: (source, ref, lyrics, {md5}) {},
+        // A chosen version: another upload, through the playing account.
+        routeOf: (track) => (
+          key: '9_9',
+          accessKey: 'k',
+          call: (method, params) async {
+            asked.add(params['audio_id']!);
+            return vkReplyOf(plain);
+          },
+        ),
+      );
+      controller.show(song(1));
+      await pumpEventQueue();
+      expect(asked, ['9_9_k']);
+      expect((controller.state as LyricsShown).lyrics, plain);
     });
 
     test('a song no source covers yet has none, without asking', () async {
@@ -236,7 +327,7 @@ void main() {
               current: () => playing,
               currentStream: songs.stream,
               position: () => position,
-              positions: positions.stream,
+              positions: () => positions.stream,
               seek: (to) async => seeks.add(to),
             ),
           ),
@@ -286,6 +377,37 @@ void main() {
       await settle(tester);
       expect(seeks, [const Duration(milliseconds: 1000)]);
       expect(colorOf(tester, 'Первая строка'), OwnColors.dark.text);
+    });
+
+    testWidgets('positions that come late still move the lit line', (
+      tester,
+    ) async {
+      f.answer = (_) => timed;
+      Stream<Duration>? late;
+      tester.view.physicalSize = const Size(900, 700);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: buildTheme(OwnColors.dark),
+          home: Scaffold(
+            body: LyricsPage(
+              lyrics: f.controller,
+              current: () => playing,
+              currentStream: songs.stream,
+              position: () => position,
+              positions: () => late,
+              seek: (to) async => seeks.add(to),
+            ),
+          ),
+        ),
+      );
+      await settle(tester);
+      late = positions.stream;
+      await tester.pump(const Duration(milliseconds: 600));
+      positions.add(const Duration(milliseconds: 9100));
+      await settle(tester);
+      expect(colorOf(tester, 'Third line'), OwnColors.dark.text);
     });
 
     testWidgets('the next song brings its own lyrics', (tester) async {
