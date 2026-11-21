@@ -269,7 +269,10 @@ class ArtistsPage extends StatefulWidget {
 }
 
 class _ArtistsPageState extends State<ArtistsPage> {
-  final _scroll = ScrollController();
+  /// The library's own scroll: the place history saves its offset, so Back
+  /// from an artist's page returns to the same spot of the grid (user,
+  /// 2026-11-21: "it scrolls back to very beginning").
+  ScrollController get _scroll => widget.library.scroll;
 
   /// The tiles laid out last: their order and the grid's measures, for
   /// telling which tiles are on screen.
@@ -295,7 +298,7 @@ class _ArtistsPageState extends State<ArtistsPage> {
   @override
   void dispose() {
     widget.artists.placeOpen(false);
-    _scroll.dispose();
+    _scroll.removeListener(_onScroll);
     super.dispose();
   }
 

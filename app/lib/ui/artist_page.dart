@@ -292,6 +292,10 @@ class _ArtistPageState extends State<ArtistPage> {
             final narrow = box.maxWidth < 640;
             return ListView(
               key: ValueKey('artist-page-$key'),
+              // The library's scroll, whose offset the place history keeps:
+              // Back from a release or a song comes back to this spot
+              // (open check B20).
+              controller: widget.library.scroll,
               padding: const EdgeInsets.fromLTRB(12, 0, 24, 28),
               children: [
                 _Header(

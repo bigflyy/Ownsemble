@@ -292,6 +292,48 @@ void main() {
       again.dispose();
     });
 
+    testWidgets('Back from an artist page returns to the same spot of the '
+        'grid (user, 2026-11-21: "it scrolls back to very beginning")', (
+      tester,
+    ) async {
+      await show(tester, width: 480, height: 400);
+      await openArtists(tester);
+      final scroll = library.scroll;
+      expect(scroll.position.maxScrollExtent, greaterThan(0));
+      scroll.jumpTo(scroll.position.maxScrollExtent);
+      await tester.pump();
+      final spot = scroll.offset;
+      final tile = find.byKey(const ValueKey('artist-name:старый рок-клуб'));
+      await tester.tap(tile);
+      await tester.pumpAndSettle();
+      expect(library.view.kind, ViewKind.artist);
+      library.goBack();
+      await tester.pump();
+      await tester.pumpAndSettle();
+      expect(library.view.kind, ViewKind.artists);
+      expect(library.scroll.offset, spot);
+    });
+
+    testWidgets('Back to an artist page returns to the same spot of it '
+        '(open check B20)', (tester) async {
+      await show(tester, width: 1100, height: 600);
+      await openTank(tester);
+      final scroll = library.scroll;
+      expect(scroll.position.maxScrollExtent, greaterThan(0));
+      scroll.jumpTo(scroll.position.maxScrollExtent / 2);
+      await tester.pump();
+      final spot = scroll.offset;
+      // Show all (the same as its button, which may be out of sight here).
+      library.openArtistSongs('vk:10000');
+      await tester.pumpAndSettle();
+      expect(library.view.kind, ViewKind.artistSongs);
+      library.goBack();
+      await tester.pump();
+      await tester.pumpAndSettle();
+      expect(library.view.kind, ViewKind.artist);
+      expect(library.scroll.offset, spot);
+    });
+
     testWidgets('the search box filters the artists by name', (tester) async {
       await show(tester);
       await openArtists(tester);
