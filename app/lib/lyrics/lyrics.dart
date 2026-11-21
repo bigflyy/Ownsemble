@@ -97,8 +97,8 @@ class Lyrics {
 }
 
 /// The lyrics in a VK `audio.getLyrics` reply, or null when it holds no
-/// words. Timed lines are put in time order; gaps at the start and end are
-/// dropped and runs of gaps become one.
+/// words. Timed lines are put in time order; gaps at the start (and plain
+/// gaps at the end) are dropped and runs of gaps become one.
 Lyrics? lyricsFromVk(Object? reply) {
   final lyrics = reply is Map ? reply['lyrics'] : null;
   if (lyrics is! Map) return null;
@@ -141,14 +141,16 @@ List<LyricLine> _stableSortByStart(List<LyricLine> lines) {
   return [for (final (_, line) in indexed) line];
 }
 
-/// Drops gaps at the start and the end and keeps one of each run of gaps.
+/// Drops gaps at the start and keeps one of each run of gaps. Plain gaps at
+/// the end go too; a timed one there stays: it is the outro, and without it
+/// the last sung line would stay lit through the silence (Codex review).
 List<LyricLine> _tidyGaps(List<LyricLine> lines) {
   final tidy = <LyricLine>[];
   for (final line in lines) {
     if (line.isGap && (tidy.isEmpty || tidy.last.isGap)) continue;
     tidy.add(line);
   }
-  while (tidy.isNotEmpty && tidy.last.isGap) {
+  while (tidy.isNotEmpty && tidy.last.isGap && tidy.last.startMs == null) {
     tidy.removeLast();
   }
   return tidy;

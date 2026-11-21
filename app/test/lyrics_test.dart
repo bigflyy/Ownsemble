@@ -58,12 +58,10 @@ void main() {
         plainReply(['', 'one', 'two', '', '', 'three\r', '  ', '']),
       )!;
       expect(lyrics.timed, isFalse);
-      expect([for (final line in lyrics.lines) line.text], [
-        'one',
-        'two',
-        '',
-        'three',
-      ]);
+      expect(
+        [for (final line in lyrics.lines) line.text],
+        ['one', 'two', '', 'three'],
+      );
     });
 
     test('an instrumental gap inside timed lyrics stays', () {
@@ -76,6 +74,19 @@ void main() {
         ]),
       )!;
       expect([for (final line in lyrics.lines) line.text], ['a', '', 'b']);
+    });
+
+    test('a timed outro gap stays, so the last sung line goes out', () {
+      final lyrics = lyricsFromVk(
+        timedReply([
+          [1000, 2000, 'a'],
+          [20000, 24000, 'b'],
+          [25000, 40000, ''],
+        ]),
+      )!;
+      expect([for (final line in lyrics.lines) line.text], ['a', 'b', '']);
+      expect(lyrics.lineAt(22000), 1);
+      expect(lyrics.lineAt(30000), 2);
     });
 
     test('a reply without words is no lyrics', () {
