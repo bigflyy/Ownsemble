@@ -109,6 +109,8 @@ class VkArtistPage {
     this.domain,
     this.bannerUrl,
     this.popularTotal,
+    this.releasesBlockId,
+    this.releasesNextFrom,
   });
 
   /// VK's artist id: the page asked by address name says whose it is.
@@ -126,9 +128,31 @@ class VkArtistPage {
   /// does not say.
   final int? popularTotal;
 
-  /// The Releases block's releases, in its order.
+  /// The Releases block's releases, in its order: its first 10 until
+  /// [fetchVkReleasesMore] pages on (user, 2026-11-21: "not all the
+  /// albums").
   final List<VkArtistRelease> releases;
   final List<VkSimilarArtist> similar;
+
+  /// The Releases block and the mark its next page starts from; null when
+  /// VK gives no next page.
+  final String? releasesBlockId;
+  final String? releasesNextFrom;
+
+  bool get hasMoreReleases =>
+      releasesBlockId != null && releasesNextFrom != null;
+
+  /// This page with [releases] in place of its releases, paged to the end.
+  VkArtistPage withAllReleases(List<VkArtistRelease> releases) => VkArtistPage(
+    id: id,
+    name: name,
+    domain: domain,
+    bannerUrl: bannerUrl,
+    popular: popular,
+    popularTotal: popularTotal,
+    releases: releases,
+    similar: similar,
+  );
 }
 
 /// The page [reply] of `catalog.getAudioArtist` holds; null when it names
@@ -170,6 +194,8 @@ VkArtistPage? vkArtistPageOf(Object? reply) {
   VkSongBlock? popular;
   int? popularTotal;
   List<VkArtistRelease>? releases;
+  String? releasesBlockId;
+  String? releasesNextFrom;
   List<VkSimilarArtist>? similar;
   for (final block in blocks.whereType<Map>()) {
     switch (block['data_type']) {
@@ -192,7 +218,11 @@ VkArtistPage? vkArtistPageOf(Object? reply) {
             if (playlists['$key'] case final item? when _isReleaseOf(item, id))
               _releaseOf(item),
         ];
-        if (own.isNotEmpty) releases = own;
+        if (own.isNotEmpty) {
+          releases = own;
+          releasesBlockId = block['id'] as String?;
+          releasesNextFrom = _nonEmpty(block['next_from']);
+        }
       // You may like: the block of links to artist pages.
       case 'links' when similar == null:
         final artistsHere = [
@@ -229,6 +259,8 @@ VkArtistPage? vkArtistPageOf(Object? reply) {
     popularTotal: popularTotal,
     releases: releases ?? const [],
     similar: similar ?? const [],
+    releasesBlockId: releasesBlockId,
+    releasesNextFrom: releasesNextFrom,
   );
 }
 
@@ -330,6 +362,66 @@ Future<VkSongBlock> fetchVkBlockMore(VkApiCall call, VkSongBlock block) async {
     blockId: blockId,
     nextFrom: added.isEmpty || next == nextFrom ? null : next,
   );
+}
+
+/// [page] with every release of its Releases block: pages on with
+/// `catalog.getBlockItems` (10 a page; the probe's biggest artist had 14
+/// more in one page, 0.8 s), at most [maxPages] pages. Paging stops on a
+/// page with no new playlist or a repeated mark (R7). Releases of other
+/// artists are left out, as on the first page. A request failing after
+/// the first keeps the pages that came.
+Future<VkArtistPage> fetchVkReleasesMore(
+  VkApiCall call,
+  VkArtistPage page, {
+  int maxPages = 10,
+}) async {
+  final blockId = page.releasesBlockId;
+  var nextFrom = page.releasesNextFrom;
+  if (blockId == null || nextFrom == null) return page;
+  final releases = [...page.releases];
+  final known = {for (final release in releases) release.key};
+  // Every playlist id seen, kept or not: a page of only other artists'
+  // releases still goes on; a page with no new id at all ends paging.
+  final seen = <String>{...known};
+  for (var pages = 0; pages < maxPages && nextFrom != null; pages++) {
+    final Object? reply;
+    try {
+      reply = await call('catalog.getBlockItems', {
+        'block_id': blockId,
+        'start_from': nextFrom,
+      });
+    } catch (_) {
+      // The pages that came are kept; nothing came: the error goes up.
+      if (pages == 0) rethrow;
+      break;
+    }
+    if (reply is! Map<String, dynamic>) break;
+    final playlists = <String, Map<String, dynamic>>{};
+    for (final item in reply['playlists'] as List? ?? const []) {
+      if (item case {'owner_id': final int owner, 'id': final int id}
+          when item is Map<String, dynamic>) {
+        playlists['${owner}_$id'] = item;
+      }
+    }
+    final ids = switch (reply['block']) {
+      {'playlists_ids': final List ids} => ids,
+      _ => playlists.keys.toList(),
+    };
+    var fresh = 0;
+    for (final key in ids) {
+      if (seen.add('$key')) fresh++;
+      final item = playlists['$key'];
+      if (item == null || !_isReleaseOf(item, page.id)) continue;
+      final release = _releaseOf(item);
+      if (known.add(release.key)) releases.add(release);
+    }
+    final next = switch (reply['block']) {
+      {'next_from': final String next} when next.isNotEmpty => next,
+      _ => null,
+    };
+    nextFrom = fresh == 0 || next == nextFrom ? null : next;
+  }
+  return page.withAllReleases(releases);
 }
 
 /// What one artist's photo lookup gave.

@@ -475,6 +475,7 @@ class LibraryArtists extends ChangeNotifier implements ListCatalog {
               '${page.releases.length} releases, ${page.similar.length} '
               'similar in ${clock.elapsedMilliseconds} ms',
             );
+            if (page.hasMoreReleases) _moreReleases(call, sourceId, page);
           },
           onError: (Object error) {
             _failures[key] = describeSyncError(error);
@@ -488,6 +489,36 @@ class LibraryArtists extends ChangeNotifier implements ListCatalog {
           _loading.remove(key);
           if (!_disposed) notifyListeners();
         });
+  }
+
+  /// Pages on [page]'s Releases past VK's first 10 (one more request,
+  /// about 0.3 s): the page shows the first ones at once and the rest when
+  /// they come. A failure keeps the first ones; the next run asks again.
+  void _moreReleases(VkApiCall call, int sourceId, VkArtistPage page) {
+    final byId = '$sourceId:${page.id}';
+    final clock = Stopwatch()..start();
+    fetchVkReleasesMore(call, page).then(
+      (all) {
+        // Kept only while the same page is held for the same account.
+        if (_disposed ||
+            _sourceId != sourceId ||
+            !identical(_pages[byId], page)) {
+          return;
+        }
+        _pages[byId] = all;
+        log?.call(
+          'artist releases: ${all.releases.length} after paging in '
+          '${clock.elapsedMilliseconds} ms',
+        );
+        notifyListeners();
+      },
+      onError: (Object error) {
+        log?.call(
+          'artist releases paging failed after '
+          '${clock.elapsedMilliseconds} ms (${error.runtimeType})',
+        );
+      },
+    );
   }
 
   // ---- Popular as a VK list ----
@@ -597,8 +628,16 @@ class LibraryArtists extends ChangeNotifier implements ListCatalog {
       throw AlbumNotListed('VK did not list it: ${describeSyncError(error)}');
     }
     if (page == null) throw const AlbumNotListed('VK has no page for them');
-    _pages['${link.sourceId}:${page.id}'] = page;
-    return outside.albumSongs(page.popular.songs, link.sourceId);
+    final byId = '${link.sourceId}:${page.id}';
+    // A page that came in meanwhile (the artist page opened) stays, with
+    // its releases paging; a new one pages its releases too (Codex review
+    // 2026-11-21).
+    final held = _pages[byId];
+    if (held == null) {
+      _pages[byId] = page;
+      if (page.hasMoreReleases) _moreReleases(call, link.sourceId, page);
+    }
+    return outside.albumSongs((held ?? page).popular.songs, link.sourceId);
   }
 
   @override

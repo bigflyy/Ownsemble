@@ -285,6 +285,116 @@ void main() {
           throw StateError('asked');
       expect(await fetchVkBlockMore(call, done), same(done));
     });
+
+    test("Releases page on past the first ten: this artist's albums, each "
+        'once, until VK gives no next mark (user 2026-11-21: "not all the '
+        'albums")', () async {
+      final page = vkArtistPageOf(_fixture())!;
+      // The fixture's Releases block says there is more.
+      expect(page.hasMoreReleases, isTrue);
+      final asked = <Map<String, String>>[];
+      Future<Object?> call(String method, Map<String, String> params) async {
+        expect(method, 'catalog.getBlockItems');
+        asked.add(params);
+        final first = asked.length == 1;
+        return {
+          // The live reply's shape (check_artist_readers, 2026-11-21):
+          // block {id, data_type, layout, meta, playlists_ids, title} and
+          // the playlists; a page without next_from is the last.
+          'block': {
+            'id': page.releasesBlockId,
+            'playlists_ids': first
+                ? ['-7_21', '-7_22', '-7_23', page.releases.first.key]
+                : ['-7_24'],
+            if (first) 'next_from': 'opaque-more',
+          },
+          'playlists': [
+            _album(21, page.id),
+            _album(22, '99'), // Another artist's: left out.
+            _album(23, page.id, type: 'ugc'), // A user's list: left out.
+            _album(24, page.id),
+          ],
+        };
+      }
+
+      final all = await fetchVkReleasesMore(call, page);
+      expect(asked.map((p) => p['start_from']), [
+        page.releasesNextFrom,
+        'opaque-more',
+      ]);
+      expect(asked.first['block_id'], page.releasesBlockId);
+      expect(all.releases.map((r) => r.key), [
+        ...page.releases.map((r) => r.key),
+        '-7_21',
+        '-7_24',
+      ]);
+      expect(all.hasMoreReleases, isFalse);
+      // The rest of the page stays.
+      expect(all.popular, same(page.popular));
+      expect(all.similar, same(page.similar));
+      expect(all.popularTotal, page.popularTotal);
+    });
+
+    test('Releases paging stops on a page with nothing new', () async {
+      final page = vkArtistPageOf(_fixture())!;
+      var calls = 0;
+      Future<Object?> call(String method, Map<String, String> params) async {
+        calls++;
+        return {
+          'block': {
+            'playlists_ids': [page.releases.first.key],
+            'next_from': 'again-$calls',
+          },
+          'playlists': const [],
+        };
+      }
+
+      final all = await fetchVkReleasesMore(call, page);
+      expect(calls, 1);
+      expect(all.releases, hasLength(page.releases.length));
+    });
+
+    test(
+      "a page of only other artists' releases goes on; a failing "
+      'request keeps the pages that came (Codex review 2026-11-21)',
+      () async {
+        final page = vkArtistPageOf(_fixture())!;
+        var calls = 0;
+        Future<Object?> call(String method, Map<String, String> params) async {
+          calls++;
+          return switch (calls) {
+            1 => {
+              'block': {
+                'playlists_ids': ['-7_31'],
+                'next_from': 'b',
+              },
+              'playlists': [_album(31, '99')],
+            },
+            2 => {
+              'block': {
+                'playlists_ids': ['-7_32'],
+                'next_from': 'c',
+              },
+              'playlists': [_album(32, page.id)],
+            },
+            _ => throw VkException('busy', code: 6),
+          };
+        }
+
+        final all = await fetchVkReleasesMore(call, page);
+        expect(calls, 3);
+        expect(all.releases.last.key, '-7_32');
+        expect(all.releases, hasLength(page.releases.length + 1));
+
+        // The first request failing: the error goes up.
+        Future<Object?> failing(String method, Map<String, String> params) =>
+            throw VkException('busy', code: 6);
+        await expectLater(
+          fetchVkReleasesMore(failing, page),
+          throwsA(isA<VkException>()),
+        );
+      },
+    );
   });
 
   group('artist photos', () {

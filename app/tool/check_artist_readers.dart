@@ -115,6 +115,41 @@ Future<void> main(List<String> args) async {
         '${clock.elapsedMilliseconds} ms, ended ${!block.hasMore}, '
         'repeats ${block.songs.length - {for (final s in block.songs) s.key}.length}',
       );
+      // Releases past VK's first 10 (user 2026-11-21): the reply's shape
+      // (key names and counts only), then the app's reader.
+      if (page.hasMoreReleases) {
+        final raw = await timed(
+          'releases raw page',
+          () => client.call('catalog.getBlockItems', {
+            'block_id': page.releasesBlockId!,
+            'start_from': page.releasesNextFrom!,
+          }),
+        );
+        if (raw is Map<String, dynamic>) {
+          final lists = (raw['playlists'] as List? ?? const [])
+              .whereType<Map>()
+              .toList();
+          print(
+            '  raw keys ${raw.keys.toList()}, block keys '
+            '${(raw['block'] as Map?)?.keys.toList()}, playlists '
+            '${lists.length}, albums '
+            '${lists.where((l) => l['type'] == 'album').length}, with '
+            'main_artists ${lists.where((l) => l['main_artists'] is List).length}',
+          );
+        }
+      }
+      final all = await timed(
+        'releases paged',
+        () => fetchVkReleasesMore(client.call, page),
+      );
+      if (all != null) {
+        print(
+          '  releases: first ${page.releases.length}, more '
+          '${page.hasMoreReleases}, after paging ${all.releases.length}, '
+          'repeats ${all.releases.length - {for (final r in all.releases) r.key}.length}, '
+          'all by this id ${all.releases.every((r) => r.artists.any((a) => a.vkId == page.id))}',
+        );
+      }
     }
 
     if (similarDomain != null) {

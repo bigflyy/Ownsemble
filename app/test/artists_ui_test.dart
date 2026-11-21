@@ -10,6 +10,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ownsemble/library/artist_credit.dart';
 import 'package:ownsemble/library/artist_index.dart';
@@ -18,12 +19,15 @@ import 'package:ownsemble/library/search_index.dart';
 import 'package:ownsemble/library/track.dart';
 import 'package:ownsemble/playback/playback_controller.dart';
 import 'package:ownsemble/ui/artists.dart';
+import 'package:ownsemble/ui/artists_page.dart' show ArtistPhoto;
+import 'package:ownsemble/ui/cover_tile.dart' show TrackTile;
 import 'package:ownsemble/ui/catalog_search.dart';
 import 'package:ownsemble/ui/library_controller.dart';
 import 'package:ownsemble/ui/library_screen.dart';
 import 'package:ownsemble/ui/outside_songs.dart';
 import 'package:ownsemble/ui/shell_settings.dart';
 import 'package:ownsemble/ui/sources_scope.dart';
+import 'package:ownsemble/vk/vk_artists.dart';
 
 import 'catalog_support.dart';
 
@@ -52,6 +56,7 @@ void main() {
   Completer<Object?>? pageGate;
   Object? pageError;
   Object? Function(Map<String, String> params)? pageAnswer;
+  Object? Function(Map<String, String> params)? blockItemsAnswer;
 
   void reload() {
     final tracks = store.loadAll();
@@ -62,6 +67,7 @@ void main() {
     pageGate = null;
     pageError = null;
     pageAnswer = null;
+    blockItemsAnswer = null;
     calls = [];
     settings = {};
     store = LibraryStore.open(':memory:');
@@ -111,6 +117,9 @@ void main() {
         if (pageGate case final gate?) return gate.future;
         if (pageAnswer case final answer?) return answer(params);
         return _page();
+      }
+      if (method == 'catalog.getBlockItems' && blockItemsAnswer != null) {
+        return blockItemsAnswer!(params);
       }
       if (method == 'execute') {
         // One search per artist asked: the first answers with its photo.
@@ -320,6 +329,69 @@ void main() {
       expect(find.text('Серебряная Свадьба'), findsOneWidget);
     });
 
+    testWidgets('a Popular list read before the page pages the releases '
+        'too (Codex review 2026-11-21)', (tester) async {
+      blockItemsAnswer = (params) => {
+        'block': {
+          'playlists_ids': ['-7_51'],
+        },
+        'playlists': [
+          {
+            'owner_id': -7,
+            'id': 51,
+            'type': 'album',
+            'title': 'Старый альбом',
+            'count': 9,
+            'main_artists': [
+              {'id': '10000', 'name': 'Дайте танк (!)'},
+            ],
+          },
+        ],
+      };
+      await show(tester);
+      final ref = artists.popularRef(vkArtistPageOf(_page())!, source);
+      await tester.runAsync(() => artists.fetch(ref));
+      await tester.pumpAndSettle();
+      expect(artists.vkOf('10000').page?.releases, hasLength(11));
+    });
+
+    testWidgets('releases past the first ten come in after the page '
+        '(user 2026-11-21: "not all the albums")', (tester) async {
+      blockItemsAnswer = (params) => {
+        'block': {
+          'id': params['block_id'],
+          'playlists_ids': ['-7_51'],
+        },
+        'playlists': [
+          {
+            'owner_id': -7,
+            'id': 51,
+            'type': 'album',
+            'title': 'Старый альбом',
+            'count': 9,
+            'year': 2004,
+            'main_artists': [
+              {'id': '10000', 'name': 'Дайте танк (!)'},
+            ],
+          },
+        ],
+      };
+      await show(tester);
+      await openTank(tester);
+      await tester.pumpAndSettle();
+      expect(calls, contains('catalog.getBlockItems'));
+      expect(
+        find.textContaining('On VK: 132 songs, 11 releases'),
+        findsOneWidget,
+      );
+      await tester.scrollUntilVisible(
+        find.byKey(const ValueKey('artist-release--7_51')),
+        300,
+        scrollable: find.byType(Scrollable).first,
+      );
+      expect(find.text('Старый альбом'), findsOneWidget);
+    });
+
     testWidgets('Play plays the library songs; Show all opens them as a '
         'song list and Back returns', (tester) async {
       await show(tester);
@@ -389,6 +461,38 @@ void main() {
         artists.index.artistsOf(added.id).map((a) => a.key),
         contains('vk:10000'),
       );
+    });
+
+    testWidgets('a click on the photo shows it bigger; Esc closes it '
+        '(user 2026-11-21)', (tester) async {
+      await show(tester);
+      await openTank(tester);
+      // The grid asked for the photos: the header has one.
+      expect(find.byKey(const ValueKey('artist-photo-open')), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey('artist-photo-open')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('cover-viewer')), findsOneWidget);
+      final side = tester.getSize(
+        find.descendant(
+          of: find.byKey(const ValueKey('cover-viewer')),
+          matching: find.byType(TrackTile),
+        ),
+      );
+      expect(side.width, lessThanOrEqualTo(ArtistPhoto.viewerSide));
+      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('cover-viewer')), findsNothing);
+      expect(library.view.kind, ViewKind.artist);
+    });
+
+    testWidgets('a name-only artist has no photo to open', (tester) async {
+      await show(tester);
+      await openArtists(tester);
+      await tester.tap(
+        find.byKey(const ValueKey('artist-name:старый рок-клуб')),
+      );
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('artist-photo-open')), findsNothing);
     });
 
     testWidgets('a similar artist opens by address name', (tester) async {
