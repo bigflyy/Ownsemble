@@ -4,6 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:ownsemble/library/file_print.dart';
 import 'package:ownsemble/library/library_schema.dart';
 import 'package:ownsemble/library/library_store.dart';
+import 'package:ownsemble/lyrics/lyrics.dart';
 import 'package:ownsemble/library/song_version.dart';
 import 'package:ownsemble/library/track.dart';
 import 'package:path/path.dart' as p;
@@ -605,6 +606,27 @@ void main() {
     expect(migrated.loadAll().single.title, 'Хочешь?');
     expect(migrated.markRemoved(source, ['1_1']), 1);
     expect(migrated.loadAll(), isEmpty);
+  });
+
+  test('version 17 lyrics gain a meta column and keep their words', () {
+    final store = LibraryStore.open(dbPath);
+    const lyrics = Lyrics(source: 'vk', lines: [LyricLine('Строка')]);
+    store.saveLyrics('vk', '1_1', lyrics, md5: 'm', atMs: 7);
+    store.close();
+    final db = sqlite3.open(dbPath);
+    db
+      ..execute('ALTER TABLE lyrics DROP COLUMN meta')
+      ..execute('PRAGMA user_version = 17')
+      ..close();
+
+    final migrated = LibraryStore.open(dbPath);
+    addTearDown(migrated.close);
+    expect(versionOf(dbPath), librarySchemaVersion);
+    final kept = migrated.lyricsOf('vk', '1_1')!;
+    expect(kept.lyrics, lyrics);
+    expect(kept.meta, isNull);
+    migrated.saveLyrics('lrclib', '1_1', lyrics, meta: '{"id":"5"}', atMs: 8);
+    expect(migrated.lyricsOf('lrclib', '1_1')!.meta, '{"id":"5"}');
   });
 
   test('a library from a newer build is refused and left alone', () {

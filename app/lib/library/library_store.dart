@@ -888,7 +888,7 @@ class LibraryStore implements PlayLog, PlayStatsSource {
   /// lyrics, the word that the source has none, or null when never asked.
   StoredLyrics? lyricsOf(String source, String ref) {
     final row = _db.select(
-      'SELECT found, body, md5, fetched_at_ms FROM lyrics '
+      'SELECT found, body, md5, fetched_at_ms, meta FROM lyrics '
       'WHERE source = ? AND ref = ?',
       [source, ref],
     ).firstOrNull;
@@ -900,6 +900,7 @@ class LibraryStore implements PlayLog, PlayStatsSource {
           : null,
       md5: row['md5'] as String?,
       fetchedAtMs: row['fetched_at_ms'] as int,
+      meta: row['meta'] as String?,
     );
   }
 
@@ -910,15 +911,18 @@ class LibraryStore implements PlayLog, PlayStatsSource {
     String ref,
     Lyrics? lyrics, {
     String? md5,
+    String? meta,
     int? atMs,
   }) {
     _db.execute(
       '''
-      INSERT INTO lyrics (source, ref, found, timed, body, md5, fetched_at_ms)
-      VALUES (?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO lyrics
+        (source, ref, found, timed, body, md5, fetched_at_ms, meta)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT (source, ref) DO UPDATE SET
         found = excluded.found, timed = excluded.timed, body = excluded.body,
-        md5 = excluded.md5, fetched_at_ms = excluded.fetched_at_ms
+        md5 = excluded.md5, fetched_at_ms = excluded.fetched_at_ms,
+        meta = excluded.meta
     ''',
       [
         source,
@@ -928,6 +932,7 @@ class LibraryStore implements PlayLog, PlayStatsSource {
         lyrics?.linesToJson(),
         md5,
         atMs ?? _now(),
+        meta,
       ],
     );
   }

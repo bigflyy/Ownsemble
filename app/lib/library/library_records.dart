@@ -186,7 +186,14 @@ typedef StoredArtistPhoto = ({String? small, String? large, int fetchedAtMs});
 
 /// A song's stored lyrics from one source (plan 10): the lyrics, or null
 /// when the source said it has none; VK's change mark; when it was asked.
-typedef StoredLyrics = ({Lyrics? lyrics, String? md5, int fetchedAtMs});
+typedef StoredLyrics = ({
+  Lyrics? lyrics,
+  String? md5,
+  int fetchedAtMs,
+
+  /// An outside source's facts of the song (LyricsCandidate.metaToJson).
+  String? meta,
+});
 
 /// What [LibraryStore.mergeSameSongs] did.
 class MergeResult {

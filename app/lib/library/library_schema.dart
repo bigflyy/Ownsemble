@@ -6,7 +6,7 @@ import 'package:sqlite3/sqlite3.dart';
 /// Schema version this build reads and writes (`PRAGMA user_version`).
 ///
 /// 0 is the speed-gate build's single `tracks` table (or an empty file).
-const librarySchemaVersion = 17;
+const librarySchemaVersion = 18;
 
 /// How many colors sources can have; the theme has one per slot, from 1.
 const sourceColorCount = 6;
@@ -57,6 +57,7 @@ void migrateLibrary(Database db, {String? dataDir}) {
     if (version < 15) _addArtistCredits(db);
     if (version < 16) _addFoundVersionArtists(db);
     if (version < 17) _addLyrics(db);
+    if (version < 18) _addLyricsMeta(db);
     db.execute('PRAGMA user_version = $librarySchemaVersion');
     db.execute('COMMIT');
   } catch (_) {
@@ -351,6 +352,15 @@ void _addFoundVersionArtists(Database db) {
 /// song's key "ownerId_id"). `found` 0 records that the source has none, so
 /// it is not asked again at once. `body` is the lines as JSON
 /// (Lyrics.linesToJson); `md5` is VK's mark that changes with its lyrics.
+/// Version 18 (plan 10, E1): the facts of an outside source's song whose
+/// lyrics a row holds (JSON: id, artist, title, seconds, exact, diff), for
+/// the automatic pick and the chooser. VK rows leave it empty.
+void _addLyricsMeta(Database db) {
+  final columns = db.select('PRAGMA table_info(lyrics)');
+  if (columns.any((column) => column['name'] == 'meta')) return;
+  db.execute('ALTER TABLE lyrics ADD COLUMN meta TEXT');
+}
+
 void _addLyrics(Database db) {
   db.execute('''
     CREATE TABLE IF NOT EXISTS lyrics (
