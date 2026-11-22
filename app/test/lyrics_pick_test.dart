@@ -442,6 +442,33 @@ void main() {
       expect(f.controller.chosen, isNull);
     });
 
+    test('a slow chooser ask does not hold up the next song (lyrics-41a: '
+        'QQ took 6 s and the next song waited)', () async {
+      final f = Fixture()
+        ..lrclib.answer = timedOf('lrclib')
+        ..qq.hold = Completer<void>();
+      f.controller.show(song());
+      await pumpEventQueue();
+      final choosing = f.controller.askAll();
+      await pumpEventQueue();
+      final next = Track(
+        id: 2,
+        sourceId: 1,
+        source: TrackSource.vk,
+        artist: 'Другой',
+        title: 'Следующая',
+        durationSec: 180,
+        sourceKey: '1_2',
+        addedAt: 0,
+      );
+      f.controller.show(next);
+      await pumpEventQueue();
+      expect(f.lyrics?.source, 'lrclib', reason: 'shown while QQ still waits');
+      expect(f.controller.track!.id, 2);
+      f.qq.hold!.complete();
+      await choosing;
+    });
+
     test('a choice made while the walk runs is not replaced by it', () async {
       final f = Fixture()
         ..vk = plainOf('vk')

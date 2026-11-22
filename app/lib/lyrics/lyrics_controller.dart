@@ -657,8 +657,7 @@ class LyricsController extends ChangeNotifier {
 
   /// Asks every source not stored yet or due again for the song shown (all
   /// of them with [again]: the chooser's refresh), each answer shown as it
-  /// comes. Asks wait in the line with the automatic picks. A "none" never
-  /// erases lyrics found before.
+  /// comes. A "none" never erases lyrics found before.
   Future<void> askAll({bool again = false}) async {
     final track = _track;
     final route = track == null ? null : routeOf(track);
@@ -704,11 +703,24 @@ class LyricsController extends ChangeNotifier {
       }
     }
 
-    final run = _line.then(
-      (_) => Future.wait([for (final source in wanted) askOne(source)]),
-    );
-    _line = run.then<void>((_) {}, onError: (Object _) {});
-    await run;
+    // Not in the line of picks: a slow source here (QQ took 6 s, lyrics-41a)
+    // must not hold up the next song's lyrics. It only waits for a pick of
+    // this same upload, so no source is asked twice at once; one VK call
+    // more is no flood.
+    try {
+      await _asks[key];
+    } on Object {
+      // The pick's failure is the place's to show; the chooser asks anew.
+    }
+    // What that pick asked meanwhile is not asked again.
+    final still = [
+      for (final source in wanted)
+        if (again || _storedOf(source, key).ask) source,
+    ];
+    for (final source in wanted.where((source) => !still.contains(source))) {
+      _choiceAsking.remove('$key|$source');
+    }
+    await Future.wait([for (final source in still) askOne(source)]);
     // What shows may change: a source asked for the first time can beat the
     // automatic pick. A pick still running for the song sets it itself.
     if (_shownKey != key || _asks.containsKey(key)) return;
