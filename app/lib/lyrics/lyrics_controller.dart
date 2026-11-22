@@ -157,6 +157,14 @@ class _Dropped implements Exception {
   const _Dropped();
 }
 
+/// One press of "earlier" or "later" moves timed lines this much (F1), as
+/// in VLC's subtitle delay and Musixmatch's sync.
+const lyricsOffsetStepMs = 500;
+
+/// Lines move at most this far either way: past it the words belong to
+/// another version.
+const lyricsOffsetLimitMs = 60000;
+
 class LyricsController extends ChangeNotifier {
   LyricsController({
     required this.load,
@@ -165,6 +173,8 @@ class LyricsController extends ChangeNotifier {
     this.sources = const [],
     this.loadPick,
     this.savePick,
+    this.loadOffset,
+    this.saveOffset,
     int Function()? now,
     this.log,
   }) : _now = now ?? (() => DateTime.now().millisecondsSinceEpoch);
@@ -199,6 +209,18 @@ class LyricsController extends ChangeNotifier {
 
   /// Choices made in this run when no [savePick] keeps them.
   final _picks = <String, String?>{};
+
+  /// How far the user moved a source's timed lines for an upload
+  /// (LibraryStore.lyricsOffsetOf), milliseconds, > 0 later (F1).
+  final int Function(String ref, String source)? loadOffset;
+
+  /// Keeps a moved timing, 0 to forget it (LibraryStore.saveLyricsOffset).
+  /// Without it offsets last for this run only.
+  final void Function(String ref, String source, int offsetMs)? saveOffset;
+
+  /// Offsets set in this run when no [saveOffset] keeps them, as
+  /// "upload key|source".
+  final _offsets = <String, int>{};
 
   /// Sources being asked by [askAll], and those whose ask failed, as
   /// "upload key|source".
@@ -771,6 +793,56 @@ class LyricsController extends ChangeNotifier {
           : LyricsShown(best, refreshing: true),
     );
     unawaited(_ask(route, track));
+  }
+
+  /// How far [source]'s timed lines are moved for the song shown,
+  /// milliseconds, > 0 later; 0 when not moved or no song is shown.
+  int offsetOf(String source) {
+    final key = _shownKey;
+    if (key == null) return 0;
+    return saveOffset == null
+        ? _offsets['$key|$source'] ?? 0
+        : loadOffset?.call(key, source) ?? 0;
+  }
+
+  /// The source of the lyrics the place shows now; null when none show.
+  String? get shownSource => switch (_state) {
+    LyricsShown(:final lyrics) => lyrics.source,
+    _ => null,
+  };
+
+  /// The offset of the lyrics the place shows now.
+  int get shownOffset => switch (_state) {
+    LyricsShown(:final lyrics) => offsetOf(lyrics.source),
+    _ => 0,
+  };
+
+  /// Moves the shown lyrics' lines by [deltaMs] (> 0 later) and keeps it
+  /// for the song and that source; the result stays within
+  /// [lyricsOffsetLimitMs] and on [lyricsOffsetStepMs] steps.
+  void shiftShown(int deltaMs) {
+    final state = _state;
+    if (state is! LyricsShown || !state.lyrics.timed) return;
+    setOffset(state.lyrics.source, offsetOf(state.lyrics.source) + deltaMs);
+  }
+
+  /// Sets how far [source]'s lines are moved for the song shown.
+  void setOffset(String source, int offsetMs) {
+    final key = _shownKey;
+    if (key == null) return;
+    final steps = (offsetMs / lyricsOffsetStepMs).round();
+    final kept = (steps * lyricsOffsetStepMs).clamp(
+      -lyricsOffsetLimitMs,
+      lyricsOffsetLimitMs,
+    );
+    if (kept == offsetOf(source)) return;
+    if (saveOffset == null) {
+      _offsets['$key|$source'] = kept;
+    } else {
+      saveOffset!(key, source, kept);
+    }
+    log?.call('lyrics offset $source $kept ms');
+    notifyListeners();
   }
 
   void _keepPick(String key, String? source) {

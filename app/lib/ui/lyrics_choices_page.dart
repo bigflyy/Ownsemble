@@ -191,7 +191,8 @@ class _LyricsChoicesPageState extends State<LyricsChoicesPage> {
                   ),
                   Text(
                     '${choice.label}, ${lyrics.timed ? 'timed' : 'words only'}'
-                    ' · ${_lengthNote(choice)}',
+                    ' · ${_lengthNote(choice)}'
+                    '${_offsetNote(lyrics.timed ? widget.lyrics.offsetOf(choice.source) : 0)}',
                     key: const ValueKey('lyrics-preview-what'),
                     style: TextStyle(color: colors.dim, fontSize: 13),
                   ),
@@ -220,6 +221,7 @@ class _LyricsChoicesPageState extends State<LyricsChoicesPage> {
               child: LyricsLines(
                 key: ValueKey('lyrics-preview-${choice.source}'),
                 lyrics: lyrics,
+                offsetMs: widget.lyrics.offsetOf(choice.source),
                 header: const SizedBox.shrink(),
                 position: widget.position,
                 positions: widget.positions,
@@ -239,6 +241,10 @@ String _lengthNote(LyricsChoice choice) => switch (choice.lengthDiff) {
   0 => 'same length',
   final diff => '$diff s off',
 };
+
+/// The user's moved timing (F1) after the preview's facts; empty when none.
+String _offsetNote(int offsetMs) =>
+    offsetMs == 0 ? '' : ' · ${lyricsOffsetText(offsetMs)}';
 
 /// How many lines have words.
 int _wordLines(Lyrics lyrics) =>

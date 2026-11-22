@@ -1227,6 +1227,12 @@ class _LibraryScreenState extends State<LibraryScreen> {
                             widget.lyrics != null)
                           _lyricsAskAgain(widget.lyrics!),
                         if (view.kind == ViewKind.lyrics &&
+                            switch (widget.lyrics?.state) {
+                              LyricsShown(:final lyrics) => lyrics.timed,
+                              _ => false,
+                            })
+                          LyricsTimingControl(lyrics: widget.lyrics!),
+                        if (view.kind == ViewKind.lyrics &&
                             widget.lyrics?.track != null)
                           _lyricsChooseButton(
                             compact: listWidth < lyricsNarrowWidth,
@@ -1447,8 +1453,10 @@ class _LibraryScreenState extends State<LibraryScreen> {
     final state = lyrics.state;
     if (state is! LyricsShown) return song;
     final source = state.lyrics.source;
+    final offset = state.lyrics.timed ? lyrics.shownOffset : 0;
     return '$song · from ${lyricsSourceLabel(source)}'
-        '${lyrics.chosen == source ? ', your choice' : ''}';
+        '${lyrics.chosen == source ? ', your choice' : ''}'
+        '${offset == 0 ? '' : ', ${lyricsOffsetText(offset)}'}';
   }
 
   /// The chooser's count beside its title: how many sources have lyrics.

@@ -1,9 +1,9 @@
 // Renders the Lyrics place of plan 10 to PNG files with the real fonts, so
 // its look can be checked without opening the app on screen: timed lyrics
 // following a playing song, plain lyrics, a song without lyrics, a failed
-// ask, the loading spinner and long lines in a narrow window; and the
-// chooser of every source's lyrics (E2): its list, a preview and a kept
-// choice. The words are made up.
+// ask, the loading spinner, long lines in a narrow window, lines moved
+// later by hand (F1); and the chooser of every source's lyrics (E2): its
+// list, a preview and a kept choice. The words are made up.
 //
 // Run from app/:
 //   flutter test tool/lyrics_shots_test.dart \
@@ -184,7 +184,7 @@ void main() {
     if (File(icons).existsSync()) await loadFont('MaterialIcons', [icons]);
   });
 
-  /// [step]: 'timed', 'plain', 'none', 'failed', 'loading', 'long', 'closed'
+  /// [step]: 'timed', 'moved' (timed, lines moved 1.5 s later), 'plain', 'none', 'failed', 'loading', 'long', 'closed'
   /// (the Songs list with the mic button, before Lyrics is opened).
   Future<void> shoot(
     WidgetTester tester,
@@ -262,12 +262,16 @@ void main() {
               '"seconds":206,"exact":false,"diff":2}',
         );
       if (step == 'chosen') store.saveLyricsPick('1_1', 'netease');
+      // F1: the preview shows NetEase's moved timing.
+      if (step == 'preview') store.saveLyricsOffset('1_1', 'netease', -1000);
     }
     final lyrics = LyricsController(
       load: store.lyricsOf,
       save: store.saveLyrics,
       loadPick: store.lyricsPickOf,
       savePick: store.saveLyricsPick,
+      loadOffset: store.lyricsOffsetOf,
+      saveOffset: store.saveLyricsOffset,
       routeOf: lyricsRouteBySource((_) => fakeVk),
       sources: choosing
           ? [
@@ -327,6 +331,15 @@ void main() {
       await settle();
       await tester.pump(const Duration(milliseconds: 600));
       await settle();
+      if (step == 'moved') {
+        // F1: three presses of "later", lines 1.5 s later.
+        for (var i = 0; i < 3; i++) {
+          await tester.tap(find.byKey(const ValueKey('lyrics-later')));
+          await settle();
+        }
+        await tester.pump(const Duration(milliseconds: 600));
+        await settle();
+      }
       if (step == 'choices' || step == 'preview') {
         await tester.tap(find.byKey(const ValueKey('lyrics-choose')));
         await settle();
@@ -366,6 +379,10 @@ void main() {
     ('timed', true, const Size(1440, 900)),
     ('timed', false, const Size(1440, 900)),
     ('timed', true, const Size(760, 900)),
+    ('timed', false, const Size(480, 800)),
+    ('moved', true, const Size(1440, 900)),
+    ('moved', false, const Size(760, 900)),
+    ('moved', true, const Size(480, 800)),
     ('plain', false, const Size(1440, 900)),
     ('plain', true, const Size(760, 900)),
     ('none', true, const Size(1440, 900)),

@@ -407,6 +407,9 @@ Future<void> main(List<String> args) async {
     // Plan 10 E2: the lyrics the user chose in the chooser, per upload.
     loadPick: store.lyricsPickOf,
     savePick: store.saveLyricsPick,
+    // F1: timed lines moved by hand, per upload and source.
+    loadOffset: store.lyricsOffsetOf,
+    saveOffset: store.saveLyricsOffset,
     // The upload that plays: the account that has the song, or the version
     // chosen for it; logged out, the song's own key (stored lyrics show).
     routeOf: (track) {

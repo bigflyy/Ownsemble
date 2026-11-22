@@ -166,6 +166,7 @@ class _LyricsPageState extends State<LyricsPage> {
             : 'Words only, from $label: no source has times for this song';
         return LyricsLines(
           lyrics: lyrics,
+          offsetMs: widget.lyrics.offsetOf(lyrics.source),
           position: widget.position,
           positions: widget.positions,
           seek: widget.seek,
@@ -176,6 +177,73 @@ class _LyricsPageState extends State<LyricsPage> {
           ),
         );
     }
+  }
+}
+
+/// The user's moved timing in words (F1): "lines 1.5 s later".
+String lyricsOffsetText(int offsetMs) {
+  final seconds = (offsetMs.abs() / 1000).toStringAsFixed(1);
+  return 'lines $seconds s ${offsetMs > 0 ? 'later' : 'earlier'}';
+}
+
+/// The Lyrics heading's timing stepper (F1): earlier, the moved time (a
+/// click there goes back to the source's timing), later; each press moves
+/// the lines [lyricsOffsetStepMs], like a player's subtitle delay.
+class LyricsTimingControl extends StatelessWidget {
+  const LyricsTimingControl({super.key, required this.lyrics});
+
+  final LyricsController lyrics;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = OwnColors.of(context);
+    final offset = lyrics.shownOffset;
+    final step = (lyricsOffsetStepMs / 1000).toStringAsFixed(1);
+    final seconds = (offset.abs() / 1000).toStringAsFixed(1);
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        IconButton(
+          key: const ValueKey('lyrics-earlier'),
+          tooltip: 'Lines earlier by $step s',
+          onPressed: offset <= -lyricsOffsetLimitMs
+              ? null
+              : () => lyrics.shiftShown(-lyricsOffsetStepMs),
+          icon: const Icon(Icons.remove),
+        ),
+        Tooltip(
+          message: offset == 0
+              ? 'Move the lines when they come too early or too late'
+              : "Back to the source's timing",
+          child: TextButton(
+            key: const ValueKey('lyrics-offset'),
+            style: TextButton.styleFrom(
+              minimumSize: const Size(56, 40),
+              padding: const EdgeInsets.symmetric(horizontal: 6),
+              foregroundColor: colors.text,
+              disabledForegroundColor: colors.dim,
+            ),
+            onPressed: offset == 0
+                ? null
+                : () => lyrics.setOffset(lyrics.shownSource!, 0),
+            child: Text(
+              offset == 0 ? 'Timing' : '${offset > 0 ? '+' : '-'}$seconds s',
+              style: const TextStyle(
+                fontFeatures: [FontFeature.tabularFigures()],
+              ),
+            ),
+          ),
+        ),
+        IconButton(
+          key: const ValueKey('lyrics-later'),
+          tooltip: 'Lines later by $step s',
+          onPressed: offset >= lyricsOffsetLimitMs
+              ? null
+              : () => lyrics.shiftShown(lyricsOffsetStepMs),
+          icon: const Icon(Icons.add),
+        ),
+      ],
+    );
   }
 }
 
@@ -219,10 +287,15 @@ class LyricsLines extends StatefulWidget {
     required this.position,
     required this.positions,
     required this.seek,
+    this.offsetMs = 0,
   });
 
   final Lyrics lyrics;
   final Widget header;
+
+  /// How far the user moved the lines (F1), milliseconds: > 0 lights each
+  /// line later than its start time, and a click on it jumps later too.
+  final int offsetMs;
   final Duration Function() position;
   final Stream<Duration>? Function() positions;
   final Future<void> Function(Duration to) seek;
@@ -268,8 +341,17 @@ class _LyricsLinesState extends State<LyricsLines> {
     if (old.lyrics != widget.lyrics) {
       if (_scroll.hasClients) _scroll.jumpTo(0);
       _takeLyrics();
+    } else if (old.offsetMs != widget.offsetMs) {
+      // Moved timing: the line sung now changes at once, even when paused.
+      _line = _lineAt(widget.position());
+      _handScrollUntil = DateTime.fromMillisecondsSinceEpoch(0);
+      _revealLine();
     }
   }
+
+  /// The line sung at [at] with the lead and the user's offset.
+  int _lineAt(Duration at) =>
+      widget.lyrics.lineAt(at.inMilliseconds + lyricsLeadMs - widget.offsetMs);
 
   /// Listens to the player's positions once it has them; true when it does.
   bool _listenToPositions() {
@@ -293,7 +375,7 @@ class _LyricsLinesState extends State<LyricsLines> {
   void _takeLyrics() {
     final lyrics = widget.lyrics;
     _lineKeys = [for (final _ in lyrics.lines) GlobalKey()];
-    _line = lyrics.lineAt(widget.position().inMilliseconds + lyricsLeadMs);
+    _line = _lineAt(widget.position());
     _handScrollUntil = DateTime.fromMillisecondsSinceEpoch(0);
     _revealLine(animate: false);
   }
@@ -301,7 +383,7 @@ class _LyricsLinesState extends State<LyricsLines> {
   void _follow(Duration at) {
     final lyrics = widget.lyrics;
     if (!lyrics.timed) return;
-    final line = lyrics.lineAt(at.inMilliseconds + lyricsLeadMs);
+    final line = _lineAt(at);
     if (line == _line) return;
     setState(() => _line = line);
     _revealLine();
@@ -350,7 +432,8 @@ class _LyricsLinesState extends State<LyricsLines> {
     _handScrollUntil = DateTime.fromMillisecondsSinceEpoch(0);
     setState(() => _line = index);
     _revealLine();
-    unawaited(widget.seek(Duration(milliseconds: start)));
+    final to = start + widget.offsetMs;
+    unawaited(widget.seek(Duration(milliseconds: to < 0 ? 0 : to)));
   }
 
   @override
