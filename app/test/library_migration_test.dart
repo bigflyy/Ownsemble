@@ -653,6 +653,31 @@ void main() {
     expect(migrated.lyricsPickOf('1_1'), isNull);
   });
 
+  test('version 19 gains moved lyrics timings; picks stay', () {
+    final store = LibraryStore.open(dbPath);
+    store.saveLyricsPick('1_1', 'lrclib');
+    store.close();
+    final db = sqlite3.open(dbPath);
+    db
+      ..execute('DROP TABLE lyrics_offsets')
+      ..execute('PRAGMA user_version = 19')
+      ..close();
+
+    final migrated = LibraryStore.open(dbPath);
+    addTearDown(migrated.close);
+    expect(versionOf(dbPath), librarySchemaVersion);
+    expect(migrated.lyricsPickOf('1_1'), 'lrclib');
+    expect(migrated.lyricsOffsetOf('1_1', 'lrclib'), 0);
+    migrated.saveLyricsOffset('1_1', 'lrclib', 1500);
+    migrated.saveLyricsOffset('1_1', 'netease', -500);
+    expect(migrated.lyricsOffsetOf('1_1', 'lrclib'), 1500);
+    migrated.saveLyricsOffset('1_1', 'lrclib', 2000);
+    expect(migrated.lyricsOffsetOf('1_1', 'lrclib'), 2000);
+    migrated.saveLyricsOffset('1_1', 'lrclib', 0);
+    expect(migrated.lyricsOffsetOf('1_1', 'lrclib'), 0);
+    expect(migrated.lyricsOffsetOf('1_1', 'netease'), -500);
+  });
+
   test('a library from a newer build is refused and left alone', () {
     final db = sqlite3.open(dbPath);
     db.execute('PRAGMA user_version = ${librarySchemaVersion + 1}');

@@ -6,7 +6,7 @@ import 'package:sqlite3/sqlite3.dart';
 /// Schema version this build reads and writes (`PRAGMA user_version`).
 ///
 /// 0 is the speed-gate build's single `tracks` table (or an empty file).
-const librarySchemaVersion = 19;
+const librarySchemaVersion = 20;
 
 /// How many colors sources can have; the theme has one per slot, from 1.
 const sourceColorCount = 6;
@@ -59,6 +59,7 @@ void migrateLibrary(Database db, {String? dataDir}) {
     if (version < 17) _addLyrics(db);
     if (version < 18) _addLyricsMeta(db);
     if (version < 19) _addLyricsPicks(db);
+    if (version < 20) _addLyricsOffsets(db);
     db.execute('PRAGMA user_version = $librarySchemaVersion');
     db.execute('COMMIT');
   } catch (_) {
@@ -371,6 +372,22 @@ void _addLyricsPicks(Database db) {
       ref TEXT PRIMARY KEY,
       source TEXT NOT NULL,
       picked_at_ms INTEGER NOT NULL
+    )
+  ''');
+}
+
+/// Version 20 (plan 10, F1): how far the user moved one source's timed
+/// lines for a song, by the upload's key (`ref`) and the source: a live or
+/// acoustic version is sung later or earlier than the lines say.
+/// `offset_ms` > 0 lights each line later; no row means 0.
+void _addLyricsOffsets(Database db) {
+  db.execute('''
+    CREATE TABLE IF NOT EXISTS lyrics_offsets (
+      ref TEXT NOT NULL,
+      source TEXT NOT NULL,
+      offset_ms INTEGER NOT NULL,
+      set_at_ms INTEGER NOT NULL,
+      PRIMARY KEY (ref, source)
     )
   ''');
 }

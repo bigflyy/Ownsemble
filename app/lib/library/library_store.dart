@@ -962,6 +962,36 @@ class LibraryStore implements PlayLog, PlayStatsSource {
     );
   }
 
+  /// How far the user moved [source]'s timed lines for the song [ref]
+  /// (plan 10, F1), milliseconds; > 0 is later, 0 when never moved.
+  int lyricsOffsetOf(String ref, String source) =>
+      _db.select(
+            'SELECT offset_ms FROM lyrics_offsets WHERE ref = ? AND source = ?',
+            [ref, source],
+          ).firstOrNull?['offset_ms']
+          as int? ??
+      0;
+
+  /// Keeps [offsetMs] for [source]'s lines of the song [ref]; 0 forgets it.
+  void saveLyricsOffset(String ref, String source, int offsetMs) {
+    if (offsetMs == 0) {
+      _db.execute('DELETE FROM lyrics_offsets WHERE ref = ? AND source = ?', [
+        ref,
+        source,
+      ]);
+      return;
+    }
+    _db.execute(
+      '''
+      INSERT INTO lyrics_offsets (ref, source, offset_ms, set_at_ms)
+      VALUES (?, ?, ?, ?)
+      ON CONFLICT (ref, source) DO UPDATE SET
+        offset_ms = excluded.offset_ms, set_at_ms = excluded.set_at_ms
+    ''',
+      [ref, source, offsetMs, _now()],
+    );
+  }
+
   /// The VK album key of each listed song that has one, by the listed row's
   /// id: the row [vkAlbumOf] opens the album through (the song's own row
   /// first, then a copy not gone, then the oldest).
