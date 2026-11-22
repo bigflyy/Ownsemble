@@ -1,8 +1,9 @@
 // Renders the Lyrics place of plan 10 to PNG files with the real fonts, so
 // its look can be checked without opening the app on screen: timed lyrics
 // following a playing song, plain lyrics, a song without lyrics, a failed
-// ask, the loading spinner and long lines in a narrow window. The words
-// are made up.
+// ask, the loading spinner and long lines in a narrow window; and the
+// chooser of every source's lyrics (E2): its list, a preview and a kept
+// choice. The words are made up.
 //
 // Run from app/:
 //   flutter test tool/lyrics_shots_test.dart \
@@ -18,7 +19,9 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ownsemble/library/library_store.dart';
 import 'package:ownsemble/library/track.dart';
+import 'package:ownsemble/lyrics/lyrics.dart';
 import 'package:ownsemble/lyrics/lyrics_controller.dart';
+import 'package:ownsemble/lyrics/lyrics_sources.dart';
 import 'package:ownsemble/playback/playback_controller.dart';
 import 'package:ownsemble/playback/player_service.dart';
 import 'package:ownsemble/storage/audio_storage.dart';
@@ -73,6 +76,26 @@ class _ShownPlayer extends PlayerService {
     return const PlayTiming(ok: true, cached: true, resolveMs: 0, toSoundMs: 1);
   }
 }
+
+/// An outside source with nothing more to say: the shots' outside lyrics
+/// are stored before.
+class _QuietSource implements OutsideLyricsSource {
+  _QuietSource(this.id);
+
+  @override
+  final String id;
+
+  @override
+  Future<LyricsCandidate?> find(SongNames song) async => null;
+}
+
+Lyrics _outsideTimed(String source, int shift) => Lyrics(
+  source: source,
+  lines: [
+    for (final (i, line) in _timedWords.indexed)
+      LyricLine(line, startMs: 10000 + shift + i * 6000),
+  ],
+);
 
 Future<void> loadFont(String family, List<String> files) async {
   final loader = FontLoader(family);
@@ -210,7 +233,7 @@ void main() {
           throw VkException('audio.getLyrics error 9', code: 9);
         case 'none':
           throw VkException('audio.getLyrics error 104', code: 104);
-        case 'plain':
+        case 'plain' || 'choices' || 'preview' || 'chosen':
           return _plainReply();
         case 'long':
           return _timedReply(_longWords);
@@ -218,10 +241,41 @@ void main() {
       return _timedReply(_timedWords);
     }
 
+    final choosing = const ['choices', 'preview', 'chosen'].contains(step);
+    if (choosing) {
+      store
+        ..saveLyrics(
+          'lrclib',
+          '1_1',
+          _outsideTimed('lrclib', 0),
+          meta:
+              '{"id":"1","artist":"Северные комнаты","title":"Огни пристани",'
+              '"seconds":204,"exact":true,"diff":0}',
+        )
+        ..saveLyrics(
+          'netease',
+          '1_1',
+          _outsideTimed('netease', 300),
+          meta:
+              '{"id":"2","artist":"Severnye komnaty","title":"Ogni pristani '
+              '(Live at the Old Harbour Hall, remastered edition)",'
+              '"seconds":206,"exact":false,"diff":2}',
+        );
+      if (step == 'chosen') store.saveLyricsPick('1_1', 'netease');
+    }
     final lyrics = LyricsController(
       load: store.lyricsOf,
       save: store.saveLyrics,
+      loadPick: store.lyricsPickOf,
+      savePick: store.saveLyricsPick,
       routeOf: lyricsRouteBySource((_) => fakeVk),
+      sources: choosing
+          ? [
+              _QuietSource('lrclib'),
+              _QuietSource('netease'),
+              _QuietSource('qq'),
+            ]
+          : const [],
     );
     final settings = ShellSettings.inMemory();
     if (!dark) settings.toggleTheme();
@@ -261,13 +315,28 @@ void main() {
     player.playing.value = true;
     await settle();
     if (step != 'closed') {
-      await tester.tap(find.byKey(const ValueKey('lyrics')));
+      // The smallest window keeps the mic in the bar's More menu (B26).
+      if (find.byKey(const ValueKey('lyrics')).evaluate().isEmpty) {
+        library.toggleLyrics();
+      } else {
+        await tester.tap(find.byKey(const ValueKey('lyrics')));
+      }
       await settle();
       // The song moves on to the 7th line (or the 2nd of the long ones).
       player.moveTo(Duration(milliseconds: step == 'long' ? 16500 : 46500));
       await settle();
       await tester.pump(const Duration(milliseconds: 600));
       await settle();
+      if (step == 'choices' || step == 'preview') {
+        await tester.tap(find.byKey(const ValueKey('lyrics-choose')));
+        await settle();
+      }
+      if (step == 'preview') {
+        await tester.tap(find.byKey(const ValueKey('lyrics-choice-netease')));
+        await settle();
+        await tester.pump(const Duration(milliseconds: 600));
+        await settle();
+      }
     }
     for (final paragraph
         in tester.allRenderObjects.whereType<RenderParagraph>()) {
@@ -303,8 +372,19 @@ void main() {
     ('failed', false, const Size(1440, 900)),
     ('loading', true, const Size(1440, 900)),
     ('long', false, const Size(760, 900)),
+    ('choices', true, const Size(1440, 900)),
+    ('choices', false, const Size(1440, 900)),
+    ('choices', true, const Size(760, 900)),
+    ('choices', false, const Size(480, 800)),
+    ('preview', true, const Size(1440, 900)),
+    ('preview', false, const Size(760, 900)),
+    ('chosen', true, const Size(1440, 900)),
   ]) {
-    final width = size.width < 1000 ? 'narrow' : 'wide';
+    final width = size.width < 600
+        ? 'smallest'
+        : size.width < 1000
+        ? 'narrow'
+        : 'wide';
     testWidgets(
       'Lyrics: $step, ${dark ? 'dark' : 'light'}, $width',
       (t) => shoot(

@@ -11,6 +11,7 @@ import '../library/song_filter.dart';
 import '../library/song_version.dart';
 import '../library/track.dart';
 import '../lyrics/lyrics_controller.dart';
+import '../lyrics/lyrics_sources.dart' show lyricsSourceLabel;
 import '../playback/playback_controller.dart';
 import '../playback/play_queue.dart';
 import '../playback/version_book.dart';
@@ -34,6 +35,7 @@ import 'filter_bar.dart';
 import 'for_you.dart';
 import 'for_you_page.dart';
 import 'library_controller.dart';
+import 'lyrics_choices_page.dart';
 import 'lyrics_page.dart';
 import 'outside_songs.dart';
 import 'playing_mark.dart';
@@ -1199,6 +1201,8 @@ class _LibraryScreenState extends State<LibraryScreen> {
                               artists.shown(library.searchText.text).length,
                               artists.index.length,
                             )
+                          : view.kind == ViewKind.lyricsChoices
+                          ? _lyricsFoundText()
                           : view.isPage
                           ? null
                           : _countLabel(),
@@ -1209,6 +1213,8 @@ class _LibraryScreenState extends State<LibraryScreen> {
                           ? _versionsDetail()
                           : view.kind == ViewKind.lyrics
                           ? _lyricsDetail()
+                          : view.kind == ViewKind.lyricsChoices
+                          ? _lyricsChoicesDetail()
                           : _albumDetail(view),
                       actions: [
                         if (view.kind == ViewKind.artists && artists != null)
@@ -1217,6 +1223,14 @@ class _LibraryScreenState extends State<LibraryScreen> {
                             compact: listWidth < filterChipsMinWidth,
                           ),
                         if (view.kind == ViewKind.versions) _versionsSearch(),
+                        if (view.kind == ViewKind.lyricsChoices &&
+                            widget.lyrics != null)
+                          _lyricsAskAgain(widget.lyrics!),
+                        if (view.kind == ViewKind.lyrics &&
+                            widget.lyrics?.track != null)
+                          _lyricsChooseButton(
+                            compact: listWidth < lyricsNarrowWidth,
+                          ),
                         ?_albumAddAll(view, tight: tight),
                         ?_listActions(
                           view,
@@ -1299,6 +1313,20 @@ class _LibraryScreenState extends State<LibraryScreen> {
                                 ? widget.player.positions
                                 : null,
                             seek: widget.playback.seek,
+                            onChoose: library.openLyricsChoices,
+                          )
+                        : view.kind == ViewKind.lyricsChoices &&
+                              widget.lyrics != null
+                        ? LyricsChoicesPage(
+                            lyrics: widget.lyrics!,
+                            current: () => widget.player.current,
+                            currentStream: widget.player.currentStream,
+                            position: () => widget.player.position,
+                            positions: () => widget.player.isReady
+                                ? widget.player.positions
+                                : null,
+                            seek: widget.playback.seek,
+                            onUsed: library.goBack,
                           )
                         : statsFilters != null
                         ? NowPlayingScope(
@@ -1407,12 +1435,106 @@ class _LibraryScreenState extends State<LibraryScreen> {
 
   /// The line under an album's title: its artist and how far its list got.
   /// The Lyrics place's line under its title: the song it shows.
+  /// With lyrics shown it names their source too: the credit line above
+  /// the lines scrolls away while they follow the song.
   String? _lyricsDetail() {
-    final track = widget.lyrics?.track;
-    if (track == null) return null;
-    return track.artist.isEmpty
+    final lyrics = widget.lyrics;
+    final track = lyrics?.track;
+    if (lyrics == null || track == null) return null;
+    final song = track.artist.isEmpty
         ? track.title
         : '${track.title} - ${track.artist}';
+    final state = lyrics.state;
+    if (state is! LyricsShown) return song;
+    final source = state.lyrics.source;
+    return '$song · from ${lyricsSourceLabel(source)}'
+        '${lyrics.chosen == source ? ', your choice' : ''}';
+  }
+
+  /// The chooser's count beside its title: how many sources have lyrics.
+  String? _lyricsFoundText() {
+    final choices = widget.lyrics?.choices ?? const <LyricsChoice>[];
+    if (choices.isEmpty) return null;
+    final found = choices.where((choice) => choice.lyrics != null).length;
+    return '$found found';
+  }
+
+  /// The chooser's line under its title: whose lyrics the Lyrics place
+  /// shows, and whether the app or the user picked them.
+  String? _lyricsChoicesDetail() {
+    final lyrics = widget.lyrics;
+    final track = lyrics?.track;
+    if (lyrics == null || track == null) return null;
+    final choices = lyrics.choices;
+    final asking = choices
+        .where((choice) => choice.status == LyricsChoiceStatus.asking)
+        .length;
+    final chosen = lyrics.chosen;
+    final source = chosen ?? lyrics.automatic;
+    final shown = choices
+        .where((choice) => choice.source == source)
+        .firstOrNull;
+    final song = track.artist.isEmpty
+        ? track.title
+        : '${track.title} - ${track.artist}';
+    final shows = shown?.lyrics == null
+        ? asking > 0
+              ? ''
+              : ' No source has lyrics for this song.'
+        : " Shows ${shown!.label}'s "
+              "${shown.lyrics!.timed ? 'timed lyrics' : 'words'} "
+              "(${chosen == null ? 'automatic pick' : 'your choice'}).";
+    final status = asking == 0
+        ? ''
+        : '  Asking ${asking == 1 ? '1 source' : '$asking sources'}...';
+    return '$song.$shows$status';
+  }
+
+  /// The Lyrics place's button that opens the chooser of every source's
+  /// lyrics (E2): in the heading, so it stays in sight while the lines
+  /// follow the song; an icon alone in a narrow place.
+  Widget _lyricsChooseButton({required bool compact}) => compact
+      ? IconButton(
+          key: const ValueKey('lyrics-choose'),
+          tooltip: 'Choose lyrics',
+          onPressed: library.openLyricsChoices,
+          icon: const Icon(Icons.manage_search),
+        )
+      : TextButton.icon(
+          key: const ValueKey('lyrics-choose'),
+          onPressed: library.openLyricsChoices,
+          icon: const Icon(Icons.manage_search, size: 20),
+          label: const Text('Choose lyrics'),
+        );
+
+  /// The chooser's button that asks every source again; a small spinner
+  /// while sources are asked.
+  Widget _lyricsAskAgain(LyricsController lyrics) {
+    final asking = lyrics.choices.any(
+      (choice) => choice.status == LyricsChoiceStatus.asking || choice.asking,
+    );
+    if (asking) {
+      return const Tooltip(
+        message: 'Asking the lyrics sources...',
+        child: Padding(
+          padding: EdgeInsets.all(11),
+          child: SizedBox(
+            key: ValueKey('lyrics-choices-asking'),
+            width: 18,
+            height: 18,
+            child: CircularProgressIndicator(strokeWidth: 2),
+          ),
+        ),
+      );
+    }
+    return IconButton(
+      key: const ValueKey('lyrics-choices-refresh'),
+      tooltip: 'Ask every source again',
+      onPressed: lyrics.track == null
+          ? null
+          : () => unawaited(lyrics.askAll(again: true)),
+      icon: const Icon(Icons.refresh),
+    );
   }
 
   /// The mic button of the player (plan 10): lit while Lyrics is open.
@@ -1421,7 +1543,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
       : ListenableBuilder(
           listenable: library,
           builder: (context, _) => LyricsButton(
-            open: library.view.kind == ViewKind.lyrics,
+            open: library.view.showsLyrics,
             onPressed: () {
               library.jump.clear();
               library.toggleLyrics();
@@ -1553,6 +1675,9 @@ class _LibraryScreenState extends State<LibraryScreen> {
     ViewKind.history => 'History',
     ViewKind.stats => 'Stats',
     ViewKind.lyrics => 'Lyrics',
+    // The song is named in the line under it: "Lyrics of <title>" left
+    // "Lyrics o..." in the smallest window (shots-41).
+    ViewKind.lyricsChoices => 'Choose lyrics',
     ViewKind.yearReport => 'Your ${view.year}',
     ViewKind.album => view.album?.title ?? 'Album',
     ViewKind.versions =>
@@ -2423,7 +2548,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
     }
     final found = catalog?.foundById(track.id);
     if (!recommended && found == null && !lyrics) return null;
-    final lyricsOpen = library.view.kind == ViewKind.lyrics;
+    final lyricsOpen = library.view.showsLyrics;
     return [
       if (recommended)
         BarMenuItem(

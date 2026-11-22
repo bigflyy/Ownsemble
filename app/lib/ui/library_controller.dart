@@ -69,6 +69,10 @@ enum ViewKind {
   /// The playing song's lyrics (plan 10), opened by the mic button.
   lyrics,
 
+  /// Every source's lyrics for the playing song, to preview and choose
+  /// from (plan 10, E2), opened from the Lyrics place.
+  lyricsChoices,
+
   /// One recommended list (a VK list, "Similar to", VK Mix), opened from
   /// For you or a song's "Similar songs" (plan 07).
   vkList,
@@ -128,12 +132,17 @@ class LibraryView {
       kind == ViewKind.stats ||
       kind == ViewKind.yearReport ||
       kind == ViewKind.forYou ||
-      kind == ViewKind.lyrics;
+      showsLyrics;
+
+  /// Whether the view is the Lyrics place or its chooser: the mic button
+  /// is lit and closes them.
+  bool get showsLyrics =>
+      kind == ViewKind.lyrics || kind == ViewKind.lyricsChoices;
 
   /// Whether the view is opened from another one and shows a Back button.
   bool get hasBack =>
       listsOutside ||
-      kind == ViewKind.lyrics ||
+      showsLyrics ||
       kind == ViewKind.yearReport ||
       kind == ViewKind.artist ||
       kind == ViewKind.artistSongs;
@@ -262,7 +271,8 @@ class LibraryController extends ChangeNotifier {
         kind == ViewKind.album ||
         kind == ViewKind.versions ||
         kind == ViewKind.vkList ||
-        kind == ViewKind.lyrics) {
+        kind == ViewKind.lyrics ||
+        kind == ViewKind.lyricsChoices) {
       return null;
     }
     // A year report opens from Stats, and Back has nothing to return to
@@ -766,7 +776,7 @@ class LibraryController extends ChangeNotifier {
   /// Opens the Lyrics place (Back returns), or closes it when it is open:
   /// the mic button (plan 10).
   void toggleLyrics() {
-    if (_view.kind != ViewKind.lyrics) {
+    if (!_view.showsLyrics) {
       _places.leave(_here);
       _showList(const LibraryView(ViewKind.lyrics), '', _source);
       return;
@@ -776,7 +786,7 @@ class LibraryController extends ChangeNotifier {
     Place? before;
     while (true) {
       before = _places.back(here);
-      if (before == null || before.view.kind != ViewKind.lyrics) break;
+      if (before == null || !before.view.showsLyrics) break;
       here = before;
     }
     if (before == null) {
@@ -784,6 +794,14 @@ class LibraryController extends ChangeNotifier {
     } else {
       _showPlace(before);
     }
+  }
+
+  /// Opens the chooser of every source's lyrics for the playing song, from
+  /// the Lyrics place (Back returns there; plan 10, E2).
+  void openLyricsChoices() {
+    if (_view.kind == ViewKind.lyricsChoices) return;
+    _places.leave(_here);
+    _showList(const LibraryView(ViewKind.lyricsChoices), '', _source);
   }
 
   /// Shows the report of [year] in place of the one shown (its arrows):
@@ -1345,7 +1363,7 @@ class LibraryController extends ChangeNotifier {
   void _onSearchChanged() {
     final query = searchText.text;
     if (query == _appliedQuery) return;
-    if (_view.kind == ViewKind.lyrics && query.isNotEmpty) {
+    if (_view.showsLyrics && query.isNotEmpty) {
       // Lyrics shows no list: a search there leaves for the songs it finds
       // (Back returns to Lyrics), as in Spotify.
       _places.leave(_here);
@@ -1490,7 +1508,8 @@ class LibraryController extends ChangeNotifier {
           ViewKind.stats ||
           ViewKind.yearReport ||
           ViewKind.forYou ||
-          ViewKind.lyrics:
+          ViewKind.lyrics ||
+          ViewKind.lyricsChoices:
         _base = const [];
     }
     _filterBaseBySource();

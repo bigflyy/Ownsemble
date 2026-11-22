@@ -33,6 +33,7 @@ class LyricsPage extends StatefulWidget {
     required this.position,
     required this.positions,
     required this.seek,
+    this.onChoose,
   });
 
   final LyricsController lyrics;
@@ -47,16 +48,191 @@ class LyricsPage extends StatefulWidget {
   final Stream<Duration>? Function() positions;
   final Future<void> Function(Duration to) seek;
 
+  /// Opens the chooser of every source's lyrics (E2) from the "No lyrics
+  /// found" message; the place's heading has its own button (a link by the
+  /// credit line scrolled away with following lines: shots-41).
+  final VoidCallback? onChoose;
+
   @override
   State<LyricsPage> createState() => _LyricsPageState();
 }
 
 class _LyricsPageState extends State<LyricsPage> {
-  final _scroll = ScrollController();
-  final _subscriptions = <StreamSubscription<Object?>>[];
+  StreamSubscription<Track?>? _current;
 
-  /// The lyrics the line keys below belong to.
-  Lyrics? _shown;
+  /// Shows the spinner only when an answer takes a while.
+  Timer? _spinnerTimer;
+  bool _spinnerDue = false;
+
+  @override
+  void initState() {
+    super.initState();
+    widget.lyrics.addListener(_onLyrics);
+    _current = widget.currentStream.listen(widget.lyrics.show);
+    // The controller tells its listeners at once; not while building. A
+    // place opened anew looks again at a song whose ask failed before.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) widget.lyrics.show(widget.current(), again: true);
+    });
+    _takeState();
+  }
+
+  @override
+  void dispose() {
+    widget.lyrics.removeListener(_onLyrics);
+    unawaited(_current?.cancel());
+    _spinnerTimer?.cancel();
+    super.dispose();
+  }
+
+  void _onLyrics() {
+    _takeState();
+    if (mounted) setState(() {});
+  }
+
+  void _takeState() {
+    _spinnerTimer?.cancel();
+    _spinnerDue = false;
+    if (widget.lyrics.state is LyricsLoading) {
+      _spinnerTimer = Timer(const Duration(milliseconds: 300), () {
+        if (mounted) setState(() => _spinnerDue = true);
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = OwnColors.of(context);
+    final state = widget.lyrics.state;
+    final track = widget.lyrics.track;
+    final choose = widget.onChoose;
+    if (track == null) {
+      return lyricsMessage(context, 'Play a song to see its lyrics.');
+    }
+    switch (state) {
+      case LyricsLoading():
+        return _spinnerDue
+            ? LayoutBuilder(
+                builder: (context, constraints) => Padding(
+                  padding: EdgeInsets.fromLTRB(
+                    constraints.maxWidth < lyricsNarrowWidth ? 24 : 56,
+                    48,
+                    24,
+                    24,
+                  ),
+                  child: const Align(
+                    alignment: Alignment.topLeft,
+                    child: SizedBox(
+                      key: ValueKey('lyrics-loading'),
+                      width: 24,
+                      height: 24,
+                      child: CircularProgressIndicator(strokeWidth: 2.5),
+                    ),
+                  ),
+                ),
+              )
+            : const SizedBox.shrink();
+      case LyricsMissing():
+        return lyricsMessage(
+          context,
+          'No lyrics found for this song.',
+          action: choose == null
+              ? null
+              : OutlinedButton(
+                  key: const ValueKey('lyrics-choose'),
+                  onPressed: choose,
+                  child: const Text('See every source'),
+                ),
+        );
+      case LyricsFailed(:final reason):
+        return lyricsMessage(
+          context,
+          reason,
+          action: FilledButton.tonal(
+            key: const ValueKey('lyrics-retry'),
+            onPressed: widget.lyrics.retry,
+            child: const Text('Try again'),
+          ),
+        );
+      case LyricsShown(:final lyrics, :final refreshing):
+        final label = lyricsSourceLabel(lyrics.source);
+        final yours = widget.lyrics.chosen == lyrics.source;
+        final credit = lyrics.timed
+            ? 'From $label${yours ? ' (your choice)' : ''}'
+            : yours
+            ? 'Words only, from $label (your choice)'
+            : refreshing
+            ? 'Words only, from $label; looking for timed lyrics...'
+            : 'Words only, from $label: no source has times for this song';
+        return LyricsLines(
+          lyrics: lyrics,
+          position: widget.position,
+          positions: widget.positions,
+          seek: widget.seek,
+          header: Text(
+            credit,
+            key: const ValueKey('lyrics-credit'),
+            style: TextStyle(color: colors.dim2, fontSize: 13),
+          ),
+        );
+    }
+  }
+}
+
+/// A message in the lyrics places' style (no song, none, a failure), with
+/// an optional button under it. It scrolls in a window too short for the
+/// text and its button (the smallest window over For You left 132 px: B25's
+/// test).
+Widget lyricsMessage(BuildContext context, String text, {Widget? action}) {
+  final colors = OwnColors.of(context);
+  return LayoutBuilder(
+    builder: (context, constraints) {
+      final narrow = constraints.maxWidth < lyricsNarrowWidth;
+      return SingleChildScrollView(
+        padding: EdgeInsets.fromLTRB(narrow ? 24 : 56, 48, 24, 24),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              text,
+              key: const ValueKey('lyrics-message'),
+              style: TextStyle(color: colors.dim, fontSize: narrow ? 16 : 18),
+            ),
+            if (action != null) ...[const SizedBox(height: 16), action],
+          ],
+        ),
+      );
+    },
+  );
+}
+
+/// One source's lyrics under a [header] line: timed lines follow the song
+/// with the current line bright, about a third down, and a click on a line
+/// jumps there; plain lines scroll by hand and can be selected. Scrolling
+/// by hand pauses the following for a few seconds, as in Spotify. Used by
+/// the Lyrics place and the chooser's preview.
+class LyricsLines extends StatefulWidget {
+  const LyricsLines({
+    super.key,
+    required this.lyrics,
+    required this.header,
+    required this.position,
+    required this.positions,
+    required this.seek,
+  });
+
+  final Lyrics lyrics;
+  final Widget header;
+  final Duration Function() position;
+  final Stream<Duration>? Function() positions;
+  final Future<void> Function(Duration to) seek;
+
+  @override
+  State<LyricsLines> createState() => _LyricsLinesState();
+}
+
+class _LyricsLinesState extends State<LyricsLines> {
+  final _scroll = ScrollController();
   List<GlobalKey> _lineKeys = const [];
 
   /// The line sung now; -1 before the first or for plain lyrics.
@@ -64,10 +240,6 @@ class _LyricsPageState extends State<LyricsPage> {
 
   /// Until when a hand scroll keeps the lines where the user put them.
   DateTime _handScrollUntil = DateTime.fromMillisecondsSinceEpoch(0);
-
-  /// Shows the spinner only when an answer takes a while.
-  Timer? _spinnerTimer;
-  bool _spinnerDue = false;
 
   /// Ends the pause a hand scroll made; one at a time.
   Timer? _handScrollTimer;
@@ -80,8 +252,6 @@ class _LyricsPageState extends State<LyricsPage> {
   @override
   void initState() {
     super.initState();
-    widget.lyrics.addListener(_onLyrics);
-    _subscriptions.add(widget.currentStream.listen(widget.lyrics.show));
     if (!_listenToPositions()) {
       _positionsTimer = Timer.periodic(const Duration(milliseconds: 500), (
         timer,
@@ -89,12 +259,16 @@ class _LyricsPageState extends State<LyricsPage> {
         if (_listenToPositions()) timer.cancel();
       });
     }
-    // The controller tells its listeners at once; not while building. A
-    // place opened anew looks again at a song whose ask failed before.
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) widget.lyrics.show(widget.current(), again: true);
-    });
-    _takeState();
+    _takeLyrics();
+  }
+
+  @override
+  void didUpdateWidget(LyricsLines old) {
+    super.didUpdateWidget(old);
+    if (old.lyrics != widget.lyrics) {
+      if (_scroll.hasClients) _scroll.jumpTo(0);
+      _takeLyrics();
+    }
   }
 
   /// Listens to the player's positions once it has them; true when it does.
@@ -108,49 +282,25 @@ class _LyricsPageState extends State<LyricsPage> {
 
   @override
   void dispose() {
-    widget.lyrics.removeListener(_onLyrics);
-    for (final subscription in _subscriptions) {
-      unawaited(subscription.cancel());
-    }
     unawaited(_positions?.cancel());
     _positionsTimer?.cancel();
     _handScrollTimer?.cancel();
-    _spinnerTimer?.cancel();
     _scroll.dispose();
     super.dispose();
   }
 
-  void _onLyrics() {
-    _takeState();
-    if (mounted) setState(() {});
-  }
-
-  /// Takes in the controller's state: new lyrics get new line keys and
-  /// start at the line sung now.
-  void _takeState() {
-    final state = widget.lyrics.state;
-    _spinnerTimer?.cancel();
-    _spinnerDue = false;
-    if (state is LyricsLoading) {
-      _spinnerTimer = Timer(const Duration(milliseconds: 300), () {
-        if (mounted) setState(() => _spinnerDue = true);
-      });
-    }
-    final lyrics = state is LyricsShown ? state.lyrics : null;
-    if (lyrics != _shown) {
-      _shown = lyrics;
-      _lineKeys = [for (final _ in lyrics?.lines ?? const []) GlobalKey()];
-      _line =
-          lyrics?.lineAt(widget.position().inMilliseconds + lyricsLeadMs) ?? -1;
-      _handScrollUntil = DateTime.fromMillisecondsSinceEpoch(0);
-      if (_scroll.hasClients) _scroll.jumpTo(0);
-      _revealLine(animate: false);
-    }
+  /// New lyrics get new line keys and start at the line sung now.
+  void _takeLyrics() {
+    final lyrics = widget.lyrics;
+    _lineKeys = [for (final _ in lyrics.lines) GlobalKey()];
+    _line = lyrics.lineAt(widget.position().inMilliseconds + lyricsLeadMs);
+    _handScrollUntil = DateTime.fromMillisecondsSinceEpoch(0);
+    _revealLine(animate: false);
   }
 
   void _follow(Duration at) {
-    final lyrics = _shown;
-    if (lyrics == null || !lyrics.timed) return;
+    final lyrics = widget.lyrics;
+    if (!lyrics.timed) return;
     final line = lyrics.lineAt(at.inMilliseconds + lyricsLeadMs);
     if (line == _line) return;
     setState(() => _line = line);
@@ -195,7 +345,7 @@ class _LyricsPageState extends State<LyricsPage> {
   }
 
   void _seekTo(int index) {
-    final start = _shown?.lines[index].startMs;
+    final start = widget.lyrics.lines[index].startMs;
     if (start == null) return;
     _handScrollUntil = DateTime.fromMillisecondsSinceEpoch(0);
     setState(() => _line = index);
@@ -206,61 +356,14 @@ class _LyricsPageState extends State<LyricsPage> {
   @override
   Widget build(BuildContext context) {
     final colors = OwnColors.of(context);
-    final state = widget.lyrics.state;
-    final track = widget.lyrics.track;
     return LayoutBuilder(
       builder: (context, constraints) {
         final narrow = constraints.maxWidth < lyricsNarrowWidth;
         final side = narrow ? 24.0 : 56.0;
-        // Scrolls in a window too short for the text and its button (the
-        // smallest window over For You left 132 px: B25's test).
-        Widget message(String text, {Widget? action}) => SingleChildScrollView(
-          padding: EdgeInsets.fromLTRB(side, 48, 24, 24),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                text,
-                key: const ValueKey('lyrics-message'),
-                style: TextStyle(color: colors.dim, fontSize: narrow ? 16 : 18),
-              ),
-              if (action != null) ...[const SizedBox(height: 16), action],
-            ],
-          ),
-        );
-        if (track == null) return message('Play a song to see its lyrics.');
-        switch (state) {
-          case LyricsLoading():
-            return _spinnerDue
-                ? Padding(
-                    padding: EdgeInsets.fromLTRB(side, 48, 24, 24),
-                    child: const Align(
-                      alignment: Alignment.topLeft,
-                      child: SizedBox(
-                        key: ValueKey('lyrics-loading'),
-                        width: 24,
-                        height: 24,
-                        child: CircularProgressIndicator(strokeWidth: 2.5),
-                      ),
-                    ),
-                  )
-                : const SizedBox.shrink();
-          case LyricsMissing():
-            return message('No lyrics found for this song.');
-          case LyricsFailed(:final reason):
-            return message(
-              reason,
-              action: FilledButton.tonal(
-                key: const ValueKey('lyrics-retry'),
-                onPressed: widget.lyrics.retry,
-                child: const Text('Try again'),
-              ),
-            );
-          case LyricsShown(:final lyrics, :final refreshing):
-            return lyrics.timed
-                ? _timed(lyrics, colors, narrow, side, constraints.maxHeight)
-                : _plain(lyrics, colors, narrow, side, refreshing: refreshing);
-        }
+        final lyrics = widget.lyrics;
+        return lyrics.timed
+            ? _timed(lyrics, colors, narrow, side, constraints.maxHeight)
+            : _plain(lyrics, colors, narrow, side);
       },
     );
   }
@@ -305,11 +408,7 @@ class _LyricsPageState extends State<LyricsPage> {
                 children: [
                   Padding(
                     padding: const EdgeInsets.only(bottom: 8),
-                    child: Text(
-                      'From ${lyricsSourceLabel(lyrics.source)}',
-                      key: const ValueKey('lyrics-credit'),
-                      style: TextStyle(color: colors.dim2, fontSize: 13),
-                    ),
+                    child: widget.header,
                   ),
                   for (var i = 0; i < lyrics.lines.length; i++)
                     _TimedLine(
@@ -334,13 +433,7 @@ class _LyricsPageState extends State<LyricsPage> {
     );
   }
 
-  Widget _plain(
-    Lyrics lyrics,
-    OwnColors colors,
-    bool narrow,
-    double side, {
-    required bool refreshing,
-  }) {
+  Widget _plain(Lyrics lyrics, OwnColors colors, bool narrow, double side) {
     final size = narrow ? 18.0 : 22.0;
     return SingleChildScrollView(
       key: const ValueKey('lyrics-plain'),
@@ -350,34 +443,31 @@ class _LyricsPageState extends State<LyricsPage> {
         alignment: Alignment.topLeft,
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 820),
-          child: SelectionArea(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  refreshing
-                      ? 'Words only, from ${lyricsSourceLabel(lyrics.source)}; '
-                            'looking for timed lyrics...'
-                      : 'Words only, from ${lyricsSourceLabel(lyrics.source)}: '
-                            'no source has times for this song',
-                  key: const ValueKey('lyrics-credit'),
-                  style: TextStyle(color: colors.dim2, fontSize: 13),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              widget.header,
+              const SizedBox(height: 14),
+              SelectionArea(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    for (final line in lyrics.lines)
+                      line.isGap
+                          ? SizedBox(height: size * 0.8)
+                          : Text(
+                              line.text,
+                              style: TextStyle(
+                                color: colors.text.withValues(alpha: 0.86),
+                                fontSize: size,
+                                height: 1.55,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                  ],
                 ),
-                const SizedBox(height: 14),
-                for (final line in lyrics.lines)
-                  line.isGap
-                      ? SizedBox(height: size * 0.8)
-                      : Text(
-                          line.text,
-                          style: TextStyle(
-                            color: colors.text.withValues(alpha: 0.86),
-                            fontSize: size,
-                            height: 1.55,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-              ],
-            ),
+              ),
+            ],
           ),
         ),
       ),
@@ -385,7 +475,7 @@ class _LyricsPageState extends State<LyricsPage> {
   }
 }
 
-/// One timed line: a button that jumps to it; a gap shows three dots.
+// One timed line: a button that jumps to it; a gap shows three dots.
 class _TimedLine extends StatelessWidget {
   const _TimedLine({
     super.key,
