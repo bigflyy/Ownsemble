@@ -26,6 +26,7 @@ import 'package:integration_test/integration_test.dart';
 import 'package:ownsemble/library/track.dart';
 import 'package:ownsemble/lyrics/lyrics.dart';
 import 'package:ownsemble/lyrics/lyrics_controller.dart';
+import 'package:ownsemble/lyrics/lyrics_sources.dart';
 import 'package:ownsemble/main.dart' as app;
 import 'package:ownsemble/playback/player_service.dart';
 import 'package:ownsemble/ui/library_controller.dart';
@@ -61,7 +62,7 @@ void main() {
     }
   }
 
-  testWidgets('Lyrics: timed follows and seeks, plain, none, stored, '
+  testWidgets('Lyrics: timed follows and seeks, outside sources, stored, '
       'download keeps them', (tester) async {
     expect(dataDir, isNotEmpty, reason: 'pass --dart-define=OWNSEMBLE_DATA');
     expect(session, isNotEmpty, reason: 'pass OWNSEMBLE_SESSION');
@@ -121,24 +122,35 @@ void main() {
     expect(sync.lastOutcome?.error, isNull, reason: 'the start sync worked');
 
     // Which songs have what: asked by the test itself, spaced out (VK
-    // answers error 9 to many calls in a row).
+    // answers error 9 to many calls in a row), and for the songs VK has no
+    // timed lyrics for, LRCLIB (then NetEase and QQ for a "none anywhere"
+    // song) through the app's own readers.
     final client = VkClient(SessionCookie.loadAll(File(session)));
     // login.vk.ru refused connections now and then (lyrics-36a).
     await retryTransient(client.ensureToken);
-    Track? timedSong, plainSong, noneSong, spareSong;
+    final outside = outsideLyricsSources(httpGetJson());
+    Track? timedSong, upgradeSong, outsideSong, noneSong, wordsSong, spareSong;
     Lyrics? timedLyrics;
     var asked = 0;
     final songs = library.all
         .where((t) => t.source == TrackSource.vk && t.inLibrary)
         .toList();
+    SongNames namesOf(Track track) => SongNames(
+      artist: track.artist,
+      title: track.title,
+      album: track.album,
+      seconds: track.durationSec,
+    );
     for (final track in songs) {
-      if (timedSong != null &&
-          plainSong != null &&
-          noneSong != null &&
-          spareSong != null) {
-        break;
-      }
-      if (asked >= 45) break;
+      final needed =
+          timedSong == null ||
+          upgradeSong == null ||
+          outsideSong == null ||
+          spareSong == null;
+      if (!needed && noneSong != null && wordsSong != null) break;
+      // The optional ones are looked for a while longer, not forever.
+      if (!needed && asked >= 90) break;
+      if (asked >= 126) break;
       await Future<void>.delayed(const Duration(milliseconds: 450));
       asked++;
       final answer = await fetchVkLyrics(
@@ -146,33 +158,57 @@ void main() {
         sourceKey: track.sourceKey!,
         accessKey: track.accessKey,
       );
-      switch (answer) {
-        case VkLyricsFound(:final lyrics) when lyrics.timed:
-          if (timedSong == null && lyrics.lines.length >= 8) {
-            timedSong = track;
-            timedLyrics = lyrics;
-          } else {
-            spareSong ??= track;
+      final vkTimed = answer is VkLyricsFound && answer.lyrics.timed;
+      if (vkTimed) {
+        if (timedSong == null && answer.lyrics.lines.length >= 8) {
+          timedSong = track;
+          timedLyrics = answer.lyrics;
+        }
+        continue;
+      }
+      final vkWords = answer is VkLyricsFound;
+      LyricsCandidate? lrclib;
+      try {
+        lrclib = await outside.first.find(namesOf(track));
+      } on LyricsSourceException {
+        continue;
+      }
+      final lrclibTimed = lrclib != null && lrclib.lyrics.timed;
+      if (lrclibTimed && vkWords) {
+        upgradeSong ??= track;
+      } else if (lrclibTimed && outsideSong == null) {
+        outsideSong = track;
+      } else if (lrclibTimed) {
+        spareSong ??= track;
+      } else if (lrclib == null && (noneSong == null || wordsSong == null)) {
+        // Nothing at LRCLIB: what do NetEase and QQ say?
+        try {
+          final others = [
+            for (final source in outside.skip(1))
+              await source.find(namesOf(track)),
+          ];
+          if (others.every((found) => found == null)) {
+            if (vkWords) {
+              wordsSong ??= track;
+            } else {
+              noneSong ??= track;
+            }
           }
-        case VkLyricsFound():
-          if (plainSong == null) {
-            plainSong = track;
-          } else {
-            spareSong ??= track;
-          }
-        case VkLyricsNone():
-          noneSong ??= track;
+        } on LyricsSourceException {
+          continue;
+        }
       }
     }
     client.close();
     say(
-      'asked VK about $asked songs: timed "${timedSong?.title}", plain '
-      '"${plainSong?.title}", none "${noneSong?.title}", spare '
-      '"${spareSong?.title}"',
+      'asked about $asked songs: VK timed "${timedSong?.title}", VK words + '
+      'LRCLIB timed "${upgradeSong?.title}", only LRCLIB timed '
+      '"${outsideSong?.title}", none anywhere "${noneSong?.title}", VK words '
+      'only "${wordsSong?.title}", spare "${spareSong?.title}"',
     );
     expect(timedSong, isNotNull, reason: 'a library song with timed lyrics');
-    expect(plainSong, isNotNull, reason: 'a library song with plain lyrics');
-    expect(noneSong, isNotNull, reason: 'a library song without lyrics');
+    expect(upgradeSong, isNotNull, reason: 'VK words, LRCLIB timed');
+    expect(outsideSong, isNotNull, reason: 'no VK lyrics, LRCLIB timed');
 
     final timings = <PlayTiming>[];
     final listening = player.timings.listen(timings.add);
@@ -293,37 +329,89 @@ void main() {
     }
     say('following: ${checks.join('; ')}');
 
-    // 4. A song with plain lyrics: the place follows the playing song.
-    await playAndSound(plainSong!, 'plain song');
-    await waitUntil(
-      tester,
-      () =>
-          lyrics.track?.id == plainSong!.id &&
-          lyrics.state is LyricsShown &&
-          !(lyrics.state as LyricsShown).lyrics.timed,
-      timeout: const Duration(seconds: 20),
-      what: 'the plain lyrics',
-    );
+    /// Waits until the place shows [track]'s final pick (the walk over the
+    /// sources is done) and says how long it took after the song sounded.
+    Future<Lyrics> finalPick(Track track, String what) async {
+      final clock = Stopwatch()..start();
+      await waitUntil(
+        tester,
+        () =>
+            lyrics.track?.id == track.id &&
+            lyrics.state is LyricsShown &&
+            !(lyrics.state as LyricsShown).refreshing,
+        timeout: const Duration(seconds: 30),
+        what: what,
+      );
+      await tester.pump();
+      final picked = (lyrics.state as LyricsShown).lyrics;
+      say(
+        '$what: ${picked.source} ${picked.timed ? 'timed' : 'words'}, '
+        '${picked.lines.length} lines, ${clock.elapsedMilliseconds} ms after '
+        'the sound',
+      );
+      return picked;
+    }
+
+    String credit() =>
+        tester.widget<Text>(find.byKey(const ValueKey('lyrics-credit'))).data!;
+
+    // 4. VK has only words: LRCLIB's timed lines show (the user's "timed
+    // first"), and they follow the song.
+    await playAndSound(upgradeSong!, 'VK-words song');
+    final upgraded = await finalPick(upgradeSong, 'VK words + LRCLIB timed');
+    expect(upgraded.source, 'lrclib');
+    expect(upgraded.timed, isTrue);
+    expect(find.byKey(const ValueKey('lyrics-timed')), findsOneWidget);
+    expect(credit(), 'From LRCLIB');
+    await Future<void>.delayed(const Duration(seconds: 2));
     await tester.pump();
-    expect(find.byKey(const ValueKey('lyrics-plain')), findsOneWidget);
-    say(
-      'plain lyrics: '
-      '${(lyrics.state as LyricsShown).lyrics.lines.length} lines',
+    await tester.pump(const Duration(milliseconds: 500));
+    final upgradedAt = player.position.inMilliseconds;
+    final upgradedLit = litLine();
+    final upgradedExpected = upgraded.lineAt(upgradedAt + 120);
+    expect(
+      (upgradedLit - upgradedExpected).abs() <= 1,
+      isTrue,
+      reason: 'lit $upgradedLit at $upgradedAt ms, expected $upgradedExpected',
     );
 
-    // 5. A song without lyrics says so.
-    await playAndSound(noneSong!, 'song without lyrics');
-    await waitUntil(
-      tester,
-      () => lyrics.track?.id == noneSong!.id && lyrics.state is LyricsMissing,
-      timeout: const Duration(seconds: 20),
-      what: 'the word that VK has none',
-    );
-    await tester.pump();
-    expect(find.text('VK has no lyrics for this song.'), findsOneWidget);
+    // 5. VK has nothing: LRCLIB's lyrics show.
+    await playAndSound(outsideSong!, 'song without VK lyrics');
+    final fromOutside = await finalPick(outsideSong, 'only LRCLIB timed');
+    expect(fromOutside.source, 'lrclib');
+    expect(fromOutside.timed, isTrue);
+    expect(credit(), 'From LRCLIB');
 
-    // 6. What VK answered is stored.
-    Map<String, int> storedRows() {
+    // 6. No source at all says so; VK's words alone show as words.
+    final none = noneSong;
+    if (none != null) {
+      await playAndSound(none, 'song without lyrics anywhere');
+      await waitUntil(
+        tester,
+        () => lyrics.track?.id == none.id && lyrics.state is LyricsMissing,
+        timeout: const Duration(seconds: 30),
+        what: 'the word that no source has lyrics',
+      );
+      await tester.pump();
+      expect(find.text('No lyrics found for this song.'), findsOneWidget);
+      say('none anywhere: "No lyrics found" shown');
+    } else {
+      say('NOT CHECKED: no song without lyrics anywhere among those asked');
+    }
+    final words = wordsSong;
+    if (words != null) {
+      await playAndSound(words, 'VK-words-only song');
+      final picked = await finalPick(words, 'VK words only');
+      expect(picked.source, 'vk');
+      expect(picked.timed, isFalse);
+      expect(find.byKey(const ValueKey('lyrics-plain')), findsOneWidget);
+      expect(credit(), startsWith('Words only, from VK'));
+    } else {
+      say('NOT CHECKED: no song with VK words and nothing outside');
+    }
+
+    // 7. Every source's answer is stored.
+    Map<String, int> storedRows(String source) {
       final db = sqlite3.open(
         p.join(copy.path, 'library.db'),
         mode: OpenMode.readOnly,
@@ -332,7 +420,7 @@ void main() {
         return {
           for (final row in db.select(
             'SELECT ref, found FROM lyrics WHERE source = ?',
-            ['vk'],
+            [source],
           ))
             row['ref'] as String: row['found'] as int,
         };
@@ -341,30 +429,44 @@ void main() {
       }
     }
 
-    final rows = storedRows();
-    expect(rows[timedSong.sourceKey], 1);
-    expect(rows[plainSong.sourceKey], 1);
-    expect(rows[noneSong.sourceKey], 0);
+    final vkRows = storedRows('vk');
+    final lrclibRows = storedRows('lrclib');
+    expect(vkRows[timedSong.sourceKey], 1);
+    expect(vkRows[upgradeSong.sourceKey], 1, reason: "VK's words kept too");
+    expect(vkRows[outsideSong.sourceKey], 0);
+    expect(lrclibRows[upgradeSong.sourceKey], 1);
+    expect(lrclibRows[outsideSong.sourceKey], 1);
+    expect(
+      lrclibRows.containsKey(timedSong.sourceKey),
+      isFalse,
+      reason: 'VK timed: LRCLIB never asked',
+    );
+    if (none != null) {
+      for (final source in ['vk', 'lrclib', 'netease', 'qq']) {
+        expect(storedRows(source)[none.sourceKey], 0, reason: source);
+      }
+    }
     say(
-      'stored: ${rows.length} rows (${rows.values.where((f) => f == 1).length} with lyrics)',
+      'stored: vk ${vkRows.length} rows, lrclib ${lrclibRows.length}, '
+      'netease ${storedRows('netease').length}, qq ${storedRows('qq').length}',
     );
 
-    // 7. A download keeps a song's lyrics (never shown before).
+    // 7b. A download keeps a song's outside lyrics (never shown before).
     final spare = spareSong;
-    expect(spare, isNotNull, reason: 'a second song with lyrics to download');
+    expect(spare, isNotNull, reason: 'another LRCLIB song to download');
     if (spare != null) {
-      expect(rows.containsKey(spare.sourceKey), isFalse);
+      expect(storedRows('lrclib').containsKey(spare.sourceKey), isFalse);
       clock = Stopwatch()..start();
       final error = await playback.download(spare);
       expect(error, isNull, reason: 'download of "${spare.title}"');
       await waitUntil(
         tester,
-        () => storedRows()[spare.sourceKey] == 1,
+        () => storedRows('lrclib')[spare.sourceKey] == 1,
         timeout: const Duration(seconds: 30),
         what: 'the downloaded song\'s lyrics to be stored',
       );
       say(
-        'download "${spare.title}": audio and lyrics kept in '
+        'download "${spare.title}": audio and LRCLIB lyrics kept in '
         '${clock.elapsedMilliseconds} ms',
       );
       playback.removeDownload(spare);
