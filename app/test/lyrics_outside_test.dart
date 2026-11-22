@@ -25,8 +25,16 @@ class FakeWeb {
   final Object? Function(Uri url) answers;
   final asked = <Uri>[];
 
-  Future<Object?> call(Uri url, {Map<String, String> headers = const {}}) {
+  /// The POSTed body of each ask, null for a GET.
+  final bodies = <Object?>[];
+
+  Future<Object?> call(
+    Uri url, {
+    Map<String, String> headers = const {},
+    Object? body,
+  }) {
     asked.add(url);
+    bodies.add(body);
     lastHeaders = headers;
     return Future.value(answers(url));
   }
@@ -256,7 +264,7 @@ void main() {
 
     test('a refusal is thrown to the caller', () async {
       final source = LrclibSource(
-        (url, {headers = const {}}) async =>
+        (url, {headers = const {}, body}) async =>
             throw const LyricsSourceException('status 429', slowDown: true),
       );
       expect(() => source.find(song), throwsA(isA<LyricsSourceException>()));
@@ -324,33 +332,85 @@ void main() {
       );
     });
 
-    test('QQ: search, then lyrics by songmid', () async {
+    Map<String, Object?> qqSearch(List<Map<String, Object?>> songs) => {
+      'code': 0,
+      'req': {
+        'code': 0,
+        'data': {
+          'body': {'item_song': songs},
+        },
+      },
+    };
+    const qqBusy = {
+      'code': 0,
+      'req': {'code': 2001},
+    };
+    const qqSong = {
+      'mid': 'm1',
+      'title': 'Gorod spit',
+      'interval': 201,
+      'singer': [
+        {'name': 'Nochnye Teni'},
+      ],
+    };
+
+    test('QQ: mobile search (POST), then lyrics by songmid', () async {
       final web = FakeWeb((url) {
-        if (url.path.endsWith('client_search_cp')) {
-          return {
-            'data': {
-              'song': {
-                'list': [
-                  {
-                    'songmid': 'm1',
-                    'songname': 'Gorod spit',
-                    'interval': 201,
-                    'singer': [
-                      {'name': 'Nochnye Teni'},
-                    ],
-                  },
-                ],
-              },
-            },
-          };
-        }
+        if (url.path.endsWith('musicu.fcg')) return qqSearch([qqSong]);
         return {'lyric': '[00:00.00]Gorod spit - Nochnye Teni\n$timed'};
       });
       final found = (await QqSource(web.call).find(song))!;
       expect(found.id, 'm1');
       expect(found.names, NameMatch.loose);
       expect(found.lyrics.lines.first.text, 'Раз');
+      expect(web.asked.first.host, 'u.y.qq.com');
+      final ask = web.bodies.first! as Map;
+      expect(
+        ((ask['req'] as Map)['param'] as Map)['query'],
+        'Ночные Тени Город спит',
+        reason: 'tags such as (Remastered) left out of the search',
+      );
       expect(web.asked.last.queryParameters['songmid'], 'm1');
+      expect(web.bodies.last, isNull, reason: 'the lyrics are a GET');
+    });
+
+    test('QQ: a 2001 answer is asked again', () async {
+      var searches = 0;
+      final web = FakeWeb((url) {
+        if (url.path.endsWith('musicu.fcg')) {
+          return ++searches < 3 ? qqBusy : qqSearch([qqSong]);
+        }
+        return {'lyric': timed};
+      });
+      final found = await QqSource(
+        web.call,
+        retryPause: Duration.zero,
+      ).find(song);
+      expect(found?.id, 'm1');
+      expect(searches, 3);
+    });
+
+    test('QQ: 2001 four times, or another code, is a failure', () async {
+      var searches = 0;
+      final busy = FakeWeb((url) {
+        searches++;
+        return qqBusy;
+      });
+      await expectLater(
+        QqSource(busy.call, retryPause: Duration.zero).find(song),
+        throwsA(isA<LyricsSourceException>()),
+      );
+      expect(searches, 4);
+      final other = FakeWeb(
+        (url) => {
+          'code': 0,
+          'req': {'code': 500},
+        },
+      );
+      await expectLater(
+        QqSource(other.call, retryPause: Duration.zero).find(song),
+        throwsA(isA<LyricsSourceException>()),
+      );
     });
   });
 

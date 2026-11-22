@@ -82,11 +82,13 @@ class LyricsSourceException implements Exception {
 }
 
 /// Reads JSON from [url] with [headers]: the decoded reply, or null when
-/// the server says it has no such thing (404). Throws
-/// [LyricsSourceException] for other answers and on network failures.
+/// the server says it has no such thing (404). With [body] the request is a
+/// POST of that value as JSON. Throws [LyricsSourceException] for other
+/// answers and on network failures.
 typedef GetJson = Future<Object?> Function(
   Uri url, {
   Map<String, String> headers,
+  Object? body,
 });
 
 /// An outside lyrics source.
@@ -359,42 +361,80 @@ class NeteaseSource extends _SearchThenLyrics {
   }
 }
 
-/// QQ Music's desktop services (no key): client_search_cp, then
+/// QQ Music (no key): the mobile search of musicu.fcg, then
 /// fcg_query_lyric_new with the lyrics unencoded.
+///
+/// The older desktop search (client_search_cp) answers HTTP 500 after 5-7 s
+/// since 2026-11-22 (open check B27). The mobile search answers at once,
+/// but often (11 of 26 asks by hand, also twice in a row for the same
+/// words) with code 2001 and no songs; asking again brings them, so a
+/// 2001 is asked again up to [_searchTries] times. Asked back to back for
+/// 126 songs (sources-43a-qq), 33 still got 2001 after 4 tries, in runs of
+/// 2-3 songs: a throttle of a few seconds, which the app's slower pace
+/// (QQ only while nothing is timed, and in the chooser) rarely meets.
 class QqSource extends _SearchThenLyrics {
-  QqSource(super.getJson);
+  QqSource(
+    super.getJson, {
+    this.retryPause = const Duration(milliseconds: 700),
+  });
 
   static const headers = {'Referer': 'https://y.qq.com/'};
+
+  static const _searchTries = 4;
+
+  /// The wait before asking again after a 2001.
+  final Duration retryPause;
 
   @override
   String get id => 'qq';
 
   @override
   Future<List<SourceRow>> search(SongNames song) async {
-    final found = await getJson(
-      Uri.https('c.y.qq.com', '/soso/fcgi-bin/client_search_cp', {
-        'w': '${song.artist} ${searchTitle(song.title)}',
-        'format': 'json',
-        'p': '1',
-        'n': '10',
-        'cr': '1',
-      }),
-      headers: headers,
-    );
-    final data = found is Map ? found['data'] : null;
-    final songPart = data is Map ? data['song'] : null;
-    final list = songPart is Map ? songPart['list'] : null;
+    final ask = {
+      'comm': {'ct': '11', 'cv': '1003006', 'uin': '0'},
+      'req': {
+        'module': 'music.search.SearchCgiService',
+        'method': 'DoSearchForQQMusicMobile',
+        'param': {
+          'query': '${song.artist} ${searchTitle(song.title)}',
+          'search_type': 0,
+          'grp': 1,
+          'num_per_page': 10,
+          'page_num': 1,
+        },
+      },
+    };
+    Object? req;
+    for (var tries = 1; ; tries++) {
+      final found = await getJson(
+        Uri.https('u.y.qq.com', '/cgi-bin/musicu.fcg'),
+        headers: headers,
+        body: ask,
+      );
+      req = found is Map ? found['req'] : null;
+      final code = req is Map ? req['code'] : null;
+      if (code == 0) break;
+      if (code == 2001 && tries < _searchTries) {
+        await Future<void>.delayed(retryPause);
+        continue;
+      }
+      throw LyricsSourceException('QQ code $code');
+    }
+    final data = req is Map ? req['data'] : null;
+    final body = data is Map ? data['body'] : null;
+    final list = body is Map ? body['item_song'] : null;
     return [
       for (final item in list is List ? list : const [])
-        if (item is Map && item['songmid'] != null)
+        if (item is Map && item['mid'] != null)
           SourceRow(
             song,
-            '${item['songmid']}',
+            '${item['mid']}',
             [
               for (final singer in item['singer'] as List? ?? const [])
                 if (singer is Map) '${singer['name'] ?? ''}',
             ].join(' '),
-            '${item['songname'] ?? ''}',
+            // The title keeps tags such as "(Live)"; the name drops them.
+            '${item['title'] ?? item['name'] ?? ''}',
             (item['interval'] as num?)?.toInt(),
           ),
     ];
@@ -426,16 +466,26 @@ GetJson httpGetJson() {
     ..connectionTimeout = const Duration(seconds: 10)
     ..idleTimeout = const Duration(seconds: 1)
     ..userAgent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)';
-  Future<Object?> once(Uri url, Map<String, String> headers) async {
-    final request = await http.getUrl(url);
+  Future<Object?> once(
+    Uri url,
+    Map<String, String> headers,
+    Object? body,
+  ) async {
+    final request = body == null
+        ? await http.getUrl(url)
+        : await http.postUrl(url);
     headers.forEach(request.headers.set);
+    if (body != null) {
+      request.headers.contentType = ContentType.json;
+      request.write(jsonEncode(body));
+    }
     final HttpClientResponse response;
     try {
       response = await request.close().timeout(const Duration(seconds: 15));
     } on IOException {
       throw const _NoAnswer();
     }
-    final body = await response
+    final text = await response
         .transform(const Utf8Decoder(allowMalformed: true))
         .join()
         .timeout(const Duration(seconds: 15));
@@ -446,15 +496,15 @@ GetJson httpGetJson() {
     if (response.statusCode != 200) {
       throw LyricsSourceException('status ${response.statusCode}');
     }
-    return jsonDecode(body);
+    return jsonDecode(text);
   }
 
-  return (url, {headers = const {}}) async {
+  return (url, {headers = const {}, body}) async {
     try {
       try {
-        return await once(url, headers);
+        return await once(url, headers, body);
       } on _NoAnswer {
-        return await once(url, headers);
+        return await once(url, headers, body);
       }
     } on _NoAnswer {
       throw const LyricsSourceException('connection closed');
