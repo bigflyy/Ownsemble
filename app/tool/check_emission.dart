@@ -3,13 +3,22 @@
 // Python research's int8 run on the same audio.
 //
 //   dart run tool/check_emission.dart DATA_DIR MODEL.onnx ONNXRUNTIME.dll
-//       [--only 0,11] [--threads 4]
+//       [--only 0,11] [--threads 4] [--mpv libmpv-2.dll] [--dump DIR]
+//       [--with SUBDIR] [--out LINES.jsonl] [--ffmpeg-mp3]
 //
 // For every DATA_DIR/vocals/<index>.flac with a cached Python output in
 // DATA_DIR/emission-vocals-onnx/<index>.npy, the audio is decoded with
-// ffmpeg (this PC's, a tool-only shortcut; the app decodes otherwise), run
-// through the model here, and compared: frame counts, the largest
-// difference in log probability, and the line starts both give. It loads a
+// ffmpeg (this PC's, a tool-only shortcut), run through the model here, and
+// compared: frame counts, the largest difference in log probability, and
+// the line starts both give. With --mpv the app's whole path is checked
+// instead: DATA_DIR/audio/<index>.mp3 decoded by libmpv
+// (lib/lyrics/audio_decode.dart), against the research's baseline, the
+// fp32 PyTorch output on the same MP3 (DATA_DIR/emission/<index>.npy).
+// --with keeps the songs that have DATA_DIR/SUBDIR/<index>-transcript.json
+// (a recogniser's heard words); --out writes every line's start, sure
+// value and final start from both, for line_confidence.py's truth.
+// --ffmpeg-mp3 is the --mpv check with ffmpeg decoding the MP3 instead, to
+// tell the decoder's part from the int8 model's. It loads a
 // 355 MB model on 4 threads: run it through agg-queue. Prints numbers only.
 // ignore_for_file: avoid_print
 import 'dart:convert';
@@ -17,6 +26,7 @@ import 'dart:io';
 import 'dart:math' as math;
 import 'dart:typed_data';
 
+import 'package:ownsemble/lyrics/audio_decode.dart';
 import 'package:ownsemble/lyrics/emission_model.dart';
 import 'package:ownsemble/lyrics/line_fit.dart';
 import 'package:ownsemble/lyrics/onnx_runtime.dart';
@@ -33,7 +43,7 @@ Float32List decode(String path) {
   return Float32List.sublistView(bytes);
 }
 
-void main(List<String> args) {
+Future<void> main(List<String> args) async {
   final data = args[0];
   String? valueOf(String name) {
     final index = args.indexOf(name);
@@ -46,6 +56,13 @@ void main(List<String> args) {
       .map(int.parse)
       .toSet();
   final threads = int.parse(valueOf('--threads') ?? '4');
+  final mpv = valueOf('--mpv');
+  final ffmpegMp3 = args.contains('--ffmpeg-mp3');
+  final onMp3 = mpv != null || ffmpegMp3;
+  final cachedDir = onMp3 ? 'emission' : 'emission-vocals-onnx';
+  final withDir = valueOf('--with');
+  final outPath = valueOf('--out');
+  final rows = outPath == null ? null : File(outPath).openWrite();
   final ort = OnnxRuntime.load(args[2]);
   final clock = Stopwatch()..start();
   final session = ort.open(args[1], threads: threads);
@@ -56,18 +73,31 @@ void main(List<String> args) {
   print('memory after open: $rss MB');
 
   final cached =
-      Directory('$data/emission-vocals-onnx')
+      Directory('$data/$cachedDir')
           .listSync()
           .whereType<File>()
           .map((f) => int.parse(f.uri.pathSegments.last.split('.').first))
           .where((i) => only.isEmpty || only.contains(i))
+          .where(
+            (i) =>
+                withDir == null ||
+                File('$data/$withDir/$i-transcript.json').existsSync(),
+          )
           .toList()
         ..sort();
   var peak = 0;
   for (final index in cached) {
-    final flac = '$data/vocals/$index.flac';
-    if (!File(flac).existsSync()) continue;
-    final samples = decode(flac);
+    final audio = onMp3 ? '$data/audio/$index.mp3' : '$data/vocals/$index.flac';
+    if (!File(audio).existsSync()) continue;
+    clock.reset();
+    final samples = mpv == null
+        ? decode(audio)
+        : decodeForModel(
+            mpv,
+            File(audio).absolute.path,
+            Directory.systemTemp.path,
+          );
+    final decodeMs = clock.elapsedMilliseconds;
     final seconds = samples.length / modelSampleRate;
     clock.reset();
     final mine = modelEmission(session, samples);
@@ -83,7 +113,7 @@ void main(List<String> args) {
         ),
       );
     }
-    final theirs = readNpy(File('$data/emission-vocals-onnx/$index.npy'));
+    final theirs = readNpy(File('$data/$cachedDir/$index.npy'));
     var maxDiff = 0.0;
     // Differences in probability (0..1), where the alignment feels them;
     // log differences on letters that are next to impossible do not count.
@@ -103,7 +133,9 @@ void main(List<String> args) {
     ) as Map<String, dynamic>;
     var lines = 0;
     var moved = 0;
-    for (final lyric in (song['sources'] as Map<String, dynamic>).values) {
+    var movedFar = 0;
+    for (final source in (song['sources'] as Map<String, dynamic>).entries) {
+      final lyric = source.value;
       final sung = sungLines([
         for (final l in lyric as List)
           (
@@ -115,9 +147,25 @@ void main(List<String> args) {
       if (sung.length < 3) continue;
       final a = fitLines(mine, sung, seconds / mine.frames);
       final b = fitLines(theirs, sung, seconds / theirs.frames);
+      final aFinal = fittedStarts(a);
+      final bFinal = fittedStarts(b);
       for (var k = 0; k < a.length && k < b.length; k++) {
+        rows?.writeln(
+          jsonEncode({
+            'index': index,
+            'source': source.key,
+            'line': a[k].index,
+            'app_start': a[k].start,
+            'app_sure': a[k].sure,
+            'app_final': aFinal[k],
+            'research_start': b[k].start,
+            'research_sure': b[k].sure,
+            'research_final': bFinal[k],
+          }),
+        );
         lines++;
         if ((a[k].start - b[k].start).abs() > 0.05) moved++;
+        if ((a[k].start - b[k].start).abs() > 1) movedFar++;
       }
     }
     print(
@@ -125,11 +173,12 @@ void main(List<String> args) {
       '${theirs.frames}, max log-prob difference '
       '${maxDiff.toStringAsFixed(4)} (probability '
       '${maxProb.toStringAsFixed(4)}), line starts differing > 50 ms: '
-      '$moved of $lines; $runMs ms '
+      '$moved of $lines (over 1 s: $movedFar); $runMs ms '
       '(${(runMs / 1000 / seconds).toStringAsFixed(3)} s per audio second), '
-      'memory $rssNow MB',
+      'decoded in $decodeMs ms, memory $rssNow MB',
     );
   }
   session.close();
+  await rows?.close();
   print('peak memory $peak MB');
 }

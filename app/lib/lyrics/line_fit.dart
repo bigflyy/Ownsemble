@@ -85,12 +85,16 @@ String _stripApostrophes(String word) {
 
 /// A timed lyric line as the fit reads it.
 class SungLine {
-  const SungLine(this.start, this.end, this.text);
+  const SungLine(this.start, this.end, this.text, {this.lineIndex = -1});
 
   /// Seconds.
   final double start;
   final double end;
   final String text;
+
+  /// The line's place in the list [sungLines] read it from (-1 when made
+  /// by hand).
+  final int lineIndex;
 }
 
 /// The lines that have words and a start, as the research read them: a
@@ -100,19 +104,23 @@ List<SungLine> sungLines(
   List<({int? startMs, int? endMs, String text})> lines,
 ) {
   final timed = [
-    for (final line in lines)
-      if (line.startMs != null) line,
+    for (var i = 0; i < lines.length; i++)
+      if (lines[i].startMs != null) (index: i, line: lines[i]),
   ];
   final result = <SungLine>[];
   for (var i = 0; i < timed.length; i++) {
-    final start = timed[i].startMs! / 1000;
+    final start = timed[i].line.startMs! / 1000;
     final following = i + 1 < timed.length
-        ? timed[i + 1].startMs! / 1000
+        ? timed[i + 1].line.startMs! / 1000
         : start + 8;
-    var end = timed[i].endMs != null ? timed[i].endMs! / 1000 : following;
+    var end = timed[i].line.endMs != null
+        ? timed[i].line.endMs! / 1000
+        : following;
     end = [end, following, start + 8].reduce(math.min);
-    if (timed[i].text.trim().isNotEmpty && end > start) {
-      result.add(SungLine(start, end, timed[i].text));
+    if (timed[i].line.text.trim().isNotEmpty && end > start) {
+      result.add(
+        SungLine(start, end, timed[i].line.text, lineIndex: timed[i].index),
+      );
     }
   }
   return result;

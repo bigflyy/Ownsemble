@@ -102,6 +102,7 @@ void main() {
       (startMs: null, endMs: null, text: 'untimed'),
     ]);
     expect([for (final l in lines) l.text], ['one', 'two', 'three']);
+    expect([for (final l in lines) l.lineIndex], [0, 2, 3]);
     expect(lines[0].end, 3);
     expect(lines[1].end, 13);
     expect(lines[2].end, 31);
