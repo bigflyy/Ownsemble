@@ -17,6 +17,11 @@
 /// best answer by the user's "timed first" (2026-11-22): VK timed, outside
 /// timed, VK plain, outside plain. Every source's answer is stored, so the
 /// pick is made again from the stored rows, also offline.
+///
+/// The chooser (E2, user pick 2026-11-22 "List like Versions"): every
+/// source's answer for the song is listed ([choices]), the sources not asked
+/// yet are asked ([askAll]), and the user's choice ([use]) is kept per upload
+/// and shown instead of the automatic pick until [useAutomatic].
 library;
 
 import 'dart:async';
@@ -92,6 +97,61 @@ LyricsRoute? Function(Track track) lyricsRouteBySource(
   );
 };
 
+/// How one source stands for the song in the chooser.
+enum LyricsChoiceStatus {
+  /// Never asked for this song.
+  notAsked,
+
+  /// Being asked now (with nothing stored yet).
+  asking,
+
+  /// Its lyrics are stored.
+  found,
+
+  /// It said it has none.
+  none,
+
+  /// Asking it failed and nothing is stored.
+  failed,
+}
+
+/// One source's lyrics for the song shown, as the chooser lists them.
+class LyricsChoice {
+  const LyricsChoice({
+    required this.source,
+    required this.status,
+    this.lyrics,
+    this.artist,
+    this.title,
+    this.seconds,
+    this.lengthDiff,
+    this.exact = false,
+    this.asking = false,
+  });
+
+  /// 'vk', 'lrclib', 'netease' or 'qq'.
+  final String source;
+  final LyricsChoiceStatus status;
+  final Lyrics? lyrics;
+
+  /// The names and length of the source's song the lyrics belong to (VK:
+  /// the song's own).
+  final String? artist;
+  final String? title;
+  final int? seconds;
+
+  /// Seconds between that length and the played song's; null when unknown.
+  final int? lengthDiff;
+
+  /// Whether the names agree exactly (not only after transliteration).
+  final bool exact;
+
+  /// Whether the source is being asked again while its lyrics show.
+  final bool asking;
+
+  String get label => lyricsSourceLabel(source);
+}
+
 /// An ask dropped before it started: its song is no longer shown.
 class _Dropped implements Exception {
   const _Dropped();
@@ -103,6 +163,8 @@ class LyricsController extends ChangeNotifier {
     required this.save,
     required this.routeOf,
     this.sources = const [],
+    this.loadPick,
+    this.savePick,
     int Function()? now,
     this.log,
   }) : _now = now ?? (() => DateTime.now().millisecondsSinceEpoch);
@@ -127,6 +189,21 @@ class LyricsController extends ChangeNotifier {
   /// The outside sources in the order they are asked (outsideLyricsSources):
   /// the first alone after VK, the others together after it.
   final List<OutsideLyricsSource> sources;
+
+  /// The source the user chose for an upload (LibraryStore.lyricsPickOf).
+  final String? Function(String ref)? loadPick;
+
+  /// Keeps the user's choice, null for automatic (LibraryStore
+  /// .saveLyricsPick). Without it choices last for this run only.
+  final void Function(String ref, String? source)? savePick;
+
+  /// Choices made in this run when no [savePick] keeps them.
+  final _picks = <String, String?>{};
+
+  /// Sources being asked by [askAll], and those whose ask failed, as
+  /// "upload key|source".
+  final _choiceAsking = <String>{};
+  final _choiceFailed = <String>{};
 
   /// One line to perf.log: times and outcomes only, never words or keys.
   final void Function(String line)? log;
@@ -188,6 +265,11 @@ class LyricsController extends ChangeNotifier {
       return;
     }
     _shownKey = route.key;
+    final picked = _pickedLyrics(route.key);
+    if (picked != null) {
+      _set(LyricsShown(picked));
+      return;
+    }
     final stored = _storedPick(route.key);
     final best = stored.best;
     if (!stored.mustAsk) {
@@ -246,7 +328,9 @@ class LyricsController extends ChangeNotifier {
         // A better answer while the walk goes on shows at once (VK's words
         // first, then LRCLIB's timed lines).
         onBetter: (lyrics) {
-          if (asking == _asking && _shownKey == route.key) {
+          if (asking == _asking &&
+              _shownKey == route.key &&
+              _pickedLyrics(route.key) == null) {
             _set(LyricsShown(lyrics, refreshing: true));
           }
         },
@@ -257,7 +341,8 @@ class LyricsController extends ChangeNotifier {
         '${clock.elapsedMilliseconds} ms',
       );
       if (asking != _asking) return;
-      _set(lyrics == null ? const LyricsMissing() : LyricsShown(lyrics));
+      final shown = _pickedLyrics(route.key) ?? lyrics;
+      _set(shown == null ? const LyricsMissing() : LyricsShown(shown));
     } on _Dropped {
       return;
     } on Object catch (error) {
@@ -434,21 +519,254 @@ class LyricsController extends ChangeNotifier {
   }
 
   /// Asks an outside source and keeps its answer.
+  ///
+  /// With [keepFound] (the chooser asking again) a "none" does not erase
+  /// lyrics stored before: they stay, only their time moves, as VK's.
   Future<(Lyrics?, String?)> _askOutside(
     String source,
     String key,
-    SongNames names,
-  ) async {
+    SongNames names, {
+    bool keepFound = false,
+  }) async {
     final found = await sources
         .firstWhere((outside) => outside.id == source)
         .find(names);
     if (found == null) {
+      final kept = keepFound ? load(source, key) : null;
+      final keptLyrics = kept?.lyrics;
+      if (keptLyrics != null) {
+        save(source, key, keptLyrics, meta: kept!.meta);
+        return (keptLyrics, kept.meta);
+      }
       save(source, key, null);
       return (null, null);
     }
     final meta = found.metaToJson();
     save(source, key, found.lyrics, meta: meta);
     return (found.lyrics, meta);
+  }
+
+  /// Every source in the order they are asked: VK, then the outside ones.
+  List<String> get _allSources => [
+    'vk',
+    for (final source in sources) source.id,
+  ];
+
+  /// The source the user chose for [key], or null (automatic).
+  String? _pickOf(String key) =>
+      savePick == null ? _picks[key] : loadPick?.call(key);
+
+  /// The lyrics the user chose for [key], when that source still has them
+  /// stored; null means the automatic pick shows.
+  Lyrics? _pickedLyrics(String key) {
+    final source = _pickOf(key);
+    return source == null ? null : load(source, key)?.lyrics;
+  }
+
+  /// The source the user chose for the song shown, while its lyrics are
+  /// stored; null when the automatic pick shows.
+  String? get chosen {
+    final key = _shownKey;
+    if (key == null || _pickedLyrics(key) == null) return null;
+    return _pickOf(key);
+  }
+
+  /// The source the automatic pick takes for the song shown, from what is
+  /// stored; null when none has lyrics.
+  String? get automatic {
+    final key = _shownKey;
+    return key == null ? null : _storedPick(key).best?.source;
+  }
+
+  /// Every source's answer for the song shown, for the chooser: found
+  /// lyrics best first (the automatic pick's order), then the sources
+  /// being asked, without lyrics, failed or not asked, in asking order.
+  List<LyricsChoice> get choices {
+    final key = _shownKey;
+    final track = _track;
+    if (key == null || track == null) return const [];
+    final found = <(int, LyricsChoice)>[];
+    final rest = <LyricsChoice>[];
+    for (final source in _allSources) {
+      final stored = load(source, key);
+      final lyrics = stored?.lyrics;
+      final asking = _choiceAsking.contains('$key|$source');
+      if (lyrics != null) {
+        found.add((
+          _rank(lyrics, stored!.meta),
+          _choiceOf(source, lyrics, stored.meta, track, asking: asking),
+        ));
+        continue;
+      }
+      rest.add(
+        LyricsChoice(
+          source: source,
+          status: asking
+              ? LyricsChoiceStatus.asking
+              : _choiceFailed.contains('$key|$source')
+              ? LyricsChoiceStatus.failed
+              : stored == null
+              ? LyricsChoiceStatus.notAsked
+              : LyricsChoiceStatus.none,
+        ),
+      );
+    }
+    found.sort((a, b) => b.$1.compareTo(a.$1));
+    return [for (final (_, choice) in found) choice, ...rest];
+  }
+
+  LyricsChoice _choiceOf(
+    String source,
+    Lyrics lyrics,
+    String? meta,
+    Track track, {
+    required bool asking,
+  }) {
+    if (source == 'vk') {
+      return LyricsChoice(
+        source: source,
+        status: LyricsChoiceStatus.found,
+        lyrics: lyrics,
+        artist: track.artist,
+        title: track.title,
+        seconds: track.durationSec,
+        lengthDiff: 0,
+        exact: true,
+        asking: asking,
+      );
+    }
+    Map<Object?, Object?> facts = const {};
+    try {
+      final decoded = meta == null ? null : jsonDecode(meta);
+      if (decoded is Map) facts = decoded;
+    } on FormatException {
+      // Unreadable facts: the lyrics are listed without names.
+    }
+    return LyricsChoice(
+      source: source,
+      status: LyricsChoiceStatus.found,
+      lyrics: lyrics,
+      artist: facts['artist'] as String?,
+      title: facts['title'] as String?,
+      seconds: (facts['seconds'] as num?)?.toInt(),
+      lengthDiff: (facts['diff'] as num?)?.toInt(),
+      exact: facts['exact'] == true,
+      asking: asking,
+    );
+  }
+
+  /// Asks every source not stored yet or due again for the song shown (all
+  /// of them with [again]: the chooser's refresh), each answer shown as it
+  /// comes. Asks wait in the line with the automatic picks. A "none" never
+  /// erases lyrics found before.
+  Future<void> askAll({bool again = false}) async {
+    final track = _track;
+    final route = track == null ? null : routeOf(track);
+    if (track == null || route == null) return;
+    final key = route.key;
+    final wanted = [
+      for (final source in _allSources)
+        if (!_choiceAsking.contains('$key|$source') &&
+            (again || _storedOf(source, key).ask))
+          source,
+    ];
+    if (wanted.isEmpty) return;
+    for (final source in wanted) {
+      _choiceAsking.add('$key|$source');
+      _choiceFailed.remove('$key|$source');
+    }
+    notifyListeners();
+    final names = SongNames(
+      artist: track.artist,
+      title: track.title,
+      album: track.album,
+      seconds: track.durationSec,
+    );
+    Future<void> askOne(String source) async {
+      final clock = Stopwatch()..start();
+      try {
+        final (lyrics, _) = source == 'vk'
+            ? await _askVk(route)
+            : await _askOutside(source, key, names, keepFound: true);
+        log?.call(
+          'lyrics choose $source ${lyrics == null ? 'none' : _kind(lyrics)} '
+          '${clock.elapsedMilliseconds} ms',
+        );
+      } on Object catch (error) {
+        log?.call(
+          'lyrics choose $source failed ${error.runtimeType} '
+          '${clock.elapsedMilliseconds} ms',
+        );
+        _choiceFailed.add('$key|$source');
+      } finally {
+        _choiceAsking.remove('$key|$source');
+        if (_shownKey == key) notifyListeners();
+      }
+    }
+
+    final run = _line.then(
+      (_) => Future.wait([for (final source in wanted) askOne(source)]),
+    );
+    _line = run.then<void>((_) {}, onError: (Object _) {});
+    await run;
+    // What shows may change: a source asked for the first time can beat the
+    // automatic pick. A pick still running for the song sets it itself.
+    if (_shownKey != key || _asks.containsKey(key)) return;
+    final current = _state;
+    final shown =
+        _pickedLyrics(key) ??
+        _storedPick(key).best ??
+        (current is LyricsShown ? current.lyrics : null);
+    if (shown != null) {
+      _set(LyricsShown(shown));
+    } else if (current is! LyricsFailed) {
+      _set(const LyricsMissing());
+    }
+  }
+
+  /// Shows [source]'s stored lyrics for the song shown and keeps that
+  /// choice for its upload.
+  void use(String source) {
+    final key = _shownKey;
+    if (key == null) return;
+    final lyrics = load(source, key)?.lyrics;
+    if (lyrics == null) return;
+    _keepPick(key, source);
+    log?.call('lyrics use $source');
+    _asking++;
+    _set(LyricsShown(lyrics));
+  }
+
+  /// Forgets the user's choice for the song shown: the automatic pick shows
+  /// again (asked when stored rows are missing or old).
+  void useAutomatic() {
+    final key = _shownKey;
+    final track = _track;
+    if (key == null || track == null) return;
+    _keepPick(key, null);
+    log?.call('lyrics use automatic');
+    _asking++;
+    final stored = _storedPick(key);
+    final best = stored.best;
+    final route = routeOf(track);
+    if (!stored.mustAsk || route == null) {
+      _set(best == null ? const LyricsMissing() : LyricsShown(best));
+      return;
+    }
+    _set(
+      best == null
+          ? const LyricsLoading()
+          : LyricsShown(best, refreshing: true),
+    );
+    unawaited(_ask(route, track));
+  }
+
+  void _keepPick(String key, String? source) {
+    if (savePick == null) {
+      _picks[key] = source;
+    } else {
+      savePick!(key, source);
+    }
   }
 
   /// How good an answer is to show: VK timed, outside timed, VK plain,

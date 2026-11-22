@@ -629,6 +629,30 @@ void main() {
     expect(migrated.lyricsOf('lrclib', '1_1')!.meta, '{"id":"5"}');
   });
 
+  test('version 18 gains kept lyrics picks; lyrics rows stay', () {
+    final store = LibraryStore.open(dbPath);
+    const lyrics = Lyrics(source: 'lrclib', lines: [LyricLine('Строка')]);
+    store.saveLyrics('lrclib', '1_1', lyrics, meta: '{"id":"5"}', atMs: 7);
+    store.close();
+    final db = sqlite3.open(dbPath);
+    db
+      ..execute('DROP TABLE lyrics_picks')
+      ..execute('PRAGMA user_version = 18')
+      ..close();
+
+    final migrated = LibraryStore.open(dbPath);
+    addTearDown(migrated.close);
+    expect(versionOf(dbPath), librarySchemaVersion);
+    expect(migrated.lyricsOf('lrclib', '1_1')!.lyrics, lyrics);
+    expect(migrated.lyricsPickOf('1_1'), isNull);
+    migrated.saveLyricsPick('1_1', 'netease');
+    expect(migrated.lyricsPickOf('1_1'), 'netease');
+    migrated.saveLyricsPick('1_1', 'qq');
+    expect(migrated.lyricsPickOf('1_1'), 'qq');
+    migrated.saveLyricsPick('1_1', null);
+    expect(migrated.lyricsPickOf('1_1'), isNull);
+  });
+
   test('a library from a newer build is refused and left alone', () {
     final db = sqlite3.open(dbPath);
     db.execute('PRAGMA user_version = ${librarySchemaVersion + 1}');

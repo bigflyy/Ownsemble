@@ -404,6 +404,9 @@ Future<void> main(List<String> args) async {
   final lyrics = LyricsController(
     load: store.lyricsOf,
     save: store.saveLyrics,
+    // Plan 10 E2: the lyrics the user chose in the chooser, per upload.
+    loadPick: store.lyricsPickOf,
+    savePick: store.saveLyricsPick,
     // The upload that plays: the account that has the song, or the version
     // chosen for it; logged out, the song's own key (stored lyrics show).
     routeOf: (track) {

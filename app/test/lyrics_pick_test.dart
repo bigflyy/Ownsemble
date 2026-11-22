@@ -81,6 +81,9 @@ class Fixture {
   final qq = FakeSource('qq');
   final shown = <LyricsState>[];
 
+  /// The user's kept choices (LibraryStore.lyricsPickOf).
+  final picks = <String, String>{};
+
   /// VK's answer: Lyrics, null for none, or an error to throw.
   Object? vk;
   bool loggedIn = true;
@@ -109,6 +112,9 @@ class Fixture {
           : null,
     ),
     sources: [lrclib, netease, qq],
+    loadPick: (ref) => picks[ref],
+    savePick: (ref, source) =>
+        source == null ? picks.remove(ref) : picks[ref] = source,
     now: () => nowMs,
   )..addListener(() => shown.add(controller.state));
 
@@ -299,5 +305,155 @@ void main() {
     await pumpEventQueue();
     expect(f.controller.state, isA<LyricsLoading>());
     expect(f.stored['lrclib:1_1']!.lyrics, isNotNull, reason: 'still kept');
+  });
+
+  group('chooser (E2)', () {
+    test(
+      'lists every source: found best first, then none and not asked',
+      () async {
+        final f = Fixture()
+          ..vk = plainOf('vk')
+          ..lrclib.answer = timedOf('lrclib');
+        f.controller.show(song());
+        await pumpEventQueue();
+        final choices = f.controller.choices;
+        expect(
+          [for (final c in choices) c.source],
+          ['lrclib', 'vk', 'netease', 'qq'],
+        );
+        expect(choices[0].status, LyricsChoiceStatus.found);
+        expect(choices[0].title, 'Город спит');
+        expect(choices[0].lengthDiff, 0);
+        expect(choices[0].exact, isTrue);
+        expect(choices[1].artist, 'Ночные Тени', reason: "VK: the song's own");
+        expect(choices[2].status, LyricsChoiceStatus.notAsked);
+        expect(f.controller.automatic, 'lrclib');
+        expect(f.controller.chosen, isNull);
+      },
+    );
+
+    test('askAll asks only the sources not asked yet, each shown', () async {
+      final f = Fixture()
+        ..vk = plainOf('vk')
+        ..lrclib.answer = timedOf('lrclib')
+        ..netease.answer = timedOf('netease')
+        ..qq.hold = Completer<void>();
+      f.controller.show(song());
+      await pumpEventQueue();
+      final asking = f.controller.askAll();
+      await pumpEventQueue();
+      expect(f.lrclib.asked, hasLength(1), reason: 'stored: not asked again');
+      expect(f.vkAsked, hasLength(1));
+      final mid = {for (final c in f.controller.choices) c.source: c};
+      expect(mid['netease']!.status, LyricsChoiceStatus.found);
+      expect(mid['qq']!.status, LyricsChoiceStatus.asking);
+      f.qq.hold!.complete();
+      await asking;
+      final after = {for (final c in f.controller.choices) c.source: c};
+      expect(after['qq']!.status, LyricsChoiceStatus.none);
+      expect(f.lyrics!.source, 'lrclib', reason: 'the automatic pick stays');
+    });
+
+    test(
+      'askAll again keeps found lyrics when a source now says none',
+      () async {
+        final f = Fixture()..lrclib.answer = timedOf('lrclib');
+        f.controller.show(song());
+        await pumpEventQueue();
+        f.lrclib.answer = null;
+        await f.controller.askAll(again: true);
+        expect(f.lrclib.asked, hasLength(2));
+        expect(f.stored['lrclib:1_1']!.lyrics, isNotNull);
+        expect(f.lyrics!.source, 'lrclib');
+      },
+    );
+
+    test(
+      'a failed source is listed as failed, the others still found',
+      () async {
+        final f = Fixture()
+          ..lrclib.answer = plainOf('lrclib')
+          ..netease.answer = const LyricsSourceException('down');
+        f.controller.show(song());
+        await pumpEventQueue();
+        await f.controller.askAll();
+        final byId = {for (final c in f.controller.choices) c.source: c};
+        expect(byId['netease']!.status, LyricsChoiceStatus.failed);
+        expect(byId['lrclib']!.status, LyricsChoiceStatus.found);
+        f.netease.answer = timedOf('netease');
+        await f.controller.askAll();
+        expect(f.netease.asked, hasLength(3), reason: 'failures asked again');
+        expect(f.lyrics!.source, 'netease', reason: 'timed beats plain');
+      },
+    );
+
+    test(
+      'use keeps the choice, also for a new controller and offline',
+      () async {
+        final f = Fixture()
+          ..vk = timedOf('vk')
+          ..lrclib.answer = timedOf('lrclib');
+        f.controller.show(song());
+        await pumpEventQueue();
+        await f.controller.askAll();
+        expect(f.lyrics!.source, 'vk');
+        f.controller.use('lrclib');
+        expect(f.lyrics!.source, 'lrclib');
+        expect(f.controller.chosen, 'lrclib');
+        expect(f.controller.automatic, 'vk');
+        expect(f.picks, {'1_1': 'lrclib'});
+
+        final again = Fixture()
+          ..stored.addAll(f.stored)
+          ..picks.addAll(f.picks)
+          ..loggedIn = false;
+        again.nowMs = f.nowMs + 60 * day;
+        again.controller.show(song());
+        await pumpEventQueue();
+        expect(again.lyrics!.source, 'lrclib');
+        expect(again.vkAsked, isEmpty, reason: 'a choice asks nothing more');
+      },
+    );
+
+    test(
+      'useAutomatic forgets the choice and shows the automatic pick',
+      () async {
+        final f = Fixture()
+          ..vk = plainOf('vk')
+          ..lrclib.answer = timedOf('lrclib');
+        f.controller.show(song());
+        await pumpEventQueue();
+        f.controller.use('vk');
+        expect(f.lyrics!.source, 'vk');
+        f.controller.useAutomatic();
+        await pumpEventQueue();
+        expect(f.lyrics!.source, 'lrclib');
+        expect(f.picks, isEmpty);
+        expect(f.controller.chosen, isNull);
+      },
+    );
+
+    test('a choice whose lyrics are not stored is ignored', () async {
+      final f = Fixture()..lrclib.answer = timedOf('lrclib');
+      f.picks['1_1'] = 'qq';
+      f.controller.show(song());
+      await pumpEventQueue();
+      expect(f.lyrics!.source, 'lrclib');
+      expect(f.controller.chosen, isNull);
+    });
+
+    test('a choice made while the walk runs is not replaced by it', () async {
+      final f = Fixture()
+        ..vk = plainOf('vk')
+        ..lrclib.answer = timedOf('lrclib')
+        ..lrclib.hold = Completer<void>();
+      f.controller.show(song());
+      await pumpEventQueue();
+      expect(f.lyrics!.source, 'vk');
+      f.controller.use('vk');
+      f.lrclib.hold!.complete();
+      await pumpEventQueue();
+      expect(f.lyrics!.source, 'vk');
+    });
   });
 }

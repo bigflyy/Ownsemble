@@ -937,6 +937,31 @@ class LibraryStore implements PlayLog, PlayStatsSource {
     );
   }
 
+  /// The source whose lyrics the user chose for the song [ref] (plan 10,
+  /// E2), or null for the automatic pick.
+  String? lyricsPickOf(String ref) =>
+      _db.select('SELECT source FROM lyrics_picks WHERE ref = ?', [
+            ref,
+          ]).firstOrNull?['source']
+          as String?;
+
+  /// Keeps [source] as the lyrics to show for the song [ref]; null goes
+  /// back to the automatic pick.
+  void saveLyricsPick(String ref, String? source) {
+    if (source == null) {
+      _db.execute('DELETE FROM lyrics_picks WHERE ref = ?', [ref]);
+      return;
+    }
+    _db.execute(
+      '''
+      INSERT INTO lyrics_picks (ref, source, picked_at_ms) VALUES (?, ?, ?)
+      ON CONFLICT (ref) DO UPDATE SET
+        source = excluded.source, picked_at_ms = excluded.picked_at_ms
+    ''',
+      [ref, source, _now()],
+    );
+  }
+
   /// The VK album key of each listed song that has one, by the listed row's
   /// id: the row [vkAlbumOf] opens the album through (the song's own row
   /// first, then a copy not gone, then the oldest).

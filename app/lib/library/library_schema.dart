@@ -6,7 +6,7 @@ import 'package:sqlite3/sqlite3.dart';
 /// Schema version this build reads and writes (`PRAGMA user_version`).
 ///
 /// 0 is the speed-gate build's single `tracks` table (or an empty file).
-const librarySchemaVersion = 18;
+const librarySchemaVersion = 19;
 
 /// How many colors sources can have; the theme has one per slot, from 1.
 const sourceColorCount = 6;
@@ -58,6 +58,7 @@ void migrateLibrary(Database db, {String? dataDir}) {
     if (version < 16) _addFoundVersionArtists(db);
     if (version < 17) _addLyrics(db);
     if (version < 18) _addLyricsMeta(db);
+    if (version < 19) _addLyricsPicks(db);
     db.execute('PRAGMA user_version = $librarySchemaVersion');
     db.execute('COMMIT');
   } catch (_) {
@@ -359,6 +360,19 @@ void _addLyricsMeta(Database db) {
   final columns = db.select('PRAGMA table_info(lyrics)');
   if (columns.any((column) => column['name'] == 'meta')) return;
   db.execute('ALTER TABLE lyrics ADD COLUMN meta TEXT');
+}
+
+/// Version 19 (plan 10, E2): the lyrics the user chose for a song in the
+/// chooser, by the upload's key (`ref`, as in `lyrics`): `source` is the
+/// row of `lyrics` to show instead of the automatic pick.
+void _addLyricsPicks(Database db) {
+  db.execute('''
+    CREATE TABLE IF NOT EXISTS lyrics_picks (
+      ref TEXT PRIMARY KEY,
+      source TEXT NOT NULL,
+      picked_at_ms INTEGER NOT NULL
+    )
+  ''');
 }
 
 void _addLyrics(Database db) {
