@@ -41,7 +41,8 @@ class LyricLine {
 class Lyrics {
   const Lyrics({required this.source, required this.lines});
 
-  /// Where they came from: 'vk' (Stage E adds outside sources).
+  /// Where they came from: 'vk', or an outside source ('lrclib', 'netease',
+  /// 'qq': lib/lyrics/lyrics_sources.dart).
   final String source;
   final List<LyricLine> lines;
 
@@ -118,13 +119,13 @@ Lyrics? lyricsFromVk(Object? reply) {
         );
       }
     }
-    lines = _stableSortByStart(lines);
+    lines = sortLinesByStart(lines);
   } else if (text is List) {
     lines = [for (final line in text) LyricLine(_clean(line))];
   } else if (text is String) {
     lines = [for (final line in text.split('\n')) LyricLine(_clean(line))];
   }
-  lines = _tidyGaps(lines);
+  lines = tidyLyricGaps(lines);
   if (lines.every((line) => line.isGap)) return null;
   return Lyrics(source: 'vk', lines: lines);
 }
@@ -132,7 +133,7 @@ Lyrics? lyricsFromVk(Object? reply) {
 String _clean(Object? text) =>
     text is String ? text.replaceAll('\r', '').trimRight() : '';
 
-List<LyricLine> _stableSortByStart(List<LyricLine> lines) {
+List<LyricLine> sortLinesByStart(List<LyricLine> lines) {
   final indexed = [for (var i = 0; i < lines.length; i++) (i, lines[i])]
     ..sort((a, b) {
       final byStart = a.$2.startMs!.compareTo(b.$2.startMs!);
@@ -144,7 +145,7 @@ List<LyricLine> _stableSortByStart(List<LyricLine> lines) {
 /// Drops gaps at the start and keeps one of each run of gaps. Plain gaps at
 /// the end go too; a timed one there stays: it is the outro, and without it
 /// the last sung line would stay lit through the silence (Codex review).
-List<LyricLine> _tidyGaps(List<LyricLine> lines) {
+List<LyricLine> tidyLyricGaps(List<LyricLine> lines) {
   final tidy = <LyricLine>[];
   for (final line in lines) {
     if (line.isGap && (tidy.isEmpty || tidy.last.isGap)) continue;
