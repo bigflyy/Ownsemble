@@ -15,14 +15,19 @@
 // seeks there; the lit line follows the song and stays in sight; the next
 // song with plain lyrics shows them; a song without lyrics says so; what VK
 // answered is stored; a download keeps a song's lyrics in the library; the
-// mic button closes the place. Prints titles, counts and times only: no
-// lyrics, link, key, token or id.
+// mic button closes the place. The chooser (E2): on the VK-words song it
+// asks the sources not asked yet, VK's words are previewed and used, the
+// choice is stored and read back by a new controller as after a restart,
+// and Back to automatic gives LRCLIB's lines again. Prints titles, counts
+// and times only: no lyrics, link, key, token or id.
 
 import 'dart:io';
 
+import 'package:flutter/gestures.dart' show kSecondaryButton;
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
+import 'package:ownsemble/library/library_store.dart';
 import 'package:ownsemble/library/track.dart';
 import 'package:ownsemble/lyrics/lyrics.dart';
 import 'package:ownsemble/lyrics/lyrics_controller.dart';
@@ -374,6 +379,108 @@ void main() {
       isTrue,
       reason: 'lit $upgradedLit at $upgradedAt ms, expected $upgradedExpected',
     );
+
+    // 4b. The chooser (E2) on the same song: NetEase and QQ, not asked
+    // while LRCLIB had timed lyrics, are asked now; VK's words are
+    // previewed and used; the choice is kept; Back to automatic.
+    clock = Stopwatch()..start();
+    await tester.tap(find.byKey(const ValueKey('lyrics-choose')));
+    await tester.pump();
+    expect(library.view.kind, ViewKind.lyricsChoices);
+    await waitUntil(
+      tester,
+      () =>
+          lyrics.choices.length == 4 &&
+          lyrics.choices.every(
+            (choice) =>
+                choice.status != LyricsChoiceStatus.asking &&
+                choice.status != LyricsChoiceStatus.notAsked,
+          ),
+      timeout: const Duration(seconds: 30),
+      what: 'every source answered in the chooser',
+    );
+    await tester.pump();
+    say(
+      'chooser answered in ${clock.elapsedMilliseconds} ms: '
+      '${[for (final choice in lyrics.choices) '${choice.source} ${choice.status.name}${choice.lyrics == null ? '' : ' ${choice.lyrics!.timed ? 'timed' : 'words'} ${choice.lengthDiff ?? '?'} s off'}'].join(', ')}',
+    );
+    final byId = {for (final choice in lyrics.choices) choice.source: choice};
+    expect(byId['lrclib']!.lyrics?.timed, isTrue);
+    expect(byId['vk']!.lyrics?.timed, isFalse);
+    expect(lyrics.automatic, 'lrclib');
+    expect(
+      find.descendant(
+        of: find.byKey(const ValueKey('lyrics-choice-lrclib')),
+        matching: find.byKey(const ValueKey('lyrics-tag-in use')),
+      ),
+      findsOneWidget,
+    );
+    await tester.tap(find.byKey(const ValueKey('lyrics-choice-vk')));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(find.byKey(const ValueKey('lyrics-plain')), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('lyrics-use')));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(library.view.kind, ViewKind.lyrics);
+    expect(credit(), 'Words only, from VK (your choice)');
+    String? storedPick() {
+      final db = sqlite3.open(
+        p.join(copy.path, 'library.db'),
+        mode: OpenMode.readOnly,
+      );
+      try {
+        return db.select('SELECT source FROM lyrics_picks WHERE ref = ?', [
+              upgradeSong!.sourceKey,
+            ]).firstOrNull?['source']
+            as String?;
+      } finally {
+        db.close();
+      }
+    }
+
+    expect(storedPick(), 'vk');
+    // As after a restart: a new controller over the library file shows the
+    // choice from what is stored, asking nothing.
+    final reopened = LibraryStore.open(p.join(copy.path, 'library.db'));
+    try {
+      final fresh = LyricsController(
+        load: reopened.lyricsOf,
+        save: (source, ref, found, {md5, meta}) =>
+            fail('a kept choice asks nothing'),
+        loadPick: reopened.lyricsPickOf,
+        savePick: reopened.saveLyricsPick,
+        routeOf: (track) =>
+            (key: track.sourceKey!, accessKey: track.accessKey, call: null),
+      );
+      fresh.show(upgradeSong);
+      final kept = fresh.state;
+      expect(kept, isA<LyricsShown>());
+      expect((kept as LyricsShown).lyrics.source, 'vk');
+      fresh.dispose();
+    } finally {
+      reopened.close();
+    }
+    say('chooser: VK words used, stored, read back as after a restart');
+    await tester.tap(find.byKey(const ValueKey('lyrics-choose')));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    await tester.tap(
+      find.byKey(const ValueKey('lyrics-choice-lrclib')),
+      buttons: kSecondaryButton,
+    );
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    await tester.tap(find.byKey(const ValueKey('menu-lyrics-automatic')));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(storedPick(), isNull);
+    await tester.tap(find.byKey(const ValueKey('album-back')));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(library.view.kind, ViewKind.lyrics);
+    expect(credit(), 'From LRCLIB');
+    say('chooser: back to automatic, LRCLIB timed again');
 
     // 5. VK has nothing: LRCLIB's lyrics show.
     await playAndSound(outsideSong!, 'song without VK lyrics');
