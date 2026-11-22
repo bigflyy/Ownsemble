@@ -11,6 +11,7 @@ import 'package:flutter/material.dart';
 import '../library/track.dart';
 import '../lyrics/lyrics.dart';
 import '../lyrics/lyrics_controller.dart';
+import '../lyrics/lyrics_sources.dart' show lyricsSourceLabel;
 import 'theme.dart';
 
 /// Below this width the lines get a smaller size.
@@ -245,11 +246,7 @@ class _LyricsPageState extends State<LyricsPage> {
                   )
                 : const SizedBox.shrink();
           case LyricsMissing():
-            return message(
-              track.source == TrackSource.vk
-                  ? 'VK has no lyrics for this song.'
-                  : 'No lyrics for this song.',
-            );
+            return message('No lyrics found for this song.');
           case LyricsFailed(:final reason):
             return message(
               reason,
@@ -259,10 +256,10 @@ class _LyricsPageState extends State<LyricsPage> {
                 child: const Text('Try again'),
               ),
             );
-          case LyricsShown(:final lyrics):
+          case LyricsShown(:final lyrics, :final refreshing):
             return lyrics.timed
                 ? _timed(lyrics, colors, narrow, side, constraints.maxHeight)
-                : _plain(lyrics, colors, narrow, side);
+                : _plain(lyrics, colors, narrow, side, refreshing: refreshing);
         }
       },
     );
@@ -306,6 +303,14 @@ class _LyricsPageState extends State<LyricsPage> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 8),
+                    child: Text(
+                      'From ${lyricsSourceLabel(lyrics.source)}',
+                      key: const ValueKey('lyrics-credit'),
+                      style: TextStyle(color: colors.dim2, fontSize: 13),
+                    ),
+                  ),
                   for (var i = 0; i < lyrics.lines.length; i++)
                     _TimedLine(
                       key: _lineKeys[i],
@@ -329,7 +334,13 @@ class _LyricsPageState extends State<LyricsPage> {
     );
   }
 
-  Widget _plain(Lyrics lyrics, OwnColors colors, bool narrow, double side) {
+  Widget _plain(
+    Lyrics lyrics,
+    OwnColors colors,
+    bool narrow,
+    double side, {
+    required bool refreshing,
+  }) {
     final size = narrow ? 18.0 : 22.0;
     return SingleChildScrollView(
       key: const ValueKey('lyrics-plain'),
@@ -344,7 +355,12 @@ class _LyricsPageState extends State<LyricsPage> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  'Words only: VK has no times for this song',
+                  refreshing
+                      ? 'Words only, from ${lyricsSourceLabel(lyrics.source)}; '
+                            'looking for timed lyrics...'
+                      : 'Words only, from ${lyricsSourceLabel(lyrics.source)}: '
+                            'no source has times for this song',
+                  key: const ValueKey('lyrics-credit'),
                   style: TextStyle(color: colors.dim2, fontSize: 13),
                 ),
                 const SizedBox(height: 14),

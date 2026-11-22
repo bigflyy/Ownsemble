@@ -13,6 +13,7 @@ import 'library/search_index.dart';
 import 'library/similar_seeds.dart';
 import 'library/track.dart';
 import 'lyrics/lyrics_controller.dart';
+import 'lyrics/lyrics_sources.dart';
 import 'playback/playback_controller.dart';
 import 'platform/end_process.dart';
 import 'playback/player_service.dart';
@@ -417,6 +418,9 @@ Future<void> main(List<String> args) async {
       }
       return lyricsRouteBySource((_) => null)(track);
     },
+    // Plan 10 E1: LRCLIB, then NetEase and QQ Music, when VK has no timed
+    // lyrics.
+    sources: outsideLyricsSources(httpGetJson()),
     log: logPerf,
   );
   playback.onDownloaded = lyrics.keepFor;

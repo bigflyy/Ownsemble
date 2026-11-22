@@ -84,7 +84,7 @@ void main() {
       addTearDown(tester.view.reset);
       final lyrics = LyricsController(
         load: (source, ref) => null,
-        save: (source, ref, lyrics, {md5}) {},
+        save: (source, ref, lyrics, {md5, meta}) {},
         routeOf: lyricsRouteBySource((sourceId) => null),
       );
       // The player's buttons show with a song: one restored from before.
@@ -144,7 +144,7 @@ void main() {
             collections: CollectionsController(store),
             lyrics: LyricsController(
               load: (source, ref) => null,
-              save: (source, ref, lyrics, {md5}) {},
+              save: (source, ref, lyrics, {md5, meta}) {},
               routeOf: lyricsRouteBySource((sourceId) => null),
             ),
           ),
@@ -173,7 +173,7 @@ void main() {
           playback: PlaybackController(player: player),
           lyrics: LyricsController(
             load: (source, ref) => null,
-            save: (source, ref, lyrics, {md5}) {},
+            save: (source, ref, lyrics, {md5, meta}) {},
             routeOf: lyricsRouteBySource((sourceId) => null),
           ),
         ),
@@ -220,7 +220,7 @@ void main() {
             collections: CollectionsController(store),
             lyrics: LyricsController(
               load: (source, ref) => null,
-              save: (source, ref, lyrics, {md5}) {},
+              save: (source, ref, lyrics, {md5, meta}) {},
               routeOf: lyricsRouteBySource((sourceId) => null),
             ),
           ),

@@ -813,7 +813,7 @@ void main() {
               // The mic button shows in every bar, as in the app.
               lyrics: LyricsController(
                 load: (source, ref) => null,
-                save: (source, ref, lyrics, {md5}) {},
+                save: (source, ref, lyrics, {md5, meta}) {},
                 routeOf: lyricsRouteBySource((sourceId) => null),
               ),
             ),

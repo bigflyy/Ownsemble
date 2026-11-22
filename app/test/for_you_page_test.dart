@@ -244,7 +244,7 @@ void main() {
       dock: PlayerDock.bottom,
       lyrics: LyricsController(
         load: (source, ref) => null,
-        save: (source, ref, lyrics, {md5}) {},
+        save: (source, ref, lyrics, {md5, meta}) {},
         routeOf: lyricsRouteBySource((sourceId) => null),
       ),
     );
@@ -311,7 +311,7 @@ void main() {
       '(B26)', (tester) async {
     LyricsController lyricsController() => LyricsController(
       load: (source, ref) => null,
-      save: (source, ref, lyrics, {md5}) {},
+      save: (source, ref, lyrics, {md5, meta}) {},
       routeOf: lyricsRouteBySource((sourceId) => null),
     );
     final own = store.loadAll().firstWhere((t) => t.sourceKey == '42_1');

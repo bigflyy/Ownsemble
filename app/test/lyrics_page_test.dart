@@ -73,8 +73,12 @@ class Fixture {
 
   late final controller = LyricsController(
     load: (source, ref) => stored['$source:$ref'],
-    save: (source, ref, lyrics, {md5}) =>
-        stored['$source:$ref'] = (lyrics: lyrics, md5: md5, fetchedAtMs: nowMs),
+    save: (source, ref, lyrics, {md5, meta}) => stored['$source:$ref'] = (
+      lyrics: lyrics,
+      md5: md5,
+      fetchedAtMs: nowMs,
+      meta: meta,
+    ),
     routeOf: lyricsRouteBySource(
       (sourceId) => (method, params) async {
         final key = params['audio_id']!;
@@ -122,6 +126,7 @@ void main() {
         lyrics: null,
         md5: null,
         fetchedAtMs: f.nowMs - day,
+        meta: null,
       );
       f.controller.show(song(1));
       expect(f.controller.state, isA<LyricsMissing>());
@@ -131,6 +136,7 @@ void main() {
         lyrics: null,
         md5: null,
         fetchedAtMs: f.nowMs - 8 * day,
+        meta: null,
       );
       f.answer = (_) => plain;
       f.controller.show(song(2, key: '2_2'));
@@ -144,6 +150,7 @@ void main() {
         lyrics: plain,
         md5: 'm',
         fetchedAtMs: f.nowMs - 31 * day,
+        meta: null,
       );
       f.controller.show(song(1));
       final shown = f.controller.state as LyricsShown;
@@ -220,6 +227,7 @@ void main() {
         lyrics: plain,
         md5: 'm',
         fetchedAtMs: f.nowMs - 31 * day,
+        meta: null,
       );
       f.controller.show(song(1));
       await pumpEventQueue();
@@ -234,6 +242,7 @@ void main() {
         lyrics: null,
         md5: null,
         fetchedAtMs: f.nowMs - 8 * day,
+        meta: null,
       );
       await f.controller.keepFor(song(1));
       expect(f.stored['vk:1_1']!.lyrics, timed);
@@ -256,7 +265,7 @@ void main() {
       final asked = <String>[];
       final controller = LyricsController(
         load: (source, ref) => null,
-        save: (source, ref, lyrics, {md5}) {},
+        save: (source, ref, lyrics, {md5, meta}) {},
         // A chosen version: another upload, through the playing account.
         routeOf: (track) => (
           key: '9_9',
@@ -410,6 +419,22 @@ void main() {
       expect(colorOf(tester, 'Third line'), OwnColors.dark.text);
     });
 
+    testWidgets('each kind names its source', (tester) async {
+      f.answer = (key) => key == '1_1' ? timed : plain;
+      await open(tester);
+      expect(
+        tester.widget<Text>(find.byKey(const ValueKey('lyrics-credit'))).data,
+        'From VK',
+      );
+      playing = song(2, key: '2_2');
+      songs.add(playing);
+      await settle(tester);
+      expect(
+        tester.widget<Text>(find.byKey(const ValueKey('lyrics-credit'))).data,
+        'Words only, from VK: no source has times for this song',
+      );
+    });
+
     testWidgets('the next song brings its own lyrics', (tester) async {
       f.answer = (key) => key == '1_1' ? timed : plain;
       await open(tester);
@@ -424,7 +449,7 @@ void main() {
 
     testWidgets('no lyrics, and a failure with Try again', (tester) async {
       await open(tester);
-      expect(find.text('VK has no lyrics for this song.'), findsOneWidget);
+      expect(find.text('No lyrics found for this song.'), findsOneWidget);
 
       f.answer = (_) => VkException('error 9', code: 9);
       playing = song(2, key: '2_2');
