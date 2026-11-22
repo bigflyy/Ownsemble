@@ -2412,8 +2412,9 @@ class _LibraryScreenState extends State<LibraryScreen> {
 
   /// The bottom bar's More menu when its song buttons do not fit (B25):
   /// the thumb-down of a song VK recommended, the + of a found song, then
-  /// with [lyrics] the mic (a narrow bar has no right-hand group). Null for
-  /// a song with neither, whose title has room.
+  /// with [lyrics] the mic (a narrow bar has no right-hand group; it adds
+  /// Up next itself, B26). Without [lyrics], null for a song with neither
+  /// button, whose title has room.
   List<BarMenuItem>? _playerMore(Track track, {required bool lyrics}) {
     final recommended = _outside?.isRecommended(track.id) ?? false;
     final catalog = widget.catalog;
@@ -2421,7 +2422,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
       recFoundSong(_outside, catalog, track);
     }
     final found = catalog?.foundById(track.id);
-    if (!recommended && found == null) return null;
+    if (!recommended && found == null && !lyrics) return null;
     final lyricsOpen = library.view.kind == ViewKind.lyrics;
     return [
       if (recommended)

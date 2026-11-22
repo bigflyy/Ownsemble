@@ -309,13 +309,16 @@ class DockBar extends StatelessWidget {
   /// The song's buttons as menu entries (thumb-down, +, and with [lyrics]
   /// the mic), for a song part too short to show them beside the title
   /// (B25: the smallest window left a VK Mix song's title 16 px, a 760 px
-  /// one a letter); null when the song has no buttons beside the heart, so
-  /// nothing needs to give way.
+  /// one a letter); without [lyrics] null or empty when the song has no
+  /// buttons beside the heart, so nothing needs to give way.
   final List<BarMenuItem>? Function(Track track, {required bool lyrics})?
   moreItems;
 
-  /// A thumb-down and + (40 + 48) beside a title one can read (112).
-  static const _songButtonsWanted = 88 + 112.0;
+  /// A title one can read: about 8 letters.
+  static const _titleWanted = 112.0;
+
+  /// A thumb-down and + (40 + 48) beside a title one can read.
+  static const _songButtonsWanted = 88 + _titleWanted;
 
   /// Whether the 52 px cover (and its 12 px gap) fits in a left part of
   /// [width] beside [trailing] 48 px buttons (Up Next, the mic), while the
@@ -383,35 +386,60 @@ class DockBar extends StatelessWidget {
                           : LayoutBuilder(
                               builder: (context, box) {
                                 // Short of room, the song's buttons and the
-                                // mic go into one More menu (B25).
-                                // A narrow bar also has Up Next and the mic
-                                // here; a wide one the small cover.
-                                final more = moreItems?.call(
-                                  track,
-                                  lyrics: compact,
-                                );
-                                final besides = compact
-                                    ? 96.0
-                                    : (thumbnails ? 64.0 : 0.0);
-                                final folded =
-                                    more != null &&
-                                    more.isNotEmpty &&
-                                    box.maxWidth < besides + _songButtonsWanted;
+                                // mic go into one More menu (B25). A narrow
+                                // bar also has Up Next and the mic here; a
+                                // wide one the small cover.
+                                final songButtons =
+                                    moreItems
+                                        ?.call(track, lyrics: false)
+                                        ?.isNotEmpty ??
+                                    false;
+                                final heart =
+                                    collections != null && track.inLibrary;
+                                // A narrow bar's buttons after the heart:
+                                // Up Next and the mic.
+                                final ends =
+                                    48.0 + (lyricsButton != null ? 48 : 0);
+                                // A narrow bar folds Up Next and the mic too
+                                // when the title would be left too little
+                                // (B26: a library song's title kept about 60
+                                // px beside its heart, Up Next and the mic).
+                                // Folding Up Next alone would gain nothing:
+                                // More is as wide.
+                                final folded = compact
+                                    ? (songButtons || lyricsButton != null) &&
+                                          box.maxWidth <
+                                              ends +
+                                                  (songButtons ? 88 : 0) +
+                                                  (heart ? 48 : 0) +
+                                                  _titleWanted
+                                    : songButtons &&
+                                          box.maxWidth <
+                                              (thumbnails ? 64.0 : 0.0) +
+                                                  _songButtonsWanted;
+                                // The small cover goes first when the title
+                                // row would be squeezed under the heart (the
+                                // smallest window with Up Next and the mic:
+                                // B24, acceptance-36g); a narrow bar keeps
+                                // the room More won for the title (B26).
+                                final cover =
+                                    thumbnails &&
+                                    (compact
+                                        ? box.maxWidth -
+                                                  64 -
+                                                  (folded ? 48 : ends) -
+                                                  (heart ? 48 : 0) -
+                                                  (songButtons && !folded
+                                                      ? 88
+                                                      : 0) >=
+                                              _titleWanted
+                                        : _coverFits(
+                                            box.maxWidth,
+                                            trailing: folded ? 1 : 0,
+                                          ));
                                 return Row(
                                   children: [
-                                    // The small cover goes first when the title
-                                    // row would be squeezed under the heart (the
-                                    // smallest window with Up Next and the mic:
-                                    // B24, acceptance-36g).
-                                    if (thumbnails &&
-                                        _coverFits(
-                                          box.maxWidth,
-                                          trailing: !compact
-                                              ? (folded ? 1 : 0)
-                                              : folded || lyricsButton != null
-                                              ? 2
-                                              : 1,
-                                        )) ...[
+                                    if (cover) ...[
                                       OpensCover(
                                         track: track,
                                         child: TrackTile(
@@ -463,22 +491,26 @@ class DockBar extends StatelessWidget {
                                     ),
                                     // Without the right-hand group (a narrow
                                     // bar) Up Next and the mic follow the heart.
-                                    if (compact) ...[
+                                    if (compact && folded)
+                                      _BarMoreButton(
+                                        items: () => [
+                                          upNextMenuItem(
+                                            context,
+                                            playback: playback,
+                                            thumbnails: thumbnails,
+                                          ),
+                                          ...?moreItems?.call(
+                                            track,
+                                            lyrics: true,
+                                          ),
+                                        ],
+                                      )
+                                    else if (compact) ...[
                                       UpNextButton(
                                         playback: playback,
                                         thumbnails: thumbnails,
                                       ),
-                                      if (folded)
-                                        _BarMoreButton(
-                                          items: () =>
-                                              moreItems?.call(
-                                                track,
-                                                lyrics: true,
-                                              ) ??
-                                              const [],
-                                        )
-                                      else
-                                        ?lyricsButton,
+                                      ?lyricsButton,
                                     ] else if (folded)
                                       _BarMoreButton(
                                         items: () =>
@@ -1331,6 +1363,46 @@ class LyricsButton extends StatelessWidget {
   }
 }
 
+/// Shows Up next as a dialog at the window's bottom (the bottom bar has no
+/// room for the list).
+void showUpNext(
+  BuildContext context, {
+  required PlaybackController playback,
+  required bool thumbnails,
+}) => showDialog<void>(
+  context: context,
+  builder: (context) => Dialog(
+    alignment: Alignment.bottomCenter,
+    child: ConstrainedBox(
+      constraints: const BoxConstraints(maxWidth: 380, maxHeight: 460),
+      child: ListenableBuilder(
+        listenable: playback,
+        builder: (context, _) => ListView(
+          shrinkWrap: true,
+          padding: const EdgeInsets.all(16),
+          children: [_UpNext(playback: playback, thumbnails: thumbnails)],
+        ),
+      ),
+    ),
+  ),
+);
+
+/// Up next as the narrow bar's More entry (B26), with the queued count the
+/// button's badge shows.
+BarMenuItem upNextMenuItem(
+  BuildContext context, {
+  required PlaybackController playback,
+  required bool thumbnails,
+}) {
+  final count = playback.queue.queued.length;
+  return BarMenuItem(
+    label: count > 0 ? 'Up next ($count)' : 'Up next',
+    icon: Icons.queue_music,
+    onSelected: () =>
+        showUpNext(context, playback: playback, thumbnails: thumbnails),
+  );
+}
+
 /// Opens Up next from the bottom bar, which has no room for the list; the
 /// count says how many songs are queued.
 class UpNextButton extends StatelessWidget {
@@ -1349,23 +1421,8 @@ class UpNextButton extends StatelessWidget {
     return IconButton(
       key: const ValueKey('up-next-open'),
       tooltip: 'Up next',
-      onPressed: () => showDialog<void>(
-        context: context,
-        builder: (context) => Dialog(
-          alignment: Alignment.bottomCenter,
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 380, maxHeight: 460),
-            child: ListenableBuilder(
-              listenable: playback,
-              builder: (context, _) => ListView(
-                shrinkWrap: true,
-                padding: const EdgeInsets.all(16),
-                children: [_UpNext(playback: playback, thumbnails: thumbnails)],
-              ),
-            ),
-          ),
-        ),
-      ),
+      onPressed: () =>
+          showUpNext(context, playback: playback, thumbnails: thumbnails),
       icon: Badge(
         isLabelVisible: count > 0,
         label: Text('$count'),

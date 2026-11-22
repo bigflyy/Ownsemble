@@ -152,7 +152,9 @@ void main() {
       );
       await tester.pump();
       expect(find.byKey(const ValueKey('player-heart')), findsOneWidget);
-      expect(find.byKey(const ValueKey('lyrics')), findsOneWidget);
+      // B26: at these widths Up Next and the mic are in More.
+      expect(find.byKey(const ValueKey('player-more')), findsOneWidget);
+      expect(find.byKey(const ValueKey('lyrics')), findsNothing);
       expect(tester.takeException(), isNull, reason: '$size');
     }
   });

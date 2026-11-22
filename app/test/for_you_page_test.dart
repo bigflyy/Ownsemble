@@ -16,6 +16,7 @@ import 'package:ownsemble/library/track.dart';
 import 'package:ownsemble/lyrics/lyrics_controller.dart';
 import 'package:ownsemble/playback/playback_controller.dart';
 import 'package:ownsemble/ui/catalog_search.dart';
+import 'package:ownsemble/ui/collections_controller.dart';
 import 'package:ownsemble/ui/for_you.dart';
 import 'package:ownsemble/ui/library_controller.dart';
 import 'package:ownsemble/ui/library_screen.dart';
@@ -120,6 +121,7 @@ void main() {
     double height = 900,
     LyricsController? lyrics,
     PlayerDock dock = PlayerDock.side,
+    CollectionsController? collections,
   }) async {
     tester.view.physicalSize = Size(width, height);
     tester.view.devicePixelRatio = 1;
@@ -134,6 +136,7 @@ void main() {
             catalog: catalog,
             forYou: forYou,
             lyrics: lyrics,
+            collections: collections,
             // The side panel: Similar songs shows there, not in the bar.
             settings: ShellSettings.inMemory()..dockTo(dock),
           ),
@@ -269,8 +272,15 @@ void main() {
     expect(find.byKey(const ValueKey('player-more')), findsOneWidget);
     expect(tester.takeException(), isNull);
 
+    expect(
+      find.byKey(const ValueKey('up-next-open')),
+      findsNothing,
+      reason: 'B26: Up next is in More too',
+    );
+
     await tester.tap(find.byKey(const ValueKey('player-more')));
     await tester.pumpAndSettle();
+    expect(find.text('Up next'), findsOneWidget);
     expect(find.text('Add to library'), findsOneWidget);
     expect(find.text('Lyrics'), findsOneWidget);
     await tester.tap(find.text("Don't like it"));
@@ -291,6 +301,85 @@ void main() {
     expect(find.text('Close lyrics'), findsOneWidget);
     await tester.tapAt(Offset.zero);
     await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+    player.playing.value = false;
+    await tester.pump(const Duration(seconds: 5));
+  });
+
+  testWidgets('the smallest window gives a library song\'s title room: Up '
+      'next and the mic go into More, the heart stays; 700 px keeps them '
+      '(B26)', (tester) async {
+    LyricsController lyricsController() => LyricsController(
+      load: (source, ref) => null,
+      save: (source, ref, lyrics, {md5}) {},
+      routeOf: lyricsRouteBySource((sourceId) => null),
+    );
+    final own = store.loadAll().firstWhere((t) => t.sourceKey == '42_1');
+    for (final (width, foldedWanted) in [(480.0, true), (700.0, false)]) {
+      await openForYou(
+        tester,
+        width: width,
+        height: 440,
+        dock: PlayerDock.bottom,
+        lyrics: lyricsController(),
+        collections: CollectionsController(store),
+      );
+      await playback.playFrom([own], 0);
+      await playback.addToQueue(own);
+      await tester.pumpAndSettle();
+      final title = find.descendant(
+        of: find.byType(DockBar),
+        matching: find.text('Закрой за мной дверь'),
+      );
+      expect(title, findsWidgets);
+      expect(find.byKey(const ValueKey('player-heart')), findsOneWidget);
+      expect(
+        tester.getSize(title.first).width,
+        greaterThanOrEqualTo(100),
+        reason: 'at $width px the title kept about 60 px (B26)',
+      );
+      expect(
+        find.byKey(const ValueKey('player-more')),
+        foldedWanted ? findsOneWidget : findsNothing,
+        reason: '$width px',
+      );
+      expect(
+        find.byKey(const ValueKey('up-next-open')),
+        foldedWanted ? findsNothing : findsOneWidget,
+      );
+      expect(
+        find.byKey(const ValueKey('lyrics')),
+        foldedWanted ? findsNothing : findsOneWidget,
+      );
+      expect(tester.takeException(), isNull);
+    }
+
+    await openForYou(
+      tester,
+      width: 480,
+      height: 440,
+      dock: PlayerDock.bottom,
+      lyrics: lyricsController(),
+      collections: CollectionsController(store),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('player-more')));
+    await tester.pumpAndSettle();
+    final upNext = 'Up next (${playback.queue.queued.length})';
+    expect(playback.queue.queued, isNotEmpty);
+    expect(find.text(upNext), findsOneWidget, reason: 'the queued count');
+    expect(find.text('Lyrics'), findsOneWidget);
+    expect(find.text("Don't like it"), findsNothing);
+    await tester.tap(find.text(upNext));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('queued-0')), findsOneWidget);
+    await tester.tapAt(Offset.zero);
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('player-more')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Lyrics'));
+    await tester.pumpAndSettle();
+    expect(library.view.kind, ViewKind.lyrics);
     expect(tester.takeException(), isNull);
     player.playing.value = false;
     await tester.pump(const Duration(seconds: 5));
