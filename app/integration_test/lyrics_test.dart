@@ -15,7 +15,9 @@
 // seeks there; the lit line follows the song and stays in sight; the next
 // song with plain lyrics shows them; a song without lyrics says so; what VK
 // answered is stored; a download keeps a song's lyrics in the library; the
-// mic button closes the place. The chooser (E2): on the VK-words song it
+// mic button closes the place. Timing by hand (F1): "later" moves the lit
+// line and a clicked line's jump, the offset is stored and reset. The
+// chooser (E2): on the VK-words song it
 // asks the sources not asked yet, VK's words are previewed and used, the
 // choice is stored and read back by a new controller as after a restart,
 // and Back to automatic gives LRCLIB's lines again. Prints titles, counts
@@ -333,6 +335,94 @@ void main() {
       );
     }
     say('following: ${checks.join('; ')}');
+
+    // 3b. Timing by hand (F1): six presses of "later" move the lines 3 s
+    // later; the lit line follows the moved times, a click on a line jumps
+    // to its moved time, the offset is stored, and the label resets it.
+    int storedOffset() {
+      final db = sqlite3.open(
+        p.join(copy.path, 'library.db'),
+        mode: OpenMode.readOnly,
+      );
+      try {
+        return db.select(
+                  'SELECT offset_ms FROM lyrics_offsets WHERE ref = ? AND '
+                  'source = ?',
+                  [timedSong!.sourceKey, 'vk'],
+                ).firstOrNull?['offset_ms']
+                as int? ??
+            0;
+      } finally {
+        db.close();
+      }
+    }
+
+    String offsetLabel() => tester
+        .widget<Text>(
+          find.descendant(
+            of: find.byKey(const ValueKey('lyrics-offset')),
+            matching: find.byType(Text),
+          ),
+        )
+        .data!;
+
+    expect(offsetLabel(), 'Timing');
+    for (var i = 0; i < 6; i++) {
+      await tester.tap(find.byKey(const ValueKey('lyrics-later')));
+      await tester.pump();
+    }
+    await tester.pump(const Duration(milliseconds: 500));
+    expect(offsetLabel(), '+3.0 s');
+    expect(lyrics.shownOffset, 3000);
+    expect(storedOffset(), 3000);
+    expect(
+      find.textContaining('lines 3.0 s later'),
+      findsOneWidget,
+      reason: 'the heading names the moved timing',
+    );
+    final movedChecks = <String>[];
+    for (var round = 0; round < 2; round++) {
+      await Future<void>.delayed(const Duration(seconds: 2));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 500));
+      final at = player.position.inMilliseconds;
+      final expected = shown.lineAt(at + 120 - 3000);
+      final lit = litLine();
+      movedChecks.add('$at ms: lit $lit, expected $expected');
+      expect(
+        (lit - expected).abs() <= 1,
+        isTrue,
+        reason: 'moved: lit line $lit at $at ms, expected about $expected',
+      );
+    }
+    // A line a few seconds ahead of the song, so the jump is a real one.
+    final aheadMs = player.position.inMilliseconds + 6000;
+    final movedTarget = [
+      for (var i = 0; i < shown.lines.length; i++)
+        if (!shown.lines[i].isGap && shown.lines[i].startMs! + 3000 > aheadMs)
+          i,
+    ].first;
+    final movedLine = find.byKey(ValueKey('lyrics-line-$movedTarget'));
+    await tester.ensureVisible(movedLine);
+    await tester.pump(const Duration(milliseconds: 400));
+    final movedStart = shown.lines[movedTarget].startMs! + 3000;
+    await tester.tap(movedLine);
+    await waitUntil(
+      tester,
+      () =>
+          player.position.inMilliseconds >= movedStart - 500 &&
+          player.position.inMilliseconds <= movedStart + 4000,
+      timeout: const Duration(seconds: 15),
+      what: 'the seek to the moved line',
+    );
+    say(
+      'moved 3 s later: ${movedChecks.join('; ')}; clicked line $movedTarget '
+      '(moved $movedStart ms): playing at ${player.position.inMilliseconds} ms',
+    );
+    await tester.tap(find.byKey(const ValueKey('lyrics-offset')));
+    await tester.pump();
+    expect(offsetLabel(), 'Timing');
+    expect(storedOffset(), 0, reason: 'back to the source timing');
 
     /// Waits until the place shows [track]'s final pick (the walk over the
     /// sources is done) and says how long it took after the song sounded.
