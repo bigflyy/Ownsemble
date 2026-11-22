@@ -20,6 +20,11 @@ Methods:
              median of (aligned start - lyrics start) is the offset.
 
     python -I timing_probe.py DATA_DIR OUT.jsonl [--only 0,1] [--no-align]
+        [--audio vocals] [--onnx MODEL.onnx]
+
+--audio vocals reads DATA_DIR/vocals/<index>.flac (separate.py) instead of the
+MP3s; --onnx runs the aligner from an ONNX file (onnx_probe.py's int8 copy)
+through onnxruntime instead of PyTorch.
 
 Prints only indexes, sources, numbers and timings: never words or names.
 """
@@ -181,13 +186,26 @@ def romanize(text):
 class Aligner:
     """MMS_FA forced alignment of the words to the audio."""
 
-    def __init__(self, threads):
+    def __init__(self, threads, onnx_path=None):
         import torch
         import torchaudio
         torch.set_num_threads(threads)
         bundle = torchaudio.pipelines.MMS_FA
         self.torch = torch
-        self.model = bundle.get_model(with_star=False).eval()
+        if onnx_path:
+            import onnxruntime as ort
+            options = ort.SessionOptions()
+            options.intra_op_num_threads = threads
+            session = ort.InferenceSession(str(onnx_path), options,
+                                           providers=["CPUExecutionProvider"])
+
+            def run(wave):
+                out = session.run(["emission"], {"wave": wave.numpy()})[0]
+                return torch.from_numpy(out), None
+
+            self.model = run
+        else:
+            self.model = bundle.get_model(with_star=False).eval()
         self.tokenizer = bundle.get_tokenizer()
         self.aligner = bundle.get_aligner()
 
@@ -252,19 +270,22 @@ def main():
     parser.add_argument("--only", default="")
     parser.add_argument("--no-align", action="store_true")
     parser.add_argument("--threads", type=int, default=4)
+    parser.add_argument("--audio", default="audio")
+    parser.add_argument("--onnx", default=None)
     args = parser.parse_args()
     data = Path(args.data)
     only = {int(i) for i in args.only.split(",") if i.strip()}
     songs = sorted((data / "songs").glob("*.json"), key=lambda p: int(p.stem))
     vad = Vad()
-    aligner = None if args.no_align else Aligner(args.threads)
+    aligner = None if args.no_align else Aligner(args.threads, args.onnx)
     with open(args.out, "a", encoding="utf-8") as out:
         for song_path in songs:
             song = json.loads(song_path.read_text(encoding="utf-8"))
             index = song["index"]
             if only and index not in only:
                 continue
-            mp3 = data / "audio" / f"{index}.mp3"
+            suffix = ".mp3" if args.audio == "audio" else ".flac"
+            mp3 = data / args.audio / f"{index}{suffix}"
             if not mp3.exists():
                 print(f"#{index} no audio")
                 continue
@@ -280,7 +301,9 @@ def main():
             if aligner is not None:
                 # The model's output is kept beside the audio, so the
                 # analysis can change without running the model again.
-                cached = data / "emission" / f"{index}.npy"
+                kind = "" if args.audio == "audio" and not args.onnx else (
+                    f"-{args.audio}" + ("-onnx" if args.onnx else ""))
+                cached = data / f"emission{kind}" / f"{index}.npy"
                 started = time.time()
                 if cached.exists():
                     emission = aligner.torch.from_numpy(np.load(cached))
