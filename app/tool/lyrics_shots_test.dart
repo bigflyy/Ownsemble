@@ -27,6 +27,7 @@ import 'package:ownsemble/lyrics/lyrics.dart';
 import 'package:ownsemble/lyrics/lyrics_controller.dart';
 import 'package:ownsemble/lyrics/lyrics_fitter.dart';
 import 'package:ownsemble/lyrics/lyrics_sources.dart';
+import 'package:ownsemble/lyrics/recording_fit.dart';
 import 'package:ownsemble/playback/playback_controller.dart';
 import 'package:ownsemble/playback/player_service.dart';
 import 'package:ownsemble/storage/audio_storage.dart';
@@ -238,7 +239,12 @@ void main() {
           throw VkException('audio.getLyrics error 9', code: 9);
         case 'none':
           throw VkException('audio.getLyrics error 104', code: 104);
-        case 'plain' || 'choices' || 'preview' || 'chosen':
+        case 'plain' ||
+            'choices' ||
+            'preview' ||
+            'chosen' ||
+            'ranked' ||
+            'checkrow':
           return _plainReply();
         case 'long':
           return _timedReply(_longWords);
@@ -246,7 +252,13 @@ void main() {
       return _timedReply(_timedWords);
     }
 
-    final choosing = const ['choices', 'preview', 'chosen'].contains(step);
+    final choosing = const [
+      'choices',
+      'preview',
+      'chosen',
+      'ranked',
+      'checkrow',
+    ].contains(step);
     if (choosing) {
       store
         ..saveLyrics(
@@ -290,7 +302,7 @@ void main() {
     final hang = Completer<void>();
     final modelDir = Directory.systemTemp.createTempSync('shots-model');
     addTearDown(() => modelDir.deleteSync(recursive: true));
-    final modelThere = step == 'fitting';
+    final modelThere = const ['fitting', 'ranked', 'checkrow'].contains(step);
     final model = File(p.join(modelDir.path, 'm.onnx'));
     if (modelThere) model.writeAsBytesSync([1, 2, 3]);
     final fitter = LyricsFitter(
@@ -310,10 +322,21 @@ void main() {
       },
       audioOf: (track, onProgress) async => model.path,
       fit: (key, path, lines, onProgress) async {
+        if (step == 'ranked') {
+          // G3: NetEase's copy (300 ms later) fits this recording worse.
+          return RecordingFit(
+            lines: const {},
+            sureShare: lines.first.startMs == 10300 ? 0.31 : 0.92,
+            audioSeconds: 204,
+            elapsedMs: 1,
+          );
+        }
         onProgress(7, 12);
         await hang.future;
         throw StateError('never');
       },
+      storedAudioOf: (track) => modelThere ? model.path : null,
+      hasCachedOutput: (key) => step == 'ranked',
     );
     final settings = ShellSettings.inMemory();
     if (!dark) settings.toggleTheme();
@@ -401,8 +424,14 @@ void main() {
         await tester.tap(find.byKey(const ValueKey('lyrics-fit')));
         await settle();
       }
-      if (step == 'choices' || step == 'preview') {
+      if (const ['choices', 'preview', 'ranked', 'checkrow'].contains(step)) {
         await tester.tap(find.byKey(const ValueKey('lyrics-choose')));
+        await settle();
+      }
+      if (step == 'ranked') {
+        await tester.runAsync(
+          () => Future<void>.delayed(const Duration(milliseconds: 200)),
+        );
         await settle();
       }
       if (step == 'preview') {
@@ -468,6 +497,9 @@ void main() {
     ('fitted', true, const Size(480, 800)),
     ('nomatch', false, const Size(1440, 900)),
     ('nomatch', true, const Size(760, 900)),
+    ('ranked', true, const Size(1440, 900)),
+    ('ranked', false, const Size(480, 800)),
+    ('checkrow', false, const Size(1440, 900)),
   ]) {
     final width = size.width < 600
         ? 'smallest'

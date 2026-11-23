@@ -4,6 +4,12 @@
 /// lyrics (timed lines follow the song); "Use these lyrics" keeps that
 /// choice for the song's upload and returns to the Lyrics place. Sources not
 /// asked yet are asked when the place opens.
+///
+/// With the fit model downloaded and the song stored (G3), timed lyrics are
+/// ranked by how well they fit this recording: tagged "fits this recording"
+/// or "may not match" and listed best first. When the recording's model
+/// output is cached this happens by itself; otherwise a row offers the
+/// check (about 20 s).
 library;
 
 import 'dart:async';
@@ -13,6 +19,7 @@ import 'package:flutter/material.dart';
 import '../library/track.dart';
 import '../lyrics/lyrics.dart';
 import '../lyrics/lyrics_controller.dart';
+import '../lyrics/lyrics_fitter.dart';
 import 'lyrics_page.dart';
 import 'theme.dart';
 import 'version_marks.dart' show lengthText;
@@ -27,9 +34,13 @@ class LyricsChoicesPage extends StatefulWidget {
     required this.positions,
     required this.seek,
     required this.onUsed,
+    this.fitter,
   });
 
   final LyricsController lyrics;
+
+  /// Ranks timed lyrics by fit (G3); no ranking when null.
+  final LyricsFitter? fitter;
 
   /// The playing song now, and every change of it.
   final Track? Function() current;
@@ -57,6 +68,7 @@ class _LyricsChoicesPageState extends State<LyricsChoicesPage> {
   void initState() {
     super.initState();
     widget.lyrics.addListener(_onLyrics);
+    widget.fitter?.addListener(_onLyrics);
     _current = widget.currentStream.listen((track) {
       if (!mounted) return;
       // Another song: its own list, a preview of the old one closes.
@@ -71,12 +83,20 @@ class _LyricsChoicesPageState extends State<LyricsChoicesPage> {
 
   void _showAndAsk(Track? track) {
     widget.lyrics.show(track);
-    unawaited(widget.lyrics.askAll());
+    final fitter = widget.fitter;
+    // Ranks what is stored at once, and again once the sources answered.
+    unawaited(fitter?.rankChoices());
+    unawaited(
+      widget.lyrics.askAll().then((_) {
+        if (mounted) unawaited(fitter?.rankChoices());
+      }),
+    );
   }
 
   @override
   void dispose() {
     widget.lyrics.removeListener(_onLyrics);
+    widget.fitter?.removeListener(_onLyrics);
     unawaited(_current?.cancel());
     super.dispose();
   }
@@ -131,7 +151,8 @@ class _LyricsChoicesPageState extends State<LyricsChoicesPage> {
     if (widget.lyrics.track == null) {
       return lyricsMessage(context, 'Play a song to see its lyrics.');
     }
-    final choices = widget.lyrics.choices;
+    final fitter = widget.fitter;
+    final choices = _ranked(widget.lyrics.choices);
     final previewed = choices
         .where((choice) => choice.source == _preview && choice.lyrics != null)
         .firstOrNull;
@@ -145,10 +166,14 @@ class _LyricsChoicesPageState extends State<LyricsChoicesPage> {
           key: const ValueKey('lyrics-choices'),
           padding: const EdgeInsets.only(bottom: 24),
           children: [
+            if (fitter != null) ?_checkRow(fitter, narrow),
             for (final choice in choices)
               _ChoiceRow(
                 key: ValueKey('lyrics-choice-${choice.source}'),
                 choice: choice,
+                score: choice.lyrics == null
+                    ? null
+                    : fitter?.scoreOf(choice.lyrics!),
                 inUse: choice.source == (chosen ?? automatic),
                 automatic: choice.source == automatic,
                 yours: choice.source == chosen,
@@ -160,6 +185,69 @@ class _LyricsChoicesPageState extends State<LyricsChoicesPage> {
           ],
         );
       },
+    );
+  }
+
+  /// [choices] with the timed lyrics that have a fit score first, best
+  /// first; the rest keep their order.
+  List<LyricsChoice> _ranked(List<LyricsChoice> choices) {
+    final fitter = widget.fitter;
+    if (fitter == null) return choices;
+    double? scoreOf(LyricsChoice choice) =>
+        choice.lyrics == null ? null : fitter.scoreOf(choice.lyrics!);
+    final scored = [
+      for (final choice in choices)
+        if (scoreOf(choice) != null) choice,
+    ]..sort((a, b) => scoreOf(b)!.compareTo(scoreOf(a)!));
+    if (scored.isEmpty) return choices;
+    return [
+      ...scored,
+      for (final choice in choices)
+        if (scoreOf(choice) == null) choice,
+    ];
+  }
+
+  /// The row that offers the fit check (or shows it running); null when
+  /// there is nothing to check or it would run by itself.
+  Widget? _checkRow(LyricsFitter fitter, bool narrow) {
+    final colors = OwnColors.of(context);
+    final stage = fitter.stageOf(widget.lyrics.shownKey, LyricsFitter.rankJob);
+    if (stage == null && (!fitter.canRank || fitter.job != null)) return null;
+    final share = stage is FitRunning ? stage.share : 0.0;
+    return Padding(
+      key: const ValueKey('lyrics-rank-row'),
+      padding: EdgeInsets.fromLTRB(narrow ? 16 : 24, 8, 24, 8),
+      child: Row(
+        children: [
+          Icon(Icons.auto_fix_high, size: 20, color: colors.accent),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Text(
+              stage == null
+                  ? 'Find which lyrics fit this recording'
+                        '${fitter.rankIsQuick ? '' : ' (about 20 s)'}'
+                  : 'Checking which lyrics fit this recording, '
+                        '${(share * 100).floor()}%',
+              style: TextStyle(color: colors.dim, fontSize: 13),
+            ),
+          ),
+          if (stage == null)
+            TextButton(
+              key: const ValueKey('lyrics-rank'),
+              onPressed: () => unawaited(fitter.rankChoices(runModel: true)),
+              child: const Text('Check'),
+            )
+          else
+            SizedBox(
+              width: 18,
+              height: 18,
+              child: CircularProgressIndicator(
+                strokeWidth: 2,
+                value: share == 0 ? null : share,
+              ),
+            ),
+        ],
+      ),
     );
   }
 
@@ -264,6 +352,7 @@ class _ChoiceRow extends StatelessWidget {
   const _ChoiceRow({
     super.key,
     required this.choice,
+    this.score,
     required this.inUse,
     required this.automatic,
     required this.yours,
@@ -274,6 +363,10 @@ class _ChoiceRow extends StatelessWidget {
   });
 
   final LyricsChoice choice;
+
+  /// The share of the lyrics' lines found in this recording (G3); null
+  /// when not checked.
+  final double? score;
   final bool inUse;
   final bool automatic;
   final bool yours;
@@ -292,6 +385,18 @@ class _ChoiceRow extends StatelessWidget {
         lyrics.timed
             ? ('timed', 'Lines follow the music.')
             : ('words only', 'No times: the words scroll by hand.'),
+      if (score case final sure?)
+        sure >= 0.5
+            ? (
+                'fits this recording',
+                '${(sure * 100).round()}% of the lines were found in this '
+                    'recording.',
+              )
+            : (
+                'may not match',
+                'Only ${(sure * 100).round()}% of the lines were found in '
+                    'this recording: these lyrics may be of another version.',
+              ),
       if (inUse) ('in use', 'The Lyrics place shows these.'),
       if (yours)
         ('your choice', 'You chose these; the app keeps them for this song.')

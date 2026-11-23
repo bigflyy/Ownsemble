@@ -306,6 +306,8 @@ void main() {
         List<String>? steps,
         Completer<void>? audioGate,
         bool modelThere = false,
+        bool stored = false,
+        bool cached = false,
       }) {
         final model = File('${dir.path}/models/m.onnx');
         if (modelThere) {
@@ -340,6 +342,8 @@ void main() {
             onProgress(1, 2);
             return result(lines);
           },
+          storedAudioOf: (track) => stored ? '${dir.path}/song.mp3' : null,
+          hasCachedOutput: (key) => cached,
           now: () => 7,
         );
       }
@@ -506,6 +510,89 @@ void main() {
           expect(fitter.modelReady, isFalse);
         },
       );
+
+      test(
+        'the chooser ranking scores every timed source once the model '
+        "output is cached; a first check runs only when asked (G3)",
+        () async {
+          final other = Lyrics(
+            source: 'netease',
+            lines: [
+              for (final line in lrclib.lines)
+                LyricLine(line.text, startMs: (line.startMs ?? 0) + 100),
+            ],
+          );
+          store.saveLyrics('netease', '1_1', other, meta: '{}');
+          final lyrics = LyricsController(
+            load: store.lyricsOf,
+            save: store.saveLyrics,
+            loadFit: store.lyricsFitOf,
+            saveFit: store.saveLyricsFit,
+            routeOf: (track) => (key: '1_1', accessKey: null, call: null),
+            sources: [StoredOnlySource('lrclib'), StoredOnlySource('netease')],
+            now: () => 1000,
+          )..show(playing);
+          final steps = <String>[];
+          var cached = false;
+          LyricsFitter fitterNow() => fitterOf(
+            lyrics,
+            modelThere: true,
+            stored: true,
+            cached: cached,
+            steps: steps,
+            result: (lines) => RecordingFit(
+              lines: movedLater,
+              // NetEase's copy fits worse.
+              sureShare: lines.first.startMs == 10100 ? 0.3 : 0.9,
+              audioSeconds: 200,
+              elapsedMs: 1,
+            ),
+          );
+          var fitter = fitterNow();
+          expect(fitter.canRank, isTrue);
+          expect(fitter.rankIsQuick, isFalse);
+          await fitter.rankChoices();
+          expect(steps, isEmpty, reason: 'no model run unless asked');
+          await fitter.rankChoices(runModel: true);
+          expect(steps, ['fit 1_1', 'fit 1_1']);
+          expect(fitter.scoreOf(lrclib), 0.9);
+          expect(fitter.scoreOf(other), 0.3);
+          expect(fitter.canRank, isFalse, reason: 'all scored');
+          expect(
+            store.lyricsFitOf('1_1', 'lrclib'),
+            isNull,
+            reason: 'no line moved',
+          );
+          // A new run with the output cached ranks by itself.
+          cached = true;
+          steps.clear();
+          fitter = fitterNow();
+          expect(fitter.rankIsQuick, isTrue);
+          await fitter.rankChoices();
+          expect(steps, hasLength(2));
+          // Changed lyrics lose their score.
+          final changed = Lyrics(
+            source: 'netease',
+            lines: [...other.lines, const LyricLine('x', startMs: 60000)],
+          );
+          expect(fitter.scoreOf(changed), isNull);
+        },
+      );
+
+      test('no ranking for a song that is not stored', () async {
+        final lyrics = controllerOf()..show(playing);
+        final steps = <String>[];
+        final fitter = fitterOf(
+          lyrics,
+          modelThere: true,
+          cached: true,
+          steps: steps,
+          result: fitted,
+        );
+        expect(fitter.canRank, isFalse);
+        await fitter.rankChoices(runModel: true);
+        expect(steps, isEmpty);
+      });
 
       test('failures say why', () async {
         final lyrics = controllerOf()..show(playing);
@@ -797,6 +884,105 @@ void main() {
     tearDown(() {
       store.close();
       dir.deleteSync(recursive: true);
+    });
+
+    testWidgets('the chooser lists the lyrics that fit this recording first, '
+        'tagged (G3)', (tester) async {
+      tester.view.physicalSize = const Size(1400, 900);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      // NetEase ranks below LRCLIB by names, but fits the recording better.
+      final netease = Lyrics(
+        source: 'netease',
+        lines: [
+          for (final line in lrclib.lines)
+            LyricLine(line.text, startMs: (line.startMs ?? 0) + 100),
+        ],
+      );
+      store.saveLyrics('netease', '1_1', netease, meta: '{"diff":3}');
+      final lyrics = LyricsController(
+        load: store.lyricsOf,
+        save: store.saveLyrics,
+        loadFit: store.lyricsFitOf,
+        saveFit: store.saveLyricsFit,
+        routeOf: lyricsRouteBySource((sourceId) => null),
+        sources: [StoredOnlySource('lrclib'), StoredOnlySource('netease')],
+        now: () => 1000,
+      );
+      final model = File('${dir.path}/m.onnx')..writeAsBytesSync([1, 2, 3]);
+      final song = File('${dir.path}/song.mp3')..writeAsBytesSync([1, 2]);
+      final fitter = LyricsFitter(
+        lyrics: lyrics,
+        modelFile: model,
+        model: ModelFile(
+          url: Uri.parse('http://localhost/m'),
+          bytes: 3,
+          sha256: '',
+          fileName: 'm.onnx',
+        ),
+        downloadModelTo: (onProgress, stop) async {},
+        audioOf: (track, onProgress) async => song.path,
+        fit: (key, path, lines, onProgress) async => RecordingFit(
+          lines: const {},
+          sureShare: lines.first.startMs == 10100 ? 0.9 : 0.2,
+          audioSeconds: 200,
+          elapsedMs: 1,
+        ),
+        storedAudioOf: (track) => song.path,
+        hasCachedOutput: (key) => true,
+      );
+      final player = PlayerService(muted: true, dataDir: '.')
+        ..restore(library.all.single, const Duration(seconds: 21));
+      await tester.pumpWidget(
+        MaterialApp(
+          home: LibraryScreen(
+            library: library,
+            playback: PlaybackController(player: player),
+            lyrics: lyrics,
+            lyricsFitter: fitter,
+          ),
+        ),
+      );
+      await tester.pump();
+      library.toggleLyrics();
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
+      library.openLyricsChoices();
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 100)),
+      );
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
+      final neteaseRow = tester.getTopLeft(
+        find.byKey(const ValueKey('lyrics-choice-netease')),
+      );
+      final lrclibRow = tester.getTopLeft(
+        find.byKey(const ValueKey('lyrics-choice-lrclib')),
+      );
+      expect(neteaseRow.dy, lessThan(lrclibRow.dy), reason: 'fits better');
+      expect(
+        find.descendant(
+          of: find.byKey(const ValueKey('lyrics-choice-netease')),
+          matching: find.byKey(
+            const ValueKey('lyrics-tag-fits this recording'),
+          ),
+        ),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(
+          of: find.byKey(const ValueKey('lyrics-choice-lrclib')),
+          matching: find.byKey(const ValueKey('lyrics-tag-may not match')),
+        ),
+        findsOneWidget,
+      );
+      expect(find.byKey(const ValueKey('lyrics-rank-row')), findsNothing);
+      expect(
+        store.lyricsFitOf('1_1', 'netease'),
+        isNull,
+        reason: 'no line moved',
+      );
+      expect(tester.takeException(), isNull);
     });
 
     for (final size in const [Size(1400, 900), Size(480, 700)]) {

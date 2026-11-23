@@ -21,7 +21,8 @@
 // lines moved by about 7.7 s, the song was saved as cache (not a Download);
 // a click on a fitted line jumps to its fitted start; the lit line follows
 // the fitted times; "use LRCLIB's own timing" undoes it; a second fit reads
-// the cached model output and takes a moment. Memory before, at the peak
+// the cached model output and takes a moment; the chooser then ranks every
+// timed source by fit by itself (G3). Memory before, at the peak
 // and after. Prints titles, counts and times only.
 
 import 'dart:async';
@@ -381,6 +382,41 @@ void main() {
     expect(lyrics.timedOf(shown).lines.map((l) => l.startMs), [
       for (final l in fitted.lines) l.startMs,
     ], reason: 'the same fit');
+
+    // G3: the chooser ranks every timed source by fit by itself, since the
+    // recording's model output is cached now.
+    final rankClock = Stopwatch()..start();
+    library.openLyricsChoices();
+    await tester.pump();
+    await waitUntil(
+      tester,
+      () {
+        final timed = [
+          for (final choice in lyrics.choices)
+            if (choice.lyrics?.timed ?? false) choice.lyrics!,
+        ];
+        return fitter.job == null &&
+            timed.length >= 2 &&
+            timed.every((l) => fitter.scoreOf(l) != null);
+      },
+      timeout: const Duration(minutes: 2),
+      what: 'the chooser ranking',
+    );
+    final ranked = [
+      for (final choice in lyrics.choices)
+        if (choice.lyrics?.timed ?? false)
+          '${choice.source} ${fitter.scoreOf(choice.lyrics!)!.toStringAsFixed(2)}',
+    ];
+    say(
+      'chooser ranked in ${rankClock.elapsedMilliseconds} ms (with asking the '
+      'sources): ${ranked.join(', ')}',
+    );
+    expect(
+      find.byKey(const ValueKey('lyrics-tag-fits this recording')),
+      findsWidgets,
+    );
+    library.goBack();
+    await tester.pump(const Duration(milliseconds: 400));
 
     final perf = File(p.join(copy.path, 'perf.log'))
         .readAsLinesSync()

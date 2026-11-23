@@ -1351,6 +1351,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
                                 : null,
                             seek: widget.playback.seek,
                             onUsed: library.goBack,
+                            fitter: widget.lyricsFitter,
                           )
                         : statsFilters != null
                         ? NowPlayingScope(

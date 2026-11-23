@@ -66,7 +66,7 @@ class LyricsFitButton extends StatelessWidget {
         icon: Icons.auto_fix_high,
         label: 'Fit to recording',
         tooltip: busy
-            ? 'Another song is being fitted'
+            ? 'Another fit is running'
             : 'Move the lines to where they are sung in this recording',
         onPressed: busy ? null : () => _fit(context),
       );

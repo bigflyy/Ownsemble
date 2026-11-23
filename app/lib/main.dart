@@ -451,6 +451,15 @@ Future<void> main(List<String> args) async {
   final modelFile = File(
     p.join(options.dataDir, 'models', alignerModel.fileName),
   );
+  String fitCacheOf(String key) =>
+      p.join(options.dataDir, 'fit-cache', '${fitCacheName(key)}.emission');
+  String? storedAudioOf(Track track) {
+    final path = storage.stateOf(track).path;
+    if (path == null) return null;
+    final file = storage.fileAt(path);
+    return file.existsSync() ? file.path : null;
+  }
+
   final fitter = LyricsFitter(
     lyrics: lyrics,
     modelFile: modelFile,
@@ -491,13 +500,12 @@ Future<void> main(List<String> args) async {
           tempDir: tempDir.path,
         ),
         onProgress: onProgress,
-        emissionCachePath: p.join(
-          options.dataDir,
-          'fit-cache',
-          '${fitCacheName(key)}.emission',
-        ),
+        emissionCachePath: fitCacheOf(key),
       );
     },
+    // G3: the chooser's ranking, only for stored songs.
+    storedAudioOf: storedAudioOf,
+    hasCachedOutput: (key) => File(fitCacheOf(key)).existsSync(),
     log: logPerf,
   );
   artists.onListChanged = library.listChanged;

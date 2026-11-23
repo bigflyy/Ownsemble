@@ -7,6 +7,13 @@
 /// file in a background isolate. What the click saw (the upload, the
 /// source, its lyrics) is what is fitted and kept, also when the user moves
 /// on to another song meanwhile.
+///
+/// The chooser's ranking (G3): with the model there and the song stored,
+/// every source's timed lyrics get a score, the share of their lines placed
+/// with confidence in this recording ([scoreOf]). Once a recording's model
+/// output is cached (after its first fit or check) this takes a moment per
+/// source; the first check runs the model (about 20 s). Scores stay for
+/// this run only and move no line.
 library;
 
 import 'dart:io';
@@ -98,6 +105,8 @@ class LyricsFitter extends ChangeNotifier {
     required this.downloadModelTo,
     required this.audioOf,
     required this.fit,
+    this.storedAudioOf,
+    this.hasCachedOutput,
     this.model,
     this.log,
     int Function()? now,
@@ -136,8 +145,20 @@ class LyricsFitter extends ChangeNotifier {
   )
   fit;
 
+  /// The path of [track]'s stored audio file, null when it is not stored
+  /// (the ranking never saves a song).
+  final String? Function(Track track)? storedAudioOf;
+
+  /// Whether the model's output for the upload [key] is cached, so scoring
+  /// needs no model run.
+  final bool Function(String key)? hasCachedOutput;
+
   /// One line to perf.log: times and outcomes only.
   final void Function(String line)? log;
+
+  /// Scores by "upload key|source": for which lyrics and file, and the
+  /// share of sure lines.
+  final _scores = <String, ({String hash, int bytes, double sure})>{};
 
   final int Function() _now;
 
@@ -174,6 +195,91 @@ class LyricsFitter extends ChangeNotifier {
     if (shows) notifyListeners();
   }
 
+  /// The source name a ranking job runs under.
+  static const rankJob = '*ranking*';
+
+  /// The share of [candidate]'s lines placed with confidence in the
+  /// recording of the song shown; null when not scored (or scored for
+  /// other lyrics or another file).
+  double? scoreOf(Lyrics candidate) {
+    final key = lyrics.shownKey;
+    final track = lyrics.track;
+    if (key == null || track == null || !candidate.timed) return null;
+    final score = _scores['$key|${candidate.source}'];
+    if (score == null || score.hash != lyricsHashOf(candidate)) return null;
+    final path = storedAudioOf?.call(track);
+    if (path != null && File(path).lengthSync() != score.bytes) return null;
+    return score.sure;
+  }
+
+  /// Whether the chooser can offer a check: the model is there, the song
+  /// is in the library and stored, and some timed lyrics are not scored.
+  bool get canRank {
+    final track = lyrics.track;
+    if (track == null || !track.inLibrary || !modelReady) return false;
+    if (storedAudioOf?.call(track) == null) return false;
+    return lyrics.choices.any(
+      (choice) =>
+          (choice.lyrics?.timed ?? false) && scoreOf(choice.lyrics!) == null,
+    );
+  }
+
+  /// Whether ranking the song shown needs no model run.
+  bool get rankIsQuick {
+    final key = lyrics.shownKey;
+    return key != null && (hasCachedOutput?.call(key) ?? false);
+  }
+
+  /// Scores every timed source's lyrics for the song shown that is not
+  /// scored yet. Without [runModel] only when the model's output is cached
+  /// (a moment); with it, the model runs first when needed (about 20 s).
+  Future<void> rankChoices({bool runModel = false}) async {
+    if (_job != null || !canRank) return;
+    if (!runModel && !rankIsQuick) return;
+    final track = lyrics.track!;
+    final key = lyrics.shownKey!;
+    final path = storedAudioOf!(track)!;
+    final bytes = File(path).lengthSync();
+    final wanted = [
+      for (final choice in lyrics.choices)
+        if ((choice.lyrics?.timed ?? false) && scoreOf(choice.lyrics!) == null)
+          choice.lyrics!,
+    ];
+    final job = _job = FitJob(key, rankJob, const FitRunning(0));
+    notifyListeners();
+    final clock = Stopwatch()..start();
+    try {
+      for (final (i, candidate) in wanted.indexed) {
+        double sure;
+        try {
+          final result = await fit(key, path, candidate.lines, (done, total) {
+            final share = total == 0 ? 0 : done / total;
+            _move(job, FitRunning((i + share) / wanted.length));
+          });
+          sure = result.sureShare;
+        } on FitError {
+          sure = 0; // Lyrics the aligner cannot read do not fit.
+        }
+        _scores['$key|${candidate.source}'] = (
+          hash: lyricsHashOf(candidate),
+          bytes: bytes,
+          sure: sure,
+        );
+        _move(job, FitRunning((i + 1) / wanted.length));
+      }
+      log?.call(
+        'lyrics rank ${wanted.length} sources ${clock.elapsedMilliseconds} ms',
+      );
+    } on Object catch (error) {
+      log?.call(
+        'lyrics rank failed ${error.runtimeType} ${clock.elapsedMilliseconds} ms',
+      );
+    } finally {
+      _job = null;
+      notifyListeners();
+    }
+  }
+
   /// Stops the model's download; what came stays for the next try.
   void stopDownload() => _stop?.stop();
 
@@ -186,7 +292,7 @@ class LyricsFitter extends ChangeNotifier {
     final key = lyrics.shownKey;
     final state = lyrics.state;
     if (_job != null) {
-      return const FitFailed('Another song is being fitted; wait for it.');
+      return const FitFailed('Another fit is running; wait for it.');
     }
     if (track == null || key == null || state is! LyricsShown) {
       return const FitFailed('No lyrics to fit.', retry: false);
