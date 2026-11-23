@@ -470,6 +470,26 @@ void main() {
       expect(seeks, isEmpty, reason: "another version's times are not these");
     });
 
+    testWidgets("another version's plain words say so (Codex review)", (
+      tester,
+    ) async {
+      f.stored['lrclib:1_1'] = (
+        lyrics: const Lyrics(
+          source: 'lrclib',
+          lines: [LyricLine('Первая строка'), LyricLine('Second line')],
+        ),
+        md5: null,
+        fetchedAtMs: f.nowMs,
+        meta: '{"exact":true,"seconds":180,"diff":20,"other":true}',
+      );
+      f.sources = [_StoredOnly('lrclib')];
+      await open(tester);
+      expect(
+        tester.widget<Text>(find.byKey(const ValueKey('lyrics-credit'))).data,
+        'Words of another version (20 s shorter), from LRCLIB',
+      );
+    });
+
     testWidgets('the next song brings its own lyrics', (tester) async {
       f.answer = (key) => key == '1_1' ? timed : plain;
       await open(tester);

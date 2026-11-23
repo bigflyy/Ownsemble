@@ -162,7 +162,9 @@ class _LyricsPageState extends State<LyricsPage> {
         final version = other == null
             ? ''
             : 'another version (${LyricsController.otherLengthText(other)})';
-        final credit = other != null && lyrics.timed
+        final credit = other != null && !lyrics.timed
+            ? 'Words of $version, from $label'
+            : other != null
             ? fitted
                   ? 'From $label, $version, fitted to this recording'
                   : widget.lyrics.fitFor(lyrics) != null

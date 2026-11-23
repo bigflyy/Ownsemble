@@ -235,11 +235,9 @@ void main() {
         'sure ${fit.sureShare.toStringAsFixed(2)}; memory $memoryBefore -> '
         '$peak -> ${rssMb()} MB (debug)',
       );
-      if (!fit.fits) {
-        expect(credit(), contains('do not fit'));
-        expect(find.byKey(const ValueKey('lyrics-timed')), findsNothing);
-        continue;
-      }
+      // These uploads are known to fit (research and session 46): a no
+      // match here is a regression, not an answer (Codex review).
+      expect(fit.fits, isTrue, reason: '#$index should fit');
       final fitted = lyrics.timedOf(shown);
       row['starts'] = {
         'source': [for (final l in shown.lines) l.startMs],

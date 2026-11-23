@@ -458,7 +458,12 @@ class LyricsController extends ChangeNotifier {
     final age = _now() - stored.fetchedAtMs;
     final lyrics = stored.lyrics;
     if (lyrics != null) {
-      final old = source == 'vk' && age > lyricsRefreshAfter.inMilliseconds;
+      // Another version is asked again like a "none": the source may have
+      // the song's own length by now (Codex review).
+      final old = source == 'vk'
+          ? age > lyricsRefreshAfter.inMilliseconds
+          : _isOtherVersion(stored.meta) &&
+                age > lyricsMissingRecheckAfter.inMilliseconds;
       return (lyrics: lyrics, meta: stored.meta, ask: old);
     }
     return (
@@ -588,6 +593,17 @@ class LyricsController extends ChangeNotifier {
       }
       save(source, key, null);
       return (null, null);
+    }
+    if (found.otherVersion) {
+      // Another version never replaces lyrics of the song's own length
+      // stored before (Codex review: the chooser's ask again); only their
+      // time moves.
+      final kept = load(source, key);
+      final keptLyrics = kept?.lyrics;
+      if (keptLyrics != null && !_isOtherVersion(kept!.meta)) {
+        save(source, key, keptLyrics, meta: kept.meta);
+        return (keptLyrics, kept.meta);
+      }
     }
     final meta = found.metaToJson();
     save(source, key, found.lyrics, meta: meta);
@@ -859,15 +875,17 @@ class LyricsController extends ChangeNotifier {
     final key = _shownKey;
     final track = _track;
     if (key == null || track == null || lyrics.source == 'vk') return null;
-    // Read once per lyrics shown, not on every build: stored lyrics are
-    // saved anew (a new object) whenever their facts change.
-    final cached = _lastOther;
-    if (cached != null &&
-        identical(cached.$1, lyrics) &&
-        cached.$2 == '$key|${track.durationSec}') {
-      return cached.$3;
-    }
-    final meta = load(lyrics.source, key)?.meta;
+    // Read once per lyrics object, not on every build, and kept with that
+    // object: lyrics stored again later (a refresh) come as a new object
+    // with their own facts, and a chooser preview of other lyrics does not
+    // move what the lyrics shown are (Codex review).
+    final place = '$key|${track.durationSec}';
+    final cached = _otherOf[lyrics];
+    if (cached != null && cached.place == place) return cached.diff;
+    final stored = load(lyrics.source, key);
+    // Facts of other lyrics than these say nothing about these.
+    if (stored?.lyrics != lyrics) return null;
+    final meta = stored!.meta;
     int? diff;
     try {
       final facts = meta == null ? null : jsonDecode(meta);
@@ -880,11 +898,22 @@ class LyricsController extends ChangeNotifier {
     } on FormatException {
       // Unreadable facts: taken as the song's own lyrics, as before G4.
     }
-    _lastOther = (lyrics, '$key|${track.durationSec}', diff);
+    _otherOf[lyrics] = (place: place, diff: diff);
     return diff;
   }
 
-  (Lyrics, String, int?)? _lastOther;
+  final _otherOf = Expando<({String place, int? diff})>();
+
+  /// Whether stored facts mark another version's lyrics (G4a).
+  static bool _isOtherVersion(String? meta) {
+    if (meta == null) return false;
+    try {
+      final facts = jsonDecode(meta);
+      return facts is Map && facts['other'] == true;
+    } on FormatException {
+      return false;
+    }
+  }
 
   /// How another version's length compares with the song's, in words:
   /// "25 s longer", "60 min shorter" ([otherVersionOf]'s seconds).

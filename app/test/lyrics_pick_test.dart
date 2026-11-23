@@ -261,6 +261,47 @@ void main() {
       expect(again.qq.asked, hasLength(1));
       expect(again.lyrics!.source, 'qq', reason: 'QQ has the own length');
     });
+
+    test(
+      'another version is asked again after 7 days (Codex review)',
+      () async {
+        final f = Fixture()
+          ..lrclib.answer = timedOf('lrclib')
+          ..lrclib.otherVersion = true
+          ..lrclib.lengthDiff = 30;
+        f.controller.show(song());
+        await pumpEventQueue();
+        expect(f.lrclib.asked, hasLength(1));
+        final later = Fixture()
+          ..stored.addAll(f.stored)
+          ..nowMs = f.nowMs + 8 * day
+          ..lrclib.answer = timedOf('lrclib');
+        later.controller.show(song());
+        await pumpEventQueue();
+        expect(later.lrclib.asked, hasLength(1), reason: 'own length now');
+        expect(later.stored['lrclib:1_1']!.meta, isNot(contains('other')));
+      },
+    );
+
+    test("asked again, another version never replaces the song's own "
+        'lyrics (Codex review)', () async {
+      final f = Fixture()..lrclib.answer = timedOf('lrclib');
+      f.controller.show(song());
+      await pumpEventQueue();
+      final own = f.stored['lrclib:1_1']!;
+      f.lrclib
+        ..answer = plainOf('lrclib')
+        ..otherVersion = true
+        ..lengthDiff = 40;
+      f.nowMs += day;
+      await f.controller.askAll(again: true);
+      await pumpEventQueue();
+      final kept = f.stored['lrclib:1_1']!;
+      expect(kept.lyrics, own.lyrics);
+      expect(kept.meta, own.meta);
+      expect(kept.fetchedAtMs, f.nowMs, reason: 'only its time moves');
+      expect(f.lyrics!.timed, isTrue);
+    });
   });
 
   test('stored answers show at once and offline, without asking', () async {

@@ -334,6 +334,18 @@ void main() {
       lyrics.forgetFit('lrclib');
       expect(lyrics.timedOf(shown).timed, isFalse, reason: 'undone: words');
 
+      // A refresh stores the song's own lyrics while the old ones still
+      // show, and a chooser preview looks at others: the lyrics shown keep
+      // what they are (Codex review).
+      const refreshed = Lyrics(
+        source: 'lrclib',
+        lines: [LyricLine('Новая', startMs: 1000)],
+      );
+      store.saveLyrics('lrclib', '1_1', refreshed, meta: '{"exact":true}');
+      expect(lyrics.otherVersionOf(refreshed), isNull);
+      expect(lyrics.otherVersionOf(shown), 25);
+      expect(lyrics.timedOf(shown).timed, isFalse);
+
       // Lyrics of the song's own length, and VK's, are not another version.
       store.saveLyrics('lrclib', '1_1', lrclib, meta: '{"exact":true}');
       expect(lyrics.otherVersionOf(lrclib), isNull);
