@@ -17,8 +17,12 @@
 // saves the song and fits. When the words fit: the lines are timed, the
 // heading says "timed by fitting", the stepper shows, a click seeks to a
 // fitted start, the fit is still there after the song is opened again,
-// and "Show words only" goes back to words. A no-match is reported, not
-// failed: the truth of these songs is not known yet.
+// and "Show words only" goes back to words. Every song's verdict is pinned
+// ([expectedFits], plan 10 H4, user 2026-11-23): a song that fits when it
+// should be refused, or the other way, fails the test. Around a verse
+// break the lit row is checked against the fitted starts (the line before
+// the break, the break itself, the line after it), and a refused song is
+// still refused after it is opened again.
 // Written to <copy>/plain-live.json: per song the fit's numbers and the
 // fitted starts; and, for scoring against a heard truth
 // (experiments/f2-timing/score_plain_fit.py), the lines' words and the
@@ -38,6 +42,7 @@ import 'package:ownsemble/main.dart' as app;
 import 'package:ownsemble/playback/player_service.dart';
 import 'package:ownsemble/ui/library_controller.dart';
 import 'package:ownsemble/ui/library_screen.dart';
+import 'package:ownsemble/ui/lyrics_page.dart' show lyricsLeadMs;
 import 'package:path/path.dart' as p;
 import 'package:sqlite3/sqlite3.dart';
 
@@ -45,6 +50,21 @@ const dataDir = String.fromEnvironment('OWNSEMBLE_DATA');
 const session = String.fromEnvironment('OWNSEMBLE_SESSION');
 const plainSongs = String.fromEnvironment('OWNSEMBLE_PLAIN');
 const modelName = 'mms_fa.int8.onnx';
+
+/// The verdict each test song must get, by its index in OWNSEMBLE_PLAIN
+/// (plan 10 H2e, checked against a heard truth: the five that fit have
+/// 72-100% of their heard lines within 1 s; #31's words are not of its
+/// 336 s file and #48's placed lines are 28% within 1 s, so both must be
+/// refused).
+const expectedFits = {
+  '3': true,
+  '28': true,
+  '94': true,
+  '114': true,
+  '116': true,
+  '31': false,
+  '48': false,
+};
 
 // ignore: avoid_print
 void say(String line) => print(line);
@@ -92,6 +112,13 @@ void main() {
       for (final item in plainSongs.split(','))
         (index: item.split('=').first, key: item.split('=').last),
     ];
+    for (final (:index, key: _) in wanted) {
+      expect(
+        expectedFits.containsKey(index),
+        isTrue,
+        reason: '#$index has no pinned verdict in expectedFits',
+      );
+    }
 
     final copy = Directory('$dataDir-plain');
     if (copy.existsSync()) copy.deleteSync(recursive: true);
@@ -177,6 +204,37 @@ void main() {
       expect(timings.last.sampleRate, isNotNull, reason: 'mpv decoded it');
     }
 
+    /// The row lit now: the line drawn bold, -1 when none is.
+    int litRow(int count) {
+      for (var i = 0; i < count; i++) {
+        final style = find.descendant(
+          of: find.byKey(ValueKey('lyrics-line-$i')),
+          matching: find.byType(AnimatedDefaultTextStyle),
+        );
+        if (style.evaluate().isEmpty) continue;
+        final weight = tester
+            .widget<AnimatedDefaultTextStyle>(style.first)
+            .style
+            .fontWeight;
+        if (weight == FontWeight.w700) return i;
+      }
+      return -1;
+    }
+
+    /// Paused at [ms] into the song: waits for the player to be there and
+    /// for the lit row to settle; that row.
+    Future<int> litAt(int ms, int count) async {
+      await player.seek(Duration(milliseconds: ms));
+      await waitUntil(
+        tester,
+        () => (player.position.inMilliseconds - ms).abs() <= 300,
+        timeout: const Duration(seconds: 15),
+        what: 'the seek to $ms ms',
+      );
+      await tester.pump(const Duration(milliseconds: 400));
+      return litRow(count);
+    }
+
     final rows = <Map<String, Object?>>[];
     var fitted = 0;
     for (final (:index, :key) in wanted) {
@@ -250,12 +308,37 @@ void main() {
           'audio': fitter.storedAudioOf?.call(song),
         }),
       );
+      expect(
+        fit.fits,
+        expectedFits[index],
+        reason:
+            '#$index: pinned ${expectedFits[index]! ? 'fits' : 'refused'}, '
+            'got sure ${fit.sureShare.toStringAsFixed(2)}',
+      );
       if (!fit.fits) {
         expect(
           find.byKey(const ValueKey('lyrics-fit-no-match')),
           findsOneWidget,
         );
         expect(credit(), contains('could not be matched'));
+        // Opened again (another song, then this one): still refused, the
+        // words shown, no timed list.
+        final other = library.all.firstWhere(
+          (t) => t.inLibrary && t.sourceKey != key,
+        );
+        await play(other);
+        await showLyricsOf(other, 'other');
+        await play(song);
+        await showLyricsOf(song, index);
+        expect(lyrics.fitFor(shown)?.fits, isFalse);
+        expect(
+          find.byKey(const ValueKey('lyrics-fit-no-match')),
+          findsOneWidget,
+        );
+        expect(credit(), contains('could not be matched'));
+        expect(find.byKey(const ValueKey('lyrics-timed')), findsNothing);
+        row['reopened'] = 'still refused';
+        say('#$index refused, still refused after opening it again');
         await player.stop();
         continue;
       }
@@ -303,6 +386,47 @@ void main() {
           '#$index clicked line $target: at ${player.position.inMilliseconds}'
           ' ms, fitted $targetMs',
         );
+      }
+      // Around the first verse break with room on both sides: paused in
+      // the line before it, in the break, and in the line after it, the
+      // lit row is the one the fitted starts say (the same lead as the
+      // screen), and the break lights during its pause.
+      final count = timed.lines.length;
+      int? gap;
+      for (var i = 1; i + 1 < count; i++) {
+        final before = timed.lines[i - 1], after = timed.lines[i + 1];
+        if (timed.lines[i].isGap &&
+            !before.isGap &&
+            !after.isGap &&
+            !before.label &&
+            !after.label &&
+            timed.lines[i].startMs! - before.startMs! >= 1000 &&
+            after.startMs! - timed.lines[i].startMs! >= 1000) {
+          gap = i;
+          break;
+        }
+      }
+      if (gap != null) {
+        final points = <String, int>{};
+        for (final (name, line) in [
+          ('before', gap - 1),
+          ('break', gap),
+          ('after', gap + 1),
+        ]) {
+          // Halfway into the row's own span, less the screen's lead.
+          final start = timed.lines[line].startMs!;
+          final end = timed.lines[line + 1 < count ? line + 1 : line].startMs!;
+          final at = (start + end) ~/ 2 - lyricsLeadMs;
+          final lit = await litAt(at, count);
+          expect(lit, timed.lineAt(at + lyricsLeadMs), reason: '#$index $name');
+          expect(lit, line, reason: '#$index $name the break');
+          points[name] = at;
+        }
+        row['verseBreak'] = {'gap': gap, 'atMs': points};
+        say('#$index verse break at row $gap: lit rows right');
+      } else {
+        row['verseBreak'] = 'none with 1 s on both sides';
+        say('#$index has no verse break with 1 s on both sides');
       }
       await playback.playOrPause();
 
