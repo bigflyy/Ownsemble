@@ -92,6 +92,15 @@ Float32List decodeForModel(
   );
   final handle = create();
   if (handle == nullptr) throw const DecodeError('mpv_create failed');
+  // mpv must have stopped writing before the samples are read, and
+  // mpv_terminate_destroy may be called only once.
+  var destroyed = false;
+  void destroyOnce() {
+    if (destroyed) return;
+    destroyed = true;
+    destroy(handle);
+  }
+
   try {
     using((arena) {
       void option(String name, String value) {
@@ -146,15 +155,18 @@ Float32List decodeForModel(
       }
       break;
     }
-  } finally {
-    destroy(handle);
-  }
-  try {
+    destroyOnce();
     final bytes = out.readAsBytesSync();
     return Float32List.sublistView(bytes, 0, bytes.length ~/ 4 * 4);
   } on FileSystemException catch (e) {
     throw DecodeError('no samples written: ${e.osError?.message}');
   } finally {
-    if (out.existsSync()) out.deleteSync();
+    destroyOnce();
+    // Also after a failure: samples written before it must not pile up.
+    try {
+      if (out.existsSync()) out.deleteSync();
+    } on FileSystemException {
+      // Still open somewhere; the temp folder is cleaned by Windows.
+    }
   }
 }
