@@ -292,6 +292,58 @@ void main() {
       expect(store.lyricsOffsetOf('1_1', 'lrclib'), 1000);
     });
 
+    test('another version shows its words until fitted (G4c)', () {
+      // The studio song is 25 s longer than this live upload.
+      store.saveLyrics(
+        'lrclib',
+        '1_1',
+        lrclib,
+        meta: '{"exact":true,"seconds":225,"diff":25,"other":true}',
+      );
+      final lyrics = controllerOf()..show(playing);
+      final shown = (lyrics.state as LyricsShown).lyrics;
+      expect(shown.timed, isTrue, reason: 'stored and fitted as they came');
+      expect(lyrics.otherVersionOf(shown), 25);
+      final words = lyrics.timedOf(shown);
+      expect(words.timed, isFalse);
+      expect(words.lines.map((line) => line.text), [
+        for (final line in shown.lines) line.text,
+      ]);
+      expect(lyrics.timedOf(shown), same(words), reason: 'made once');
+      lyrics.shiftShown(500);
+      expect(lyrics.offsetOf('lrclib'), 0, reason: 'no timing to move');
+
+      lyrics.keepFit('1_1', 'lrclib', fitOf(shown));
+      expect(lyrics.timedOf(shown).timed, isTrue);
+      expect(lyrics.timedOf(shown).lines.first.startMs, 22000);
+      lyrics.shiftShown(500);
+      expect(lyrics.offsetOf('lrclib'), 500, reason: 'the fit can be moved');
+
+      lyrics.keepFit(
+        '1_1',
+        'lrclib',
+        StoredFit(
+          lyricsHash: lyricsHashOf(shown),
+          audioBytes: 4000000,
+          starts: null,
+          sureShare: 0.3,
+          fittedAtMs: 1,
+        ),
+      );
+      expect(lyrics.timedOf(shown).timed, isFalse, reason: 'does not fit');
+      lyrics.forgetFit('lrclib');
+      expect(lyrics.timedOf(shown).timed, isFalse, reason: 'undone: words');
+
+      // Lyrics of the song's own length, and VK's, are not another version.
+      store.saveLyrics('lrclib', '1_1', lrclib, meta: '{"exact":true}');
+      expect(lyrics.otherVersionOf(lrclib), isNull);
+      expect(lyrics.timedOf(lrclib), same(lrclib));
+      expect(
+        lyrics.otherVersionOf(const Lyrics(source: 'vk', lines: [])),
+        isNull,
+      );
+    });
+
     group('fitter', () {
       late Directory dir;
       setUp(() {

@@ -1237,7 +1237,10 @@ class _LibraryScreenState extends State<LibraryScreen> {
                           _lyricsAskAgain(widget.lyrics!),
                         if (view.kind == ViewKind.lyrics &&
                             switch (widget.lyrics?.state) {
-                              LyricsShown(:final lyrics) => lyrics.timed,
+                              // Another version's words have no timing to
+                              // move until fitted (G4c).
+                              LyricsShown(:final lyrics) =>
+                                widget.lyrics!.timedOf(lyrics).timed,
                               _ => false,
                             })
                           LyricsTimingControl(lyrics: widget.lyrics!),
@@ -1474,6 +1477,9 @@ class _LibraryScreenState extends State<LibraryScreen> {
     final source = state.lyrics.source;
     final offset = state.lyrics.timed ? lyrics.shownOffset : 0;
     final fit = state.lyrics.timed ? lyrics.fitFor(state.lyrics) : null;
+    final other = fit == null && state.lyrics.timed
+        ? lyrics.otherVersionOf(state.lyrics)
+        : null;
     final stage = widget.lyricsFitter?.stageOf(lyrics.shownKey, source);
     if (stage != null) {
       return '$song · from ${lyricsSourceLabel(source)} · '
@@ -1486,6 +1492,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
             : fit.fits
             ? ', fitted to this recording'
             : ', may not match this recording'}'
+        '${other == null ? '' : ', words of another version'}'
         '${offset == 0 ? '' : ', ${lyricsOffsetText(offset)}'}';
   }
 

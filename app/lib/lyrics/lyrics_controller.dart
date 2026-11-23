@@ -32,6 +32,7 @@ library;
 
 import 'dart:async';
 import 'dart:convert';
+import 'dart:math' show min;
 
 import 'package:flutter/foundation.dart';
 
@@ -132,6 +133,7 @@ class LyricsChoice {
     this.title,
     this.seconds,
     this.lengthDiff,
+    this.otherVersion = false,
     this.exact = false,
     this.asking = false,
   });
@@ -149,6 +151,9 @@ class LyricsChoice {
 
   /// Seconds between that length and the played song's; null when unknown.
   final int? lengthDiff;
+
+  /// Another version's lyrics (G4a): a song of another length.
+  final bool otherVersion;
 
   /// Whether the names agree exactly (not only after transliteration).
   final bool exact;
@@ -344,7 +349,7 @@ class LyricsController extends ChangeNotifier {
     final route = routeOf(track);
     if (route == null) return;
     final stored = _storedPick(route.key);
-    if (!stored.mustAsk || (stored.best?.timed ?? false)) return;
+    if (!stored.mustAsk || stored.settled) return;
     for (var attempt = 0; attempt < 2; attempt++) {
       try {
         await _shared(route, track);
@@ -465,7 +470,7 @@ class LyricsController extends ChangeNotifier {
 
   /// The pick from stored rows only, and whether a source the walk reaches
   /// must still be asked.
-  ({Lyrics? best, bool mustAsk}) _storedPick(String key) {
+  ({Lyrics? best, bool settled, bool mustAsk}) _storedPick(String key) {
     final pick = _Best(_rank);
     var mustAsk = false;
     for (final stage in _stages) {
@@ -475,9 +480,9 @@ class LyricsController extends ChangeNotifier {
         if (lyrics != null) pick.consider(lyrics, stored.meta);
         if (stored.ask) mustAsk = true;
       }
-      if (pick.best?.timed ?? false) break;
+      if (pick.settled) break;
     }
-    return (best: pick.best, mustAsk: mustAsk);
+    return (best: pick.best, settled: pick.settled, mustAsk: mustAsk);
   }
 
   /// Walks the sources for [route]'s upload: stored answers first, asking
@@ -525,7 +530,7 @@ class LyricsController extends ChangeNotifier {
 
     for (final stage in _stages) {
       await Future.wait([for (final source in stage) walk(source)]);
-      if (pick.best?.timed ?? false) break;
+      if (pick.settled) break;
     }
     if (pick.best == null && failures.isNotEmpty) {
       final vk = failures.where((failure) => failure.$1 == 'vk');
@@ -693,6 +698,7 @@ class LyricsController extends ChangeNotifier {
       title: facts['title'] as String?,
       seconds: (facts['seconds'] as num?)?.toInt(),
       lengthDiff: (facts['diff'] as num?)?.toInt(),
+      otherVersion: facts['other'] == true,
       exact: facts['exact'] == true,
       asking: asking,
     );
@@ -845,11 +851,67 @@ class LyricsController extends ChangeNotifier {
   /// Whether [lyrics] show fitted to the recording.
   bool isFitted(Lyrics lyrics) => fitFor(lyrics)?.fits ?? false;
 
+  /// How many seconds longer (> 0) or shorter the song of [lyrics] is than
+  /// the song shown, when they are another version's lyrics (G4a): their
+  /// times are that version's, not this recording's. Null for lyrics of
+  /// the song's own length, VK's, and lyrics not stored for the song shown.
+  int? otherVersionOf(Lyrics lyrics) {
+    final key = _shownKey;
+    final track = _track;
+    if (key == null || track == null || lyrics.source == 'vk') return null;
+    // Read once per lyrics shown, not on every build: stored lyrics are
+    // saved anew (a new object) whenever their facts change.
+    final cached = _lastOther;
+    if (cached != null &&
+        identical(cached.$1, lyrics) &&
+        cached.$2 == '$key|${track.durationSec}') {
+      return cached.$3;
+    }
+    final meta = load(lyrics.source, key)?.meta;
+    int? diff;
+    try {
+      final facts = meta == null ? null : jsonDecode(meta);
+      if (facts is Map && facts['other'] == true) {
+        final seconds = (facts['seconds'] as num?)?.toInt();
+        diff = seconds == null
+            ? (facts['diff'] as num?)?.toInt() ?? 0
+            : seconds - track.durationSec;
+      }
+    } on FormatException {
+      // Unreadable facts: taken as the song's own lyrics, as before G4.
+    }
+    _lastOther = (lyrics, '$key|${track.durationSec}', diff);
+    return diff;
+  }
+
+  (Lyrics, String, int?)? _lastOther;
+
+  /// How another version's length compares with the song's, in words:
+  /// "25 s longer", "60 min shorter" ([otherVersionOf]'s seconds).
+  static String otherLengthText(int diffSeconds) {
+    final size = diffSeconds.abs();
+    final amount = size >= 120 ? '${(size / 60).round()} min' : '$size s';
+    return diffSeconds == 0
+        ? 'another length'
+        : '$amount ${diffSeconds > 0 ? 'longer' : 'shorter'}';
+  }
+
   /// [lyrics] as they show for the song: fitted to its recording when a
-  /// fit is kept for them, else as the source timed them.
+  /// fit is kept for them, else as the source timed them; another
+  /// version's lyrics (G4c) show their words only until a fit places them.
   Lyrics timedOf(Lyrics lyrics) {
     final starts = fitFor(lyrics)?.starts;
-    if (starts == null) return lyrics;
+    if (starts == null) {
+      if (!lyrics.timed || otherVersionOf(lyrics) == null) return lyrics;
+      final words = _lastWords;
+      if (words != null && identical(words.$1, lyrics)) return words.$2;
+      final plain = Lyrics(
+        source: lyrics.source,
+        lines: [for (final line in lyrics.lines) LyricLine(line.text)],
+      );
+      _lastWords = (lyrics, plain);
+      return plain;
+    }
     final last = _lastTimed;
     if (last != null &&
         identical(last.$1, lyrics) &&
@@ -862,6 +924,7 @@ class LyricsController extends ChangeNotifier {
   }
 
   (Lyrics, List<int>, Lyrics)? _lastTimed;
+  (Lyrics, Lyrics)? _lastWords;
 
   /// Keeps [fit] of [source]'s lines for the upload [key] (null forgets
   /// it). A new fit starts with no hand offset of its own; the offset of
@@ -940,7 +1003,9 @@ class LyricsController extends ChangeNotifier {
 
   /// The offset of the lyrics the place shows now.
   int get shownOffset => switch (_state) {
-    LyricsShown(:final lyrics) => offsetOf(lyrics.source),
+    LyricsShown(:final lyrics) when timedOf(lyrics).timed => offsetOf(
+      lyrics.source,
+    ),
     _ => 0,
   };
 
@@ -949,7 +1014,7 @@ class LyricsController extends ChangeNotifier {
   /// [lyricsOffsetLimitMs] and on [lyricsOffsetStepMs] steps.
   void shiftShown(int deltaMs) {
     final state = _state;
-    if (state is! LyricsShown || !state.lyrics.timed) return;
+    if (state is! LyricsShown || !timedOf(state.lyrics).timed) return;
     setOffset(state.lyrics.source, offsetOf(state.lyrics.source) + deltaMs);
   }
 
@@ -980,23 +1045,33 @@ class LyricsController extends ChangeNotifier {
   /// How good an answer is to show: VK timed, outside timed, VK plain,
   /// outside plain (the user's "timed first"); among outside answers of one
   /// kind exact names first, then the closer length, then the earlier
-  /// source.
+  /// source. Another version's lyrics (G4a) come after all of them: their
+  /// timing is not this recording's, and they show as words until fitted.
   int _rank(Lyrics lyrics, String? meta) {
     final vk = lyrics.source == 'vk';
     final base = lyrics.timed ? (vk ? 4000 : 3000) : (vk ? 2000 : 1000);
     if (vk) return base;
     var exact = false;
+    var other = false;
     int? diff;
     try {
       final facts = meta == null ? null : jsonDecode(meta);
       if (facts is Map) {
         exact = facts['exact'] == true;
+        other = facts['other'] == true;
         diff = (facts['diff'] as num?)?.toInt();
       }
     } on FormatException {
       // Unreadable facts rank last among their kind.
     }
     final order = sources.indexWhere((source) => source.id == lyrics.source);
+    if (other) {
+      // 300-799: below every answer of the song's own length.
+      return 500 +
+          (lyrics.timed ? 200 : 0) -
+          min(diff ?? 99, 99) * 2 -
+          (order < 0 ? 9 : order);
+    }
     return base +
         (exact ? 100 : 0) -
         (diff ?? 9) * 10 -
@@ -1020,6 +1095,10 @@ class _Best {
 
   Lyrics? best;
   int _bestRank = 0;
+
+  /// Whether the walk can stop: the best is timed and of the song's own
+  /// length (another version ranks below 1000, see [LyricsController]).
+  bool get settled => best != null && best!.timed && _bestRank >= 1000;
 
   void consider(Lyrics lyrics, String? meta) {
     final rank = _rank(lyrics, meta);

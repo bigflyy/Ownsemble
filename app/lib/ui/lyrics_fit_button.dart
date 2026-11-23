@@ -162,7 +162,12 @@ class LyricsFitButton extends StatelessWidget {
           key: const ValueKey('lyrics-unfit'),
           // The upload the menu was opened for, even if the song moves on.
           onTap: () => _lyrics.forgetFit(shown.source, key: upload),
-          child: Text("Use $label's own timing"),
+          // Another version's own timing is not this recording's (G4c).
+          child: Text(
+            _lyrics.otherVersionOf(shown) != null
+                ? 'Show words only'
+                : "Use $label's own timing",
+          ),
         ),
       ],
       child: IgnorePointer(

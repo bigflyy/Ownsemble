@@ -278,7 +278,11 @@ class _LyricsChoicesPageState extends State<LyricsChoicesPage> {
                     label: const Text('All sources'),
                   ),
                   Text(
-                    '${choice.label}, ${lyrics.timed ? 'timed' : 'words only'}'
+                    '${choice.label}, ${widget.lyrics.timedOf(lyrics).timed
+                        ? 'timed'
+                        : choice.otherVersion && lyrics.timed
+                        ? 'words of another version'
+                        : 'words only'}'
                     ' · ${_lengthNote(choice)}'
                     '${widget.lyrics.isFitted(lyrics) ? ' · fitted to this recording' : ''}'
                     '${_offsetNote(lyrics.timed ? widget.lyrics.offsetOf(choice.source) : 0)}',
@@ -397,6 +401,13 @@ class _ChoiceRow extends StatelessWidget {
                 'Only ${(sure * 100).round()}% of the lines were found in '
                     'this recording: these lyrics may be of another version.',
               ),
+      if (found && choice.otherVersion)
+        (
+          'another version',
+          'From a song of another length (${_lengthNote(choice)}), such as '
+              'the studio song of a live upload: the words show without '
+              'timing until you fit them to this recording.',
+        ),
       if (inUse) ('in use', 'The Lyrics place shows these.'),
       if (yours)
         ('your choice', 'You chose these; the app keeps them for this song.')

@@ -158,7 +158,19 @@ class _LyricsPageState extends State<LyricsPage> {
         final label = lyricsSourceLabel(lyrics.source);
         final yours = widget.lyrics.chosen == lyrics.source;
         final fitted = widget.lyrics.isFitted(lyrics);
-        final credit = lyrics.timed
+        final other = widget.lyrics.otherVersionOf(lyrics);
+        final version = other == null
+            ? ''
+            : 'another version (${LyricsController.otherLengthText(other)})';
+        final credit = other != null && lyrics.timed
+            ? fitted
+                  ? 'From $label, $version, fitted to this recording'
+                  : widget.lyrics.fitFor(lyrics) != null
+                  ? 'Words of $version, from $label: they do not fit this '
+                        'recording'
+                  : 'Words of $version, from $label. Fit them to this '
+                        'recording to time them.'
+            : lyrics.timed
             ? 'From $label${yours ? ' (your choice)' : ''}'
                   '${fitted ? ', fitted to this recording' : ''}'
             : yours

@@ -10,6 +10,7 @@ import 'package:ownsemble/library/library_records.dart';
 import 'package:ownsemble/library/track.dart';
 import 'package:ownsemble/lyrics/lyrics.dart';
 import 'package:ownsemble/lyrics/lyrics_controller.dart';
+import 'package:ownsemble/lyrics/lyrics_sources.dart';
 import 'package:ownsemble/ui/lyrics_page.dart';
 import 'package:ownsemble/ui/theme.dart';
 import 'package:ownsemble/vk/vk_client.dart';
@@ -71,7 +72,11 @@ class Fixture {
   Object? Function(String key) answer = (_) => null;
   Completer<void>? hold;
 
+  /// Outside sources; set before [controller] is first used.
+  List<OutsideLyricsSource> sources = const [];
+
   late final controller = LyricsController(
+    sources: sources,
     load: (source, ref) => stored['$source:$ref'],
     save: (source, ref, lyrics, {md5, meta}) => stored['$source:$ref'] = (
       lyrics: lyrics,
@@ -435,6 +440,36 @@ void main() {
       );
     });
 
+    testWidgets("another version's lyrics show as words, without seeking "
+        '(G4c)', (tester) async {
+      f.stored['lrclib:1_1'] = (
+        lyrics: const Lyrics(
+          source: 'lrclib',
+          lines: [
+            LyricLine('Первая строка', startMs: 1000),
+            LyricLine('Second line', startMs: 4000),
+            LyricLine('Third line', startMs: 9000),
+          ],
+        ),
+        md5: null,
+        fetchedAtMs: f.nowMs,
+        meta: '{"exact":true,"seconds":225,"diff":25,"other":true}',
+      );
+      f.sources = [_StoredOnly('lrclib')];
+      position = const Duration(milliseconds: 4200);
+      await open(tester);
+      expect(
+        tester.widget<Text>(find.byKey(const ValueKey('lyrics-credit'))).data,
+        'Words of another version (25 s longer), from LRCLIB. Fit them to '
+        'this recording to time them.',
+      );
+      expect(find.byKey(const ValueKey('lyrics-timed')), findsNothing);
+      expect(find.text('Second line'), findsOneWidget);
+      await tester.tap(find.text('Second line'));
+      await settle(tester);
+      expect(seeks, isEmpty, reason: "another version's times are not these");
+    });
+
     testWidgets('the next song brings its own lyrics', (tester) async {
       f.answer = (key) => key == '1_1' ? timed : plain;
       await open(tester);
@@ -491,4 +526,15 @@ void main() {
       expect(tester.takeException(), isNull);
     });
   });
+}
+
+/// An outside source with nothing to add: only its stored answers show.
+class _StoredOnly implements OutsideLyricsSource {
+  _StoredOnly(this.id);
+
+  @override
+  final String id;
+
+  @override
+  Future<LyricsCandidate?> find(SongNames song) async => null;
 }

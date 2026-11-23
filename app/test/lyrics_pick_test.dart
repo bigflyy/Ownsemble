@@ -50,6 +50,9 @@ class FakeSource implements OutsideLyricsSource {
   Object? answer;
   NameMatch names = NameMatch.exact;
   int lengthDiff = 0;
+
+  /// Answers lyrics of another version of the song (G4a).
+  bool otherVersion = false;
   Completer<void>? hold;
   final asked = <SongNames>[];
 
@@ -68,6 +71,7 @@ class FakeSource implements OutsideLyricsSource {
       seconds: song.seconds + lengthDiff,
       names: names,
       lengthDiff: lengthDiff,
+      otherVersion: otherVersion,
     );
   }
 }
@@ -192,6 +196,71 @@ void main() {
     expect(f.vkAsked, ['1_1']);
     expect(f.lrclib.asked, hasLength(1));
     expect(f.qq.asked, hasLength(1));
+  });
+
+  group('another version (G4b)', () {
+    test('only another version: shown, and every source was asked', () async {
+      final f = Fixture()
+        ..lrclib.answer = timedOf('lrclib')
+        ..lrclib.otherVersion = true
+        ..lrclib.lengthDiff = 3651;
+      f.controller.show(song());
+      await pumpEventQueue();
+      expect(f.lyrics!.source, 'lrclib');
+      expect(f.stored['lrclib:1_1']!.meta, contains('"other":true'));
+      expect(f.netease.asked, hasLength(1), reason: 'the walk went on');
+      expect(f.qq.asked, hasLength(1));
+    });
+
+    test("words of the song's own length beat another version timed", () async {
+      final f = Fixture()
+        ..lrclib.answer = timedOf('lrclib')
+        ..lrclib.otherVersion = true
+        ..lrclib.lengthDiff = 30
+        ..netease.answer = plainOf('netease');
+      f.controller.show(song());
+      await pumpEventQueue();
+      expect(f.lyrics!.source, 'netease');
+      expect(f.lyrics!.timed, isFalse);
+    });
+
+    test('VK words beat another version timed', () async {
+      final f = Fixture()
+        ..vk = plainOf('vk')
+        ..netease.answer = timedOf('netease')
+        ..netease.otherVersion = true
+        ..netease.lengthDiff = 12;
+      f.controller.show(song());
+      await pumpEventQueue();
+      expect(f.lyrics!.source, 'vk');
+    });
+
+    test('the closer of two other versions; stored, the rest is still '
+        'asked', () async {
+      final f = Fixture()
+        ..lrclib.answer = timedOf('lrclib')
+        ..lrclib.otherVersion = true
+        ..lrclib.lengthDiff = 40
+        ..netease.answer = timedOf('netease')
+        ..netease.otherVersion = true
+        ..netease.lengthDiff = 8;
+      f.controller.show(song());
+      await pumpEventQueue();
+      expect(f.lyrics!.source, 'netease');
+
+      // Next time only another version is stored, and QQ's answer is
+      // forgotten: QQ is asked again, LRCLIB and NetEase are not.
+      f.stored.remove('qq:1_1');
+      f.qq.answer = timedOf('qq');
+      final again = Fixture()
+        ..stored.addAll(f.stored)
+        ..qq.answer = timedOf('qq');
+      again.controller.show(song());
+      await pumpEventQueue();
+      expect(again.lrclib.asked, isEmpty);
+      expect(again.qq.asked, hasLength(1));
+      expect(again.lyrics!.source, 'qq', reason: 'QQ has the own length');
+    });
   });
 
   test('stored answers show at once and offline, without asking', () async {
