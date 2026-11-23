@@ -6,7 +6,7 @@ import 'package:sqlite3/sqlite3.dart';
 /// Schema version this build reads and writes (`PRAGMA user_version`).
 ///
 /// 0 is the speed-gate build's single `tracks` table (or an empty file).
-const librarySchemaVersion = 20;
+const librarySchemaVersion = 21;
 
 /// How many colors sources can have; the theme has one per slot, from 1.
 const sourceColorCount = 6;
@@ -60,6 +60,7 @@ void migrateLibrary(Database db, {String? dataDir}) {
     if (version < 18) _addLyricsMeta(db);
     if (version < 19) _addLyricsPicks(db);
     if (version < 20) _addLyricsOffsets(db);
+    if (version < 21) _addLyricsFits(db);
     db.execute('PRAGMA user_version = $librarySchemaVersion');
     db.execute('COMMIT');
   } catch (_) {
@@ -387,6 +388,29 @@ void _addLyricsOffsets(Database db) {
       source TEXT NOT NULL,
       offset_ms INTEGER NOT NULL,
       set_at_ms INTEGER NOT NULL,
+      PRIMARY KEY (ref, source)
+    )
+  ''');
+}
+
+/// Version 21 (plan 10, G2): one source's timed lines fitted to the
+/// recording of an upload ("Fit to this recording"), by the upload's key
+/// (`ref`) and the source, beside the hand offset of version 20.
+/// `lyrics_hash` names the lyrics that were fitted (a fit of older lyrics
+/// is not used), `audio_bytes` the size of the recording's file (a fit of
+/// a file VK swapped since is not used); `starts` is a JSON list with every
+/// line's new start in milliseconds, null when the lyrics did not fit the
+/// recording.
+void _addLyricsFits(Database db) {
+  db.execute('''
+    CREATE TABLE IF NOT EXISTS lyrics_fits (
+      ref TEXT NOT NULL,
+      source TEXT NOT NULL,
+      lyrics_hash TEXT NOT NULL,
+      audio_bytes INTEGER NOT NULL,
+      starts TEXT,
+      sure_share REAL NOT NULL,
+      fitted_at_ms INTEGER NOT NULL,
       PRIMARY KEY (ref, source)
     )
   ''');

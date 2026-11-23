@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:path/path.dart' as p;
 import 'package:sqlite3/sqlite3.dart';
 
+import '../lyrics/fitted_lines.dart' show StoredFit;
 import '../lyrics/lyrics.dart';
 import '../playback/mp3_length.dart' show FileFacts, otherRecordingSeconds;
 
@@ -989,6 +990,61 @@ class LibraryStore implements PlayLog, PlayStatsSource {
         offset_ms = excluded.offset_ms, set_at_ms = excluded.set_at_ms
     ''',
       [ref, source, offsetMs, _now()],
+    );
+  }
+
+  /// [source]'s lines of the song [ref] fitted to its recording (plan 10,
+  /// G2), or null when never fitted.
+  StoredFit? lyricsFitOf(String ref, String source) {
+    final row = _db.select(
+      'SELECT lyrics_hash, audio_bytes, starts, sure_share, fitted_at_ms '
+      'FROM lyrics_fits '
+      'WHERE ref = ? AND source = ?',
+      [ref, source],
+    ).firstOrNull;
+    if (row == null) return null;
+    try {
+      return StoredFit(
+        lyricsHash: row['lyrics_hash'] as String,
+        audioBytes: row['audio_bytes'] as int,
+        starts: StoredFit.startsFromJson(row['starts'] as String?),
+        sureShare: (row['sure_share'] as num).toDouble(),
+        fittedAtMs: row['fitted_at_ms'] as int,
+      );
+    } on FormatException {
+      return null; // Unreadable starts: as if never fitted.
+    }
+  }
+
+  /// Keeps [fit] for [source]'s lines of the song [ref]; null forgets it.
+  void saveLyricsFit(String ref, String source, StoredFit? fit) {
+    if (fit == null) {
+      _db.execute('DELETE FROM lyrics_fits WHERE ref = ? AND source = ?', [
+        ref,
+        source,
+      ]);
+      return;
+    }
+    _db.execute(
+      '''
+      INSERT INTO lyrics_fits
+        (ref, source, lyrics_hash, audio_bytes, starts, sure_share,
+         fitted_at_ms)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT (ref, source) DO UPDATE SET
+        lyrics_hash = excluded.lyrics_hash,
+        audio_bytes = excluded.audio_bytes, starts = excluded.starts,
+        sure_share = excluded.sure_share, fitted_at_ms = excluded.fitted_at_ms
+    ''',
+      [
+        ref,
+        source,
+        fit.lyricsHash,
+        fit.audioBytes,
+        fit.startsToJson(),
+        fit.sureShare,
+        fit.fittedAtMs,
+      ],
     );
   }
 
