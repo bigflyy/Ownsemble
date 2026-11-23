@@ -300,6 +300,260 @@ List<FittedLine> fitLines(
   return fitted;
 }
 
+// Plain words carry notes that are not sung (Codex review of H2): section
+// headers, alone or with a number, a name or ":", and repeat marks.
+final _header = RegExp(
+  r'^(chorus|verse|bridge|intro|outro|pre-?chorus|post-?chorus|hook|refrain|'
+  r'interlude|instrumental|solo|breakdown|'
+  r'припев|куплет|бридж|проигрыш|вступление|интро|аутро|кода|'
+  r'предприпев|пред-припев|соло)'
+  r'(\s*\d+)?(\s*:.*)?$',
+  caseSensitive: false,
+  unicode: true,
+);
+final _repeatMark = RegExp(
+  r'^[(\[]?\s*([xх×]\s*\d+|\d+\s*[xх×])\s*[)\]]?$',
+  caseSensitive: false,
+  unicode: true,
+);
+final _trailingRepeat = RegExp(
+  r'\s+[(\[]?\s*([xх×]\s*\d+|\d+\s*[xх×])\s*[)\]]?$',
+  caseSensitive: false,
+  unicode: true,
+);
+
+/// Whether a line of plain words is a note rather than words sung: a whole
+/// line in [ ], a section header ("Chorus:", "Verse 2", in brackets too),
+/// or a repeat mark ("x2"). A line in ( ) is sung (backing vocals) unless
+/// it is a header such as "(Instrumental)".
+bool isUnsungLine(String text) {
+  final line = text.trim();
+  if (line.isEmpty) return false;
+  if (line.startsWith('[') && line.endsWith(']')) return true;
+  if (_repeatMark.hasMatch(line)) return true;
+  final bare = line.startsWith('(') && line.endsWith(')')
+      ? line.substring(1, line.length - 1).trim()
+      : line;
+  return _header.hasMatch(bare);
+}
+
+/// A sung line's words without a trailing repeat mark ("Hello x2").
+String sungText(String text) => text.replaceFirst(_trailingRepeat, '').trim();
+
+/// Plain words (H1): the song-level check passes when the words' mean
+/// letter score beats the same lines in shuffled order by this much (H1:
+/// no words of another song passed, 1 of 130 fitting pairs failed).
+const plainGainAt = 0.03;
+
+/// What the fit found for one line of plain words (no times of its own):
+/// the signals of H1 ("H1 findings" in docs/plans/10-lyrics.md, mirrored
+/// from experiments/f2-timing/plain_words.py).
+class PlainFittedLine {
+  PlainFittedLine({
+    required this.index,
+    required this.start,
+    required this.end,
+    required this.letters,
+    required this.at,
+    required this.score,
+    required this.starAgree,
+  });
+
+  /// The line's place in the list of texts fitted.
+  final int index;
+
+  /// Seconds, as the aligner placed the line's first and last letters.
+  final double start;
+  final double end;
+
+  /// The line's letters as the aligner reads them, and those of the placed
+  /// lines before it.
+  final int letters;
+  final int at;
+
+  /// Mean letter probability of the line's letters.
+  final double score;
+
+  /// How far the start moves (s) when the "*" token may absorb the audio
+  /// between lines.
+  final double starAgree;
+
+  /// |ln(the line's letters per second / the placed lines' median)|.
+  double rateDev = 0;
+
+  /// The start against a straight line (start by letters sung) through the
+  /// 3 placed lines before, and through the 3 after: the smaller miss (s).
+  double paceOne = 0;
+
+  /// 0..1: how likely the aligner's start is within 1 s of the singing
+  /// (H1's logistic formula, no source times needed).
+  double get sure {
+    final z =
+        1.599 +
+        5.473 * score -
+        2.561 * math.log(1 + starAgree) -
+        1.082 * math.log(1 + paceOne) -
+        1.013 * math.log(1 + rateDev);
+    return 1 / (1 + math.exp(-z));
+  }
+}
+
+/// Places plain [texts] (one per line; a line without letters the aligner
+/// knows is left out) on [emission], twice (plain and with "*"), and
+/// returns the placed lines with H1's signals.
+List<PlainFittedLine> fitPlainLines(
+  Emission emission,
+  List<String> texts,
+  double secondsPerFrame,
+) {
+  final words = [for (final text in texts) romanize(text).words];
+  final plain = alignLines(emission, words);
+  final starred = alignLines(emission, words, star: true);
+  final fitted = <PlainFittedLine>[];
+  var at = 0;
+  for (var i = 0; i < texts.length; i++) {
+    final placed = plain[i];
+    if (placed == null) continue;
+    var sum = 0.0;
+    var count = 0;
+    for (final word in placed) {
+      sum += word.score * word.letters;
+      count += word.letters;
+    }
+    final start = placed.first.start * secondsPerFrame;
+    fitted.add(
+      PlainFittedLine(
+        index: i,
+        start: start,
+        // The research's frame end is past the last letter's frame
+        // (torchaudio's merge_tokens), as [PlacedWord.end] is.
+        end: placed.last.end * secondsPerFrame,
+        letters: count,
+        at: at,
+        score: sum / count,
+        starAgree: (starred[i]!.first.start * secondsPerFrame - start).abs(),
+      ),
+    );
+    at += count;
+  }
+  if (fitted.isEmpty) return fitted;
+  // The rate uses at least one frame, as the research's max(end - start,
+  // spf) does.
+  double rateOf(PlainFittedLine line) =>
+      line.letters / math.max(line.end - line.start, secondsPerFrame);
+  final songRate = _median([for (final line in fitted) rateOf(line)]);
+  for (var p = 0; p < fitted.length; p++) {
+    final line = fitted[p];
+    line.rateDev = math.log(rateOf(line) / songRate).abs();
+    final misses = <double>[
+      for (final side in [
+        fitted.sublist(math.max(0, p - 3), p),
+        fitted.sublist(p + 1, math.min(fitted.length, p + 4)),
+      ])
+        ?_paceMiss(side, line),
+    ];
+    line.paceOne = misses.isEmpty ? 0 : misses.reduce(math.min);
+  }
+  return fitted;
+}
+
+/// How far [line]'s start is from the least-squares straight line (start
+/// by letters sung) through [side]; null with fewer than 2 lines or no
+/// spread in letters (numpy.polyfit's degree-1 fit in the research).
+double? _paceMiss(List<PlainFittedLine> side, PlainFittedLine line) {
+  if (side.length < 2) return null;
+  final n = side.length;
+  var sx = 0.0, sy = 0.0;
+  for (final s in side) {
+    sx += s.at;
+    sy += s.start;
+  }
+  final mx = sx / n, my = sy / n;
+  var sxx = 0.0, sxy = 0.0;
+  for (final s in side) {
+    sxx += (s.at - mx) * (s.at - mx);
+    sxy += (s.at - mx) * (s.start - my);
+  }
+  if (sxx == 0) return null;
+  final b = sxy / sxx;
+  return (line.start - (my + b * (line.at - mx))).abs();
+}
+
+/// A seed for [shuffleGain] from the words themselves (32-bit FNV-1a over
+/// the lines), so the same words get the same shuffles on every fit.
+int plainSeedOf(List<String> texts) {
+  var hash = 0x811c9dc5;
+  for (final text in texts) {
+    for (final unit in '$text\n'.codeUnits) {
+      hash = ((hash ^ unit) * 0x01000193) & 0xffffffff;
+    }
+  }
+  return hash;
+}
+
+/// The song-level check for plain words (H1): the mean (over placed lines)
+/// of the lines' letter scores, minus the same mean for the same lines in
+/// shuffled order on the same recording, averaged over [shuffles] orders
+/// drawn from [seed] (so a refit gives the same verdict). Words of another
+/// song score as badly in any order; the song's own words lose much of
+/// their score when shuffled.
+///
+/// Every shuffle must change the order of the words (a song of one line
+/// sung over and over has no other order: Codex review of H2). Null when
+/// that cannot be told: fewer than 3 different lines, or no changed order
+/// in 20 tries.
+double? shuffleGain(
+  Emission emission,
+  List<String> texts,
+  List<PlainFittedLine> fitted, {
+  required int seed,
+  int shuffles = 3,
+}) {
+  if (fitted.isEmpty) return null;
+  final own =
+      fitted.map((line) => line.score).reduce((a, b) => a + b) / fitted.length;
+  final words = [
+    for (final text in texts)
+      if (romanize(text).words case final w when w.isNotEmpty) w,
+  ];
+  final asSung = [for (final line in words) line.join(' ')];
+  if (asSung.toSet().length < 3) return null;
+  final random = math.Random(seed);
+  var nullSum = 0.0;
+  var nullCount = 0;
+  for (var k = 0; k < shuffles; k++) {
+    List<List<String>>? order;
+    for (var attempt = 0; attempt < 20 && order == null; attempt++) {
+      final drawn = [...words]..shuffle(random);
+      for (var i = 0; i < drawn.length; i++) {
+        if (drawn[i].join(' ') != asSung[i]) {
+          order = drawn;
+          break;
+        }
+      }
+    }
+    if (order == null) return null;
+    final placed = alignLines(emission, order);
+    var sum = 0.0;
+    var lines = 0;
+    for (final line in placed) {
+      if (line == null) continue;
+      var s = 0.0;
+      var c = 0;
+      for (final word in line) {
+        s += word.score * word.letters;
+        c += word.letters;
+      }
+      sum += s / c;
+      lines++;
+    }
+    if (lines == 0) continue;
+    nullSum += sum / lines;
+    nullCount++;
+  }
+  return nullCount == 0 ? null : own - nullSum / nullCount;
+}
+
 /// Final starts (s) per fitted line: a sure line keeps the aligner's start;
 /// another gets its lyrics start moved by the shift of its sure neighbours
 /// (interpolated by lyrics time between the one before and the one after,
