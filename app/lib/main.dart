@@ -12,10 +12,14 @@ import 'library/library_store.dart';
 import 'library/search_index.dart';
 import 'library/similar_seeds.dart';
 import 'library/track.dart';
+import 'lyrics/fit_model.dart';
 import 'lyrics/lyrics_controller.dart';
+import 'lyrics/lyrics_fitter.dart';
 import 'lyrics/lyrics_sources.dart';
+import 'lyrics/recording_fit.dart';
 import 'playback/playback_controller.dart';
 import 'platform/end_process.dart';
+import 'platform/free_space.dart';
 import 'playback/player_service.dart';
 import 'playback/version_book.dart';
 import 'storage/audio_storage.dart';
@@ -410,6 +414,16 @@ Future<void> main(List<String> args) async {
     // F1: timed lines moved by hand, per upload and source.
     loadOffset: store.lyricsOffsetOf,
     saveOffset: store.saveLyricsOffset,
+    // G2: lines fitted to the recording, per upload and source, used only
+    // for the stored file they were fitted to.
+    loadFit: store.lyricsFitOf,
+    saveFit: store.saveLyricsFit,
+    audioBytesOf: (track) {
+      final path = storage.stateOf(track).path;
+      if (path == null) return null;
+      final file = storage.fileAt(path);
+      return file.existsSync() ? file.lengthSync() : null;
+    },
     // The upload that plays: the account that has the song, or the version
     // chosen for it; logged out, the song's own key (stored lyrics show).
     routeOf: (track) {
@@ -430,6 +444,62 @@ Future<void> main(List<String> args) async {
     log: logPerf,
   );
   playback.onDownloaded = lyrics.keepFor;
+  // Plan 10 G2: Fit to this recording. The model is downloaded into the
+  // data folder on the first fit the user agrees to; onnxruntime.dll and
+  // libmpv-2.dll are beside the app.
+  final appDir = p.dirname(Platform.resolvedExecutable);
+  final modelFile = File(
+    p.join(options.dataDir, 'models', alignerModel.fileName),
+  );
+  final fitter = LyricsFitter(
+    lyrics: lyrics,
+    modelFile: modelFile,
+    downloadModelTo: (onProgress, stop) => downloadModel(
+      alignerModel,
+      modelFile,
+      freeBytes: () => freeBytesAt(options.dataDir),
+      onProgress: onProgress,
+      stop: stop,
+    ),
+    audioOf: (track, onProgress) async {
+      if (!storage.hasFile(track)) {
+        void heard() => onProgress(storage.savedShare(track));
+        storage.progress.addListener(heard);
+        try {
+          final error = await playback.download(track, pin: false);
+          if (error != null) throw FitAudioError(error);
+        } finally {
+          storage.progress.removeListener(heard);
+        }
+      }
+      final path = storage.stateOf(track).path;
+      if (path == null || !storage.fileAt(path).existsSync()) {
+        throw const FitAudioError('the song is not stored');
+      }
+      return storage.fileAt(path).path;
+    },
+    fit: (key, audioPath, lines, onProgress) {
+      final tempDir = Directory(p.join(options.dataDir, 'tmp'))
+        ..createSync(recursive: true);
+      return fitToRecording(
+        audioPath,
+        lines,
+        FitTools(
+          onnxRuntimePath: p.join(appDir, 'onnxruntime.dll'),
+          modelPath: modelFile.path,
+          mpvPath: p.join(appDir, 'libmpv-2.dll'),
+          tempDir: tempDir.path,
+        ),
+        onProgress: onProgress,
+        emissionCachePath: p.join(
+          options.dataDir,
+          'fit-cache',
+          '${fitCacheName(key)}.emission',
+        ),
+      );
+    },
+    log: logPerf,
+  );
   artists.onListChanged = library.listChanged;
   library.artistSongsOf = artists.songsOf;
   library.vkLists = CombinedLists(
@@ -525,6 +595,7 @@ Future<void> main(List<String> args) async {
       playlists: playlists,
       artists: artists,
       lyrics: lyrics,
+      lyricsFitter: fitter,
       settings: settings,
     ),
   );
@@ -745,6 +816,7 @@ class OwnsembleApp extends StatelessWidget {
     this.playlists,
     this.artists,
     this.lyrics,
+    this.lyricsFitter,
   });
 
   final CoverStore covers;
@@ -761,6 +833,7 @@ class OwnsembleApp extends StatelessWidget {
   final VkPlaylists? playlists;
   final LibraryArtists? artists;
   final LyricsController? lyrics;
+  final LyricsFitter? lyricsFitter;
 
   @override
   Widget build(BuildContext context) {
@@ -785,6 +858,7 @@ class OwnsembleApp extends StatelessWidget {
             playlists: playlists,
             artists: artists,
             lyrics: lyrics,
+            lyricsFitter: lyricsFitter,
             settings: settings,
           ),
         ),

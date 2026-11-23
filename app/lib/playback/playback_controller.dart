@@ -253,8 +253,9 @@ class PlaybackController extends ChangeNotifier {
   Future<void> Function(Track track)? onDownloaded;
 
   /// Downloads [track] (keeps its audio for good). Returns why it failed,
-  /// or null on success.
-  Future<String?> download(Track track) async {
+  /// or null on success. Without [pin] the song is only saved as cache,
+  /// for lyrics fitting (plan 10 G2), and its lyrics are not fetched.
+  Future<String?> download(Track track, {bool pin = true}) async {
     final storage = player.storage;
     if (storage == null) return 'no storage';
     if (!track.inLibrary) return 'not in your library';
@@ -271,9 +272,9 @@ class PlaybackController extends ChangeNotifier {
           throw StateError(noStreamReason(resolved.stream));
         }
         return resolved.stream.link;
-      });
+      }, pin: pin);
       final downloaded = onDownloaded;
-      if (downloaded != null) unawaited(downloaded(track));
+      if (pin && downloaded != null) unawaited(downloaded(track));
       return null;
     } catch (error) {
       return describePlayError(error);

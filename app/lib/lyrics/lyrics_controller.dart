@@ -22,6 +22,12 @@
 /// source's answer for the song is listed ([choices]), the sources not asked
 /// yet are asked ([askAll]), and the user's choice ([use]) is kept per upload
 /// and shown instead of the automatic pick until [useAutomatic].
+///
+/// Fit to this recording (G2): a source's timed lines fitted to the upload's
+/// recording are kept per upload and source ([keepFit]) and shown instead
+/// of the source's own times ([timedOf]) while they are for these lyrics and
+/// this recording. A fit has its own hand offset: the one set for the
+/// source's own timing stays for when the fit is undone ([forgetFit]).
 library;
 
 import 'dart:async';
@@ -33,6 +39,7 @@ import '../library/library_records.dart' show StoredLyrics;
 import '../library/track.dart';
 import '../vk/vk_client.dart';
 import '../vk/vk_lyrics.dart';
+import 'fitted_lines.dart';
 import 'lyrics.dart';
 import 'lyrics_sources.dart';
 
@@ -175,6 +182,9 @@ class LyricsController extends ChangeNotifier {
     this.savePick,
     this.loadOffset,
     this.saveOffset,
+    this.loadFit,
+    this.saveFit,
+    this.audioBytesOf,
     int Function()? now,
     this.log,
   }) : _now = now ?? (() => DateTime.now().millisecondsSinceEpoch);
@@ -221,6 +231,17 @@ class LyricsController extends ChangeNotifier {
   /// Offsets set in this run when no [saveOffset] keeps them, as
   /// "upload key|source".
   final _offsets = <String, int>{};
+
+  /// A source's lines fitted to an upload's recording (LibraryStore
+  /// .lyricsFitOf), and keeping one, null to forget it (.saveLyricsFit).
+  /// Without [saveFit] fits last for this run only.
+  final StoredFit? Function(String ref, String source)? loadFit;
+  final void Function(String ref, String source, StoredFit? fit)? saveFit;
+  final _fits = <String, StoredFit>{};
+
+  /// The size of a song's stored audio file, null when none is stored: a
+  /// fit of another file is not used.
+  final int? Function(Track track)? audioBytesOf;
 
   /// Sources being asked by [askAll], and those whose ask failed, as
   /// "upload key|source".
@@ -795,14 +816,120 @@ class LyricsController extends ChangeNotifier {
     unawaited(_ask(route, track));
   }
 
+  /// The upload whose lyrics the place shows, null for none.
+  String? get shownKey => _shownKey;
+
+  /// The upload [track]'s lyrics come from now: it changes when another
+  /// version is chosen for the song.
+  String? routeKeyOf(Track track) => routeOf(track)?.key;
+
+  /// The kept fit of [source]'s lines for the song shown, whether or not
+  /// it is for the lyrics stored now.
+  StoredFit? _fitOf(String source) {
+    final key = _shownKey;
+    if (key == null) return null;
+    return saveFit == null ? _fits['$key|$source'] : loadFit?.call(key, source);
+  }
+
+  /// The fit of [lyrics] for the song shown, when it was made for these
+  /// lyrics and the recording stored now.
+  StoredFit? fitFor(Lyrics lyrics) {
+    final fit = _fitOf(lyrics.source);
+    final track = _track;
+    if (fit == null || track == null) return null;
+    return fit.isFor(lyrics, audioBytes: audioBytesOf?.call(track))
+        ? fit
+        : null;
+  }
+
+  /// Whether [lyrics] show fitted to the recording.
+  bool isFitted(Lyrics lyrics) => fitFor(lyrics)?.fits ?? false;
+
+  /// [lyrics] as they show for the song: fitted to its recording when a
+  /// fit is kept for them, else as the source timed them.
+  Lyrics timedOf(Lyrics lyrics) {
+    final starts = fitFor(lyrics)?.starts;
+    if (starts == null) return lyrics;
+    final last = _lastTimed;
+    if (last != null &&
+        identical(last.$1, lyrics) &&
+        listEquals(last.$2, starts)) {
+      return last.$3;
+    }
+    final fitted = withStarts(lyrics, starts);
+    _lastTimed = (lyrics, starts, fitted);
+    return fitted;
+  }
+
+  (Lyrics, List<int>, Lyrics)? _lastTimed;
+
+  /// Keeps [fit] of [source]'s lines for the upload [key] (null forgets
+  /// it). A new fit starts with no hand offset of its own; the offset of
+  /// the source's own timing is left as it is.
+  void keepFit(String key, String source, StoredFit? fit) {
+    if (saveFit == null) {
+      if (fit == null) {
+        _fits.remove('$key|$source');
+      } else {
+        _fits['$key|$source'] = fit;
+      }
+    } else {
+      saveFit!(key, source, fit);
+    }
+    _keepOffset(key, _fitted(source), 0);
+    log?.call(
+      fit == null
+          ? 'lyrics fit $source forgotten'
+          : 'lyrics fit $source kept, fits ${fit.fits}',
+    );
+    notifyListeners();
+  }
+
+  /// Shows [source]'s own timing again for the song shown, or for the
+  /// upload [key] when given (the key the menu was opened for: the song may
+  /// have moved on since, Codex review).
+  void forgetFit(String source, {String? key}) {
+    final upload = key ?? _shownKey;
+    if (upload != null) keepFit(upload, source, null);
+  }
+
+  /// The offsets' source name for a fit's own hand offset.
+  static String _fitted(String source) => '$source@fit';
+
+  /// The name [source]'s hand offset is kept under for the song shown: its
+  /// fit's own while its lines show fitted.
+  String _offsetName(String source) {
+    final state = _state;
+    final key = _shownKey;
+    // Another source's lines (the chooser's preview): its fit counts only
+    // when it is for its lyrics as stored now (Codex review).
+    final lyrics = state is LyricsShown && state.lyrics.source == source
+        ? state.lyrics
+        : key == null
+        ? null
+        : load(source, key)?.lyrics;
+    final fit = lyrics == null ? null : fitFor(lyrics);
+    return fit?.fits ?? false ? _fitted(source) : source;
+  }
+
   /// How far [source]'s timed lines are moved for the song shown,
-  /// milliseconds, > 0 later; 0 when not moved or no song is shown.
+  /// milliseconds, > 0 later; 0 when not moved or no song is shown. While
+  /// they show fitted, this is the fit's own offset.
   int offsetOf(String source) {
     final key = _shownKey;
     if (key == null) return 0;
+    final name = _offsetName(source);
     return saveOffset == null
-        ? _offsets['$key|$source'] ?? 0
-        : loadOffset?.call(key, source) ?? 0;
+        ? _offsets['$key|$name'] ?? 0
+        : loadOffset?.call(key, name) ?? 0;
+  }
+
+  void _keepOffset(String key, String name, int offsetMs) {
+    if (saveOffset == null) {
+      _offsets['$key|$name'] = offsetMs;
+    } else {
+      saveOffset!(key, name, offsetMs);
+    }
   }
 
   /// The source of the lyrics the place shows now; null when none show.
@@ -836,12 +963,9 @@ class LyricsController extends ChangeNotifier {
       lyricsOffsetLimitMs,
     );
     if (kept == offsetOf(source)) return;
-    if (saveOffset == null) {
-      _offsets['$key|$source'] = kept;
-    } else {
-      saveOffset!(key, source, kept);
-    }
-    log?.call('lyrics offset $source $kept ms');
+    final name = _offsetName(source);
+    _keepOffset(key, name, kept);
+    log?.call('lyrics offset $name $kept ms');
     notifyListeners();
   }
 

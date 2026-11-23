@@ -192,6 +192,7 @@ class _LyricsChoicesPageState extends State<LyricsChoicesPage> {
                   Text(
                     '${choice.label}, ${lyrics.timed ? 'timed' : 'words only'}'
                     ' · ${_lengthNote(choice)}'
+                    '${widget.lyrics.isFitted(lyrics) ? ' · fitted to this recording' : ''}'
                     '${_offsetNote(lyrics.timed ? widget.lyrics.offsetOf(choice.source) : 0)}',
                     key: const ValueKey('lyrics-preview-what'),
                     style: TextStyle(color: colors.dim, fontSize: 13),
@@ -220,7 +221,7 @@ class _LyricsChoicesPageState extends State<LyricsChoicesPage> {
             Expanded(
               child: LyricsLines(
                 key: ValueKey('lyrics-preview-${choice.source}'),
-                lyrics: lyrics,
+                lyrics: widget.lyrics.timedOf(lyrics),
                 offsetMs: widget.lyrics.offsetOf(choice.source),
                 header: const SizedBox.shrink(),
                 position: widget.position,

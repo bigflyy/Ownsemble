@@ -11,6 +11,7 @@ import '../library/song_filter.dart';
 import '../library/song_version.dart';
 import '../library/track.dart';
 import '../lyrics/lyrics_controller.dart';
+import '../lyrics/lyrics_fitter.dart';
 import '../lyrics/lyrics_sources.dart' show lyricsSourceLabel;
 import '../playback/playback_controller.dart';
 import '../playback/play_queue.dart';
@@ -36,6 +37,7 @@ import 'for_you.dart';
 import 'for_you_page.dart';
 import 'library_controller.dart';
 import 'lyrics_choices_page.dart';
+import 'lyrics_fit_button.dart';
 import 'lyrics_page.dart';
 import 'outside_songs.dart';
 import 'playing_mark.dart';
@@ -130,6 +132,7 @@ class LibraryScreen extends StatefulWidget {
     this.playlists,
     this.artists,
     this.lyrics,
+    this.lyricsFitter,
     this._settings,
   });
 
@@ -167,6 +170,9 @@ class LibraryScreen extends StatefulWidget {
 
   /// The Lyrics place's lyrics (plan 10); null hides the mic button.
   final LyricsController? lyrics;
+
+  /// Fit to this recording (plan 10 G2); no Fit button when null.
+  final LyricsFitter? lyricsFitter;
 
   final ShellSettings? _settings;
 
@@ -1138,6 +1144,9 @@ class _LibraryScreenState extends State<LibraryScreen> {
               library,
               library.jump,
               ?widget.lyrics,
+              // Its stage shows in the Lyrics heading's line; it tells only
+              // when that text changes (at most once per percent).
+              ?widget.lyricsFitter,
               ?_storage,
               ?widget.collections,
               ?widget.player.versions,
@@ -1232,6 +1241,15 @@ class _LibraryScreenState extends State<LibraryScreen> {
                               _ => false,
                             })
                           LyricsTimingControl(lyrics: widget.lyrics!),
+                        if (view.kind == ViewKind.lyrics &&
+                            widget.lyricsFitter != null)
+                          LyricsFitButton(
+                            fitter: widget.lyricsFitter!,
+                            // With its label it needs about 170 px more
+                            // than the Timing control and Choose lyrics.
+                            compact: listWidth < lyricsFitLabelWidth,
+                            onChoose: library.openLyricsChoices,
+                          ),
                         if (view.kind == ViewKind.lyrics &&
                             widget.lyrics?.track != null)
                           _lyricsChooseButton(
@@ -1454,8 +1472,19 @@ class _LibraryScreenState extends State<LibraryScreen> {
     if (state is! LyricsShown) return song;
     final source = state.lyrics.source;
     final offset = state.lyrics.timed ? lyrics.shownOffset : 0;
+    final fit = state.lyrics.timed ? lyrics.fitFor(state.lyrics) : null;
+    final stage = widget.lyricsFitter?.stageOf(lyrics.shownKey, source);
+    if (stage != null) {
+      return '$song · from ${lyricsSourceLabel(source)} · '
+          '${fitStageText(stage)}';
+    }
     return '$song · from ${lyricsSourceLabel(source)}'
         '${lyrics.chosen == source ? ', your choice' : ''}'
+        '${fit == null
+            ? ''
+            : fit.fits
+            ? ', fitted to this recording'
+            : ', may not match this recording'}'
         '${offset == 0 ? '' : ', ${lyricsOffsetText(offset)}'}';
   }
 

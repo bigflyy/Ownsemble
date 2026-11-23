@@ -7,7 +7,17 @@
 // formula says which placements to trust (line_fit.dart). A 3-4 minute
 // song takes about 20-30 s of 4 CPU threads and up to 1.4 GB of memory,
 // all freed when the isolate ends.
+//
+// The model's output for a recording can be kept in a small cache file
+// (about 1.3 MB for 4 minutes): fitting other lyrics to the same recording
+// then takes well under a second and needs neither the decoder nor the
+// model.
+import 'dart:convert';
+import 'dart:io';
 import 'dart:isolate';
+import 'dart:typed_data';
+
+import 'package:crypto/crypto.dart';
 
 import 'audio_decode.dart';
 import 'ctc_align.dart';
@@ -79,11 +89,14 @@ class FitError implements Exception {
 
 /// Fits [lines] to the song at [audioPath], in a background isolate.
 /// [onProgress] hears the model's chunks done out of all.
+/// With [emissionCachePath] the model's output is read from that file when
+/// it was made for this audio file, and written there otherwise.
 Future<RecordingFit> fitToRecording(
   String audioPath,
   List<LyricLine> lines,
   FitTools tools, {
   void Function(int done, int total)? onProgress,
+  String? emissionCachePath,
 }) async {
   final progress = ReceivePort();
   final listening = progress.listen((message) {
@@ -95,18 +108,13 @@ Future<RecordingFit> fitToRecording(
     for (final line in lines)
       (startMs: line.startMs, endMs: line.endMs, text: line.text),
   ];
-  final port = progress.sendPort;
   try {
-    return await Isolate.run(
-      () => fitNow(
-        audioPath,
-        plain,
-        tools,
-        onChunk: (done, total) {
-          port.send([done, total]);
-        },
-      ),
-      debugName: 'lyrics fit',
+    return await _fitInIsolate(
+      audioPath,
+      plain,
+      tools,
+      progress.sendPort,
+      emissionCachePath,
     );
   } finally {
     await listening.cancel();
@@ -114,12 +122,36 @@ Future<RecordingFit> fitToRecording(
   }
 }
 
+/// Starts the background isolate. A function of its own on purpose: a
+/// closure shares its enclosing scope's captured variables, and in
+/// [fitToRecording] those include [onProgress], which holds the app's
+/// objects; an isolate cannot be sent those (real check fit-45a: an
+/// ArgumentError, "object is unsendable"). Here the closure holds only
+/// the fit's own data.
+Future<RecordingFit> _fitInIsolate(
+  String audioPath,
+  List<({int? startMs, int? endMs, String text})> lines,
+  FitTools tools,
+  SendPort port,
+  String? emissionCachePath,
+) => Isolate.run(
+  () => fitNow(
+    audioPath,
+    lines,
+    tools,
+    onChunk: (done, total) => port.send([done, total]),
+    emissionCachePath: emissionCachePath,
+  ),
+  debugName: 'lyrics fit',
+);
+
 /// [fitToRecording]'s work, on the calling isolate (blocks it).
 RecordingFit fitNow(
   String audioPath,
   List<({int? startMs, int? endMs, String text})> lines,
   FitTools tools, {
   void Function(int done, int total)? onChunk,
+  String? emissionCachePath,
 }) {
   final clock = Stopwatch()..start();
   final sung = sungLines(lines);
@@ -134,20 +166,34 @@ RecordingFit fitNow(
   if (sung.length < 3 || letters == 0 || kept / letters < 0.8) {
     throw const FitError('these lyrics have too few lines or letters to fit');
   }
-  final samples = decodeForModel(tools.mpvPath, audioPath, tools.tempDir);
-  final seconds = samples.length / modelSampleRate;
-  final session = OnnxRuntime.load(tools.onnxRuntimePath)
-      .open(tools.modelPath, threads: tools.threads);
+  final audioBytes = File(audioPath).lengthSync();
+  var cached = emissionCachePath == null
+      ? null
+      : readEmissionCache(emissionCachePath, audioBytes);
+  if (cached == null) {
+    final samples = decodeForModel(tools.mpvPath, audioPath, tools.tempDir);
+    final session = OnnxRuntime.load(tools.onnxRuntimePath)
+        .open(tools.modelPath, threads: tools.threads);
+    try {
+      cached = (
+        emission: modelEmission(session, samples, onChunk: onChunk),
+        seconds: samples.length / modelSampleRate,
+      );
+    } finally {
+      session.close();
+    }
+    if (emissionCachePath != null) {
+      writeEmissionCache(emissionCachePath, audioBytes, cached);
+    }
+  } else {
+    onChunk?.call(1, 1);
+  }
+  final (:emission, :seconds) = cached;
   final List<FittedLine> fitted;
   try {
-    final emission = modelEmission(session, samples, onChunk: onChunk);
-    try {
-      fitted = fitLines(emission, sung, seconds / emission.frames);
-    } on AlignmentTooLong {
-      throw const FitError('the lyrics are longer than the recording allows');
-    }
-  } finally {
-    session.close();
+    fitted = fitLines(emission, sung, seconds / emission.frames);
+  } on AlignmentTooLong {
+    throw const FitError('the lyrics are longer than the recording allows');
   }
   if (fitted.isEmpty) throw const FitError('no line could be placed');
   final starts = fittedStarts(fitted);
@@ -167,4 +213,83 @@ RecordingFit fitNow(
     audioSeconds: seconds,
     elapsedMs: clock.elapsedMilliseconds,
   );
+}
+
+/// The cache file name for an upload's key: no path characters, and the
+/// key itself (an account and song id) not spelled out on disk.
+String fitCacheName(String key) =>
+    sha256.convert(utf8.encode(key)).toString().substring(0, 24);
+
+/// The first bytes of an emission cache file, and its layout's version.
+const _cacheMagic = 0x4D45574F; // "OWEM"
+const _cacheVersion = 1;
+const _cacheHeaderBytes = 32;
+
+/// The model's output kept in [path] for an audio file of [audioBytes]
+/// bytes; null when the file is missing, unreadable or made for another
+/// file.
+({Emission emission, double seconds})? readEmissionCache(
+  String path,
+  int audioBytes,
+) {
+  try {
+    final bytes = File(path).readAsBytesSync();
+    if (bytes.length < _cacheHeaderBytes) return null;
+    final head = ByteData.sublistView(bytes, 0, _cacheHeaderBytes);
+    if (head.getUint32(0, Endian.little) != _cacheMagic ||
+        head.getUint32(4, Endian.little) != _cacheVersion ||
+        head.getInt64(8, Endian.little) != audioBytes) {
+      return null;
+    }
+    final columns = head.getUint32(16, Endian.little);
+    final frames = head.getUint32(20, Endian.little);
+    final seconds = head.getFloat64(24, Endian.little);
+    if (columns == 0 ||
+        bytes.length != _cacheHeaderBytes + columns * frames * 4) {
+      return null;
+    }
+    // Copied, so the floats start on a 4-byte boundary.
+    final values = Float32List(columns * frames);
+    values.buffer.asUint8List().setAll(
+      0,
+      Uint8List.sublistView(bytes, _cacheHeaderBytes),
+    );
+    return (emission: Emission(values, columns), seconds: seconds);
+  } on FileSystemException {
+    return null;
+  }
+}
+
+/// Keeps [cached] in [path] for an audio file of [audioBytes] bytes. A
+/// failure to write only loses the cache.
+void writeEmissionCache(
+  String path,
+  int audioBytes,
+  ({Emission emission, double seconds}) cached,
+) {
+  final (:emission, :seconds) = cached;
+  final head = ByteData(_cacheHeaderBytes)
+    ..setUint32(0, _cacheMagic, Endian.little)
+    ..setUint32(4, _cacheVersion, Endian.little)
+    ..setInt64(8, audioBytes, Endian.little)
+    ..setUint32(16, emission.columns, Endian.little)
+    ..setUint32(20, emission.frames, Endian.little)
+    ..setFloat64(24, seconds, Endian.little);
+  final file = File(path);
+  final part = File('$path.part');
+  try {
+    file.parent.createSync(recursive: true);
+    final out = part.openSync(mode: FileMode.write);
+    try {
+      out
+        ..writeFromSync(head.buffer.asUint8List())
+        ..writeFromSync(Uint8List.sublistView(emission.values))
+        ..flushSync();
+    } finally {
+      out.closeSync();
+    }
+    part.renameSync(path);
+  } on FileSystemException {
+    // Only the cache is lost.
+  }
 }

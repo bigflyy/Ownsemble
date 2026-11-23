@@ -157,15 +157,17 @@ class _LyricsPageState extends State<LyricsPage> {
       case LyricsShown(:final lyrics, :final refreshing):
         final label = lyricsSourceLabel(lyrics.source);
         final yours = widget.lyrics.chosen == lyrics.source;
+        final fitted = widget.lyrics.isFitted(lyrics);
         final credit = lyrics.timed
             ? 'From $label${yours ? ' (your choice)' : ''}'
+                  '${fitted ? ', fitted to this recording' : ''}'
             : yours
             ? 'Words only, from $label (your choice)'
             : refreshing
             ? 'Words only, from $label; looking for timed lyrics...'
             : 'Words only, from $label: no source has times for this song';
         return LyricsLines(
-          lyrics: lyrics,
+          lyrics: widget.lyrics.timedOf(lyrics),
           offsetMs: widget.lyrics.offsetOf(lyrics.source),
           position: widget.position,
           positions: widget.positions,

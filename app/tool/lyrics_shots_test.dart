@@ -2,8 +2,10 @@
 // its look can be checked without opening the app on screen: timed lyrics
 // following a playing song, plain lyrics, a song without lyrics, a failed
 // ask, the loading spinner, long lines in a narrow window, lines moved
-// later by hand (F1); and the chooser of every source's lyrics (E2): its
-// list, a preview and a kept choice. The words are made up.
+// later by hand (F1); the chooser of every source's lyrics (E2): its list,
+// a preview and a kept choice; and Fit to this recording (G2): the question
+// before the model's download, the download, the fit running, fitted lines
+// and lyrics that do not match. The words are made up.
 //
 // Run from app/:
 //   flutter test tool/lyrics_shots_test.dart \
@@ -19,8 +21,11 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ownsemble/library/library_store.dart';
 import 'package:ownsemble/library/track.dart';
+import 'package:ownsemble/lyrics/fit_model.dart';
+import 'package:ownsemble/lyrics/fitted_lines.dart';
 import 'package:ownsemble/lyrics/lyrics.dart';
 import 'package:ownsemble/lyrics/lyrics_controller.dart';
+import 'package:ownsemble/lyrics/lyrics_fitter.dart';
 import 'package:ownsemble/lyrics/lyrics_sources.dart';
 import 'package:ownsemble/playback/playback_controller.dart';
 import 'package:ownsemble/playback/player_service.dart';
@@ -281,6 +286,35 @@ void main() {
             ]
           : const [],
     );
+    // G2: a fit that never ends, held at the step to show.
+    final hang = Completer<void>();
+    final modelDir = Directory.systemTemp.createTempSync('shots-model');
+    addTearDown(() => modelDir.deleteSync(recursive: true));
+    final modelThere = step == 'fitting';
+    final model = File(p.join(modelDir.path, 'm.onnx'));
+    if (modelThere) model.writeAsBytesSync([1, 2, 3]);
+    final fitter = LyricsFitter(
+      lyrics: lyrics,
+      modelFile: model,
+      model: modelThere
+          ? ModelFile(
+              url: Uri.parse('http://localhost/m'),
+              bytes: 3,
+              sha256: '',
+              fileName: 'm.onnx',
+            )
+          : alignerModel,
+      downloadModelTo: (onProgress, stop) async {
+        onProgress(142000000, alignerModel.bytes);
+        await hang.future;
+      },
+      audioOf: (track, onProgress) async => model.path,
+      fit: (key, path, lines, onProgress) async {
+        onProgress(7, 12);
+        await hang.future;
+        throw StateError('never');
+      },
+    );
     final settings = ShellSettings.inMemory();
     if (!dark) settings.toggleTheme();
     settings.dockTo(PlayerDock.side);
@@ -303,6 +337,7 @@ void main() {
               collections: collections,
               settings: settings,
               lyrics: lyrics,
+              lyricsFitter: fitter,
             ),
           ),
         ),
@@ -338,6 +373,32 @@ void main() {
           await settle();
         }
         await tester.pump(const Duration(milliseconds: 600));
+        await settle();
+      }
+      if (step == 'fitted' || step == 'nomatch') {
+        final shown = (lyrics.state as LyricsShown).lyrics;
+        lyrics.keepFit(
+          lyrics.shownKey!,
+          shown.source,
+          StoredFit(
+            lyricsHash: lyricsHashOf(shown),
+            audioBytes: 1,
+            starts: step == 'fitted'
+                ? [for (final line in shown.lines) line.startMs! + 2500]
+                : null,
+            sureShare: step == 'fitted' ? 0.86 : 0.31,
+            fittedAtMs: 1,
+          ),
+        );
+        await tester.pump(const Duration(milliseconds: 600));
+        await settle();
+      }
+      if (step == 'downloading' || step == 'fitting') {
+        unawaited(fitter.fitShown());
+        await settle();
+      }
+      if (step == 'ask') {
+        await tester.tap(find.byKey(const ValueKey('lyrics-fit')));
         await settle();
       }
       if (step == 'choices' || step == 'preview') {
@@ -396,6 +457,17 @@ void main() {
     ('preview', true, const Size(1440, 900)),
     ('preview', false, const Size(760, 900)),
     ('chosen', true, const Size(1440, 900)),
+    ('ask', true, const Size(1440, 900)),
+    ('ask', false, const Size(480, 800)),
+    ('downloading', true, const Size(1440, 900)),
+    ('downloading', false, const Size(760, 900)),
+    ('fitting', true, const Size(1440, 900)),
+    ('fitting', false, const Size(480, 800)),
+    ('fitted', true, const Size(1440, 900)),
+    ('fitted', false, const Size(760, 900)),
+    ('fitted', true, const Size(480, 800)),
+    ('nomatch', false, const Size(1440, 900)),
+    ('nomatch', true, const Size(760, 900)),
   ]) {
     final width = size.width < 600
         ? 'smallest'

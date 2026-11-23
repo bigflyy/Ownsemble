@@ -242,6 +242,54 @@ void main() {
       expect(reopened.isDownloaded, isTrue);
     });
 
+    test('a save for lyrics fitting (no pin) keeps the song as plain cache, '
+        'and leaves a stored song as it is (plan 10 G2)', () async {
+      await storage.download(
+        songs[4],
+        () async => Uri.parse('http://127.0.0.1:${server.port}/a.mp3'),
+        pin: false,
+      );
+      final state = storage.stateOf(songs[4]);
+      expect(state.pinned, isFalse);
+      expect(storage.fileAt(state.path!).readAsBytesSync(), audio);
+      expect(
+        store.loadAll().firstWhere((t) => t.id == songs[4].id).isDownloaded,
+        isFalse,
+      );
+      cache(0, 100);
+      await storage.download(
+        songs[0],
+        () async => fail('no fetch needed'),
+        pin: false,
+      );
+      expect(storage.stateOf(songs[0]).pinned, isFalse);
+    });
+
+    test('a fit save and a Download of the same song wait for each other: '
+        'the fit gets the file and the Download its pin (Codex review: the '
+        'second one returned at once)', () async {
+      final url = Uri.parse('http://127.0.0.1:${server.port}/a.mp3');
+      final save = storage.download(songs[4], () async => url, pin: false);
+      final pinning = storage.download(
+        songs[4],
+        () async => fail('fetched twice'),
+      );
+      await save;
+      await pinning;
+      expect(storage.stateOf(songs[4]).pinned, isTrue);
+      // The other way round: a fit asking during a Download gets its file.
+      final download = storage.download(songs[3], () async => url);
+      final fitSave = storage.download(
+        songs[3],
+        () async => fail('fetched twice'),
+        pin: false,
+      );
+      await download;
+      await fitSave;
+      expect(storage.hasFile(songs[3]), isTrue);
+      expect(storage.stateOf(songs[3]).pinned, isTrue);
+    });
+
     test('a download reports how far it got and ends fully stored', () async {
       final shares = <double>[];
       storage.progress.addListener(

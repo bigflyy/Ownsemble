@@ -158,21 +158,67 @@ class AudioStorage extends ChangeNotifier {
   /// already cached is just marked downloaded; otherwise its audio is
   /// fetched from the link [resolveUrl] gives, and only from it: no other
   /// copy's file is ever kept instead. Throws when that fails.
-  Future<void> download(Track track, Future<Uri?> Function() resolveUrl) async {
+  ///
+  /// Without [pin] the song is only saved, as plain cache (lyrics fitting
+  /// needs its file, plan 10 G2): a stored file stays as it is.
+  Future<void> download(
+    Track track,
+    Future<Uri?> Function() resolveUrl, {
+    bool pin = true,
+  }) async {
     if (hasFile(track)) {
+      if (!pin) return;
       final path = stateOf(track).path;
       _store.setPinned(track.id, true);
       _changed[track.id] = (path: path, pinned: true);
       notifyListeners();
       return;
     }
-    if (!_downloading.add(track.id)) return;
+    if (!_downloading.add(track.id)) {
+      // A save or download of this song runs already (a Download during a
+      // fit's save, or the other way round): wait for it, then pin what it
+      // stored when asked to (Codex review: one returned at once, so a fit
+      // found no file, or a Download was left unpinned).
+      final running = _runs[track.id];
+      if (running != null) {
+        try {
+          await running;
+        } on Object {
+          if (!pin) rethrow;
+          return;
+        }
+      }
+      if (pin && hasFile(track)) {
+        _store.setPinned(track.id, true);
+        _changed[track.id] = (path: stateOf(track).path, pinned: true);
+        notifyListeners();
+      }
+      return;
+    }
     notifyListeners();
+    final run = _fetch(track, resolveUrl, pin: pin);
+    _runs[track.id] = run;
+    try {
+      await run;
+    } finally {
+      if (identical(_runs[track.id], run)) _runs.remove(track.id);
+    }
+  }
+
+  /// Downloads running, by track id, so a second ask can wait for one.
+  final _runs = <int, Future<void>>{};
+
+  Future<void> _fetch(
+    Track track,
+    Future<Uri?> Function() resolveUrl, {
+    required bool pin,
+  }) async {
     try {
       // The song is being saved while it streams: wait for that save.
       final saving = _saving[track.id];
       if (saving != null && await saving != null) {
         final path = stateOf(track).path;
+        if (path != null && !pin) return;
         if (path != null) {
           _store.setPinned(track.id, true);
           _changed[track.id] = (path: path, pinned: true);
@@ -189,7 +235,7 @@ class AudioStorage extends ChangeNotifier {
         fileAt(path),
         onProgress: onProgress,
       );
-      recordStored(track, path, bytes, pinned: true);
+      recordStored(track, path, bytes, pinned: pin);
     } finally {
       _downloading.remove(track.id);
       _percent.remove(track.id);
