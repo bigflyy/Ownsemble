@@ -128,22 +128,30 @@ List<int> plainLineStarts(
   Map<int, FitLine> fit, {
   int? lengthMs,
 }) {
-  final starts = List<int>.filled(lines.length, 0);
+  // First the placed lines and the blank lines; then every other line
+  // takes the start of the next line that has one, a blank line too, so a
+  // header just before a pause does not swallow it (Codex review of H2).
+  final known = List<int?>.filled(lines.length, null);
   int? endBefore;
   for (var i = 0; i < lines.length; i++) {
     final placed = fit[i];
     if (placed != null) {
-      starts[i] = placed.startMs;
+      known[i] = placed.startMs;
       endBefore = placed.endMs ?? placed.startMs;
     } else if (lines[i].isGap) {
-      starts[i] = endBefore ?? 0;
-    } else {
-      int? next;
-      for (var k = i + 1; k < lines.length && next == null; k++) {
-        next = fit[k]?.startMs;
-      }
-      starts[i] = next ?? endBefore ?? 0;
+      known[i] = endBefore ?? 0;
     }
+  }
+  final starts = List<int>.filled(lines.length, 0);
+  int? next;
+  int? lastEnd;
+  for (final placed in fit.values) {
+    final end = placed.endMs ?? placed.startMs;
+    if (lastEnd == null || end > lastEnd) lastEnd = end;
+  }
+  for (var i = lines.length - 1; i >= 0; i--) {
+    starts[i] = known[i] ?? next ?? lastEnd ?? 0;
+    if (known[i] != null) next = known[i];
   }
   for (var i = 0; i < starts.length; i++) {
     if (starts[i] < 0) starts[i] = 0;

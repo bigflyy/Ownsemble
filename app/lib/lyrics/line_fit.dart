@@ -316,11 +316,15 @@ final _repeatMark = RegExp(
   caseSensitive: false,
   unicode: true,
 );
+// A repeat mark after the words: in brackets ("(x2)", "[X3]"), or bare
+// only in lower case ("x2"), since "an X2" may be sung (Codex review).
 final _trailingRepeat = RegExp(
-  r'\s+[(\[]?\s*([xх×]\s*\d+|\d+\s*[xх×])\s*[)\]]?$',
-  caseSensitive: false,
+  r'\s+([(\[]\s*([xхX×Х]\s*\d+|\d+\s*[xхX×Х])\s*[)\]]|[xх×]\d+|\d+[xх×])$',
   unicode: true,
 );
+// A whole line that is one note in [ ]: "[Chorus]", "[Verse 2: Name]";
+// not "[Oh] I won't go [oh]", which has words outside the brackets.
+final _bracketNote = RegExp(r'^\[[^\[\]]*\]$');
 
 /// Whether a line of plain words is a note rather than words sung: a whole
 /// line in [ ], a section header ("Chorus:", "Verse 2", in brackets too),
@@ -329,7 +333,7 @@ final _trailingRepeat = RegExp(
 bool isUnsungLine(String text) {
   final line = text.trim();
   if (line.isEmpty) return false;
-  if (line.startsWith('[') && line.endsWith(']')) return true;
+  if (_bracketNote.hasMatch(line)) return true;
   if (_repeatMark.hasMatch(line)) return true;
   final bare = line.startsWith('(') && line.endsWith(')')
       ? line.substring(1, line.length - 1).trim()
@@ -516,8 +520,13 @@ double? shuffleGain(
     for (final text in texts)
       if (romanize(text).words case final w when w.isNotEmpty) w,
   ];
-  final asSung = [for (final line in words) line.join(' ')];
-  if (asSung.toSet().length < 3) return null;
+  if ({for (final line in words) line.join(' ')}.length < 3) return null;
+  // What the aligner reads: the letters in a row, with no line breaks. A
+  // shuffle counts only when it changes them ("ha", "haha", "hahaha" read
+  // the same in any order: Codex review of H2).
+  String lettersOf(List<List<String>> lines) =>
+      [for (final line in lines) ...line].join();
+  final asSung = lettersOf(words);
   final random = math.Random(seed);
   var nullSum = 0.0;
   var nullCount = 0;
@@ -525,12 +534,7 @@ double? shuffleGain(
     List<List<String>>? order;
     for (var attempt = 0; attempt < 20 && order == null; attempt++) {
       final drawn = [...words]..shuffle(random);
-      for (var i = 0; i < drawn.length; i++) {
-        if (drawn[i].join(' ') != asSung[i]) {
-          order = drawn;
-          break;
-        }
-      }
+      if (lettersOf(drawn) != asSung) order = drawn;
     }
     if (order == null) return null;
     final placed = alignLines(emission, order);

@@ -108,6 +108,16 @@ void main() {
       expect(shuffleGain(_even, repeated, fitted, seed: 1), isNull);
     });
 
+    test(
+      'lines whose every order gives the same letters cannot be checked',
+      () {
+        // "ha", "haha", "hahaha": any order is "hahahahahaha" to the aligner.
+        final same = ['ha', 'haha', 'hahaha'];
+        final fitted = fitPlainLines(_even, same, 0.02);
+        expect(shuffleGain(_even, same, fitted, seed: 1), isNull);
+      },
+    );
+
     test('the seed comes from the words', () {
       expect(plainSeedOf(_lines), plainSeedOf([..._lines]));
       expect(plainSeedOf(_lines), isNot(plainSeedOf(_lines.reversed.toList())));

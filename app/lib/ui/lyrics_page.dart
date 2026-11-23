@@ -162,8 +162,16 @@ class _LyricsPageState extends State<LyricsPage> {
         final version = other == null
             ? ''
             : 'another version (${LyricsController.otherLengthText(other)})';
+        // Plain words of another version say whether a fit timed them
+        // (Codex review of H2).
         final credit = other != null && !lyrics.timed
-            ? 'Words of $version, from $label'
+            ? fitted
+                  ? 'Words of $version, from $label, timed by fitting to this '
+                        'recording'
+                  : widget.lyrics.fitFor(lyrics) != null
+                  ? 'Words of $version, from $label: they could not be '
+                        'matched to this recording'
+                  : 'Words of $version, from $label'
             : other != null
             ? fitted
                   ? 'From $label, $version, fitted to this recording'

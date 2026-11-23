@@ -170,29 +170,37 @@ Future<RecordingFit> _fitInIsolate(
 /// (line_fit.dart sungLines); for plain words (no line has a time, H2)
 /// the words of each sung line by its place in [lines], without section
 /// headers and repeat marks. Null when there is too little to fit: fewer
-/// than 3 lines, or under 80% of the letters readable by the aligner (the
-/// research skipped those lyrics).
+/// than 3 lines, under 80% of the letters readable by the aligner (the
+/// research skipped those lyrics), or plain words with fewer than 3
+/// different lines (their check cannot tell: line_fit.dart shuffleGain).
 ({bool plain, List<SungLine> sung, Map<int, String> plainTexts})? fitTextsOf(
   List<({int? startMs, int? endMs, String text})> lines,
 ) {
   final plain = lines.every((line) => line.startMs == null);
   final sung = plain ? const <SungLine>[] : sungLines(lines);
-  final plainTexts = <int, String>{
+  // Plain words: every line that may be sung, readable or not, counts for
+  // the readable share; only the readable ones are aligned (Codex review:
+  // lines the aligner cannot read at all were left out of the share).
+  final candidates = <int, String>{
     if (plain)
       for (var i = 0; i < lines.length; i++)
-        if (!isUnsungLine(lines[i].text) &&
-            romanize(sungText(lines[i].text)).words.isNotEmpty)
+        if (lines[i].text.trim().isNotEmpty && !isUnsungLine(lines[i].text))
           i: sungText(lines[i].text),
+  };
+  final plainTexts = <int, String>{
+    for (final MapEntry(:key, :value) in candidates.entries)
+      if (romanize(value).words.isNotEmpty) key: value,
   };
   var letters = 0;
   var kept = 0;
-  for (final text in plain ? plainTexts.values : sung.map((l) => l.text)) {
+  for (final text in plain ? candidates.values : sung.map((l) => l.text)) {
     final r = romanize(text);
     letters += r.letters;
     kept += r.kept;
   }
   final count = plain ? plainTexts.length : sung.length;
   if (count < 3 || letters == 0 || kept / letters < 0.8) return null;
+  if (plain && plainTexts.values.toSet().length < 3) return null;
   return (plain: plain, sung: sung, plainTexts: plainTexts);
 }
 

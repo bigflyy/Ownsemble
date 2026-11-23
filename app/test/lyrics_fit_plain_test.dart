@@ -89,6 +89,7 @@ void main() {
           'Припев мой',
           'Hello world',
           '',
+          "[Oh] I won't go [oh]",
         ]) {
           expect(isUnsungLine(text), isFalse, reason: text);
         }
@@ -99,6 +100,23 @@ void main() {
       expect(sungText('Hello world x2'), 'Hello world');
       expect(sungText('Привет (х3)'), 'Привет');
       expect(sungText('Max2'), 'Max2');
+      expect(sungText('Hello (x2)'), 'Hello');
+      // Unbracketed, only a lowercase mark: "X2" may be sung (Codex review).
+      expect(sungText('I bought an X2'), 'I bought an X2');
+    });
+
+    test('words the fit cannot mostly read, or too few different lines, '
+        'cannot be fitted', () {
+      List<LyricLine> of(List<String> texts) => plain(texts);
+      expect(canFitLines(of(['ab cd', 'ef gh', 'ij kl'])), isTrue);
+      // Three readable lines and twenty the aligner cannot read.
+      expect(
+        canFitLines(
+          of(['ab cd', 'ef gh', 'ij kl', for (var i = 0; i < 20; i++) '第一行歌词']),
+        ),
+        isFalse,
+      );
+      expect(canFitLines(of(['ab', 'cd', 'ab', 'cd', 'ab', 'cd'])), isFalse);
     });
   });
 
@@ -119,6 +137,20 @@ void main() {
         5000,
         5000,
         6000,
+      ]);
+    });
+
+    test('a header just before a blank line keeps the pause', () {
+      final lines = plain(['ab', 'Chorus:', '', 'cd']);
+      final fit = {
+        0: const FitLine(1000, endMs: 2000, sure: true),
+        3: const FitLine(8000, endMs: 9000, sure: true),
+      };
+      expect(plainLineStarts(lines, fit, lengthMs: 9000), [
+        1000,
+        2000,
+        2000,
+        8000,
       ]);
     });
 
@@ -202,15 +234,14 @@ void main() {
       expect(result.undecided, isFalse);
     });
 
-    test(
-      'a few lines sung over and over cannot be checked, so they do not fit',
-      () {
-        final result = fitOf(['ab', 'cd', 'ab', 'cd', 'ab', 'cd']);
-        expect(result.shuffleGain, isNull);
-        expect(result.undecided, isTrue);
-        expect(result.fits, isFalse);
-      },
-    );
+    test('lines that read the same in any order cannot be checked, so they do not fit', () {
+      // Two different lines over and over are refused before any fit
+      // (canFitLines); these three differ, yet any order reads the same.
+      final result = fitOf(['ha', 'haha', 'hahaha']);
+      expect(result.shuffleGain, isNull);
+      expect(result.undecided, isTrue);
+      expect(result.fits, isFalse);
+    });
   });
 
   group('the Lyrics place with plain words', () {
@@ -241,12 +272,13 @@ void main() {
     Future<LyricsController> open(
       WidgetTester tester,
       Lyrics shown,
-      RecordingFit Function() result,
-    ) async {
+      RecordingFit Function() result, {
+      String meta = '{"exact":true}',
+    }) async {
       tester.view.physicalSize = const Size(1400, 900);
       tester.view.devicePixelRatio = 1;
       addTearDown(tester.view.reset);
-      store.saveLyrics('lrclib', '1_1', shown, meta: '{"exact":true}');
+      store.saveLyrics('lrclib', '1_1', shown, meta: meta);
       final lyrics = LyricsController(
         load: store.lyricsOf,
         save: store.saveLyrics,
@@ -377,6 +409,35 @@ void main() {
       await tester.pump(const Duration(seconds: 1));
       expect(find.byKey(const ValueKey('lyrics-fit-again')), findsOneWidget);
       expect(find.byKey(const ValueKey('lyrics-fit-choose')), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('plain words of another version say when they are timed', (
+      tester,
+    ) async {
+      await open(
+        tester,
+        words,
+        () => const RecordingFit(
+          lines: wordsFit,
+          sureShare: 0.75,
+          audioSeconds: 200,
+          elapsedMs: 10,
+          plain: true,
+          shuffleGain: 0.12,
+        ),
+        meta: '{"exact":true,"seconds":230,"other":true}',
+      );
+      expect(
+        find.textContaining('another version (30 s longer)'),
+        findsOneWidget,
+      );
+      await fit(tester);
+      final credit = tester
+          .widget<Text>(find.byKey(const ValueKey('lyrics-credit')))
+          .data!;
+      expect(credit, contains('another version (30 s longer)'));
+      expect(credit, contains('timed by fitting to this recording'));
       expect(tester.takeException(), isNull);
     });
 
