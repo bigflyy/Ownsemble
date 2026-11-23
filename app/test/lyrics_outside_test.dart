@@ -3,6 +3,8 @@
 // replies. The words and names are made up; the reply shapes are those of
 // tool/probe_lyrics_outside.dart (session 37).
 
+import 'dart:convert';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ownsemble/lyrics/lrc.dart';
 import 'package:ownsemble/lyrics/lyrics.dart';
@@ -168,6 +170,41 @@ void main() {
       expect(takeCandidate(NameMatch.none, 0), isFalse);
     });
 
+    test('another version: the same names, another known length (G4a)', () {
+      bool other(String artist, String title, int? diff) =>
+          otherVersionCandidate(
+            songArtist: 'Ночные Тени',
+            songTitle: 'Город спит (Live)',
+            artist: artist,
+            title: title,
+            lengthDiffSeconds: diff,
+          );
+      expect(other('Ночные тени', 'Город спит', 6), isTrue);
+      expect(other('Ночные Тени', 'Город спит (Remastered)', 3626), isTrue);
+      expect(other('Ночные Тени', 'Город спит - Live at Home', 30), isTrue);
+      expect(
+        other('Ночные Тени', 'Город спит', 5),
+        isFalse,
+        reason: "the song's own length is taken, not another version",
+      );
+      expect(
+        other('Ночные Тени', 'Город спит', null),
+        isFalse,
+        reason: 'an unknown length says nothing',
+      );
+      expect(
+        other('Nochnye Teni', 'Gorod spit', 40),
+        isFalse,
+        reason: 'loose names only with the own length',
+      );
+      expect(
+        other('Ночные Тени', 'Город спит снова', 40),
+        isFalse,
+        reason: 'a title inside a longer one is another song',
+      );
+      expect(other('Тени', 'Город спит', 40), isFalse);
+    });
+
     test('transliterate keeps capitals and other characters', () {
       expect(transliterate('Ночные Тени - 2'), 'Nochnye Teni - 2');
       expect(hasCyrillic('abc'), isFalse);
@@ -255,11 +292,84 @@ void main() {
       expect(found.lyrics.timed, isTrue);
     });
 
-    test('nothing taken: none', () async {
-      final web = FakeWeb(
-        (url) => url.path == '/api/get' ? null : [row(duration: 260)],
-      );
-      expect(await LrclibSource(web.call).find(song), isNull);
+    test(
+      'nothing of this length: none, unless the names agree exactly',
+      () async {
+        final web = FakeWeb(
+          (url) => url.path == '/api/get'
+              ? null
+              : [
+                  row(
+                    artist: 'Nochnye Teni',
+                    title: 'Gorod spit',
+                    duration: 260,
+                  ),
+                ],
+        );
+        expect(await LrclibSource(web.call).find(song), isNull);
+      },
+    );
+
+    test(
+      'a live upload gets the studio row as another version (G4a)',
+      () async {
+        // The studio song is 225 s; the live upload 3851 s, or 218 s: the
+        // studio's last lines lie past the shorter upload's end, so the row
+        // is read against its own length, or its times would be dropped.
+        final studio = lrcOf([
+          (10000, 'Раз'),
+          (100000, 'Два'),
+          (220000, 'Три'),
+        ]);
+        for (final seconds in [3851, 218]) {
+          final live = SongNames(
+            artist: 'Ночные Тени',
+            title: 'Город спит (Live)',
+            seconds: seconds,
+          );
+          final web = FakeWeb(
+            (url) => url.path == '/api/get'
+                ? null
+                : [row(duration: 225, synced: studio)],
+          );
+          final found = (await LrclibSource(web.call).find(live))!;
+          expect(found.otherVersion, isTrue);
+          expect(found.lyrics.timed, isTrue, reason: '$seconds s');
+          expect(found.lengthDiff, (seconds - 225).abs());
+          expect(jsonDecode(found.metaToJson())['other'], isTrue);
+          expect(
+            web.asked.map((url) => url.queryParameters['track_name']).toList(),
+            ['Город спит (Live)', 'Город спит', 'Gorod spit'],
+            reason: 'another version does not end the search',
+          );
+        }
+      },
+    );
+
+    test("a row of the song's own length beats another version", () async {
+      final web = FakeWeb((url) {
+        if (url.path == '/api/get') return null;
+        return url.queryParameters['track_name'] == 'Gorod spit'
+            ? [row(id: 2, plain: 'Слова\nещё')]
+            : [row(id: 1, duration: 300, synced: timed)];
+      });
+      final found = (await LrclibSource(web.call).find(song))!;
+      expect(found.id, '2', reason: 'own length, though words only');
+      expect(found.otherVersion, isFalse);
+      expect(found.metaToJson(), isNot(contains('other')));
+    });
+
+    test('a failed later search keeps what came before', () async {
+      final web = FakeWeb((url) {
+        if (url.path == '/api/get') return null;
+        if (url.queryParameters['track_name'] == 'Gorod spit') {
+          throw const LyricsSourceException('timed out');
+        }
+        return [row(id: 3, duration: 260, synced: timed)];
+      });
+      final found = (await LrclibSource(web.call).find(song))!;
+      expect(found.id, '3');
+      expect(found.otherVersion, isTrue);
     });
 
     test('a refusal is thrown to the caller', () async {
@@ -322,6 +432,48 @@ void main() {
         ['9', '8'],
         reason: 'closest length first, the far one never asked',
       );
+    });
+
+    test('NetEase: only other lengths: the closest as another version '
+        '(G4a)', () async {
+      final asked = <String>[];
+      final web = FakeWeb((url) {
+        if (url.path == '/api/search/get') {
+          return {
+            'code': 200,
+            'result': {
+              'songs': [
+                for (final (id, ms) in [(7, 290000), (8, 230000)])
+                  {
+                    'id': id,
+                    'name': 'Город спит',
+                    'duration': ms,
+                    'artists': [
+                      {'name': 'Ночные Тени'},
+                    ],
+                  },
+                {
+                  'id': 9,
+                  'name': 'Gorod spit',
+                  'duration': 200000,
+                  'artists': [
+                    {'name': 'Nochnye Teni'},
+                  ],
+                },
+              ],
+            },
+          };
+        }
+        asked.add(url.queryParameters['id']!);
+        return {
+          'lrc': {'lyric': url.queryParameters['id'] == '9' ? '' : timed},
+        };
+      });
+      final found = (await NeteaseSource(web.call).find(song))!;
+      expect(found.id, '8');
+      expect(found.otherVersion, isTrue);
+      expect(found.lyrics.timed, isTrue);
+      expect(asked, ['9', '8'], reason: 'own length first, then the closest');
     });
 
     test('NetEase: an error code is a failure', () async {

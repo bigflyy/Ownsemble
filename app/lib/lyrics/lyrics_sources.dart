@@ -43,6 +43,7 @@ class LyricsCandidate {
     required this.seconds,
     required this.names,
     required this.lengthDiff,
+    this.otherVersion = false,
   });
 
   final Lyrics lyrics;
@@ -57,6 +58,11 @@ class LyricsCandidate {
   /// Seconds between this song's length and the played song's.
   final int? lengthDiff;
 
+  /// The lyrics of another version of the song: the names agree but the
+  /// length does not ([otherVersionCandidate]); their timing is not the
+  /// played recording's until fitted to it.
+  final bool otherVersion;
+
   String get source => lyrics.source;
 
   /// The candidate's facts as stored with its lyrics (`lyrics.meta`).
@@ -67,6 +73,7 @@ class LyricsCandidate {
     'seconds': ?seconds,
     'exact': names == NameMatch.exact,
     'diff': ?lengthDiff,
+    if (otherVersion) 'other': true,
   });
 }
 
@@ -117,9 +124,12 @@ String lyricsSourceLabel(String source) => switch (source) {
   _ => source,
 };
 
-/// Orders candidates best first: timed before words only (the user's
-/// "timed first", 2026-11-22), then exact names, then the closer length.
+/// Orders candidates best first: the song's own length before another
+/// version (G4a), then timed before words only (the user's "timed first",
+/// 2026-11-22), then exact names, then the closer length.
 int compareCandidates(LyricsCandidate a, LyricsCandidate b) {
+  final byOwn = (a.otherVersion ? 1 : 0).compareTo(b.otherVersion ? 1 : 0);
+  if (byOwn != 0) return byOwn;
   final byTimed = (b.lyrics.timed ? 1 : 0).compareTo(a.lyrics.timed ? 1 : 0);
   if (byTimed != 0) return byTimed;
   final byNames = b.names.index.compareTo(a.names.index);
@@ -158,6 +168,21 @@ class SourceRow {
 
   bool get taken => takeCandidate(names, lengthDiff);
 
+  /// Not taken, but its lyrics may be offered as another version's (G4a).
+  late final bool otherVersion = otherVersionCandidate(
+    songArtist: song.artist,
+    songTitle: song.title,
+    artist: artist,
+    title: title,
+    lengthDiffSeconds: lengthDiff,
+  );
+
+  /// The length the row's LRC times are checked against: the song's for a
+  /// taken row; the row's own for another version, whose times belong to
+  /// that version (a shorter live upload would drop the studio's last
+  /// lines otherwise).
+  int? lrcSeconds() => otherVersion ? seconds : song.seconds;
+
   LyricsCandidate? withLyrics(Lyrics? lyrics) => lyrics == null
       ? null
       : LyricsCandidate(
@@ -168,8 +193,14 @@ class SourceRow {
           seconds: seconds,
           names: names,
           lengthDiff: lengthDiff,
+          otherVersion: otherVersion,
         );
 }
+
+/// Whether [best] ends a source's search: timed lyrics of the song's own
+/// length.
+bool _settles(LyricsCandidate? best) =>
+    best != null && best.lyrics.timed && !best.otherVersion;
 
 /// The best of [candidates], or null.
 LyricsCandidate? _best(Iterable<LyricsCandidate> candidates) {
@@ -206,18 +237,24 @@ class LrclibSource implements OutsideLyricsSource {
     );
     // Each step only while nothing timed is taken: /api/get can answer a
     // words-only row while a search finds a timed one (check 40a, song 0).
+    // A later search that fails does not lose what an earlier step found
+    // (Codex review of G4: another version no longer ends the search).
     final rows = <Object?>[if (exact is Map) exact];
     var best = _bestOf(song, rows);
-    if (best?.lyrics.timed ?? false) return best;
-    final title = searchTitle(song.title);
-    rows.addAll(await _search(title, song.artist));
-    best = _bestOf(song, rows);
-    if (best?.lyrics.timed ?? false) return best;
-    if (hasCyrillic(song.artist) || hasCyrillic(title)) {
-      rows.addAll(
-        await _search(transliterate(title), transliterate(song.artist)),
-      );
+    if (_settles(best)) return best;
+    try {
+      final title = searchTitle(song.title);
+      rows.addAll(await _search(title, song.artist));
       best = _bestOf(song, rows);
+      if (_settles(best)) return best;
+      if (hasCyrillic(song.artist) || hasCyrillic(title)) {
+        rows.addAll(
+          await _search(transliterate(title), transliterate(song.artist)),
+        );
+        best = _bestOf(song, rows);
+      }
+    } on LyricsSourceException {
+      if (best == null) rethrow;
     }
     return best;
   }
@@ -233,7 +270,8 @@ class LrclibSource implements OutsideLyricsSource {
     return found is List ? found : const [];
   }
 
-  /// The best taken row of [rows] with words; an instrumental row has none.
+  /// The best row of [rows] with words, taken or another version's; an
+  /// instrumental row has none.
   LyricsCandidate? _bestOf(SongNames song, List<Object?> rows) {
     final found = <LyricsCandidate>[];
     for (final row in rows) {
@@ -245,12 +283,12 @@ class LrclibSource implements OutsideLyricsSource {
         '${row['trackName'] ?? ''}',
         (row['duration'] as num?)?.round(),
       );
-      if (!candidate.taken) continue;
+      if (!candidate.taken && !candidate.otherVersion) continue;
       final lyrics =
           lyricsFromLrc(
             id,
             row['syncedLyrics'] as String?,
-            songSeconds: song.seconds,
+            songSeconds: candidate.lrcSeconds(),
           ) ??
           lyricsFromPlain(id, row['plainLyrics'] as String?);
       final withLyrics = candidate.withLyrics(lyrics);
@@ -276,19 +314,42 @@ abstract class _SearchThenLyrics implements OutsideLyricsSource {
 
   @override
   Future<LyricsCandidate?> find(SongNames song) async {
-    final rows = (await search(song)).where((row) => row.taken).toList()
+    final rows = await search(song);
+    final taken = rows.where((row) => row.taken).toList()
       ..sort((a, b) {
         final byNames = b.names.index.compareTo(a.names.index);
         if (byNames != 0) return byNames;
         return a.lengthDiff!.compareTo(b.lengthDiff!);
       });
+    final found = await _read(taken);
+    if (found.isNotEmpty) return _best(found);
+    // Nothing of the song's own length: another version's lyrics, the
+    // closest length first (G4a).
+    final other = rows.where((row) => row.otherVersion).toList()
+      ..sort(
+        (a, b) => (a.lengthDiff ?? 1 << 30).compareTo(b.lengthDiff ?? 1 << 30),
+      );
+    return _best(await _read(other));
+  }
+
+  /// Reads the lyrics of up to [_lyricsTries] of [rows] in order, until
+  /// timed ones come.
+  Future<List<LyricsCandidate>> _read(List<SourceRow> rows) async {
     final found = <LyricsCandidate>[];
     for (final row in rows.take(_lyricsTries)) {
+      final String? lrc;
+      try {
+        lrc = await lrcOf(row);
+      } on LyricsSourceException {
+        // Lyrics read before stay; with none the failure is the answer.
+        if (found.isEmpty) rethrow;
+        break;
+      }
       final candidate = row.withLyrics(
         lyricsFromLrc(
           id,
-          await lrcOf(row),
-          songSeconds: song.seconds,
+          lrc,
+          songSeconds: row.lrcSeconds(),
           title: row.title,
           artist: row.artist,
         ),
@@ -297,7 +358,7 @@ abstract class _SearchThenLyrics implements OutsideLyricsSource {
       found.add(candidate);
       if (candidate.lyrics.timed) break;
     }
-    return _best(found);
+    return found;
   }
 }
 

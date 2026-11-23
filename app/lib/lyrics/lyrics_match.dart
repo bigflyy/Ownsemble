@@ -169,6 +169,43 @@ bool takeCandidate(NameMatch names, int? lengthDiffSeconds) {
   };
 }
 
+/// Words that start a version tag left outside brackets: "Song live at X",
+/// "Song - Acoustic Version". Everything from such a word on is dropped
+/// when names are compared for another version.
+final _versionTail = RegExp(
+  r'\s(live|acoustic|unplugged|session|version|remix|edit|концерт\w*|'
+  r'акуст\w*|живой|версия)(\s.*)?$',
+);
+
+/// [foldName] without a trailing version tag.
+String _versionFold(String name) {
+  final folded = foldName(name);
+  final cut = folded.replaceFirst(_versionTail, '').trim();
+  return cut.isEmpty ? folded : cut;
+}
+
+/// Whether a candidate not taken by [takeCandidate] may still be offered
+/// as the lyrics of another version of the song (plan 10 G4a): the same
+/// artist and title once case, tags in brackets and a trailing version tag
+/// are dropped (stricter than [matchNames], which takes a title inside a
+/// longer one and a shared artist word: "Home (Live)" is not "Homecoming"),
+/// and both lengths known and more than 5 s apart (a live, acoustic or
+/// edited upload). Its words show without timing until fitted.
+bool otherVersionCandidate({
+  required String songArtist,
+  required String songTitle,
+  required String artist,
+  required String title,
+  required int? lengthDiffSeconds,
+}) {
+  if (lengthDiffSeconds == null || lengthDiffSeconds <= 5) return false;
+  final a = foldName(songArtist), t = _versionFold(songTitle);
+  return a.isNotEmpty &&
+      t.isNotEmpty &&
+      a == foldName(artist) &&
+      t == _versionFold(title);
+}
+
 /// Whether a text has Cyrillic letters, so a search in Latin letters may
 /// find rows a search as written does not.
 bool hasCyrillic(String text) => RegExp('[Ѐ-ӿ]').hasMatch(text);
