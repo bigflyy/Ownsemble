@@ -174,6 +174,9 @@ class _LyricsChoicesPageState extends State<LyricsChoicesPage> {
                 score: choice.lyrics == null
                     ? null
                     : fitter?.scoreOf(choice.lyrics!),
+                fitted:
+                    choice.lyrics != null &&
+                    widget.lyrics.isFitted(choice.lyrics!),
                 inUse: choice.source == (chosen ?? automatic),
                 automatic: choice.source == automatic,
                 yours: choice.source == chosen,
@@ -285,7 +288,7 @@ class _LyricsChoicesPageState extends State<LyricsChoicesPage> {
                         : 'words only'}'
                     ' · ${_lengthNote(choice)}'
                     '${widget.lyrics.isFitted(lyrics) ? ' · fitted to this recording' : ''}'
-                    '${_offsetNote(lyrics.timed ? widget.lyrics.offsetOf(choice.source) : 0)}',
+                    '${_offsetNote(widget.lyrics.timedOf(lyrics).timed ? widget.lyrics.offsetOf(choice.source) : 0)}',
                     key: const ValueKey('lyrics-preview-what'),
                     style: TextStyle(color: colors.dim, fontSize: 13),
                   ),
@@ -357,6 +360,7 @@ class _ChoiceRow extends StatelessWidget {
     super.key,
     required this.choice,
     this.score,
+    this.fitted = false,
     required this.inUse,
     required this.automatic,
     required this.yours,
@@ -371,6 +375,10 @@ class _ChoiceRow extends StatelessWidget {
   /// The share of the lyrics' lines found in this recording (G3); null
   /// when not checked.
   final double? score;
+
+  /// Whether the lyrics show fitted to this recording (G2), which times
+  /// plain words too (H2).
+  final bool fitted;
   final bool inUse;
   final bool automatic;
   final bool yours;
@@ -388,6 +396,11 @@ class _ChoiceRow extends StatelessWidget {
       if (lyrics != null)
         lyrics.timed
             ? ('timed', 'Lines follow the music.')
+            : fitted
+            ? (
+                'timed by fitting',
+                'Words timed by fitting them to this recording.',
+              )
             : ('words only', 'No times: the words scroll by hand.'),
       if (score case final sure?)
         sure >= 0.5
@@ -443,7 +456,7 @@ class _ChoiceRow extends StatelessWidget {
     };
     final icon = switch (choice.status) {
       LyricsChoiceStatus.found =>
-        lyrics!.timed ? Icons.lyrics_outlined : Icons.notes,
+        lyrics!.timed || fitted ? Icons.lyrics_outlined : Icons.notes,
       LyricsChoiceStatus.none => Icons.block,
       LyricsChoiceStatus.failed => Icons.error_outline,
       LyricsChoiceStatus.asking ||

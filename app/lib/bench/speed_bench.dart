@@ -18,6 +18,7 @@ import '../library/song_filter.dart';
 import '../library/track.dart';
 import '../lyrics/lyrics_controller.dart';
 import '../lyrics/lyrics_fitter.dart';
+import '../lyrics/recording_fit.dart' show canFitLines;
 import '../playback/playback_controller.dart';
 import '../playback/player_service.dart';
 import '../playback/stream_proxy.dart' show ProxyRequestLog;
@@ -1025,13 +1026,16 @@ class SpeedBench {
           await Future<void>.delayed(const Duration(milliseconds: 100));
         }
         final state = lyrics.state;
-        if (state is! LyricsShown || !state.lyrics.timed) {
-          row['lyrics'] = state is LyricsShown ? 'not timed' : '$state';
+        // Plain words are fitted too (H2); only lyrics the fit cannot read
+        // are skipped.
+        if (state is! LyricsShown || !canFitLines(state.lyrics.lines)) {
+          row['lyrics'] = state is LyricsShown ? 'cannot be fitted' : '$state';
           continue;
         }
         final shown = state.lyrics;
         row['lyrics'] = {
           'source': shown.source,
+          'timed': shown.timed,
           'lines': shown.lines.length,
           'gaps': shown.lines.where((l) => l.isGap).length,
           'shownAfterMs': asked.elapsedMilliseconds,
@@ -1089,15 +1093,20 @@ class SpeedBench {
         };
         final fit = lyrics.fitFor(shown);
         if (fit?.starts case final starts?) {
+          // Moves only where the source has times of its own (plain words
+          // have none: Codex review of H2).
           final moves = [
             for (var i = 0; i < shown.lines.length; i++)
-              if (!shown.lines[i].isGap) starts[i] - shown.lines[i].startMs!,
+              if (!shown.lines[i].isGap && shown.lines[i].startMs != null)
+                starts[i] - shown.lines[i].startMs!,
           ]..sort();
-          row['moves'] = {
-            'medianMs': moves[moves.length ~/ 2],
-            'minMs': moves.first,
-            'maxMs': moves.last,
-          };
+          if (moves.isNotEmpty) {
+            row['moves'] = {
+              'medianMs': moves[moves.length ~/ 2],
+              'minMs': moves.first,
+              'maxMs': moves.last,
+            };
+          }
           row['starts'] = {
             'source': [for (final l in shown.lines) l.startMs],
             'fitted': starts,

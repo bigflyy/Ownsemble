@@ -65,10 +65,18 @@ class FitDone extends FitOutcome {
 }
 
 /// Fewer than half the lines could be placed with confidence: the lyrics
-/// probably belong to another recording. Nothing moved.
+/// probably belong to another recording. Nothing moved. For [plain] words
+/// the words also had to beat their own shuffled order; [undecided] when
+/// they repeat too few different lines to tell.
 class FitNoMatch extends FitOutcome {
-  const FitNoMatch(this.sureShare);
+  const FitNoMatch(
+    this.sureShare, {
+    this.plain = false,
+    this.undecided = false,
+  });
   final double sureShare;
+  final bool plain;
+  final bool undecided;
 }
 
 /// The fit did not finish; [message] says why, [retry] whether trying
@@ -311,8 +319,12 @@ class LyricsFitter extends ChangeNotifier {
       );
     }
     final shown = state.lyrics;
-    if (!shown.timed) {
-      return const FitFailed('Only timed lyrics can be fitted.', retry: false);
+    if (!canFitLines(shown.lines)) {
+      return const FitFailed(
+        'These lyrics cannot be fitted: too few lines in letters the fit '
+        'can read.',
+        retry: false,
+      );
     }
     final job = _job = FitJob(key, shown.source, const FitSaving(0));
     final clock = Stopwatch()..start();
@@ -365,24 +377,38 @@ class LyricsFitter extends ChangeNotifier {
         StoredFit(
           lyricsHash: lyricsHashOf(shown),
           audioBytes: audioBytes,
-          starts: fits
-              ? fittedLineStarts(
+          starts: !fits
+              ? null
+              : result.plain
+              ? plainLineStarts(
                   shown.lines,
                   result.lines,
                   lengthMs: (result.audioSeconds * 1000).round(),
                 )
-              : null,
+              : fittedLineStarts(
+                  shown.lines,
+                  result.lines,
+                  lengthMs: (result.audioSeconds * 1000).round(),
+                ),
           sureShare: result.sureShare,
           fittedAtMs: _now(),
         ),
       );
       log?.call(
-        'lyrics fit ${shown.source} ${fits ? 'fits' : 'no match'} sure '
+        'lyrics fit ${shown.source}${result.plain ? ' words' : ''} '
+        '${fits ? 'fits' : 'no match'} sure '
         '${result.sureShare.toStringAsFixed(2)} '
+        '${result.plain ? 'gain ${result.shuffleGain?.toStringAsFixed(3) ?? 'none'} ' : ''}'
         '${clock.elapsedMilliseconds} ms (model $modelMs, audio $audioMs, '
         'fit ${result.elapsedMs})',
       );
-      return fits ? FitDone(result.sureShare) : FitNoMatch(result.sureShare);
+      return fits
+          ? FitDone(result.sureShare)
+          : FitNoMatch(
+              result.sureShare,
+              plain: result.plain,
+              undecided: result.undecided,
+            );
     } on DownloadStopped {
       log?.call('lyrics fit model download stopped');
       return const FitStopped();

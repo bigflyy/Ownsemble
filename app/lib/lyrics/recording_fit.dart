@@ -45,9 +45,13 @@ class FitTools {
 
 /// A line's new start, as the fit found it.
 class FitLine {
-  const FitLine(this.startMs, {required this.sure});
+  const FitLine(this.startMs, {required this.sure, this.endMs});
 
   final int startMs;
+
+  /// Where the aligner placed the line's last letter's end (plain words
+  /// only: a blank line after it starts there).
+  final int? endMs;
 
   /// Whether the aligner's own placement was trusted; otherwise the start
   /// is the lyrics' moved by the shift of the sure lines around it.
@@ -61,6 +65,8 @@ class RecordingFit {
     required this.sureShare,
     required this.audioSeconds,
     required this.elapsedMs,
+    this.plain = false,
+    this.shuffleGain,
   });
 
   /// By index into the lyrics' lines; lines without a start or words are
@@ -72,9 +78,24 @@ class RecordingFit {
   final double audioSeconds;
   final int elapsedMs;
 
+  /// Whether plain words (no times of their own) were fitted (H2).
+  final bool plain;
+
+  /// Plain words only: how much better the words score in their own order
+  /// than shuffled (line_fit.dart shuffleGain); null when that cannot be
+  /// told (too few different lines).
+  final double? shuffleGain;
+
+  /// Plain words whose fit cannot be checked: too few different lines.
+  bool get undecided => plain && shuffleGain == null;
+
   /// Whether the lyrics seem to belong to this recording (G0b: when under
-  /// half the lines are sure, most placements were wrong).
-  bool get fits => sureShare >= 0.5;
+  /// half the lines are sure, most placements were wrong). Plain words
+  /// must also beat their own shuffled order (H1: the sure share alone
+  /// lets words of another song through).
+  bool get fits =>
+      sureShare >= 0.5 &&
+      (!plain || (shuffleGain != null && shuffleGain! >= plainGainAt));
 }
 
 /// Thrown when the lines cannot be fitted (no timed lines with letters the
@@ -145,6 +166,45 @@ Future<RecordingFit> _fitInIsolate(
   debugName: 'lyrics fit',
 );
 
+/// What a fit aligns of [lines]: for timed lyrics the sung lines
+/// (line_fit.dart sungLines); for plain words (no line has a time, H2)
+/// the words of each sung line by its place in [lines], without section
+/// headers and repeat marks. Null when there is too little to fit: fewer
+/// than 3 lines, or under 80% of the letters readable by the aligner (the
+/// research skipped those lyrics).
+({bool plain, List<SungLine> sung, Map<int, String> plainTexts})? fitTextsOf(
+  List<({int? startMs, int? endMs, String text})> lines,
+) {
+  final plain = lines.every((line) => line.startMs == null);
+  final sung = plain ? const <SungLine>[] : sungLines(lines);
+  final plainTexts = <int, String>{
+    if (plain)
+      for (var i = 0; i < lines.length; i++)
+        if (!isUnsungLine(lines[i].text) &&
+            romanize(sungText(lines[i].text)).words.isNotEmpty)
+          i: sungText(lines[i].text),
+  };
+  var letters = 0;
+  var kept = 0;
+  for (final text in plain ? plainTexts.values : sung.map((l) => l.text)) {
+    final r = romanize(text);
+    letters += r.letters;
+    kept += r.kept;
+  }
+  final count = plain ? plainTexts.length : sung.length;
+  if (count < 3 || letters == 0 || kept / letters < 0.8) return null;
+  return (plain: plain, sung: sung, plainTexts: plainTexts);
+}
+
+/// Whether [lines] can be fitted at all ([fitTextsOf]), so no model is
+/// downloaded for lyrics the fit cannot read (Codex review of H2).
+bool canFitLines(List<LyricLine> lines) =>
+    fitTextsOf([
+      for (final line in lines)
+        (startMs: line.startMs, endMs: line.endMs, text: line.text),
+    ]) !=
+    null;
+
 /// [fitToRecording]'s work, on the calling isolate (blocks it).
 RecordingFit fitNow(
   String audioPath,
@@ -154,18 +214,11 @@ RecordingFit fitNow(
   String? emissionCachePath,
 }) {
   final clock = Stopwatch()..start();
-  final sung = sungLines(lines);
-  var letters = 0;
-  var kept = 0;
-  for (final line in sung) {
-    final r = romanize(line.text);
-    letters += r.letters;
-    kept += r.kept;
-  }
-  // The research skipped lyrics whose letters it mostly could not read.
-  if (sung.length < 3 || letters == 0 || kept / letters < 0.8) {
+  final texts = fitTextsOf(lines);
+  if (texts == null) {
     throw const FitError('these lyrics have too few lines or letters to fit');
   }
+  final (:plain, :sung, :plainTexts) = texts;
   final audioBytes = File(audioPath).lengthSync();
   var cached = emissionCachePath == null
       ? null
@@ -189,6 +242,9 @@ RecordingFit fitNow(
     onChunk?.call(1, 1);
   }
   final (:emission, :seconds) = cached;
+  if (plain) {
+    return _fitPlain(plainTexts, emission, seconds, clock);
+  }
   final List<FittedLine> fitted;
   try {
     fitted = fitLines(emission, sung, seconds / emission.frames);
@@ -212,6 +268,47 @@ RecordingFit fitNow(
     sureShare: sure / fitted.length,
     audioSeconds: seconds,
     elapsedMs: clock.elapsedMilliseconds,
+  );
+}
+
+/// [fitNow] for plain words: every line placed keeps the aligner's start
+/// (H1: moving unsure lines by their neighbours gains nothing), and the
+/// verdict needs the shuffled-order check too.
+RecordingFit _fitPlain(
+  Map<int, String> texts,
+  Emission emission,
+  double seconds,
+  Stopwatch clock,
+) {
+  final indexes = texts.keys.toList();
+  final words = texts.values.toList();
+  final List<PlainFittedLine> fitted;
+  final double? gain;
+  try {
+    fitted = fitPlainLines(emission, words, seconds / emission.frames);
+    gain = shuffleGain(emission, words, fitted, seed: plainSeedOf(words));
+  } on AlignmentTooLong {
+    throw const FitError('the lyrics are longer than the recording allows');
+  }
+  if (fitted.isEmpty) throw const FitError('no line could be placed');
+  var sure = 0;
+  final result = <int, FitLine>{};
+  for (final line in fitted) {
+    final isSure = line.sure >= sureAt;
+    if (isSure) sure++;
+    result[indexes[line.index]] = FitLine(
+      (line.start * 1000).round(),
+      endMs: (line.end * 1000).round(),
+      sure: isSure,
+    );
+  }
+  return RecordingFit(
+    lines: result,
+    sureShare: sure / fitted.length,
+    audioSeconds: seconds,
+    elapsedMs: clock.elapsedMilliseconds,
+    plain: true,
+    shuffleGain: gain,
   );
 }
 

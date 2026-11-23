@@ -1,5 +1,6 @@
 /// The Lyrics heading's "Fit to recording" button (plan 10 G2): moves the
-/// shown timed lines to where they are sung in the song's own audio.
+/// shown timed lines to where they are sung in the song's own audio, or
+/// times plain words by the same fit (H2).
 ///
 /// Before the first fit it asks to download the model (its size, where it
 /// comes from, that it runs on this PC). While a fit runs it shows how far
@@ -14,6 +15,7 @@ import '../lyrics/lyrics.dart';
 import '../lyrics/lyrics_controller.dart';
 import '../lyrics/lyrics_fitter.dart';
 import '../lyrics/lyrics_sources.dart' show lyricsSourceLabel;
+import '../lyrics/recording_fit.dart' show canFitLines;
 
 /// Below this width of the place the button is an icon alone.
 const lyricsFitLabelWidth = 860.0;
@@ -41,7 +43,8 @@ class LyricsFitButton extends StatelessWidget {
     listenable: Listenable.merge([fitter, _lyrics]),
     builder: (context, _) {
       final state = _lyrics.state;
-      if (state is! LyricsShown || !state.lyrics.timed) {
+      // Only lyrics the fit can read: no model download for the rest.
+      if (state is! LyricsShown || !canFitLines(state.lyrics.lines)) {
         return const SizedBox.shrink();
       }
       final shown = state.lyrics;
@@ -49,7 +52,7 @@ class LyricsFitButton extends StatelessWidget {
       if (stage != null) return _progress(context, stage);
       final fit = _lyrics.fitFor(shown);
       if (fit != null && fit.fits) return _fitted(context, shown);
-      if (fit != null) return _noMatch();
+      if (fit != null) return _noMatch(context, shown);
       final busy = fitter.job != null;
       // Fitting needs the song saved, and only library songs are saved.
       if (!(_lyrics.track?.inLibrary ?? false)) {
@@ -67,7 +70,9 @@ class LyricsFitButton extends StatelessWidget {
         label: 'Fit to recording',
         tooltip: busy
             ? 'Another fit is running'
-            : 'Move the lines to where they are sung in this recording',
+            : shown.timed
+            ? 'Move the lines to where they are sung in this recording'
+            : 'Time these words to this recording (about 20 s)',
         onPressed: busy ? null : () => _fit(context),
       );
     },
@@ -162,9 +167,10 @@ class LyricsFitButton extends StatelessWidget {
           key: const ValueKey('lyrics-unfit'),
           // The upload the menu was opened for, even if the song moves on.
           onTap: () => _lyrics.forgetFit(shown.source, key: upload),
-          // Another version's own timing is not this recording's (G4c).
+          // Another version's own timing is not this recording's (G4c);
+          // plain words have none (H2).
           child: Text(
-            _lyrics.otherVersionOf(shown) != null
+            !shown.timed || _lyrics.otherVersionOf(shown) != null
                 ? 'Show words only'
                 : "Use $label's own timing",
           ),
@@ -183,15 +189,41 @@ class LyricsFitButton extends StatelessWidget {
     );
   }
 
-  Widget _noMatch() => _button(
-    key: const ValueKey('lyrics-fit-no-match'),
-    icon: Icons.report_outlined,
-    label: 'Does not fit',
-    tooltip:
-        'These lyrics may not match this recording: most lines could not be '
-        'found in it. Choose other lyrics.',
-    onPressed: onChoose,
-  );
+  /// Lyrics that did not fit: other lyrics, or the fit again (a rule or a
+  /// recording may change; Codex review of H2).
+  Widget _noMatch(BuildContext context, Lyrics shown) {
+    final busy = fitter.job != null;
+    final tooltip = shown.timed
+        ? 'These lyrics may not match this recording: most lines could not '
+              'be found in it.'
+        : 'These words could not be matched to this recording.';
+    return PopupMenuButton<void>(
+      key: const ValueKey('lyrics-fit-no-match'),
+      tooltip: tooltip,
+      itemBuilder: (context) => [
+        PopupMenuItem<void>(
+          key: const ValueKey('lyrics-fit-choose'),
+          onTap: onChoose,
+          child: const Text('Choose other lyrics'),
+        ),
+        PopupMenuItem<void>(
+          key: const ValueKey('lyrics-fit-again'),
+          enabled: !busy,
+          onTap: () => _fit(context),
+          child: const Text('Fit again'),
+        ),
+      ],
+      child: IgnorePointer(
+        child: _button(
+          key: const ValueKey('lyrics-fit-no-match-button'),
+          icon: Icons.report_outlined,
+          label: 'Does not fit',
+          tooltip: tooltip,
+          onPressed: () {},
+        ),
+      ),
+    );
+  }
 
   Future<void> _fit(BuildContext context) async {
     final messenger = ScaffoldMessenger.of(context);
@@ -209,10 +241,15 @@ class LyricsFitButton extends StatelessWidget {
       FitStopped() => const SnackBar(
         content: Text('Download stopped. The next fit goes on from there.'),
       ),
-      FitNoMatch() => SnackBar(
-        content: const Text(
-          'These lyrics may not match this recording: most lines could not '
-          'be found in it.',
+      FitNoMatch(:final plain, :final undecided) => SnackBar(
+        content: Text(
+          undecided
+              ? 'These words repeat too few different lines to tell whether '
+                    'they belong to this recording.'
+              : plain
+              ? 'These words could not be matched to this recording.'
+              : 'These lyrics may not match this recording: most lines could '
+                    'not be found in it.',
         ),
         action: SnackBarAction(label: 'Choose lyrics', onPressed: onChoose),
       ),

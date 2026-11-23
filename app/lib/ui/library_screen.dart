@@ -1475,8 +1475,9 @@ class _LibraryScreenState extends State<LibraryScreen> {
     final state = lyrics.state;
     if (state is! LyricsShown) return song;
     final source = state.lyrics.source;
-    final offset = state.lyrics.timed ? lyrics.shownOffset : 0;
-    final fit = state.lyrics.timed ? lyrics.fitFor(state.lyrics) : null;
+    // As shown: plain words fitted to the recording are timed (H2).
+    final offset = lyrics.timedOf(state.lyrics).timed ? lyrics.shownOffset : 0;
+    final fit = lyrics.fitFor(state.lyrics);
     final other = fit == null && state.lyrics.timed
         ? lyrics.otherVersionOf(state.lyrics)
         : null;
@@ -1490,7 +1491,9 @@ class _LibraryScreenState extends State<LibraryScreen> {
         '${fit == null
             ? ''
             : fit.fits
-            ? ', fitted to this recording'
+            ? state.lyrics.timed
+                  ? ', fitted to this recording'
+                  : ', words timed by fitting to this recording'
             : ', may not match this recording'}'
         '${other == null ? '' : ', words of another version'}'
         '${offset == 0 ? '' : ', ${lyricsOffsetText(offset)}'}';
@@ -1527,7 +1530,11 @@ class _LibraryScreenState extends State<LibraryScreen> {
               ? ''
               : ' No source has lyrics for this song.'
         : " Shows ${shown!.label}'s "
-              "${shown.lyrics!.timed ? 'timed lyrics' : 'words'} "
+              "${shown.lyrics!.timed
+                  ? 'timed lyrics'
+                  : lyrics.isFitted(shown.lyrics!)
+                  ? 'words, timed by fitting'
+                  : 'words'} "
               "(${chosen == null ? 'automatic pick' : 'your choice'}).";
     final status = asking == 0
         ? ''

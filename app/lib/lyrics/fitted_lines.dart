@@ -116,6 +116,43 @@ List<int> fittedLineStarts(
   return starts;
 }
 
+/// Every line's start after a fit of plain words ([RecordingFit.plain]):
+/// a placed line takes its fitted start; a blank line starts where the
+/// placed line before it ends (0 before the first), so it lights during
+/// the pause; any other line not placed (a section header, a repeat mark,
+/// a line the aligner cannot read) starts with the next placed line, and
+/// at the end where the last one ends. Starts never go back and stay
+/// within the recording's [lengthMs].
+List<int> plainLineStarts(
+  List<LyricLine> lines,
+  Map<int, FitLine> fit, {
+  int? lengthMs,
+}) {
+  final starts = List<int>.filled(lines.length, 0);
+  int? endBefore;
+  for (var i = 0; i < lines.length; i++) {
+    final placed = fit[i];
+    if (placed != null) {
+      starts[i] = placed.startMs;
+      endBefore = placed.endMs ?? placed.startMs;
+    } else if (lines[i].isGap) {
+      starts[i] = endBefore ?? 0;
+    } else {
+      int? next;
+      for (var k = i + 1; k < lines.length && next == null; k++) {
+        next = fit[k]?.startMs;
+      }
+      starts[i] = next ?? endBefore ?? 0;
+    }
+  }
+  for (var i = 0; i < starts.length; i++) {
+    if (starts[i] < 0) starts[i] = 0;
+    if (lengthMs != null && starts[i] > lengthMs) starts[i] = lengthMs;
+    if (i > 0 && starts[i] < starts[i - 1]) starts[i] = starts[i - 1];
+  }
+  return starts;
+}
+
 /// [lyrics] with their lines at [starts]; each line's end moves as far as
 /// its start did.
 Lyrics withStarts(Lyrics lyrics, List<int> starts) => Lyrics(

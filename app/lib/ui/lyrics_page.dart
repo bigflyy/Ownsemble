@@ -175,6 +175,13 @@ class _LyricsPageState extends State<LyricsPage> {
             : lyrics.timed
             ? 'From $label${yours ? ' (your choice)' : ''}'
                   '${fitted ? ', fitted to this recording' : ''}'
+            // Plain words timed by a fit, or a fit that did not match (H2).
+            : fitted
+            ? 'Words from $label${yours ? ' (your choice)' : ''}, timed by '
+                  'fitting to this recording'
+            : widget.lyrics.fitFor(lyrics) != null
+            ? 'Words only, from $label: they could not be matched to this '
+                  'recording'
             : yours
             ? 'Words only, from $label (your choice)'
             : refreshing
