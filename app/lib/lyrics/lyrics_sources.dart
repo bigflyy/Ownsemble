@@ -223,18 +223,25 @@ class LrclibSource implements OutsideLyricsSource {
   @override
   String get id => 'lrclib';
 
+  /// The lengths /api/get takes: it answers 400 ("duration: must be
+  /// between 1 and 3600") for any other, such as an hour-long concert
+  /// upload (real reply, 2026-11-23); those songs go to the search.
+  static bool _getTakes(int seconds) => seconds >= 1 && seconds <= 3600;
+
   @override
   Future<LyricsCandidate?> find(SongNames song) async {
-    final exact = await _getJson(
-      Uri.https('lrclib.net', '/api/get', {
-        'artist_name': song.artist,
-        'track_name': song.title,
-        if (song.album != null && song.album!.isNotEmpty)
-          'album_name': song.album!,
-        'duration': '${song.seconds}',
-      }),
-      headers: headers,
-    );
+    final exact = !_getTakes(song.seconds)
+        ? null
+        : await _getJson(
+            Uri.https('lrclib.net', '/api/get', {
+              'artist_name': song.artist,
+              'track_name': song.title,
+              if (song.album != null && song.album!.isNotEmpty)
+                'album_name': song.album!,
+              'duration': '${song.seconds}',
+            }),
+            headers: headers,
+          );
     // Each step only while nothing timed is taken: /api/get can answer a
     // words-only row while a search finds a timed one (check 40a, song 0).
     // A later search that fails does not lose what an earlier step found

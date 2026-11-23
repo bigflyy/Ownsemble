@@ -339,7 +339,12 @@ void main() {
           expect(jsonDecode(found.metaToJson())['other'], isTrue);
           expect(
             web.asked.map((url) => url.queryParameters['track_name']).toList(),
-            ['Город спит (Live)', 'Город спит', 'Gorod spit'],
+            [
+              // /api/get takes no length over an hour.
+              if (seconds <= 3600) 'Город спит (Live)',
+              'Город спит',
+              'Gorod spit',
+            ],
             reason: 'another version does not end the search',
           );
         }
@@ -357,6 +362,25 @@ void main() {
       expect(found.id, '2', reason: 'own length, though words only');
       expect(found.otherVersion, isFalse);
       expect(found.metaToJson(), isNot(contains('other')));
+    });
+
+    test('a length LRCLIB refuses (over an hour) skips /api/get', () async {
+      // Real LRCLIB, 2026-11-23: /api/get answers 400 "duration: must be
+      // between 1 and 3600" for a 3851 s concert upload.
+      final web = FakeWeb((url) {
+        if (url.path == '/api/get') {
+          throw const LyricsSourceException('status 400');
+        }
+        return [row(duration: 225, synced: timed)];
+      });
+      const concert = SongNames(
+        artist: 'Ночные Тени',
+        title: 'Город спит (Live)',
+        seconds: 3851,
+      );
+      final found = (await LrclibSource(web.call).find(concert))!;
+      expect(found.otherVersion, isTrue);
+      expect(web.asked.map((url) => url.path), isNot(contains('/api/get')));
     });
 
     test('a failed later search keeps what came before', () async {
