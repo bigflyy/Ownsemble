@@ -66,6 +66,7 @@ class AppOptions {
     this.benchFile,
     this.benchParts,
     this.benchVolume = 100,
+    this.benchFitKeys = const [],
     this.mpvOptions = const {},
     this.mpvLog = false,
     this.cacheWhileStreaming = true,
@@ -95,6 +96,7 @@ class AppOptions {
       benchFile: valueOf('--bench'),
       benchParts: valueOf('--bench-parts')?.split(','),
       benchVolume: double.parse(valueOf('--bench-volume') ?? '100'),
+      benchFitKeys: valueOf('--bench-fit-keys')?.split(',') ?? const [],
       mpvLog: args.contains('--mpv-log'),
       cacheWhileStreaming: !args.contains('--no-stream-cache'),
       mpvOptions: {
@@ -131,6 +133,10 @@ class AppOptions {
 
   /// Player volume during the benchmark, under mute.
   final double benchVolume;
+
+  /// The library songs ("ownerId_audioId") the fitLive part fits to their
+  /// recordings (plan 10 G4).
+  final List<String> benchFitKeys;
 
   /// mpv option overrides, for tuning playback start.
   final Map<String, String> mpvOptions;
@@ -585,6 +591,8 @@ Future<void> main(List<String> args) async {
         catalog: catalog,
         remover: remover,
         artists: artists,
+        lyrics: lyrics,
+        fitter: fitter,
       ),
     );
   });
@@ -628,6 +636,8 @@ Future<void> _afterFirstFrame({
   required CatalogSearch catalog,
   required SongRemover remover,
   required LibraryArtists artists,
+  required LyricsController lyrics,
+  required LyricsFitter fitter,
 }) async {
   final firstFrameAt = DateTime.now();
   if (options.metricsFile != null) {
@@ -682,6 +692,9 @@ Future<void> _afterFirstFrame({
       artists: artists,
       resultFile: options.benchFile,
       volume: options.benchVolume,
+      lyrics: lyrics,
+      fitter: fitter,
+      fitKeys: options.benchFitKeys,
     ).run(parts: options.benchParts);
     File(options.benchFile!)
         .writeAsStringSync(const JsonEncoder.withIndent('  ').convert(result));

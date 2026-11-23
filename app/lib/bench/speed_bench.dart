@@ -16,6 +16,8 @@ import '../library/play_period.dart';
 import '../library/search_text.dart';
 import '../library/song_filter.dart';
 import '../library/track.dart';
+import '../lyrics/lyrics_controller.dart';
+import '../lyrics/lyrics_fitter.dart';
 import '../playback/playback_controller.dart';
 import '../playback/player_service.dart';
 import '../playback/stream_proxy.dart' show ProxyRequestLog;
@@ -51,6 +53,9 @@ class SpeedBench {
     this.artists,
     this.resultFile,
     this.volume = 100,
+    this.lyrics,
+    this.fitter,
+    this.fitKeys = const [],
   });
 
   /// Where the speed gate seeks to before it closes the window.
@@ -77,6 +82,13 @@ class SpeedBench {
 
   /// The Artists place (plan 09), for the artists part; null when not needed.
   final LibraryArtists? artists;
+
+  /// The Lyrics place and its fitter, for the fitLive part (plan 10 G4).
+  final LyricsController? lyrics;
+  final LyricsFitter? fitter;
+
+  /// The library songs ("ownerId_audioId") the fitLive part fits.
+  final List<String> fitKeys;
 
   /// The result file; the restart check writes it while the app stays open.
   final String? resultFile;
@@ -162,6 +174,9 @@ class SpeedBench {
     }
     if (parts?.contains('artists') ?? false) {
       result['artists'] = await _artistsBench();
+    }
+    if (parts?.contains('fitLive') ?? false) {
+      result['fitLive'] = await _fitLiveBench();
     }
     await player.setVolume(volume);
     result['volume'] = volume;
@@ -971,6 +986,142 @@ class SpeedBench {
           if (buildMs[i] > budgetMs || rasterMs[i] > budgetMs) i,
       ].length,
     };
+  }
+
+  /// Plan 10 G4: fits the lyrics of each of [fitKeys] to its recording the
+  /// way Fit to recording does, with the model already there. Per song: it
+  /// plays (muted) and decodes; the Lyrics place shows timed lyrics; the fit
+  /// saves the song and runs; meanwhile the list is scrolled to see whether
+  /// the fit costs frames; time, memory before / peak / after, the outcome,
+  /// and every timed source's score afterwards (G3, from the cached model
+  /// output). Line starts are numbers only, no words.
+  Future<Map<String, Object?>> _fitLiveBench() async {
+    final lyrics = this.lyrics!;
+    final fitter = this.fitter!;
+    final songs = <Map<String, Object?>>[];
+    for (final key in fitKeys) {
+      final track = library.all
+          .where((t) => t.sourceKey == key && t.inLibrary)
+          .firstOrNull;
+      if (track == null) {
+        songs.add({'key': key, 'error': 'not in the library'});
+        continue;
+      }
+      final row = <String, Object?>{'key': key, 'seconds': track.durationSec};
+      songs.add(row);
+      try {
+        final timing = await playback.playFrom([track], 0);
+        row['play'] = {
+          'ok': timing?.ok,
+          'toSoundMs': timing?.toSoundMs,
+          'sampleRate': timing?.sampleRate,
+          'stillPlayingAfter1s': await _keepsPlaying(),
+        };
+        lyrics.show(track);
+        final asked = Stopwatch()..start();
+        while (!(lyrics.state is LyricsShown &&
+                !(lyrics.state as LyricsShown).refreshing) &&
+            asked.elapsed < const Duration(seconds: 40)) {
+          await Future<void>.delayed(const Duration(milliseconds: 100));
+        }
+        final state = lyrics.state;
+        if (state is! LyricsShown || !state.lyrics.timed) {
+          row['lyrics'] = state is LyricsShown ? 'not timed' : '$state';
+          continue;
+        }
+        final shown = state.lyrics;
+        row['lyrics'] = {
+          'source': shown.source,
+          'lines': shown.lines.length,
+          'gaps': shown.lines.where((l) => l.isGap).length,
+          'shownAfterMs': asked.elapsedMilliseconds,
+        };
+
+        // The same scroll without a fit, as the baseline of this run.
+        final baseline = await _scrollRun(1500, seconds: 4);
+        library.scroll.jumpTo(0);
+        final before = ProcessInfo.currentRss ~/ (1 << 20);
+        var peak = before;
+        final sampler = Timer.periodic(const Duration(milliseconds: 250), (_) {
+          final now = ProcessInfo.currentRss ~/ (1 << 20);
+          if (now > peak) peak = now;
+        });
+        final clock = Stopwatch()..start();
+        var savedMs = -1;
+        void noteStage() {
+          final job = fitter.job;
+          if (savedMs < 0 && job != null && job.stage is FitRunning) {
+            savedMs = clock.elapsedMilliseconds;
+          }
+        }
+
+        fitter.addListener(noteStage);
+        final fitting = fitter.fitShown();
+        // Scroll while the model runs: does the fit cost the UI frames?
+        while (savedMs < 0 && fitter.job != null) {
+          await Future<void>.delayed(const Duration(milliseconds: 50));
+        }
+        final scrolls = <String, Object?>{};
+        if (fitter.job != null) {
+          scrolls['1500pxPerSec'] = await _scrollRun(1500, seconds: 4);
+          scrolls['6000pxPerSec'] = await _scrollRun(6000, seconds: 4);
+          library.scroll.jumpTo(0);
+        }
+        final outcome = await fitting;
+        final fitMs = clock.elapsedMilliseconds;
+        sampler.cancel();
+        fitter.removeListener(noteStage);
+        await Future<void>.delayed(const Duration(seconds: 3));
+        row['fit'] = {
+          'outcome': outcome.runtimeType.toString(),
+          if (outcome case FitDone(:final sureShare)) 'sure': sureShare,
+          if (outcome case FitNoMatch(:final sureShare)) 'sure': sureShare,
+          if (outcome case FitFailed(:final message)) 'message': message,
+          'ms': fitMs,
+          'savedAfterMs': savedMs,
+          'scrollBeforeFit1500pxPerSec': baseline,
+          'scrollWhileFitting': scrolls,
+          'memoryMB': {
+            'before': before,
+            'peak': peak,
+            'after': ProcessInfo.currentRss ~/ (1 << 20),
+          },
+        };
+        final fit = lyrics.fitFor(shown);
+        if (fit?.starts case final starts?) {
+          final moves = [
+            for (var i = 0; i < shown.lines.length; i++)
+              if (!shown.lines[i].isGap) starts[i] - shown.lines[i].startMs!,
+          ]..sort();
+          row['moves'] = {
+            'medianMs': moves[moves.length ~/ 2],
+            'minMs': moves.first,
+            'maxMs': moves.last,
+          };
+          row['starts'] = {
+            'source': [for (final l in shown.lines) l.startMs],
+            'fitted': starts,
+            'gap': [for (final l in shown.lines) l.isGap],
+          };
+        }
+
+        // G3: every timed source's score from the cached model output.
+        final ranked = Stopwatch()..start();
+        await lyrics.askAll();
+        await fitter.rankChoices();
+        row['ranked'] = {
+          'ms': ranked.elapsedMilliseconds,
+          for (final choice in lyrics.choices)
+            if (choice.lyrics?.timed ?? false)
+              choice.source: fitter.scoreOf(choice.lyrics!),
+        };
+      } on Object catch (error) {
+        row['error'] = '$error';
+      } finally {
+        await player.stop();
+      }
+    }
+    return {'songs': songs};
   }
 
   /// Plays cached songs and confirms each one keeps decoding audio.
