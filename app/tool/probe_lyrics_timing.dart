@@ -4,7 +4,7 @@
 // run offline against the same audio again and again.
 //
 //   dart run tool/probe_lyrics_timing.dart --vk-session FILE --out DIR
-//       [--count 200] [--only 3,11] [--no-audio]
+//       [--count 200] [--only 3,11] [--no-audio] [--keep-untimed]
 //   dart run tool/probe_lyrics_timing.dart --vk-session FILE --out DIR
 //       --live LIVE_DIR [--count 200]
 //
@@ -18,7 +18,8 @@
 // lines as the library stores them) and DIR/audio/<index>.mp3. The folder
 // must stay under .local/ (out of git): it holds words and audio. Printed
 // per song: its index, which sources are timed, line counts and the file
-// size. No song name, lyric line, link, key or token is printed.
+// size. --keep-untimed also saves songs with no timed lyrics (sources then
+// empty), for speech to text research (plan 10 Stage I). No song name, lyric line, link, key or token is printed.
 // ignore_for_file: avoid_print
 import 'dart:convert';
 import 'dart:io';
@@ -71,6 +72,7 @@ Future<void> main(List<String> args) async {
   final count = int.parse(valueOf('--count') ?? '200');
   final out = Directory(valueOf('--out')!);
   final withAudio = !args.contains('--no-audio');
+  final keepUntimed = args.contains('--keep-untimed');
   final only = {
     for (final i in (valueOf('--only') ?? '').split(','))
       if (i.trim().isNotEmpty) int.parse(i.trim()),
@@ -136,10 +138,13 @@ Future<void> main(List<String> args) async {
     }
     if (timed.isEmpty) {
       line.write(' no timed lyrics');
-      print(line);
-      continue;
+      if (!keepUntimed) {
+        print(line);
+        continue;
+      }
+    } else {
+      timedSongs++;
     }
-    timedSongs++;
     File('${out.path}/songs/$i.json').writeAsStringSync(
       jsonEncode({
         'index': i,
