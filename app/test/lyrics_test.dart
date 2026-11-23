@@ -120,6 +120,36 @@ void main() {
       expect(lyrics.lineAt(999999), 2);
     });
 
+    test('never lands on a label row, even one at the end (H5)', () {
+      const labelled = Lyrics(
+        source: 'lrclib',
+        lines: [
+          LyricLine('[Verse 1]', startMs: 1000, label: true),
+          LyricLine('a', startMs: 1000),
+          LyricLine('[Chorus]', startMs: 5000, label: true),
+          LyricLine('b', startMs: 6000),
+          LyricLine('[Outro]', startMs: 9000, label: true),
+        ],
+      );
+      expect(labelled.lineAt(999), -1);
+      expect(labelled.lineAt(1000), 1);
+      expect(labelled.lineAt(5500), 1);
+      expect(labelled.lineAt(6000), 3);
+      expect(labelled.lineAt(9500), 3);
+    });
+
+    test('a label row alone before the first line lights nothing', () {
+      const labelled = Lyrics(
+        source: 'lrclib',
+        lines: [
+          LyricLine('[Intro]', startMs: 0, label: true),
+          LyricLine('a', startMs: 3000),
+        ],
+      );
+      expect(labelled.lineAt(1000), -1);
+      expect(labelled.lineAt(3000), 1);
+    });
+
     test('is -1 for plain lyrics', () {
       const plain = Lyrics(source: 'vk', lines: [LyricLine('a')]);
       expect(plain.lineAt(5000), -1);

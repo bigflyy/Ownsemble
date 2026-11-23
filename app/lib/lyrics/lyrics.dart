@@ -12,13 +12,19 @@ import 'dart:convert';
 
 /// One line of lyrics; a timed line knows when it starts and ends.
 class LyricLine {
-  const LyricLine(this.text, {this.startMs, this.endMs});
+  const LyricLine(this.text, {this.startMs, this.endMs, this.label = false});
 
   final String text;
 
   /// When the line starts in the song, milliseconds; null in plain lyrics.
   final int? startMs;
   final int? endMs;
+
+  /// Whether the row is a note in fitted plain words, not sung (a section
+  /// header such as "[Chorus]", a repeat mark such as "x2"): it is shown
+  /// in place but never lit and a click on it does not jump (plan 10 H5,
+  /// user 2026-11-23). Set only on lyrics made for showing, never stored.
+  final bool label;
 
   /// Whether the line has no words: a verse break or an instrumental gap.
   bool get isGap => text.trim().isEmpty;
@@ -28,10 +34,11 @@ class LyricLine {
       other is LyricLine &&
       other.text == text &&
       other.startMs == startMs &&
-      other.endMs == endMs;
+      other.endMs == endMs &&
+      other.label == label;
 
   @override
-  int get hashCode => Object.hash(text, startMs, endMs);
+  int get hashCode => Object.hash(text, startMs, endMs, label);
 
   @override
   String toString() => 'LyricLine($startMs-$endMs ${text.length} chars)';
@@ -51,7 +58,8 @@ class Lyrics {
       lines.isNotEmpty && lines.every((line) => line.startMs != null);
 
   /// The index of the line sung at [ms] into the song: the last line that
-  /// starts at or before it. -1 before the first line or for plain lyrics.
+  /// starts at or before it, label rows ([LyricLine.label]) passed over.
+  /// -1 before the first line or for plain lyrics.
   int lineAt(int ms) {
     if (!timed) return -1;
     var low = 0, high = lines.length - 1, found = -1;
@@ -63,6 +71,10 @@ class Lyrics {
       } else {
         high = middle - 1;
       }
+    }
+    // A label row is never the line sung: the line before it stays lit.
+    while (found >= 0 && lines[found].label) {
+      found--;
     }
     return found;
   }

@@ -458,8 +458,9 @@ class _LyricsLinesState extends State<LyricsLines> {
   }
 
   void _seekTo(int index) {
-    final start = widget.lyrics.lines[index].startMs;
-    if (start == null) return;
+    final line = widget.lyrics.lines[index];
+    final start = line.startMs;
+    if (start == null || line.label) return;
     _handScrollUntil = DateTime.fromMillisecondsSinceEpoch(0);
     setState(() => _line = index);
     _revealLine();
@@ -610,6 +611,7 @@ class _TimedLine extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    if (line.label) return _label(context);
     return Semantics(
       button: true,
       selected: current,
@@ -631,6 +633,29 @@ class _TimedLine extends StatelessWidget {
               letterSpacing: -0.2,
             ),
             child: Text(line.isGap ? '...' : line.text),
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// A label row (a section header in fitted plain words, H5): small and
+  /// dim, never lit, nothing to click.
+  Widget _label(BuildContext context) {
+    final colors = OwnColors.of(context);
+    return Semantics(
+      header: true,
+      child: Padding(
+        key: ValueKey('lyrics-label-$index'),
+        padding: EdgeInsets.only(top: size * 0.5, bottom: size * 0.12),
+        child: Text(
+          line.text,
+          style: DefaultTextStyle.of(context).style.copyWith(
+            color: colors.dim,
+            fontSize: size * 0.55,
+            height: 1.3,
+            fontWeight: FontWeight.w600,
+            letterSpacing: 0.4,
           ),
         ),
       ),

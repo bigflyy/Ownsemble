@@ -947,7 +947,8 @@ class LyricsController extends ChangeNotifier {
         listEquals(last.$2, starts)) {
       return last.$3;
     }
-    final fitted = withStarts(lyrics, starts);
+    // Plain words timed by the fit show their headers as labels (H5).
+    final fitted = withStarts(lyrics, starts, labelUnsung: !lyrics.timed);
     _lastTimed = (lyrics, starts, fitted);
     return fitted;
   }

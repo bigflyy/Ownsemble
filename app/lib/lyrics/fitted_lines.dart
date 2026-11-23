@@ -11,6 +11,7 @@ import 'dart:convert';
 
 import 'package:crypto/crypto.dart';
 
+import 'line_fit.dart' show isUnsungLine;
 import 'lyrics.dart';
 import 'recording_fit.dart';
 
@@ -162,13 +163,21 @@ List<int> plainLineStarts(
 }
 
 /// [lyrics] with their lines at [starts]; each line's end moves as far as
-/// its start did.
-Lyrics withStarts(Lyrics lyrics, List<int> starts) => Lyrics(
+/// its start did. With [labelUnsung] (plain words timed by a fit, H5) the
+/// rows that are not sung ([isUnsungLine]: headers, repeat marks) become
+/// label rows, never lit; lyrics timed by their source keep every row a
+/// line, as before.
+Lyrics withStarts(
+  Lyrics lyrics,
+  List<int> starts, {
+  bool labelUnsung = false,
+}) => Lyrics(
   source: lyrics.source,
   lines: [
     for (var i = 0; i < lyrics.lines.length; i++)
       LyricLine(
         lyrics.lines[i].text,
+        label: labelUnsung && isUnsungLine(lyrics.lines[i].text),
         startMs: starts[i],
         endMs: switch ((lyrics.lines[i].endMs, lyrics.lines[i].startMs)) {
           (final int end, final int start) =>

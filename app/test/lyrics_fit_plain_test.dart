@@ -172,6 +172,44 @@ void main() {
     );
   });
 
+  group('label rows (H5)', () {
+    test('fitted plain words mark headers and repeat marks as labels', () {
+      final lines = plain([
+        '[Verse 1]',
+        'Первая строка',
+        'x2',
+        '',
+        'Припев:',
+        'Chorus of the night',
+      ]);
+      final fitted = withStarts(Lyrics(source: 'lrclib', lines: lines), [
+        1000,
+        1000,
+        4000,
+        4000,
+        6000,
+        6000,
+      ], labelUnsung: true);
+      expect(
+        [for (final line in fitted.lines) line.label],
+        [true, false, true, false, true, false],
+      );
+      expect(fitted.lines[0].text, '[Verse 1]');
+    });
+
+    test('lyrics timed by their source keep every row a line', () {
+      const timed = Lyrics(
+        source: 'lrclib',
+        lines: [
+          LyricLine('Chorus:', startMs: 1000),
+          LyricLine('a', startMs: 2000),
+        ],
+      );
+      final fitted = withStarts(timed, [1500, 2500]);
+      expect([for (final line in fitted.lines) line.label], [false, false]);
+    });
+  });
+
   test('a fit of plain words is not used for the same words timed later', () {
     final fit = StoredFit(
       lyricsHash: lyricsHashOf(words),
@@ -365,6 +403,12 @@ void main() {
       );
       // 23 s: the first verse's first line is lit.
       expect(shown.lineAt(23000), 1);
+      // The header is a label (H5): shown, never lit, no jump.
+      expect(shown.lines[0].label, isTrue);
+      expect(find.byKey(const ValueKey('lyrics-label-0')), findsOneWidget);
+      expect(find.byKey(const ValueKey('lyrics-line-0')), findsNothing);
+      expect(find.byKey(const ValueKey('lyrics-line-1')), findsOneWidget);
+      expect(find.text('[Verse 1]'), findsOneWidget);
       expect(find.byType(LyricsTimingControl), findsOneWidget);
 
       await tester.tap(find.byKey(const ValueKey('lyrics-fitted')));
