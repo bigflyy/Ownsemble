@@ -6,7 +6,7 @@ import 'package:sqlite3/sqlite3.dart';
 /// Schema version this build reads and writes (`PRAGMA user_version`).
 ///
 /// 0 is the speed-gate build's single `tracks` table (or an empty file).
-const librarySchemaVersion = 21;
+const librarySchemaVersion = 22;
 
 /// How many colors sources can have; the theme has one per slot, from 1.
 const sourceColorCount = 6;
@@ -61,6 +61,7 @@ void migrateLibrary(Database db, {String? dataDir}) {
     if (version < 19) _addLyricsPicks(db);
     if (version < 20) _addLyricsOffsets(db);
     if (version < 21) _addLyricsFits(db);
+    if (version < 22) _forgetOutsideLyricsMisses(db);
     db.execute('PRAGMA user_version = $librarySchemaVersion');
     db.execute('COMMIT');
   } catch (_) {
@@ -414,6 +415,15 @@ void _addLyricsFits(Database db) {
       PRIMARY KEY (ref, source)
     )
   ''');
+}
+
+/// Version 22 (plan 10, G4a): forgets the outside sources' "none" answers.
+/// Before, a source answered none for every song whose lyrics it has only
+/// at another length (a live upload); now it answers another version's
+/// lyrics, so those songs are asked again instead of waiting out the 7
+/// days. VK's answers are its own and stay.
+void _forgetOutsideLyricsMisses(Database db) {
+  db.execute("DELETE FROM lyrics WHERE found = 0 AND source != 'vk'");
 }
 
 void _addLyrics(Database db) {

@@ -678,6 +678,31 @@ void main() {
     expect(migrated.lyricsOffsetOf('1_1', 'netease'), -500);
   });
 
+  test('version 21 forgets outside "none" answers; the rest stays', () {
+    // Before plan 10 G4a an outside source answered none for every song
+    // whose lyrics have another length (live uploads): asked again now.
+    final store = LibraryStore.open(dbPath);
+    const lyrics = Lyrics(source: 'lrclib', lines: [LyricLine('Строка')]);
+    store
+      ..saveLyrics('lrclib', '1_1', null, atMs: 7)
+      ..saveLyrics('netease', '1_1', null, atMs: 7)
+      ..saveLyrics('vk', '1_1', null, atMs: 7)
+      ..saveLyrics('lrclib', '2_2', lyrics, meta: '{"id":"5"}', atMs: 7)
+      ..close();
+    sqlite3.open(dbPath)
+      ..execute('PRAGMA user_version = 21')
+      ..close();
+
+    final migrated = LibraryStore.open(dbPath);
+    addTearDown(migrated.close);
+    expect(versionOf(dbPath), librarySchemaVersion);
+    expect(migrated.lyricsOf('lrclib', '1_1'), isNull);
+    expect(migrated.lyricsOf('netease', '1_1'), isNull);
+    expect(migrated.lyricsOf('vk', '1_1'), isNotNull, reason: 'VK keeps its');
+    expect(migrated.lyricsOf('vk', '1_1')!.lyrics, isNull);
+    expect(migrated.lyricsOf('lrclib', '2_2')!.lyrics, lyrics);
+  });
+
   test('a library from a newer build is refused and left alone', () {
     final db = sqlite3.open(dbPath);
     db.execute('PRAGMA user_version = ${librarySchemaVersion + 1}');
