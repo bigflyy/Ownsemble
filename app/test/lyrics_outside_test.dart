@@ -182,6 +182,32 @@ void main() {
       expect(other('Ночные тени', 'Город спит', 6), isTrue);
       expect(other('Ночные Тени', 'Город спит (Remastered)', 3626), isTrue);
       expect(other('Ночные Тени', 'Город спит - Live at Home', 30), isTrue);
+      expect(other('Ночные Тени', 'Город спит live at Home', 30), isTrue);
+      expect(other('Ночные Тени', 'Город спит / Acoustic', 30), isTrue);
+      expect(other('Ночные Тени', 'Город спит – Live', 30), isTrue);
+      expect(other('Ночные Тени', 'Город спит 2014', 30), isFalse);
+      // A version word that belongs to the title is no tag (Codex review):
+      // "Let Me Live" is not another version of "Let Me".
+      expect(
+        otherVersionCandidate(
+          songArtist: 'A',
+          songTitle: 'Let Me Live',
+          artist: 'A',
+          title: 'Let Me',
+          lengthDiffSeconds: 30,
+        ),
+        isFalse,
+      );
+      expect(
+        otherVersionCandidate(
+          songArtist: 'A',
+          songTitle: 'Let Me',
+          artist: 'A',
+          title: 'Let Me Live',
+          lengthDiffSeconds: 30,
+        ),
+        isFalse,
+      );
       expect(
         other('Ночные Тени', 'Город спит', 5),
         isFalse,

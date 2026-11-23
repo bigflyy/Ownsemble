@@ -169,19 +169,22 @@ bool takeCandidate(NameMatch names, int? lengthDiffSeconds) {
   };
 }
 
-/// Words that start a version tag left outside brackets: "Song live at X",
-/// "Song - Acoustic Version". Everything from such a word on is dropped
-/// when names are compared for another version.
-final _versionTail = RegExp(
-  r'\s(live|acoustic|unplugged|session|version|remix|edit|концерт\w*|'
-  r'акуст\w*|живой|версия)(\s.*)?$',
+/// A version tag left outside brackets: after a dash, slash, bar or colon
+/// ("Song - Acoustic Version", "Song / Live"), or "live at / in / from ..."
+/// ("Song live at Wembley"). A version word that ends the title itself is
+/// no tag: "Let Me Live" is not another version of "Let Me" (Codex review).
+final _versionTag = RegExp(
+  r'\s+[-\u2013\u2014/|:]\s*(live|acoustic|unplugged|session|version|remix|'
+  r'edit|концерт\p{L}*|акуст\p{L}*|живой|версия)(\s.*)?$|'
+  r'\s+(live|концерт\p{L}*)\s+(at|in|from|on|в|на)\s.*$',
+  caseSensitive: false,
+  unicode: true,
 );
 
-/// [foldName] without a trailing version tag.
+/// [foldName] of [name] without a version tag outside brackets.
 String _versionFold(String name) {
-  final folded = foldName(name);
-  final cut = folded.replaceFirst(_versionTail, '').trim();
-  return cut.isEmpty ? folded : cut;
+  final cut = name.replaceFirst(_versionTag, '').trim();
+  return foldName(cut.isEmpty ? name : cut);
 }
 
 /// Whether a candidate not taken by [takeCandidate] may still be offered
