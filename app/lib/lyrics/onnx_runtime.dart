@@ -22,6 +22,8 @@ const _createEnv = 3;
 const _createSession = 7;
 const _run = 9;
 const _createSessionOptions = 10;
+const _disableMemPattern = 17;
+const _disableCpuMemArena = 19;
 const _setGraphOptimizationLevel = 23;
 const _setIntraOpNumThreads = 24;
 const _setInterOpNumThreads = 25;
@@ -112,8 +114,15 @@ class OnnxRuntime {
   }
 
   /// Opens the model at [modelPath] for CPU runs with [threads] threads
-  /// inside each operation.
-  OnnxSession open(String modelPath, {int threads = 4}) {
+  /// inside each operation. [memoryArena] false turns off the CPU memory
+  /// arena and the memory pattern: ONNX Runtime then frees each
+  /// intermediate tensor after use instead of keeping the largest set it
+  /// ever needed (plan 10 I2b: the separator's peak).
+  OnnxSession open(
+    String modelPath, {
+    int threads = 4,
+    bool memoryArena = true,
+  }) {
     return using((arena) {
       final out = arena<Pointer<Void>>();
       _check(
@@ -155,6 +164,17 @@ class OnnxRuntime {
             1,
           ),
         );
+        if (!memoryArena) {
+          final call = _entry<Pointer<Void> Function(Pointer<Void>)>;
+          _check(
+            call(_disableCpuMemArena)
+                .asFunction<Pointer<Void> Function(Pointer<Void>)>()(options),
+          );
+          _check(
+            call(_disableMemPattern)
+                .asFunction<Pointer<Void> Function(Pointer<Void>)>()(options),
+          );
+        }
         _check(
           setInt(_setGraphOptimizationLevel)
               .asFunction<Pointer<Void> Function(Pointer<Void>, int)>()(
