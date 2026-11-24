@@ -4,6 +4,7 @@ import 'package:path/path.dart' as p;
 import 'package:sqlite3/sqlite3.dart';
 
 import '../lyrics/fitted_lines.dart' show StoredFit;
+import '../lyrics/heard_lyrics.dart';
 import '../lyrics/lyrics.dart';
 import '../playback/mp3_length.dart' show FileFacts, otherRecordingSeconds;
 
@@ -1044,6 +1045,80 @@ class LibraryStore implements PlayLog, PlayStatsSource {
         fit.startsToJson(),
         fit.sureShare,
         fit.fittedAtMs,
+      ],
+    );
+  }
+
+  /// What "Hear the words" heard in the recording [ref] (plan 10, I2e), or
+  /// null when it was never heard (or the row cannot be read).
+  HeardLyrics? heardLyricsOf(String ref) {
+    final row = _db.select('SELECT * FROM heard_lyrics WHERE ref = ?', [
+      ref,
+    ]).firstOrNull;
+    if (row == null) return null;
+    try {
+      final outcome = HeardOutcome.values.byName(row['outcome'] as String);
+      final body = row['body'] as String?;
+      final model = row['model'] as String?;
+      return HeardLyrics(
+        outcome: outcome,
+        lines: body == null ? const [] : Lyrics.linesFromJson(body),
+        words: HeardLyrics.wordsFromJson(row['words'] as String?),
+        model: model == null ? null : HeardModel.values.byName(model),
+        language: row['language'] as String?,
+        confidence: (row['confidence'] as num).toDouble(),
+        russianConfidence: (row['ru_confidence'] as num).toDouble(),
+        rough: row['rough'] == 1,
+        wordCount: row['word_count'] as int,
+        loudSeconds: (row['loud_s'] as num).toDouble(),
+        audioBytes: row['audio_bytes'] as int?,
+        bundles: row['bundles'] as String,
+        heardAtMs: row['heard_at_ms'] as int,
+      );
+    } on Object {
+      // A row a newer or broken build wrote: as if never heard.
+      return null;
+    }
+  }
+
+  /// Keeps [heard] for the recording [ref]; null forgets it.
+  void saveHeardLyrics(String ref, HeardLyrics? heard) {
+    if (heard == null) {
+      _db.execute('DELETE FROM heard_lyrics WHERE ref = ?', [ref]);
+      return;
+    }
+    final words = heard.outcome == HeardOutcome.words;
+    _db.execute(
+      '''
+      INSERT INTO heard_lyrics
+        (ref, outcome, body, words, model, language, confidence,
+         ru_confidence, rough, word_count, loud_s, audio_bytes, bundles,
+         heard_at_ms)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT (ref) DO UPDATE SET
+        outcome = excluded.outcome, body = excluded.body,
+        words = excluded.words, model = excluded.model,
+        language = excluded.language, confidence = excluded.confidence,
+        ru_confidence = excluded.ru_confidence, rough = excluded.rough,
+        word_count = excluded.word_count, loud_s = excluded.loud_s,
+        audio_bytes = excluded.audio_bytes, bundles = excluded.bundles,
+        heard_at_ms = excluded.heard_at_ms
+    ''',
+      [
+        ref,
+        heard.outcome.name,
+        if (words) heard.lyrics!.linesToJson() else null,
+        if (words) heard.wordsToJson() else null,
+        heard.model?.name,
+        heard.language,
+        heard.confidence,
+        heard.russianConfidence,
+        if (heard.rough) 1 else 0,
+        heard.wordCount,
+        heard.loudSeconds,
+        heard.audioBytes,
+        heard.bundles,
+        heard.heardAtMs,
       ],
     );
   }

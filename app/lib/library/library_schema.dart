@@ -6,7 +6,7 @@ import 'package:sqlite3/sqlite3.dart';
 /// Schema version this build reads and writes (`PRAGMA user_version`).
 ///
 /// 0 is the speed-gate build's single `tracks` table (or an empty file).
-const librarySchemaVersion = 22;
+const librarySchemaVersion = 23;
 
 /// How many colors sources can have; the theme has one per slot, from 1.
 const sourceColorCount = 6;
@@ -62,6 +62,7 @@ void migrateLibrary(Database db, {String? dataDir}) {
     if (version < 20) _addLyricsOffsets(db);
     if (version < 21) _addLyricsFits(db);
     if (version < 22) _forgetOutsideLyricsMisses(db);
+    if (version < 23) _addHeardLyrics(db);
     db.execute('PRAGMA user_version = $librarySchemaVersion');
     db.execute('COMMIT');
   } catch (_) {
@@ -424,6 +425,36 @@ void _addLyricsFits(Database db) {
 /// days. VK's answers are its own and stay.
 void _forgetOutsideLyricsMisses(Database db) {
   db.execute("DELETE FROM lyrics WHERE found = 0 AND source != 'vk'");
+}
+
+/// Version 23 (plan 10, I2e): the words "Hear the words" heard in a
+/// recording, by the upload's key (`ref`, as in `lyrics`), kept apart from
+/// `lyrics` so no source's refresh or "none" can touch them. `outcome` is
+/// 'words', 'noSinging' or 'noWords'; `body` the timed lines (as
+/// `lyrics.body`) and `words` every heard word with times and confidence,
+/// both null without words; `model` 'gigaam' or 'whisper'; `confidence` the
+/// model's mean word confidence, `ru_confidence` GigaAM's (the router's
+/// number); `loud_s` the vocals' seconds with sound; `audio_bytes` the
+/// size of the file heard; `bundles` the model bundles' names and versions.
+void _addHeardLyrics(Database db) {
+  db.execute('''
+    CREATE TABLE IF NOT EXISTS heard_lyrics (
+      ref TEXT PRIMARY KEY,
+      outcome TEXT NOT NULL,
+      body TEXT,
+      words TEXT,
+      model TEXT,
+      language TEXT,
+      confidence REAL NOT NULL,
+      ru_confidence REAL NOT NULL,
+      rough INTEGER NOT NULL,
+      word_count INTEGER NOT NULL,
+      loud_s REAL NOT NULL,
+      audio_bytes INTEGER,
+      bundles TEXT NOT NULL,
+      heard_at_ms INTEGER NOT NULL
+    )
+  ''');
 }
 
 void _addLyrics(Database db) {
