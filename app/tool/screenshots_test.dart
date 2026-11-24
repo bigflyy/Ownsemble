@@ -178,6 +178,8 @@ void main() {
     bool picker = false,
     bool pickerDays = false,
     String? statsTab,
+    // Orders the Stats list by its Listened header (user 2026-11-24).
+    bool statsByListened = false,
     // Calendar tab (plan 04, D2): pick the days from 6 to 2 days ago
     // (click, then Shift+click).
     bool calendarRange = false,
@@ -852,6 +854,10 @@ void main() {
     }
     if (statsTab != null) {
       await tester.tap(find.byKey(ValueKey('stats-tab-$statsTab')));
+      await tester.pumpAndSettle();
+    }
+    if (statsByListened) {
+      await tester.tap(find.byKey(const ValueKey('stats-sort-listened')));
       await tester.pumpAndSettle();
     }
     if (calendarRange) {
@@ -1746,6 +1752,29 @@ void main() {
       playingFirst: true,
       dark: true,
       view: const LibraryView(ViewKind.stats),
+    ),
+  );
+  testWidgets(
+    'dark, Stats, by Listened',
+    (t) => shoot(
+      t,
+      'dark-stats-listened',
+      playingFirst: true,
+      dark: true,
+      view: const LibraryView(ViewKind.stats),
+      statsByListened: true,
+    ),
+  );
+  testWidgets(
+    'light, Stats, by Listened, narrow, long names',
+    (t) => shoot(
+      t,
+      'light-stats-listened-narrow',
+      dark: false,
+      size: const Size(900, 760),
+      longNames: true,
+      view: const LibraryView(ViewKind.stats),
+      statsByListened: true,
     ),
   );
   testWidgets(

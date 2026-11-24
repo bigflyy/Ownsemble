@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ownsemble/library/library_store.dart';
+import 'package:ownsemble/library/listening_stats.dart';
 import 'package:ownsemble/library/play_period.dart';
 import 'package:ownsemble/library/song_filter.dart';
 import 'package:ownsemble/library/track.dart';
@@ -236,6 +237,57 @@ void main() {
     await tester.pump();
     expect(library.view.kind, ViewKind.album);
     expect(library.view.album?.title, 'Чёрный альбом');
+  });
+
+  testWidgets('Plays and Listened headers order the list, the choice is '
+      'kept (user 2026-11-24)', (tester) async {
+    // Кукушка a second time this month: 2 plays, 600 s; Выхода нет 3 plays,
+    // 450 s; Группа крови 2 plays, 400 s.
+    play(ids[0], DateTime(2026, 11, 7, 9), heardSec: 300);
+    await pumpStats(tester);
+    expect(textIn(row(0)), contains('Выхода нет'));
+    expect(textIn(row(1)), contains('Кукушка'));
+    expect(textIn(row(2)), contains('Группа крови'));
+
+    await tester.tap(find.byKey(const ValueKey('stats-sort-listened')));
+    await tester.pump();
+    expect(filters.statsOrder, RankOrder.listened);
+    expect(textIn(row(0)), contains('Кукушка'));
+    expect(textIn(row(1)), contains('Выхода нет'));
+    expect(textIn(row(2)), contains('Группа крови'));
+    expect(
+      find.descendant(
+        of: find.byKey(const ValueKey('stats-sort-listened')),
+        matching: find.byIcon(Icons.arrow_downward),
+      ),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(
+        of: find.byKey(const ValueKey('stats-sort-plays')),
+        matching: find.byIcon(Icons.arrow_downward),
+      ),
+      findsNothing,
+    );
+
+    // Artists follow the same order: Кино 3 plays, 900 s; Сплин 3, 450 s.
+    await tester.tap(find.byKey(const ValueKey('stats-tab-artists')));
+    await tester.pump();
+    expect(textIn(row(0)), contains('Кино'));
+
+    // Kept: a new filters object reads it back.
+    final again = SongFilters(
+      store,
+      readSetting: (key) => saved[key],
+      writeSetting: (key, value) => saved[key] = value,
+      clock: () => now,
+    );
+    expect(again.statsOrder, RankOrder.listened);
+
+    await tester.tap(find.byKey(const ValueKey('stats-sort-plays')));
+    await tester.pump();
+    expect(filters.statsOrder, RankOrder.plays);
+    expect(tester.takeException(), isNull);
   });
 
   testWidgets('a top song plays the top songs from that one', (tester) async {

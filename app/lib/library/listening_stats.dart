@@ -7,6 +7,11 @@ import 'track.dart';
 /// tabs.
 enum RankBy { songs, artists, albums }
 
+/// What a Stats list is ordered by: its Plays or its Listened column (user
+/// 2026-11-24: "they should be sorted by Listened i guess"; picked: click
+/// either header, Plays by default).
+enum RankOrder { plays, listened }
+
 /// The artists of a song as Stats ranks them (plan 09, R5): each one's
 /// identity (ArtistIndex key) and shown name. Empty: ranked by its text.
 typedef SongArtists = List<({String key, String name})> Function(Track track);
@@ -119,7 +124,11 @@ class ListeningStats {
   /// The first [limit] rows ranked by [by]. Artists and albums add up
   /// their songs' counted plays and time heard; time from plays that did
   /// not count is left out of a row, as its song is not in the list.
-  List<RankedRow> top(RankBy by, {int limit = 100}) {
+  List<RankedRow> top(
+    RankBy by, {
+    RankOrder order = RankOrder.plays,
+    int limit = 100,
+  }) {
     final rows = switch (by) {
       RankBy.songs => [
         for (final (track, p) in _played)
@@ -142,6 +151,18 @@ class ListeningStats {
         detail: (songs) => songs.first.artist,
       ),
     };
+    if (order == RankOrder.listened) {
+      rows.sort(
+        (a, b) => _order(
+          a.listenedMs,
+          b.listenedMs,
+          a.plays,
+          b.plays,
+          a.name,
+          b.name,
+        ),
+      );
+    }
     return rows.length > limit ? rows.sublist(0, limit) : rows;
   }
 
@@ -201,17 +222,18 @@ class ListeningStats {
     return rows;
   }
 
-  /// Most plays first, then most time heard, then by name A to Z.
+  /// Largest [firstA] first, then largest [secondA], then by name A to Z:
+  /// most plays then most time heard, or the other way round.
   static int _order(
-    int playsA,
-    int playsB,
-    int heardA,
-    int heardB,
+    int firstA,
+    int firstB,
+    int secondA,
+    int secondB,
     String nameA,
     String nameB,
   ) {
-    if (playsA != playsB) return playsB - playsA;
-    if (heardA != heardB) return heardB - heardA;
+    if (firstA != firstB) return firstB - firstA;
+    if (secondA != secondB) return secondB - secondA;
     return nameA.toLowerCase().compareTo(nameB.toLowerCase());
   }
 }

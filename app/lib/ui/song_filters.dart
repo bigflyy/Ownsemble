@@ -119,6 +119,7 @@ class SongFilters extends ChangeNotifier {
   SongFilter _filter = const SongFilter();
   PlayPeriod _period = const PlayPeriod.month();
   SongSort _sort = SongSort.library;
+  RankOrder _statsOrder = RankOrder.plays;
   bool _descending = true;
   List<SavedView> _views = const [];
   int? _viewId;
@@ -137,6 +138,18 @@ class SongFilters extends ChangeNotifier {
   SongFilter get filter => _filter;
   PlayPeriod get period => _period;
   SongSort get sort => _sort;
+
+  /// What the Stats lists are ordered by (a click on their Plays or
+  /// Listened header); kept with the rest of this state.
+  RankOrder get statsOrder => _statsOrder;
+
+  void setStatsOrder(RankOrder order) {
+    if (order == _statsOrder) return;
+    _statsOrder = order;
+    _writeState();
+    _bump();
+  }
+
   bool get descending => _descending;
   List<SavedView> get views => _views;
 
@@ -455,6 +468,7 @@ class SongFilters extends ChangeNotifier {
       'period': _period.toJson(),
       'sort': _sort.name,
       'desc': _descending,
+      'statsOrder': _statsOrder.name,
       'view': ?_viewId,
     }),
   );
@@ -468,6 +482,8 @@ class SongFilters extends ChangeNotifier {
       _period = PlayPeriod.fromJson(json['period']) ?? _period;
       _sort = SongSort.values.asNameMap()[json['sort']] ?? SongSort.library;
       _descending = json['desc'] != false;
+      _statsOrder =
+          RankOrder.values.asNameMap()[json['statsOrder']] ?? RankOrder.plays;
       final id = json['view'];
       _viewId = _views.any((v) => v.id == id) ? id as int : null;
     } on FormatException {

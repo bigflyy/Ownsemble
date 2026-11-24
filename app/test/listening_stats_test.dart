@@ -121,6 +121,40 @@ void main() {
       expect(rows.first.listenedMs, 1000000);
     });
 
+    test('ordered by Listened: most time heard first, then most plays, and '
+        'the limit takes the top by time (user 2026-11-24)', () {
+      final mixed = ListeningStats(songs, {
+        1: plays(5, listenedSec: 60), // many plays from before heard time
+        2: plays(2, listenedSec: 900),
+        3: plays(3, listenedSec: 900),
+        4: plays(1, listenedSec: 400),
+      });
+      final rows = mixed.top(RankBy.songs, order: RankOrder.listened);
+      expect(rows.map((r) => r.name), [
+        'Закрой за мной дверь',
+        'Кукушка',
+        'Искала',
+        'Группа крови',
+      ]);
+      expect(
+        mixed
+            .top(RankBy.songs, order: RankOrder.listened, limit: 1)
+            .single
+            .name,
+        'Закрой за мной дверь',
+      );
+      expect(
+        mixed.top(RankBy.songs).first.name,
+        'Группа крови',
+        reason: 'Plays stays the default',
+      );
+      // Albums: Группа крови (songs 1 and 3) 960 s, Чёрный альбом 900 s.
+      expect(
+        mixed.top(RankBy.albums, order: RankOrder.listened).map((r) => r.name),
+        ['Группа крови', 'Чёрный альбом', 'Вендетта'],
+      );
+    });
+
     test('artists add up their songs, which are listed most played first', () {
       final rows = stats.top(RankBy.artists);
       expect(rows.map((r) => r.name), ['Кино', 'Zemfira']);

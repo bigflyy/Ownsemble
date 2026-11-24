@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 
 import '../library/day_range.dart';
@@ -148,8 +150,12 @@ class _StatsPageState extends State<StatsPage> {
         change: change(totals.artists, before?.artists),
       ),
     ];
-    final rows = stats.top(_tab);
-    final topPlays = rows.isEmpty ? 1 : rows.first.plays;
+    final order = filters.statsOrder;
+    final rows = stats.top(_tab, order: order);
+    // The bars show the column the list is ordered by.
+    int measure(RankedRow row) =>
+        order == RankOrder.plays ? row.plays : row.listenedMs;
+    final topValue = rows.isEmpty ? 1 : math.max(1, measure(rows.first));
 
     // The year report's banner: the year of the period's last day.
     final periodRange = filters.period.rangeAt(now);
@@ -252,6 +258,8 @@ class _StatsPageState extends State<StatsPage> {
                 RankBy.albums => 'Album',
               },
               bars: !narrow,
+              order: order,
+              onOrder: filters.setStatsOrder,
             ),
         ];
         return ListView.builder(
@@ -284,7 +292,7 @@ class _StatsPageState extends State<StatsPage> {
               key: ValueKey('stats-row-$n'),
               rank: n + 1,
               row: row,
-              share: row.plays / topPlays,
+              share: measure(row) / topValue,
               bars: !narrow,
               song: _tab == RankBy.songs,
               onTap: () => switch (_tab) {
@@ -494,13 +502,61 @@ class _RankRow extends StatelessWidget {
   static const _playsWidth = 70.0;
   static const _listenedWidth = 100.0;
 
-  /// The column titles above the rows.
+  /// The column titles above the rows; Plays and Listened order the list
+  /// by themselves when clicked, the one in use marked with an arrow.
   static Widget header(
     OwnColors colors, {
     required String first,
     required bool bars,
+    required RankOrder order,
+    required void Function(RankOrder order) onOrder,
   }) {
     final style = TextStyle(fontSize: 12, color: colors.dim);
+    Widget sortable(RankOrder by, String label, String tip, double width) {
+      final on = by == order;
+      return SizedBox(
+        width: width,
+        child: Align(
+          alignment: Alignment.centerRight,
+          child: Tooltip(
+            message: tip,
+            waitDuration: const Duration(milliseconds: 600),
+            child: InkWell(
+              key: ValueKey('stats-sort-${by.name}'),
+              borderRadius: BorderRadius.circular(6),
+              hoverColor: colors.hover,
+              onTap: () => onOrder(by),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    if (on)
+                      Icon(Icons.arrow_downward, size: 12, color: colors.text),
+                    if (on) const SizedBox(width: 2),
+                    Flexible(
+                      child: Text(
+                        label,
+                        maxLines: 1,
+                        softWrap: false,
+                        overflow: TextOverflow.fade,
+                        style: on
+                            ? style.copyWith(
+                                color: colors.text,
+                                fontWeight: FontWeight.w600,
+                              )
+                            : style,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+
     return Padding(
       padding: const EdgeInsets.fromLTRB(14, 10, 14, 4),
       child: Row(
@@ -511,13 +567,12 @@ class _RankRow extends StatelessWidget {
           ),
           Expanded(child: Text(first, style: style)),
           if (bars) const SizedBox(width: _barWidth),
-          SizedBox(
-            width: _playsWidth,
-            child: Text('Plays', textAlign: TextAlign.right, style: style),
-          ),
-          SizedBox(
-            width: _listenedWidth,
-            child: Text('Listened', textAlign: TextAlign.right, style: style),
+          sortable(RankOrder.plays, 'Plays', 'Most plays first', _playsWidth),
+          sortable(
+            RankOrder.listened,
+            'Listened',
+            'Most time heard first',
+            _listenedWidth,
           ),
         ],
       ),
