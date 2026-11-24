@@ -307,12 +307,19 @@ class SttWorker implements JobRunner {
         final outcome = message[2] as String;
         task._memory = message[4] as WorkerMemory;
         final memory = task._memory!;
-        log?.call(
-          'stt $name: $outcome in ${clock.elapsedMilliseconds} ms, peak '
-          '${_mb(memory.peakWorkingSet)} MB (private '
-          '${_mb(memory.peakPrivate)}), after ${_mb(memory.afterWorkingSet)} '
-          'MB (private ${_mb(memory.afterPrivate)})',
-        );
+        try {
+          log?.call(
+            'stt $name: $outcome in ${clock.elapsedMilliseconds} ms, peak '
+            '${_mb(memory.peakWorkingSet)} MB (private '
+            '${_mb(memory.peakPrivate)}), after '
+            '${_mb(memory.afterWorkingSet)} MB (private '
+            '${_mb(memory.afterPrivate)})',
+          );
+        } on Object {
+          // A log that cannot be written (a full drive) must not leave the
+          // job without an end: the app would wait on it for good (Codex
+          // review of I2f).
+        }
         switch (outcome) {
           // A result that comes after cancel() is not wanted any more:
           // the job ended between its last check and the message.

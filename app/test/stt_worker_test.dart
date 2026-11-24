@@ -100,6 +100,23 @@ void main() {
     expect(logged.single, contains('peak '));
   });
 
+  test('a log that cannot be written still ends the job', () async {
+    // A full drive: perf.log throws (Codex review of I2f).
+    final failing = SttWorker(
+      onnxRuntimePath: 'unused.dll',
+      log: (_) => throw const FileSystemException('disk full'),
+    );
+    addTearDown(failing.close);
+    expect(
+      await failing
+          .run(const CountJob(2))
+          .result
+          .timeout(const Duration(seconds: 10)),
+      2,
+    );
+    expect(failing.run(const FailJob()).result, throwsA(isA<WorkerJobError>()));
+  });
+
   test('a cancel stops at the end of the unit it is in', () async {
     final dir = Directory.systemTemp.createTempSync('worker-test');
     addTearDown(() => dir.deleteSync(recursive: true));
