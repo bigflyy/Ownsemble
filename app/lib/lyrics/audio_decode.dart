@@ -46,6 +46,10 @@ class DecodeError implements Exception {
   String toString() => 'DecodeError: $message';
 }
 
+/// A file of raw float samples (little endian, interleaved), for mpv's
+/// rawaudio demuxer.
+typedef RawFloatInput = ({int rate, int channels});
+
 /// Decodes [audioPath] to 16 kHz mono float samples with the libmpv at
 /// [mpvLibraryPath] (libmpv-2.dll beside the app on Windows), through a
 /// temporary file in [tempDir]. Gives up after [timeout].
@@ -53,6 +57,36 @@ Float32List decodeForModel(
   String mpvLibraryPath,
   String audioPath,
   String tempDir, {
+  Duration timeout = const Duration(minutes: 2),
+}) {
+  final out = decodeToFile(
+    mpvLibraryPath,
+    audioPath,
+    tempDir,
+    timeout: timeout,
+  );
+  try {
+    final bytes = out.readAsBytesSync();
+    return Float32List.sublistView(bytes, 0, bytes.length ~/ 4 * 4);
+  } on FileSystemException catch (e) {
+    throw DecodeError('no samples written: ${e.osError?.message}');
+  } finally {
+    _deleteQuietly(out);
+  }
+}
+
+/// Decodes [audioPath] to raw float samples at [sampleRate] with
+/// [channels] (1 or 2, interleaved) in a new file in [tempDir], and
+/// returns that file; the caller deletes it. [rawInput] reads [audioPath]
+/// as raw floats instead of a song file (plan 10 I2b: the separated
+/// vocals, 44.1 kHz stereo, to 16 kHz mono with the same resampler).
+File decodeToFile(
+  String mpvLibraryPath,
+  String audioPath,
+  String tempDir, {
+  int sampleRate = modelSampleRate,
+  int channels = 1,
+  RawFloatInput? rawInput,
   Duration timeout = const Duration(minutes: 2),
 }) {
   final mpv = DynamicLibrary.open(mpvLibraryPath);
@@ -120,8 +154,14 @@ Float32List decodeForModel(
       option('ao-pcm-file', out.path);
       option('ao-pcm-waveheader', 'no');
       option('audio-format', 'float');
-      option('audio-samplerate', '$modelSampleRate');
-      option('audio-channels', 'mono');
+      option('audio-samplerate', '$sampleRate');
+      option('audio-channels', channels == 2 ? 'stereo' : 'mono');
+      if (rawInput != null) {
+        option('demuxer', 'rawaudio');
+        option('demuxer-rawaudio-format', 'floatle');
+        option('demuxer-rawaudio-rate', '${rawInput.rate}');
+        option('demuxer-rawaudio-channels', '${rawInput.channels}');
+      }
       // ffmpeg's resampler defaults, which the research's audio had. mpv's
       // own (filter size 16, cutoff from it) cut everything above about
       // 5.8 kHz at 16 kHz, where the hiss of s, sh and ch lies, and cost
@@ -156,17 +196,22 @@ Float32List decodeForModel(
       break;
     }
     destroyOnce();
-    final bytes = out.readAsBytesSync();
-    return Float32List.sublistView(bytes, 0, bytes.length ~/ 4 * 4);
-  } on FileSystemException catch (e) {
-    throw DecodeError('no samples written: ${e.osError?.message}');
+    if (!out.existsSync()) throw const DecodeError('no samples written');
+    return out;
+  } catch (_) {
+    destroyOnce();
+    // Samples written before a failure must not pile up.
+    _deleteQuietly(out);
+    rethrow;
   } finally {
     destroyOnce();
-    // Also after a failure: samples written before it must not pile up.
-    try {
-      if (out.existsSync()) out.deleteSync();
-    } on FileSystemException {
-      // Still open somewhere; the temp folder is cleaned by Windows.
-    }
+  }
+}
+
+void _deleteQuietly(File file) {
+  try {
+    if (file.existsSync()) file.deleteSync();
+  } on FileSystemException {
+    // Still open somewhere; the temp folder is cleaned by Windows.
   }
 }

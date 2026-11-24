@@ -260,7 +260,13 @@ class MdxResult {
     required this.frames,
     required this.chunks,
     required this.scale,
+    this.modelMs = 0,
+    this.spectrumMs = 0,
   });
+
+  /// Time inside the model, and in the STFT and its inverse.
+  final int modelMs;
+  final int spectrumMs;
 
   /// Samples per channel written.
   final int frames;
@@ -305,6 +311,8 @@ MdxResult separateVocals(
     var base = 0;
     var written = 0; // padded positions finished
     var loudest = 0.0;
+    var modelUs = 0;
+    var spectrumUs = 0;
 
     // Writes padded positions [written, upTo) (only those that are the
     // mix, not the trim or pad), then moves the window up.
@@ -352,7 +360,15 @@ MdxResult separateVocals(
         left.setRange(mixFrom - start, mixTo - start, l);
         right.setRange(mixFrom - start, mixTo - start, r);
       }
-      spectrum.inverse(model(spectrum.forward(left, right)), outLeft, outRight);
+      final clock = Stopwatch()..start();
+      final input = spectrum.forward(left, right);
+      spectrumUs += clock.elapsedMicroseconds;
+      clock.reset();
+      final output = model(input);
+      modelUs += clock.elapsedMicroseconds;
+      clock.reset();
+      spectrum.inverse(output, outLeft, outRight);
+      spectrumUs += clock.elapsedMicroseconds;
       final window = symmetricHann(actual);
       assert(start >= base && start + actual <= base + mdxChunk);
       for (var i = 0; i < actual; i++) {
@@ -368,7 +384,13 @@ MdxResult separateVocals(
     }
     final scaled = loudest * peak;
     final scaleOut = scaled > mdxPeakLimit ? mdxPeakLimit / scaled : 1.0;
-    return MdxResult(frames: n, chunks: starts.length, scale: peak * scaleOut);
+    return MdxResult(
+      frames: n,
+      chunks: starts.length,
+      scale: peak * scaleOut,
+      modelMs: modelUs ~/ 1000,
+      spectrumMs: spectrumUs ~/ 1000,
+    );
   } finally {
     mix.close();
     sink.closeSync();
