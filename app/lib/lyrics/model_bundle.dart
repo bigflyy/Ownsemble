@@ -139,6 +139,8 @@ Future<void> downloadBundle(
   void Function(int bytes, int total)? onProgress,
   DownloadStop? stop,
   Duration stallTimeout = const Duration(seconds: 30),
+  Duration slowWindow = const Duration(seconds: 60),
+  int slowBytes = 64 * 1024,
 }) async {
   if (bundleReady(root, bundle)) {
     _removeOtherVersions(root, bundle);
@@ -175,6 +177,8 @@ Future<void> downloadBundle(
       onProgress: (bytes, _) => onProgress?.call(before + bytes, total),
       stop: stop,
       stallTimeout: stallTimeout,
+      slowWindow: slowWindow,
+      slowBytes: slowBytes,
     );
     done += file.bytes;
     onProgress?.call(done, total);

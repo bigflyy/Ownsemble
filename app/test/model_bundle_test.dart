@@ -21,6 +21,8 @@ void main() {
   final missing = <String>{};
   // Path -> bytes after which the connection breaks (once).
   final cutOnce = <String, int>{};
+  // Paths that send 1 KB at once, then one byte every 20 ms.
+  final trickle = <String>{};
 
   setUp(() async {
     final faked = HttpOverrides.current;
@@ -31,6 +33,7 @@ void main() {
     requests.clear();
     missing.clear();
     cutOnce.clear();
+    trickle.clear();
     server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
     server.listen((request) async {
       final path = request.uri.path;
@@ -56,6 +59,23 @@ void main() {
       }
       final part = body.sublist(from);
       response.contentLength = part.length;
+      if (trickle.contains(path)) {
+        // Unbuffered, or the server holds the trickle back.
+        response.bufferOutput = false;
+        response.add(part.sublist(0, 1024));
+        await response.flush();
+        try {
+          for (var i = 1024; i < part.length; i++) {
+            await Future<void>.delayed(const Duration(milliseconds: 20));
+            response.add([part[i]]);
+            await response.flush();
+          }
+          await response.close();
+        } on Object {
+          // The client gave up.
+        }
+        return;
+      }
       final cut = cutOnce.remove(path);
       if (cut != null) {
         final socket = await response.detachSocket();
@@ -86,13 +106,12 @@ void main() {
     );
   }
 
-  ModelBundle bundleOf(List<ModelFile> files, {int version = 1}) =>
-      ModelBundle(
-        name: 'hear-words',
-        version: version,
-        files: files,
-        notices: 'Test notices: Cyrillic текст.\n',
-      );
+  ModelBundle bundleOf(List<ModelFile> files, {int version = 1}) => ModelBundle(
+    name: 'hear-words',
+    version: version,
+    files: files,
+    notices: 'Test notices: Cyrillic текст.\n',
+  );
 
   Directory root() => Directory('${dir.path}/models');
 
@@ -227,12 +246,10 @@ void main() {
     // Version 1's file copied into version 2's folder, with version 1's
     // marker: the same size, a different list.
     final v2folder = bundleFolder(root(), v2)..createSync(recursive: true);
-    File('${bundleFolder(root(), v1).path}/a.onnx').copySync(
-      '${v2folder.path}/a.onnx',
-    );
-    File(
-      '${bundleFolder(root(), v1).path}/$bundleMarkerName',
-    ).copySync('${v2folder.path}/$bundleMarkerName');
+    File('${bundleFolder(root(), v1).path}/a.onnx')
+        .copySync('${v2folder.path}/a.onnx');
+    File('${bundleFolder(root(), v1).path}/$bundleMarkerName')
+        .copySync('${v2folder.path}/$bundleMarkerName');
     expect(bundleReady(root(), v2), isFalse);
     await downloadBundle(v2, root());
     expect(bundleReady(root(), v2), isTrue);
@@ -276,6 +293,34 @@ void main() {
     ]);
     await downloadBundle(bundle, root());
     expect(requests, ['/a.onnx -', '/mirror/a.onnx -']);
+    expect(bundleReady(root(), bundle), isTrue);
+  });
+
+  test('a connection that trickles counts as stalled and the mirror '
+      'continues the part (real check session 51: 546 B/s forever, never '
+      'reaching the no-data timeout)', () async {
+    final file = serve('/a.onnx', 'a.onnx', 100000);
+    served['/mirror/a.onnx'] = served['/a.onnx']!;
+    trickle.add('/a.onnx');
+    final bundle = bundleOf([
+      ModelFile(
+        url: file.url,
+        bytes: file.bytes,
+        sha256: file.sha256,
+        fileName: file.fileName,
+        mirrors: [at('/mirror/a.onnx')],
+      ),
+    ]);
+    final clock = Stopwatch()..start();
+    await downloadBundle(
+      bundle,
+      root(),
+      slowWindow: const Duration(milliseconds: 600),
+      slowBytes: 2000,
+    );
+    expect(clock.elapsed, lessThan(const Duration(seconds: 5)));
+    expect(requests.first, '/a.onnx -');
+    expect(requests.last, startsWith('/mirror/a.onnx bytes='));
     expect(bundleReady(root(), bundle), isTrue);
   });
 
@@ -337,11 +382,7 @@ void main() {
     ]);
     await downloadBundle(bundle, root());
     expect(await bundleIntact(root(), bundle), isTrue);
-    bundleFile(
-      root(),
-      bundle,
-      'b.onnx',
-    ).writeAsBytesSync(List.filled(1000, 1));
+    bundleFile(root(), bundle, 'b.onnx').writeAsBytesSync(List.filled(1000, 1));
     expect(bundleReady(root(), bundle), isTrue, reason: 'sizes only');
     expect(await bundleIntact(root(), bundle), isFalse);
     expect(bundleReady(root(), bundle), isFalse);

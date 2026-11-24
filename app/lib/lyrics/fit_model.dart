@@ -113,6 +113,8 @@ Future<void> downloadModel(
   void Function(int bytes, int total)? onProgress,
   DownloadStop? stop,
   Duration stallTimeout = const Duration(seconds: 30),
+  Duration slowWindow = const Duration(seconds: 60),
+  int slowBytes = 64 * 1024,
 }) async {
   if (hasModel(target, model)) return;
   target.parent.createSync(recursive: true);
@@ -133,6 +135,8 @@ Future<void> downloadModel(
           onProgress: onProgress,
           stop: stop,
           stallTimeout: stallTimeout,
+          slowWindow: slowWindow,
+          slowBytes: slowBytes,
         );
         return;
       } on ModelDownloadError catch (error) {
@@ -157,6 +161,8 @@ Future<void> _downloadFrom(
   void Function(int bytes, int total)? onProgress,
   DownloadStop? stop,
   required Duration stallTimeout,
+  required Duration slowWindow,
+  required int slowBytes,
 }) async {
   final host = hostName(address);
   final part = File('${target.path}.part');
@@ -186,6 +192,8 @@ Future<void> _downloadFrom(
         onProgress: onProgress,
         stop: stop,
         stallTimeout: stallTimeout,
+        slowWindow: slowWindow,
+        slowBytes: slowBytes,
       );
     }
     if (have != model.bytes) {
@@ -239,6 +247,8 @@ Future<int> _fetch(
   void Function(int bytes, int total)? onProgress,
   DownloadStop? stop,
   required Duration stallTimeout,
+  required Duration slowWindow,
+  required int slowBytes,
 }) async {
   final request = await http.getUrl(address);
   if (have > 0) request.headers.set(HttpHeaders.rangeHeader, 'bytes=$have-');
@@ -307,6 +317,18 @@ Future<int> _fetch(
         },
         cancelOnError: true,
       );
+  // A connection that still sends, but a trickle (546 B/s in the real
+  // check of session 51), never reaches the no-data timeout: under
+  // [slowBytes] in a [slowWindow] counts as stalled too, so a retry or the
+  // next address can do better.
+  var lastBytes = bytes;
+  final slow = Timer.periodic(slowWindow, (_) {
+    if (bytes - lastBytes < slowBytes && !done.isCompleted) {
+      done.completeError(TimeoutException('too slow', slowWindow));
+      unawaited(reading.cancel());
+    }
+    lastBytes = bytes;
+  });
   unawaited(
     stop?.future.then((_) async {
       await reading.cancel();
@@ -314,7 +336,7 @@ Future<int> _fetch(
     }),
   );
   try {
-    await done.future;
+    await done.future.whenComplete(slow.cancel);
   } on ModelDownloadError {
     await sink.close();
     part.deleteSync();
