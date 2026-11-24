@@ -10,6 +10,7 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'gigaam.dart';
+import 'heard_lyrics.dart' show loudSeconds;
 import 'onnx_runtime.dart';
 import 'speech_chunks.dart';
 import 'stt_worker.dart';
@@ -23,6 +24,7 @@ class GigaamJobResult {
     required this.openMs,
     required this.encodeMs,
     required this.decodeMs,
+    this.loudSeconds = 0,
     this.probabilities,
     this.firstEncoded,
   });
@@ -38,6 +40,10 @@ class GigaamJobResult {
   final int openMs;
   final int encodeMs;
   final int decodeMs;
+
+  /// Seconds of the vocals with sound (heard_lyrics.dart loudSeconds):
+  /// with few words, quiet vocals mean no singing.
+  final double loudSeconds;
 
   /// For checks only: Silero's probability of every window, and the
   /// encoder's frames of the first chunk.
@@ -84,6 +90,7 @@ class GigaamJob extends WorkerJob<GigaamJobResult> {
       0,
       Uint8List.sublistView(bytes, 0, audio.length * 4),
     );
+    final loud = loudSeconds(audio);
     final model = GigaamModel.load(modelFolder);
     final loadMs = clock.elapsedMilliseconds;
     context.checkCancelled();
@@ -174,6 +181,7 @@ class GigaamJob extends WorkerJob<GigaamJobResult> {
       openMs: openMs,
       encodeMs: encodeMs,
       decodeMs: clock.elapsedMilliseconds - loadMs - vadMs - openMs - encodeMs,
+      loudSeconds: loud,
       probabilities: probabilities,
       firstEncoded: firstEncoded,
     );

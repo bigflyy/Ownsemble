@@ -121,6 +121,7 @@ String lyricsSourceLabel(String source) => switch (source) {
   'lrclib' => 'LRCLIB',
   'netease' => 'NetEase',
   'qq' => 'QQ Music',
+  'heard' => 'Heard by the app',
   _ => source,
 };
 

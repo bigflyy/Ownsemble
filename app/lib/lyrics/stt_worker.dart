@@ -138,8 +138,21 @@ typedef WorkerMemory = ({
   int afterPrivate,
 });
 
+/// A job given to a runner: its result, progress and a way to stop it
+/// (the pipeline's view of [WorkerTask], so tests can fake the worker).
+abstract interface class RunningJob<R> {
+  Future<R> get result;
+  Stream<WorkerProgress> get progress;
+  void cancel();
+}
+
+/// What runs jobs one after another: [SttWorker], or a fake in tests.
+abstract interface class JobRunner {
+  RunningJob<R> run<R>(WorkerJob<R> job);
+}
+
 /// One job given to the worker.
-class WorkerTask<R> {
+class WorkerTask<R> implements RunningJob<R> {
   WorkerTask._(this._flag);
 
   final Pointer<Int32> _flag;
@@ -150,9 +163,11 @@ class WorkerTask<R> {
 
   /// The job's result; throws [WorkerCancelled] after [cancel] or
   /// [WorkerJobError] when the job failed.
+  @override
   Future<R> get result => _result.future;
 
   /// Progress, unit by unit.
+  @override
   Stream<WorkerProgress> get progress => _progress.stream;
 
   /// Memory during and after the job, once it has ended.
@@ -160,6 +175,7 @@ class WorkerTask<R> {
 
   /// Asks the job to stop at the end of the unit it is in. A result that
   /// arrives after this is given as [WorkerCancelled] too.
+  @override
   void cancel() {
     if (!_finished) _flag.value = 1;
   }
@@ -172,7 +188,7 @@ class WorkerTask<R> {
 }
 
 /// The worker isolate, started on the first job.
-class SttWorker {
+class SttWorker implements JobRunner {
   SttWorker({required this.onnxRuntimePath, this.log});
 
   /// onnxruntime.dll beside the app.
@@ -193,6 +209,7 @@ class SttWorker {
   final _open = <WorkerTask<Object?>>{};
 
   /// Runs [job] on the worker after the jobs given before it.
+  @override
   WorkerTask<R> run<R>(WorkerJob<R> job) {
     final task = WorkerTask<R>._(calloc<Int32>()..value = 0);
     _open.add(task);

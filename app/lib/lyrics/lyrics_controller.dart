@@ -41,6 +41,7 @@ import '../library/track.dart';
 import '../vk/vk_client.dart';
 import '../vk/vk_lyrics.dart';
 import 'fitted_lines.dart';
+import 'heard_lyrics.dart';
 import 'lyrics.dart';
 import 'lyrics_sources.dart';
 
@@ -61,9 +62,11 @@ class LyricsShown extends LyricsState {
   final bool refreshing;
 }
 
-/// No source has lyrics for the song.
+/// No source has lyrics for the song. [heard] when "Hear the words" ran
+/// and found no words: no singing, or none it could make out (I2e).
 class LyricsMissing extends LyricsState {
-  const LyricsMissing();
+  const LyricsMissing({this.heard});
+  final HeardLyrics? heard;
 }
 
 /// Asking failed and nothing is stored. [slowDown] when a source refused
@@ -190,6 +193,7 @@ class LyricsController extends ChangeNotifier {
     this.loadFit,
     this.saveFit,
     this.audioBytesOf,
+    this.loadHeard,
     int Function()? now,
     this.log,
   }) : _now = now ?? (() => DateTime.now().millisecondsSinceEpoch);
@@ -248,6 +252,12 @@ class LyricsController extends ChangeNotifier {
   /// fit of another file is not used.
   final int? Function(Track track)? audioBytesOf;
 
+  /// What "Hear the words" heard in an upload (LibraryStore
+  /// .heardLyricsOf), I2e. Kept apart from the sources: the chooser's
+  /// [choices] and every ask leave it alone. Its words show when no source
+  /// has lyrics, or when the user picks [heardSource].
+  final HeardLyrics? Function(String ref)? loadHeard;
+
   /// Sources being asked by [askAll], and those whose ask failed, as
   /// "upload key|source".
   final _choiceAsking = <String>{};
@@ -289,15 +299,19 @@ class LyricsController extends ChangeNotifier {
   ];
 
   /// Shows the lyrics of [track] (the playing song; null for none): stored
-  /// ones at once, else asked. The same song again changes nothing, unless
-  /// [again] (the place opened anew): then a failure or an old answer is
-  /// looked at again.
+  /// ones at once, else asked. The same song from the same upload again
+  /// changes nothing, unless [again] (the place opened anew): then a
+  /// failure or an old answer is looked at again. The same song from
+  /// another upload (another version chosen: the player starts the same
+  /// row again) shows that upload's lyrics (Codex review, session 54).
   void show(Track? track, {bool again = false}) {
+    final route = track == null ? null : routeOf(track);
     final sameSong =
         track != null &&
         _track != null &&
         track.id == _track!.id &&
-        track.sourceKey == _track!.sourceKey;
+        track.sourceKey == _track!.sourceKey &&
+        route?.key == _shownKey;
     if (sameSong && !(again && _state is! LyricsShown)) return;
     _track = track;
     _asking++;
@@ -306,7 +320,6 @@ class LyricsController extends ChangeNotifier {
       _set(const LyricsLoading());
       return;
     }
-    final route = routeOf(track);
     if (route == null) {
       _shownKey = null;
       _set(const LyricsMissing());
@@ -321,14 +334,10 @@ class LyricsController extends ChangeNotifier {
     final stored = _storedPick(route.key);
     final best = stored.best;
     if (!stored.mustAsk) {
-      _set(best == null ? const LyricsMissing() : LyricsShown(best));
+      _set(best == null ? _withoutSources(route.key) : LyricsShown(best));
       return;
     }
-    _set(
-      best == null
-          ? const LyricsLoading()
-          : LyricsShown(best, refreshing: true),
-    );
+    _set(_whileAsking(route.key, best));
     unawaited(_ask(route, track));
   }
 
@@ -390,7 +399,7 @@ class LyricsController extends ChangeNotifier {
       );
       if (asking != _asking) return;
       final shown = _pickedLyrics(route.key) ?? lyrics;
-      _set(shown == null ? const LyricsMissing() : LyricsShown(shown));
+      _set(shown == null ? _withoutSources(route.key) : LyricsShown(shown));
     } on _Dropped {
       return;
     } on Object catch (error) {
@@ -399,6 +408,11 @@ class LyricsController extends ChangeNotifier {
       if (shown is LyricsShown) {
         // What is stored stays; it is asked again next time.
         _set(LyricsShown(shown.lyrics));
+        return;
+      }
+      // "No singing found" says more than a failed ask.
+      if (_heardOf(route.key) != null) {
+        _set(_withoutSources(route.key));
         return;
       }
       _set(switch (error) {
@@ -624,7 +638,7 @@ class LyricsController extends ChangeNotifier {
   /// stored; null means the automatic pick shows.
   Lyrics? _pickedLyrics(String key) {
     final source = _pickOf(key);
-    return source == null ? null : load(source, key)?.lyrics;
+    return source == null ? null : _lyricsOf(source, key);
   }
 
   /// The source the user chose for the song shown, while its lyrics are
@@ -797,7 +811,7 @@ class LyricsController extends ChangeNotifier {
     if (shown != null) {
       _set(LyricsShown(shown));
     } else if (current is! LyricsFailed) {
-      _set(const LyricsMissing());
+      _set(_withoutSources(key));
     }
   }
 
@@ -806,7 +820,7 @@ class LyricsController extends ChangeNotifier {
   void use(String source) {
     final key = _shownKey;
     if (key == null) return;
-    final lyrics = load(source, key)?.lyrics;
+    final lyrics = _lyricsOf(source, key);
     if (lyrics == null) return;
     _keepPick(key, source);
     log?.call('lyrics use $source');
@@ -827,15 +841,84 @@ class LyricsController extends ChangeNotifier {
     final best = stored.best;
     final route = routeOf(track);
     if (!stored.mustAsk || route == null) {
-      _set(best == null ? const LyricsMissing() : LyricsShown(best));
+      _set(best == null ? _withoutSources(key) : LyricsShown(best));
       return;
     }
-    _set(
-      best == null
-          ? const LyricsLoading()
-          : LyricsShown(best, refreshing: true),
-    );
+    _set(_whileAsking(key, best));
     unawaited(_ask(route, track));
+  }
+
+  /// The heard version of [key] (I2e), when one is kept.
+  HeardLyrics? _heardOf(String key) => loadHeard?.call(key);
+
+  /// [source]'s lyrics stored for [key]; for [heardSource] the heard words.
+  Lyrics? _lyricsOf(String source, String key) =>
+      source == heardSource ? _heardOf(key)?.lyrics : load(source, key)?.lyrics;
+
+  /// What shows for [key] when no source has lyrics: the heard words, or
+  /// missing (with what hearing found, if it ran).
+  LyricsState _withoutSources(String key) {
+    final heard = _heardOf(key);
+    final words = heard?.lyrics;
+    if (words != null) return LyricsShown(words);
+    return LyricsMissing(heard: heard);
+  }
+
+  /// What shows for [key] while the sources are asked: the best stored,
+  /// else the heard words, else loading.
+  LyricsState _whileAsking(String key, Lyrics? best) {
+    final shown = best ?? _heardOf(key)?.lyrics;
+    return shown == null
+        ? const LyricsLoading()
+        : LyricsShown(shown, refreshing: true);
+  }
+
+  /// The heard version of the song shown, for the chooser's own row (I2f):
+  /// never one of [choices].
+  HeardLyrics? get heard {
+    final key = _shownKey;
+    return key == null ? null : _heardOf(key);
+  }
+
+  /// A heard version of the upload [ref] was saved or forgotten: what shows
+  /// follows while that upload is shown; nothing changes otherwise (a run
+  /// started for one version that ends while the song plays another).
+  void heardChanged(String ref) {
+    if (_shownKey != ref) return;
+    final heardWords = _heardOf(ref)?.lyrics;
+    // A pick of heard words no longer kept goes with them, so a later
+    // hearing does not take over again unasked (Codex review).
+    if (_pickOf(ref) == heardSource && heardWords == null) {
+      _keepPick(ref, null);
+    }
+    // An ask of the place's own is under way (an ask dropped by a pick or
+    // a new song leaves neither): it sets what shows when it ends.
+    final state = _state;
+    final pending =
+        state is LyricsLoading || (state is LyricsShown && state.refreshing);
+    final shown = _pickedLyrics(ref) ?? _storedPick(ref).best ?? heardWords;
+    if (shown != null) {
+      _set(LyricsShown(shown, refreshing: pending));
+      return;
+    }
+    if (pending) {
+      _set(const LyricsLoading());
+      return;
+    }
+    // Nothing to show: the sources are asked again when due (a failure the
+    // heard words covered, Codex review), else what hearing found shows.
+    final track = _track;
+    final route = track == null ? null : routeOf(track);
+    if (track != null &&
+        route != null &&
+        route.key == ref &&
+        _storedPick(ref).mustAsk) {
+      _asking++;
+      _set(const LyricsLoading());
+      unawaited(_ask(route, track));
+      return;
+    }
+    _set(_withoutSources(ref));
   }
 
   /// The upload whose lyrics the place shows, null for none.
@@ -1000,7 +1083,7 @@ class LyricsController extends ChangeNotifier {
         ? state.lyrics
         : key == null
         ? null
-        : load(source, key)?.lyrics;
+        : _lyricsOf(source, key);
     final fit = lyrics == null ? null : fitFor(lyrics);
     return fit?.fits ?? false ? _fitted(source) : source;
   }
