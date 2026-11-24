@@ -117,8 +117,13 @@ Future<void> main(List<String> args) async {
         File(p.join(values['--vocals'] ?? '.', '$name.vocals16.f32'))
             .copySync(vocals);
         // Marked as made from no file: the run reuses them.
-        File(vocalsMarkerOf(vocals))
-            .writeAsStringSync(jsonEncode({'audio': audio, 'bytes': null}));
+        File(vocalsMarkerOf(vocals)).writeAsStringSync(
+          vocalsMarkerText(
+            audioPath: audio,
+            audioBytes: null,
+            separatorModel: paths.separatorModel,
+          ),
+        );
       }
       final hear = HearWords(
         runner: worker,

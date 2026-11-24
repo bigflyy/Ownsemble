@@ -122,6 +122,8 @@ class HearRun {
     if (_cancelled) throw const WorkerCancelled();
     final running = runner.run(job);
     _job = running;
+    // The step shows from its start, before its first unit ends.
+    _progress.add((step: step, stage: 'start', done: 0, total: 0));
     final listening = running.progress.listen(
       (unit) => _progress.add((
         step: step,
@@ -146,6 +148,7 @@ class HearWords {
     int Function()? now,
     this.log,
     this.russianAt = russianConfidence,
+    this.beforeWhisper,
   }) : _now = now ?? (() => DateTime.now().millisecondsSinceEpoch);
 
   final JobRunner runner;
@@ -164,6 +167,12 @@ class HearWords {
   final void Function(String line)? log;
 
   final int Function() _now;
+
+  /// Runs before the first Whisper stage of a run, only for a song GigaAM
+  /// is not sure of: the app downloads the Whisper bundle there, the first
+  /// time one is needed (Codex review of I2f). Its error fails the run;
+  /// the vocals stay for the next try.
+  final Future<void> Function(HearRun run)? beforeWhisper;
 
   /// Hears [audioPath], the file of the recording [ref], into the heard
   /// version saved for [ref]. [vocalsPath] is where the vocals go between
@@ -201,7 +210,11 @@ class HearWords {
   ) async {
     final clock = Stopwatch()..start();
     final marker = File(vocalsMarkerOf(vocalsPath));
-    final from = jsonEncode({'audio': audioPath, 'bytes': audioBytes});
+    final from = vocalsMarkerText(
+      audioPath: audioPath,
+      audioBytes: audioBytes,
+      separatorModel: paths.separatorModel,
+    );
     final kept =
         File(vocalsPath).existsSync() &&
         marker.existsSync() &&
@@ -261,6 +274,10 @@ class HearWords {
         for (final chunk in heardRu.chunks)
           (chunk.range.start, chunk.range.end),
       ];
+      if (beforeWhisper != null) {
+        if (run._cancelled) throw const WorkerCancelled();
+        await beforeWhisper!(run);
+      }
       final first = await run._stage(
         'whisper',
         runner,
@@ -371,6 +388,32 @@ String? songLanguage(WhisperResult heard) {
 /// The vocals marker beside [vocalsPath]: the song file they were made
 /// from, so vocals of another file are never reused.
 String vocalsMarkerOf(String vocalsPath) => '$vocalsPath.from';
+
+/// What the marker of vocals made from [audioPath] holds: the file, its
+/// size and last change (a file replaced by another of the same size), and
+/// the separator model (a new bundle version makes new vocals; Codex
+/// review of I2f).
+String vocalsMarkerText({
+  required String audioPath,
+  required int? audioBytes,
+  required String separatorModel,
+}) {
+  int? modified;
+  try {
+    final file = File(audioPath);
+    if (audioPath.isNotEmpty && file.existsSync()) {
+      modified = file.lastModifiedSync().millisecondsSinceEpoch;
+    }
+  } on FileSystemException {
+    modified = null;
+  }
+  return jsonEncode({
+    'audio': audioPath,
+    'bytes': audioBytes,
+    'modified': modified,
+    'separator': separatorModel,
+  });
+}
 
 /// The chunks to hear again as Russian: those in another language, when
 /// more than half the singing (by samples) is heard as Russian; a song

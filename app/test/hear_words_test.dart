@@ -22,135 +22,7 @@ import 'package:ownsemble/lyrics/vocals_job.dart';
 import 'package:ownsemble/lyrics/whisper.dart';
 import 'package:ownsemble/lyrics/whisper_job.dart';
 
-/// A job the fake worker holds: its answer comes from the test.
-class FakeJob<R> implements RunningJob<R> {
-  FakeJob(this.job);
-
-  final WorkerJob<R> job;
-  final _result = Completer<R>();
-  final _progress = StreamController<WorkerProgress>.broadcast(sync: true);
-  var cancelled = false;
-
-  void finish(Object value) {
-    if (cancelled || _result.isCompleted) return;
-    _result.complete(value as R);
-    unawaited(_progress.close());
-  }
-
-  void fail(Object error) {
-    if (_result.isCompleted) return;
-    _result.completeError(error);
-    unawaited(_progress.close());
-  }
-
-  @override
-  Future<R> get result => _result.future;
-
-  @override
-  Stream<WorkerProgress> get progress => _progress.stream;
-
-  @override
-  void cancel() {
-    if (_result.isCompleted) return;
-    cancelled = true;
-    fail(const WorkerCancelled());
-  }
-}
-
-/// A worker that answers each job through [answer] at once, unless
-/// [hold] says the test answers it itself.
-class FakeRunner implements JobRunner {
-  FakeRunner(this.answer);
-
-  final Object Function(WorkerJob<Object?> job) answer;
-  bool Function(WorkerJob<Object?> job) hold = (_) => false;
-  final jobs = <FakeJob<Object?>>[];
-
-  List<String> get names => [for (final job in jobs) job.job.name];
-
-  @override
-  RunningJob<R> run<R>(WorkerJob<R> job) {
-    final fake = FakeJob<R>(job);
-    jobs.add(fake);
-    if (!hold(job)) {
-      scheduleMicrotask(() {
-        try {
-          if (job is VocalsJob) {
-            File((job as VocalsJob).outPath).writeAsBytesSync([0, 0, 0, 0]);
-          }
-          fake.finish(answer(job));
-        } on Object catch (error) {
-          fake.fail(error);
-        }
-      });
-    }
-    return fake;
-  }
-}
-
-const sr = 16000;
-
-/// Words of [text], 0.5 s apart from [start] seconds.
-List<HeardWord> said(String text, double start, double confidence) => [
-  for (final (i, word) in text.split(' ').indexed)
-    HeardWord(start + i * 0.5, start + i * 0.5 + 0.3, word, confidence),
-];
-
-/// A GigaAM result over [ranges] (seconds) with [words] in the first chunk.
-GigaamJobResult gigaamHeard(
-  List<(double, double)> ranges,
-  List<HeardWord> words, {
-  double loud = 100,
-  int seconds = 200,
-}) => GigaamJobResult(
-  result: GigaamResult(
-    samples: seconds * sr,
-    speechSeconds: ranges.fold(0, (sum, r) => sum + r.$2 - r.$1),
-    chunks: [
-      for (final (i, (start, end)) in ranges.indexed)
-        (
-          range: (start: (start * sr).round(), end: (end * sr).round()),
-          frames: 0,
-          tokens: const <HeardToken>[],
-          words: i == 0 ? words : const <HeardWord>[],
-        ),
-    ],
-  ),
-  loadMs: 0,
-  vadMs: 0,
-  openMs: 0,
-  encodeMs: 0,
-  decodeMs: 0,
-  loudSeconds: loud,
-);
-
-typedef Heard = ({String language, List<HeardWord> words});
-
-/// A Whisper result: one chunk per [ranges] entry (samples), each with its
-/// language and words.
-WhisperJobResult whisperHeard(List<(int, int)> ranges, List<Heard> chunks) =>
-    WhisperJobResult(
-      result: WhisperResult(
-        samples: 200 * sr,
-        speechSeconds: 0,
-        chunks: [
-          for (final (i, (start, end)) in ranges.indexed)
-            (
-              range: (start: start, end: end),
-              language: chunks[i].language,
-              tokens: const [],
-              words: chunks[i].words,
-            ),
-        ],
-      ),
-      loadMs: 0,
-      vadMs: 0,
-      openMs: 0,
-      transcribeMs: 0,
-      chunkMs: const [],
-    );
-
-String words(int count, String word) => List.filled(count, word).join(' ');
+import 'stt_fakes.dart';
 
 void main() {
   late Directory temp;
@@ -437,8 +309,13 @@ void main() {
 
     test('a whole vocals file from before skips separation', () async {
       File(vocals).writeAsBytesSync([0, 0, 0, 0]);
-      File(vocalsMarkerOf(vocals))
-          .writeAsStringSync('{"audio":"song.mp3","bytes":7}');
+      File(vocalsMarkerOf(vocals)).writeAsStringSync(
+        vocalsMarkerText(
+          audioPath: 'song.mp3',
+          audioBytes: 7,
+          separatorModel: 'kim.onnx',
+        ),
+      );
       final fake = normal();
       await start(fake).result;
       expect(fake.names, ['gigaam', 'whisper']);
@@ -567,10 +444,106 @@ void main() {
         await Future<void>.delayed(Duration.zero);
       }
       final gigaam = fake.jobs.last;
-      gigaam._progress.add((stage: 'hear', done: 1, total: 2));
+      gigaam.progressController.add((stage: 'hear', done: 1, total: 2));
       gigaam.finish(normal().answer(gigaam.job));
       await run.result;
-      expect(seen, [(step: 'gigaam', stage: 'hear', done: 1, total: 2)]);
+      expect(seen, [
+        (step: 'gigaam', stage: 'start', done: 0, total: 0),
+        (step: 'gigaam', stage: 'hear', done: 1, total: 2),
+        (step: 'whisper', stage: 'start', done: 0, total: 0),
+      ]);
+    });
+
+    test('vocals of another separator or a changed file are made again', () {
+      final song = File('${temp.path}/song.mp3')..writeAsBytesSync([1, 2, 3]);
+      String marker(String separator) => vocalsMarkerText(
+        audioPath: song.path,
+        audioBytes: 3,
+        separatorModel: separator,
+      );
+      final first = marker('hear-words-1/kim.onnx');
+      expect(marker('hear-words-1/kim.onnx'), first);
+      expect(marker('hear-words-2/kim.onnx'), isNot(first));
+      // The same size written anew (VK swapped the file for another).
+      song.setLastModifiedSync(DateTime(2020));
+      expect(marker('hear-words-1/kim.onnx'), isNot(first));
+    });
+
+    group('Whisper fetched when first needed', () {
+      HearWords withHook(
+        FakeRunner runner,
+        Future<void> Function(HearRun run) hook,
+      ) => HearWords(
+        runner: runner,
+        paths: const HearWordsPaths(
+          separatorModel: 'kim.onnx',
+          silero: '',
+          gigaamFolder: '',
+          mpv: '',
+          tempDir: '',
+          whisperBridge: '',
+          whisperLibraries: '',
+          whisperModel: '',
+        ),
+        save: (ref, heard) => saved[ref] = heard,
+        beforeWhisper: hook,
+      );
+
+      test('a Russian song never asks for it', () async {
+        var asked = 0;
+        final fake = FakeRunner(
+          (job) => switch (job) {
+            VocalsJob() => separated,
+            GigaamJob() => gigaamHeard([
+              (1, 20),
+            ], said(words(25, 'x'), 1, 0.95)),
+            _ => throw StateError('unexpected'),
+          },
+        );
+        await withHook(
+          fake,
+          (_) async => asked++,
+        ).start(ref: '1_1', audioPath: 'song.mp3', vocalsPath: vocals).result;
+        expect(asked, 0);
+        expect(fake.names, ['separate', 'gigaam']);
+      });
+
+      test('a failed download keeps the vocals; the retry skips '
+          'separation', () async {
+        final fake = normal();
+        final run = withHook(
+          fake,
+          (_) async => throw const FileSystemException('offline'),
+        ).start(ref: '1_1', audioPath: 'song.mp3', vocalsPath: vocals);
+        await expectLater(run.result, throwsA(isA<FileSystemException>()));
+        expect(fake.names, ['separate', 'gigaam']);
+        expect(saved, isEmpty);
+        expect(File(vocals).existsSync(), isTrue);
+        final again = normal();
+        await withHook(
+          again,
+          (_) async {},
+        ).start(ref: '1_1', audioPath: 'song.mp3', vocalsPath: vocals).result;
+        expect(again.names, ['gigaam', 'whisper']);
+      });
+
+      test('a cancel during the download: Whisper never starts', () async {
+        final fake = normal();
+        final gate = Completer<void>();
+        final run = withHook(
+          fake,
+          (_) => gate.future,
+        ).start(ref: '1_1', audioPath: 'song.mp3', vocalsPath: vocals);
+        while (fake.jobs.length < 2) {
+          await Future<void>.delayed(Duration.zero);
+        }
+        await fake.jobs.last.result;
+        await Future<void>.delayed(Duration.zero);
+        run.cancel();
+        gate.completeError(const FileSystemException('stopped'));
+        await expectLater(run.result, throwsA(isA<WorkerCancelled>()));
+        expect(fake.names, ['separate', 'gigaam']);
+      });
     });
   });
 
