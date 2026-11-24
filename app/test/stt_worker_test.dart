@@ -37,6 +37,26 @@ class CountJob extends WorkerJob<int> {
   }
 }
 
+/// One unit, then waits for [gate] and returns without another check:
+/// a job that ends between its last cancel check and its result.
+class TailJob extends WorkerJob<int> {
+  const TailJob(this.gate);
+  final String gate;
+
+  @override
+  String get name => 'tail';
+
+  @override
+  int run(WorkerContext context) {
+    context.unitDone('tail', 1, 1);
+    final until = DateTime.now().add(const Duration(seconds: 10));
+    while (!File(gate).existsSync() && DateTime.now().isBefore(until)) {
+      sleep(const Duration(milliseconds: 5));
+    }
+    return 1;
+  }
+}
+
 class FailJob extends WorkerJob<void> {
   const FailJob();
 
@@ -97,6 +117,19 @@ void main() {
     await expectLater(task.result, throwsA(isA<WorkerCancelled>()));
     expect(seen, [1, 2, 3], reason: 'unit 3 finishes, unit 4 never starts');
     expect(logged.single, startsWith('stt count: cancelled'));
+  });
+
+  test('a result that comes after cancel() is given as cancelled', () async {
+    final dir = Directory.systemTemp.createTempSync('worker-test');
+    addTearDown(() => dir.deleteSync(recursive: true));
+    final gate = '${dir.path}/go';
+    final task = worker.run(TailJob(gate));
+    task.progress.listen((p) {
+      // The job has passed its last check; it returns once the gate opens.
+      task.cancel();
+      File(gate).writeAsStringSync('');
+    });
+    await expectLater(task.result, throwsA(isA<WorkerCancelled>()));
   });
 
   test(

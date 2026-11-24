@@ -153,7 +153,8 @@ class WorkerTask<R> {
   /// Memory during and after the job, once it has ended.
   WorkerMemory? get memory => _memory;
 
-  /// Asks the job to stop at the end of the unit it is in.
+  /// Asks the job to stop at the end of the unit it is in. A result that
+  /// arrives after this is given as [WorkerCancelled] too.
   void cancel() {
     if (!_finished) _flag.value = 1;
   }
@@ -291,6 +292,10 @@ class SttWorker {
           'MB (private ${_mb(memory.afterPrivate)})',
         );
         switch (outcome) {
+          // A result that comes after cancel() is not wanted any more:
+          // the job ended between its last check and the message.
+          case 'ok' when task._flag.value != 0:
+            task._result.completeError(const WorkerCancelled());
           case 'ok':
             task._result.complete(message[3]);
           case 'cancelled':
