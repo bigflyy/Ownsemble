@@ -1,6 +1,8 @@
 // A small binding to ONNX Runtime's C API (onnxruntime.dll from
 // Microsoft's NuGet package Microsoft.ML.OnnxRuntime, 1.31.1), enough to
-// run one float model on the CPU (plan 10 G1).
+// run models on the CPU with float32, int32 and int64 tensors (plan
+// 10 G1; several typed inputs and outputs since I2c, for GigaAM's encoder
+// and Silero's carried state).
 //
 // The C API is one table of function pointers (struct OrtApi in
 // onnxruntime_c_api.h), reached through OrtGetApiBase. Entries are only
@@ -29,6 +31,7 @@ const _setIntraOpNumThreads = 24;
 const _setInterOpNumThreads = 25;
 const _createTensorWithDataAsOrtValue = 49;
 const _getTensorMutableData = 51;
+const _getTensorElementType = 60;
 const _getDimensionsCount = 61;
 const _getDimensions = 62;
 const _getTensorTypeAndShape = 65;
@@ -47,6 +50,8 @@ const _graphOptimizationAll = 99;
 const _allocatorArena = 1;
 const _memTypeDefault = 0;
 const _elementFloat = 1;
+const _elementInt32 = 6;
+const _elementInt64 = 7;
 
 typedef _Release = Void Function(Pointer<Void>);
 typedef _ReleaseDart = void Function(Pointer<Void>);
@@ -224,6 +229,52 @@ class OnnxRuntime {
   }
 }
 
+/// A tensor given to or returned by [OnnxSession.runTensors]: float32,
+/// int32 or int64 values in row-major order and their shape.
+class OnnxTensor {
+  /// A float32 tensor.
+  OnnxTensor.float(Float32List values, List<int> shape)
+    : this._(values, shape, _elementFloat);
+
+  /// An int64 tensor (lengths, token ids).
+  OnnxTensor.int64(Int64List values, List<int> shape)
+    : this._(values, shape, _elementInt64);
+
+  /// An int32 tensor (GigaAM's encoder gives its frame count as one).
+  OnnxTensor.int32(Int32List values, List<int> shape)
+    : this._(values, shape, _elementInt32);
+
+  OnnxTensor._(this.data, List<int> shape, this._element)
+    : shape = List.unmodifiable(shape) {
+    final count = shape.fold(1, (a, b) => a * b);
+    final length = data.lengthInBytes ~/ data.elementSizeInBytes;
+    if (count != length) {
+      throw ArgumentError('shape $shape holds $count values, not $length');
+    }
+  }
+
+  /// A [Float32List], an [Int32List] or an [Int64List].
+  final TypedData data;
+  final List<int> shape;
+  final int _element;
+
+  /// The values of a float tensor.
+  Float32List get floats {
+    if (data is! Float32List) throw StateError('not a float tensor');
+    return data as Float32List;
+  }
+
+  /// The values of an int32 or int64 tensor.
+  List<int> get ints {
+    final values = data;
+    if (values is Int64List) return values;
+    if (values is Int32List) return values;
+    throw StateError('not an integer tensor');
+  }
+
+  int get _bytes => data.lengthInBytes;
+}
+
 /// One opened model. Not shared between isolates: open one per isolate.
 class OnnxSession {
   OnnxSession._(this._ort, this._env, this._session, this._memory);
@@ -241,57 +292,92 @@ class OnnxSession {
     List<int> shape,
     String outputName,
   ) {
+    final [out] = runTensors(
+      {inputName: OnnxTensor.float(input, shape)},
+      [outputName],
+    );
+    return (values: out.floats, shape: out.shape);
+  }
+
+  /// Runs the model on named [inputs] (float or int64) and returns the
+  /// outputs named in [outputNames], in that order, as copies that stay
+  /// valid after the call. An output of another element type than float32
+  /// or int64 is an [OnnxError].
+  List<OnnxTensor> runTensors(
+    Map<String, OnnxTensor> inputs,
+    List<String> outputNames,
+  ) {
     if (_session == nullptr) throw const OnnxError('session closed');
     final ort = _ort;
     return using((arena) {
-      final data = arena<Float>(input.length);
-      data.asTypedList(input.length).setAll(0, input);
-      final dims = arena<Int64>(shape.length);
-      for (var i = 0; i < shape.length; i++) {
-        dims[i] = shape[i];
-      }
       final out = arena<Pointer<Void>>();
-      ort._check(
-        ort
-            ._entry<
-              Pointer<Void> Function(
-                Pointer<Void>,
-                Pointer<Void>,
-                Size,
-                Pointer<Int64>,
-                Size,
-                Int32,
-                Pointer<Pointer<Void>>,
-              )
-            >(_createTensorWithDataAsOrtValue)
-            .asFunction<
-              Pointer<Void> Function(
-                Pointer<Void>,
-                Pointer<Void>,
-                int,
-                Pointer<Int64>,
-                int,
-                int,
-                Pointer<Pointer<Void>>,
-              )
-            >()(
-          _memory,
-          data.cast(),
-          input.length * sizeOf<Float>(),
-          dims,
-          shape.length,
-          _elementFloat,
-          out,
-        ),
-      );
-      final inputValue = out.value;
-      final inNames = arena<Pointer<Utf8>>()
-        ..value = inputName.toNativeUtf8(allocator: arena);
-      final outNames = arena<Pointer<Utf8>>()
-        ..value = outputName.toNativeUtf8(allocator: arena);
-      final inputs = arena<Pointer<Void>>()..value = inputValue;
-      final outputs = arena<Pointer<Void>>()..value = nullptr;
+      final inNames = arena<Pointer<Utf8>>(inputs.length);
+      final inValues = arena<Pointer<Void>>(inputs.length);
+      final outNames = arena<Pointer<Utf8>>(outputNames.length);
+      final outValues = arena<Pointer<Void>>(outputNames.length);
+      for (var i = 0; i < outputNames.length; i++) {
+        outNames[i] = outputNames[i].toNativeUtf8(allocator: arena);
+        outValues[i] = nullptr;
+      }
+      var made = 0;
       try {
+        for (final MapEntry(key: name, value: tensor) in inputs.entries) {
+          // ONNX Runtime reads the data in place, so it lives in native
+          // memory until the run is over.
+          final bytes = tensor._bytes;
+          final data = arena<Uint8>(bytes == 0 ? 1 : bytes);
+          data
+              .asTypedList(bytes)
+              .setAll(
+                0,
+                tensor.data.buffer.asUint8List(
+                  tensor.data.offsetInBytes,
+                  bytes,
+                ),
+              );
+          final dims = arena<Int64>(
+            tensor.shape.isEmpty ? 1 : tensor.shape.length,
+          );
+          for (var d = 0; d < tensor.shape.length; d++) {
+            dims[d] = tensor.shape[d];
+          }
+          ort._check(
+            ort
+                ._entry<
+                  Pointer<Void> Function(
+                    Pointer<Void>,
+                    Pointer<Void>,
+                    Size,
+                    Pointer<Int64>,
+                    Size,
+                    Int32,
+                    Pointer<Pointer<Void>>,
+                  )
+                >(_createTensorWithDataAsOrtValue)
+                .asFunction<
+                  Pointer<Void> Function(
+                    Pointer<Void>,
+                    Pointer<Void>,
+                    int,
+                    Pointer<Int64>,
+                    int,
+                    int,
+                    Pointer<Pointer<Void>>,
+                  )
+                >()(
+              _memory,
+              data.cast(),
+              bytes,
+              dims,
+              tensor.shape.length,
+              tensor._element,
+              out,
+            ),
+          );
+          inNames[made] = name.toNativeUtf8(allocator: arena);
+          inValues[made] = out.value;
+          made++;
+        }
         ort._check(
           ort
               ._entry<
@@ -317,55 +403,117 @@ class OnnxSession {
                   int,
                   Pointer<Pointer<Void>>,
                 )
-              >()(_session, nullptr, inNames, inputs, 1, outNames, 1, outputs),
+              >()(
+            _session,
+            nullptr,
+            inNames,
+            inValues,
+            made,
+            outNames,
+            outputNames.length,
+            outValues,
+          ),
         );
+        return [
+          for (var i = 0; i < outputNames.length; i++)
+            _copyOut(outValues[i], arena),
+        ];
       } finally {
-        ort._release(_releaseValue, inputValue);
-      }
-      final outputValue = outputs.value;
-      try {
-        ort._check(
-          ort
-              ._entry<_StatusFnOut>(_getTensorTypeAndShape)
-              .asFunction<_StatusFnOutDart>()(outputValue, out),
-        );
-        final info = out.value;
-        final count = arena<Size>();
-        ort._check(
-          ort
-              ._entry<Pointer<Void> Function(Pointer<Void>, Pointer<Size>)>(
-                _getDimensionsCount,
-              )
-              .asFunction<
-                Pointer<Void> Function(Pointer<Void>, Pointer<Size>)
-              >()(info, count),
-        );
-        final outDims = arena<Int64>(count.value);
-        ort._check(
-          ort
-              ._entry<
-                Pointer<Void> Function(Pointer<Void>, Pointer<Int64>, Size)
-              >(_getDimensions)
-              .asFunction<
-                Pointer<Void> Function(Pointer<Void>, Pointer<Int64>, int)
-              >()(info, outDims, count.value),
-        );
-        ort._release(_releaseTensorTypeAndShapeInfo, info);
-        final outShape = [for (var i = 0; i < count.value; i++) outDims[i]];
-        final length = outShape.fold(1, (a, b) => a * b);
-        ort._check(
-          ort
-              ._entry<_StatusFnOut>(_getTensorMutableData)
-              .asFunction<_StatusFnOutDart>()(outputValue, out),
-        );
-        final values = Float32List.fromList(
-          out.value.cast<Float>().asTypedList(length),
-        );
-        return (values: values, shape: outShape);
-      } finally {
-        ort._release(_releaseValue, outputValue);
+        for (var i = 0; i < made; i++) {
+          ort._release(_releaseValue, inValues[i]);
+        }
+        for (var i = 0; i < outputNames.length; i++) {
+          ort._release(_releaseValue, outValues[i]);
+        }
       }
     });
+  }
+
+  /// A Dart copy of the output tensor [value] (released by the caller).
+  OnnxTensor _copyOut(Pointer<Void> value, Arena arena) {
+    final ort = _ort;
+    final out = arena<Pointer<Void>>();
+    ort._check(
+      ort
+          ._entry<_StatusFnOut>(_getTensorTypeAndShape)
+          .asFunction<_StatusFnOutDart>()(value, out),
+    );
+    final info = out.value;
+    final List<int> shape;
+    final int element;
+    try {
+      final type = arena<Int32>();
+      ort._check(
+        ort
+            ._entry<Pointer<Void> Function(Pointer<Void>, Pointer<Int32>)>(
+              _getTensorElementType,
+            )
+            .asFunction<
+              Pointer<Void> Function(Pointer<Void>, Pointer<Int32>)
+            >()(info, type),
+      );
+      element = type.value;
+      final count = arena<Size>();
+      ort._check(
+        ort
+            ._entry<Pointer<Void> Function(Pointer<Void>, Pointer<Size>)>(
+              _getDimensionsCount,
+            )
+            .asFunction<Pointer<Void> Function(Pointer<Void>, Pointer<Size>)>()(
+          info,
+          count,
+        ),
+      );
+      final dims = arena<Int64>(count.value == 0 ? 1 : count.value);
+      ort._check(
+        ort
+            ._entry<
+              Pointer<Void> Function(Pointer<Void>, Pointer<Int64>, Size)
+            >(_getDimensions)
+            .asFunction<
+              Pointer<Void> Function(Pointer<Void>, Pointer<Int64>, int)
+            >()(info, dims, count.value),
+      );
+      shape = [for (var i = 0; i < count.value; i++) dims[i]];
+    } finally {
+      ort._release(_releaseTensorTypeAndShapeInfo, info);
+    }
+    final length = shape.fold(1, (a, b) => a * b);
+    if (length == 0) {
+      switch (element) {
+        case _elementFloat:
+          return OnnxTensor.float(Float32List(0), shape);
+        case _elementInt32:
+          return OnnxTensor.int32(Int32List(0), shape);
+        case _elementInt64:
+          return OnnxTensor.int64(Int64List(0), shape);
+      }
+    }
+    ort._check(
+      ort
+          ._entry<_StatusFnOut>(_getTensorMutableData)
+          .asFunction<_StatusFnOutDart>()(value, out),
+    );
+    switch (element) {
+      case _elementFloat:
+        return OnnxTensor.float(
+          Float32List.fromList(out.value.cast<Float>().asTypedList(length)),
+          shape,
+        );
+      case _elementInt64:
+        return OnnxTensor.int64(
+          Int64List.fromList(out.value.cast<Int64>().asTypedList(length)),
+          shape,
+        );
+      case _elementInt32:
+        return OnnxTensor.int32(
+          Int32List.fromList(out.value.cast<Int32>().asTypedList(length)),
+          shape,
+        );
+    }
+    throw OnnxError(
+      'output element type $element is not float32, int32 or int64',
+    );
   }
 
   /// Frees the model and its runtime state.
