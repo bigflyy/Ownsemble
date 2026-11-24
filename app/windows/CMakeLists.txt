@@ -90,6 +90,18 @@ endif()
 # onnxruntime.dll and its licenses for the lyrics aligner (plan 10 G2a).
 include(onnxruntime.cmake)
 
+# ownsemble_whisper.dll, the bridge to the whisper.cpp libraries of the
+# downloaded Whisper bundle (plan 10 I2d); it links none of them, so the
+# app starts without the bundle. Built from whisper.cpp's pinned headers
+# (MIT), whose license goes beside it.
+set(WHISPER_BRIDGE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../native/whisper_bridge")
+add_subdirectory("${WHISPER_BRIDGE_DIR}" whisper_bridge)
+install(TARGETS ownsemble_whisper RUNTIME DESTINATION "${INSTALL_BUNDLE_LIB_DIR}"
+  COMPONENT Runtime)
+install(FILES "${WHISPER_BRIDGE_DIR}/whisper.cpp-1.9.5/LICENSE"
+  DESTINATION "${INSTALL_BUNDLE_LIB_DIR}" RENAME "whisper.cpp-LICENSE.txt"
+  COMPONENT Runtime)
+
 # Copy the native assets provided by the build.dart from all packages.
 set(NATIVE_ASSETS_DIR "${PROJECT_BUILD_DIR}native_assets/windows/")
 install(DIRECTORY "${NATIVE_ASSETS_DIR}"
