@@ -17,9 +17,12 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../library/track.dart';
+import '../lyrics/heard_lyrics.dart';
 import '../lyrics/lyrics.dart';
 import '../lyrics/lyrics_controller.dart';
 import '../lyrics/lyrics_fitter.dart';
+import '../lyrics/lyrics_hearer.dart';
+import 'hear_words_ui.dart';
 import 'lyrics_page.dart';
 import 'theme.dart';
 import 'version_marks.dart' show lengthText;
@@ -35,9 +38,14 @@ class LyricsChoicesPage extends StatefulWidget {
     required this.seek,
     required this.onUsed,
     this.fitter,
+    this.hearer,
   });
 
   final LyricsController lyrics;
+
+  /// "Hear the words" (I2f): the heard version's row offers Hear again and
+  /// Forget; null hides them.
+  final LyricsHearer? hearer;
 
   /// Ranks timed lyrics by fit (G3); no ranking when null.
   final LyricsFitter? fitter;
@@ -69,6 +77,7 @@ class _LyricsChoicesPageState extends State<LyricsChoicesPage> {
     super.initState();
     widget.lyrics.addListener(_onLyrics);
     widget.fitter?.addListener(_onLyrics);
+    widget.hearer?.addListener(_onLyrics);
     _current = widget.currentStream.listen((track) {
       if (!mounted) return;
       // Another song: its own list, a preview of the old one closes.
@@ -97,6 +106,7 @@ class _LyricsChoicesPageState extends State<LyricsChoicesPage> {
   void dispose() {
     widget.lyrics.removeListener(_onLyrics);
     widget.fitter?.removeListener(_onLyrics);
+    widget.hearer?.removeListener(_onLyrics);
     unawaited(_current?.cancel());
     super.dispose();
   }
@@ -112,11 +122,15 @@ class _LyricsChoicesPageState extends State<LyricsChoicesPage> {
 
   Future<void> _menu(LyricsChoice choice, Offset at) async {
     final chosen = widget.lyrics.chosen;
+    final heard = choice.source == heardSource;
+    final hearer = widget.hearer;
+    // The upload the menu is for, even if the song moves on meanwhile.
+    final key = widget.lyrics.shownKey;
     final action = await showMenu<String>(
       context: context,
       position: RelativeRect.fromLTRB(at.dx, at.dy, at.dx, at.dy),
       items: [
-        if (chosen != choice.source)
+        if (chosen != choice.source && choice.lyrics != null)
           const PopupMenuItem(
             key: ValueKey('menu-use-lyrics'),
             value: 'use',
@@ -128,11 +142,26 @@ class _LyricsChoicesPageState extends State<LyricsChoicesPage> {
             value: 'automatic',
             child: Text('Back to automatic'),
           ),
-        const PopupMenuItem(
-          key: ValueKey('menu-preview-lyrics'),
-          value: 'preview',
-          child: Text('Preview'),
-        ),
+        if (choice.lyrics != null)
+          const PopupMenuItem(
+            key: ValueKey('menu-preview-lyrics'),
+            value: 'preview',
+            child: Text('Preview'),
+          ),
+        if (heard && hearer != null) ...[
+          PopupMenuItem(
+            key: const ValueKey('menu-hear-again'),
+            value: 'hear',
+            enabled: hearer.job == null,
+            child: const Text('Hear again'),
+          ),
+          PopupMenuItem(
+            key: const ValueKey('menu-forget-heard'),
+            value: 'forget',
+            enabled: hearer.stageOf(key) == null,
+            child: const Text('Forget heard words'),
+          ),
+        ],
       ],
     );
     if (!mounted || action == null) return;
@@ -143,7 +172,27 @@ class _LyricsChoicesPageState extends State<LyricsChoicesPage> {
         widget.lyrics.useAutomatic();
       case 'preview':
         setState(() => _preview = choice.source);
+      case 'hear':
+        unawaited(hearShownWords(context, hearer!, forKey: key));
+      case 'forget':
+        if (key != null) hearer!.forget(key);
     }
+  }
+
+  /// The heard version as a row of its own (I2f), never one of the
+  /// sources: null when the song was never heard.
+  LyricsChoice? _heardChoice() {
+    final heard = widget.lyrics.heard;
+    if (heard == null) return null;
+    final words = heard.lyrics;
+    return LyricsChoice(
+      source: heardSource,
+      status: words == null
+          ? LyricsChoiceStatus.none
+          : LyricsChoiceStatus.found,
+      lyrics: words,
+      exact: true,
+    );
   }
 
   @override
@@ -152,7 +201,19 @@ class _LyricsChoicesPageState extends State<LyricsChoicesPage> {
       return lyricsMessage(context, 'Play a song to see its lyrics.');
     }
     final fitter = widget.fitter;
-    final choices = _ranked(widget.lyrics.choices);
+    final ranked = _ranked(widget.lyrics.choices);
+    final heardChoice = _heardChoice();
+    final foundCount = ranked.where((choice) => choice.lyrics != null).length;
+    // The heard version after the sources' lyrics, before those without.
+    final choices = [
+      ...ranked.take(foundCount),
+      ?heardChoice,
+      ...ranked.skip(foundCount),
+    ];
+    final shownState = widget.lyrics.state;
+    final shownSource = shownState is LyricsShown
+        ? shownState.lyrics.source
+        : null;
     final previewed = choices
         .where((choice) => choice.source == _preview && choice.lyrics != null)
         .firstOrNull;
@@ -177,12 +238,23 @@ class _LyricsChoicesPageState extends State<LyricsChoicesPage> {
                 fitted:
                     choice.lyrics != null &&
                     widget.lyrics.isFitted(choice.lyrics!),
-                inUse: choice.source == (chosen ?? automatic),
+                inUse: choice.source == heardSource
+                    ? shownSource == heardSource
+                    : choice.source == (chosen ?? automatic),
                 automatic: choice.source == automatic,
+                rough:
+                    choice.source == heardSource &&
+                    (widget.lyrics.heard?.rough ?? false),
+                heardOutcome: choice.source == heardSource
+                    ? widget.lyrics.heard?.outcome
+                    : null,
                 yours: choice.source == chosen,
                 narrow: narrow,
                 onPreview: () => setState(() => _preview = choice.source),
                 onMenu: (at) => _menu(choice, at),
+                hearing:
+                    choice.source == heardSource &&
+                    widget.hearer?.stageOf(widget.lyrics.shownKey) != null,
                 onRetry: () => unawaited(widget.lyrics.askAll()),
               ),
           ],
@@ -260,7 +332,10 @@ class _LyricsChoicesPageState extends State<LyricsChoicesPage> {
     final colors = OwnColors.of(context);
     final lyrics = choice.lyrics!;
     final chosen = widget.lyrics.chosen;
-    final inUse = choice.source == (chosen ?? widget.lyrics.automatic);
+    final state = widget.lyrics.state;
+    final inUse = choice.source == heardSource
+        ? state is LyricsShown && state.lyrics.source == heardSource
+        : choice.source == (chosen ?? widget.lyrics.automatic);
     return LayoutBuilder(
       builder: (context, constraints) {
         final narrow = constraints.maxWidth < lyricsNarrowWidth;
@@ -281,14 +356,18 @@ class _LyricsChoicesPageState extends State<LyricsChoicesPage> {
                     label: const Text('All sources'),
                   ),
                   Text(
-                    '${choice.label}, ${widget.lyrics.timedOf(lyrics).timed
-                        ? 'timed'
-                        : choice.otherVersion && lyrics.timed
-                        ? 'words of another version'
-                        : 'words only'}'
-                    ' · ${_lengthNote(choice)}'
-                    '${widget.lyrics.isFitted(lyrics) ? ' · fitted to this recording' : ''}'
-                    '${_offsetNote(widget.lyrics.timedOf(lyrics).timed ? widget.lyrics.offsetOf(choice.source) : 0)}',
+                    choice.source == heardSource
+                        ? 'Heard by the app from this recording'
+                              '${widget.lyrics.heard?.rough ?? false ? ', rough' : ''}'
+                              '${_offsetNote(widget.lyrics.offsetOf(choice.source))}'
+                        : '${choice.label}, ${widget.lyrics.timedOf(lyrics).timed
+                                  ? 'timed'
+                                  : choice.otherVersion && lyrics.timed
+                                  ? 'words of another version'
+                                  : 'words only'}'
+                              ' · ${_lengthNote(choice)}'
+                              '${widget.lyrics.isFitted(lyrics) ? ' · fitted to this recording' : ''}'
+                              '${_offsetNote(widget.lyrics.timedOf(lyrics).timed ? widget.lyrics.offsetOf(choice.source) : 0)}',
                     key: const ValueKey('lyrics-preview-what'),
                     style: TextStyle(color: colors.dim, fontSize: 13),
                   ),
@@ -368,9 +447,18 @@ class _ChoiceRow extends StatelessWidget {
     required this.onPreview,
     required this.onMenu,
     required this.onRetry,
+    this.rough = false,
+    this.heardOutcome,
+    this.hearing = false,
   });
 
   final LyricsChoice choice;
+
+  /// The heard version's facts (I2f): its rough mark, what hearing came
+  /// to, and whether it is being heard again now.
+  final bool rough;
+  final HeardOutcome? heardOutcome;
+  final bool hearing;
 
   /// The share of the lyrics' lines found in this recording (G3); null
   /// when not checked.
@@ -393,6 +481,11 @@ class _ChoiceRow extends StatelessWidget {
     final lyrics = choice.lyrics;
     final found = lyrics != null;
     final tags = <(String, String)>[
+      if (rough)
+        (
+          'rough',
+          'The models were not sure of these words: some may be wrong.',
+        ),
       if (lyrics != null)
         lyrics.timed
             ? ('timed', 'Lines follow the music.')
@@ -430,14 +523,25 @@ class _ChoiceRow extends StatelessWidget {
           'What the app picks by itself: timed lyrics first, then the '
               'closest names and length.',
         ),
-      if (found && choice.source != 'vk' && !choice.exact)
+      if (found &&
+          choice.source != 'vk' &&
+          choice.source != heardSource &&
+          !choice.exact)
         (
           'similar names',
           'The names match only roughly (other spelling or alphabet): '
               'check that these are the right song.',
         ),
     ];
+    final heard = choice.source == heardSource;
     final detail = switch (choice.status) {
+      _ when heard && hearing => 'Being heard again...',
+      LyricsChoiceStatus.found when heard =>
+        'From this recording, on this PC · ${_wordLines(lyrics!)} lines',
+      LyricsChoiceStatus.none when heard =>
+        heardOutcome == HeardOutcome.noSinging
+            ? 'No singing found in this recording'
+            : 'A voice, but no words made out',
       LyricsChoiceStatus.found =>
         choice.source == 'vk'
             ? "This upload's own lyrics · ${_wordLines(lyrics!)} lines"
@@ -455,6 +559,7 @@ class _ChoiceRow extends StatelessWidget {
       LyricsChoiceStatus.notAsked => 'Not asked yet',
     };
     final icon = switch (choice.status) {
+      _ when heard => Icons.hearing,
       LyricsChoiceStatus.found =>
         lyrics!.timed || fitted ? Icons.lyrics_outlined : Icons.notes,
       LyricsChoiceStatus.none => Icons.block,
@@ -465,7 +570,7 @@ class _ChoiceRow extends StatelessWidget {
     final seconds = choice.seconds;
     return InkWell(
       onTap: found ? onPreview : null,
-      onSecondaryTapDown: found
+      onSecondaryTapDown: found || heard
           ? (details) => onMenu(details.globalPosition)
           : null,
       child: Padding(
@@ -483,7 +588,10 @@ class _ChoiceRow extends StatelessWidget {
                 borderRadius: BorderRadius.circular(6),
               ),
               alignment: Alignment.center,
-              child: choice.status == LyricsChoiceStatus.asking || choice.asking
+              child:
+                  choice.status == LyricsChoiceStatus.asking ||
+                      choice.asking ||
+                      hearing
                   ? const SizedBox(
                       width: 16,
                       height: 16,

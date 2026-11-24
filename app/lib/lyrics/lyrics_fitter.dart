@@ -164,6 +164,11 @@ class LyricsFitter extends ChangeNotifier {
   /// One line to perf.log: times and outcomes only.
   final void Function(String line)? log;
 
+  /// Why another heavy job ("Hear the words") keeps a fit or a fit check
+  /// from starting now; null when none runs (one heavy lyrics job at a
+  /// time, plan 10 I2f).
+  String? Function()? busyElsewhere;
+
   /// Scores by "upload key|source": for which lyrics and file, and the
   /// share of sure lines.
   final _scores = <String, ({String hash, int bytes, double sure})>{};
@@ -242,7 +247,7 @@ class LyricsFitter extends ChangeNotifier {
   /// scored yet. Without [runModel] only when the model's output is cached
   /// (a moment); with it, the model runs first when needed (about 20 s).
   Future<void> rankChoices({bool runModel = false}) async {
-    if (_job != null || !canRank) return;
+    if (_job != null || !canRank || busyElsewhere?.call() != null) return;
     if (!runModel && !rankIsQuick) return;
     final track = lyrics.track!;
     final key = lyrics.shownKey!;
@@ -302,6 +307,8 @@ class LyricsFitter extends ChangeNotifier {
     if (_job != null) {
       return const FitFailed('Another fit is running; wait for it.');
     }
+    final busy = busyElsewhere?.call();
+    if (busy != null) return FitFailed(busy, retry: false);
     if (track == null || key == null || state is! LyricsShown) {
       return const FitFailed('No lyrics to fit.', retry: false);
     }

@@ -11,7 +11,9 @@ import '../library/song_filter.dart';
 import '../library/song_version.dart';
 import '../library/track.dart';
 import '../lyrics/lyrics_controller.dart';
+import '../lyrics/heard_lyrics.dart' show heardSource;
 import '../lyrics/lyrics_fitter.dart';
+import '../lyrics/lyrics_hearer.dart';
 import '../lyrics/lyrics_sources.dart' show lyricsSourceLabel;
 import '../playback/playback_controller.dart';
 import '../playback/play_queue.dart';
@@ -133,6 +135,7 @@ class LibraryScreen extends StatefulWidget {
     this.artists,
     this.lyrics,
     this.lyricsFitter,
+    this.lyricsHearer,
     this._settings,
   });
 
@@ -173,6 +176,9 @@ class LibraryScreen extends StatefulWidget {
 
   /// Fit to this recording (plan 10 G2); no Fit button when null.
   final LyricsFitter? lyricsFitter;
+
+  /// "Hear the words" (plan 10 I2f), for songs no source has lyrics for.
+  final LyricsHearer? lyricsHearer;
 
   final ShellSettings? _settings;
 
@@ -1147,6 +1153,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
               // Its stage shows in the Lyrics heading's line; it tells only
               // when that text changes (at most once per percent).
               ?widget.lyricsFitter,
+              ?widget.lyricsHearer,
               ?_storage,
               ?widget.collections,
               ?widget.player.versions,
@@ -1341,6 +1348,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
                                 : null,
                             seek: widget.playback.seek,
                             onChoose: library.openLyricsChoices,
+                            hearer: widget.lyricsHearer,
                           )
                         : view.kind == ViewKind.lyricsChoices &&
                               widget.lyrics != null
@@ -1355,6 +1363,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
                             seek: widget.playback.seek,
                             onUsed: library.goBack,
                             fitter: widget.lyricsFitter,
+                            hearer: widget.lyricsHearer,
                           )
                         : statsFilters != null
                         ? NowPlayingScope(
@@ -1473,8 +1482,17 @@ class _LibraryScreenState extends State<LibraryScreen> {
         ? track.title
         : '${track.title} - ${track.artist}';
     final state = lyrics.state;
+    final hearing = widget.lyricsHearer?.stageOf(lyrics.shownKey);
+    if (hearing != null) return '$song · ${hearStageText(hearing)}';
     if (state is! LyricsShown) return song;
     final source = state.lyrics.source;
+    if (source == heardSource) {
+      final offset = lyrics.shownOffset;
+      return '$song · heard by the app'
+          '${lyrics.chosen == source ? ', your choice' : ''}'
+          '${lyrics.heard?.rough ?? false ? ', rough' : ''}'
+          '${offset == 0 ? '' : ', ${lyricsOffsetText(offset)}'}';
+    }
     // As shown: plain words fitted to the recording are timed (H2).
     final offset = lyrics.timedOf(state.lyrics).timed ? lyrics.shownOffset : 0;
     final fit = lyrics.fitFor(state.lyrics);

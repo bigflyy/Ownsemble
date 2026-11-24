@@ -11,6 +11,7 @@ library;
 
 import 'package:flutter/material.dart';
 
+import '../lyrics/heard_lyrics.dart' show heardSource;
 import '../lyrics/lyrics.dart';
 import '../lyrics/lyrics_controller.dart';
 import '../lyrics/lyrics_fitter.dart';
@@ -44,7 +45,10 @@ class LyricsFitButton extends StatelessWidget {
     builder: (context, _) {
       final state = _lyrics.state;
       // Only lyrics the fit can read: no model download for the rest.
-      if (state is! LyricsShown || !canFitLines(state.lyrics.lines)) {
+      // Heard words carry this recording's own times already (I2f).
+      if (state is! LyricsShown ||
+          state.lyrics.source == heardSource ||
+          !canFitLines(state.lyrics.lines)) {
         return const SizedBox.shrink();
       }
       final shown = state.lyrics;

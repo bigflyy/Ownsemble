@@ -9,9 +9,12 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../library/track.dart';
+import '../lyrics/heard_lyrics.dart';
 import '../lyrics/lyrics.dart';
 import '../lyrics/lyrics_controller.dart';
+import '../lyrics/lyrics_hearer.dart';
 import '../lyrics/lyrics_sources.dart' show lyricsSourceLabel;
+import 'hear_words_ui.dart';
 import 'theme.dart';
 
 /// Below this width the lines get a smaller size.
@@ -34,9 +37,14 @@ class LyricsPage extends StatefulWidget {
     required this.positions,
     required this.seek,
     this.onChoose,
+    this.hearer,
   });
 
   final LyricsController lyrics;
+
+  /// "Hear the words" for songs no source has lyrics for (I2f); no button
+  /// when null.
+  final LyricsHearer? hearer;
 
   /// The playing song now, and every change of it.
   final Track? Function() current;
@@ -68,6 +76,7 @@ class _LyricsPageState extends State<LyricsPage> {
   void initState() {
     super.initState();
     widget.lyrics.addListener(_onLyrics);
+    widget.hearer?.addListener(_onLyrics);
     _current = widget.currentStream.listen(widget.lyrics.show);
     // The controller tells its listeners at once; not while building. A
     // place opened anew looks again at a song whose ask failed before.
@@ -80,6 +89,7 @@ class _LyricsPageState extends State<LyricsPage> {
   @override
   void dispose() {
     widget.lyrics.removeListener(_onLyrics);
+    widget.hearer?.removeListener(_onLyrics);
     unawaited(_current?.cancel());
     _spinnerTimer?.cancel();
     super.dispose();
@@ -109,6 +119,13 @@ class _LyricsPageState extends State<LyricsPage> {
     if (track == null) {
       return lyricsMessage(context, 'Play a song to see its lyrics.');
     }
+    final hearer = widget.hearer;
+    final hearing = hearer?.stageOf(widget.lyrics.shownKey);
+    // A run of this song shows instead of "no lyrics" (its words are not
+    // there yet); heard words being heard again stay on show.
+    if (hearer != null && hearing != null && state is! LyricsShown) {
+      return HearProgressPanel(hearer: hearer, stage: hearing);
+    }
     switch (state) {
       case LyricsLoading():
         return _spinnerDue
@@ -132,17 +149,55 @@ class _LyricsPageState extends State<LyricsPage> {
                 ),
               )
             : const SizedBox.shrink();
-      case LyricsMissing():
+      case LyricsMissing(:final heard):
+        final seeAll = choose == null
+            ? null
+            : OutlinedButton(
+                key: const ValueKey('lyrics-choose'),
+                onPressed: choose,
+                child: const Text('See every source'),
+              );
+        final other = hearer?.job;
+        final canHear = hearer != null && track.inLibrary && other == null;
+        final hear = hearer == null
+            ? null
+            : FilledButton.tonalIcon(
+                key: const ValueKey('hear-words'),
+                onPressed: canHear
+                    ? () => unawaited(hearShownWords(context, hearer))
+                    : null,
+                icon: const Icon(Icons.hearing, size: 20),
+                label: Text(heard == null ? 'Hear the words' : 'Hear again'),
+              );
+        final note = hearer == null
+            ? null
+            : other != null
+            ? 'Another song is being heard now'
+                  '${other.track.title.isEmpty ? '' : ': ${other.track.title}'}'
+                  '. One song at a time.'
+            : !track.inLibrary
+            ? 'Add the song to your library to hear its words.'
+            : heard == null
+            ? 'Hear the words listens to the recording on this PC and writes '
+                  'down what is sung, about 2 to 5 minutes a song.'
+            : null;
         return lyricsMessage(
           context,
-          'No lyrics found for this song.',
-          action: choose == null
-              ? null
-              : OutlinedButton(
-                  key: const ValueKey('lyrics-choose'),
-                  onPressed: choose,
-                  child: const Text('See every source'),
-                ),
+          switch (heard?.outcome) {
+            HeardOutcome.noSinging =>
+              'No singing found in this song: the app listened to the '
+                  'recording and heard no voice.',
+            HeardOutcome.noWords =>
+              'The app heard a voice in this song but could not make out '
+                  'the words.',
+            _ => 'No lyrics found for this song.',
+          },
+          actions: [
+            // Hearing again finds no voice where none was found.
+            if (hear != null && heard?.outcome != HeardOutcome.noSinging) hear,
+            ?seeAll,
+          ],
+          note: note,
         );
       case LyricsFailed(:final reason):
         return lyricsMessage(
@@ -152,6 +207,22 @@ class _LyricsPageState extends State<LyricsPage> {
             key: const ValueKey('lyrics-retry'),
             onPressed: widget.lyrics.retry,
             child: const Text('Try again'),
+          ),
+        );
+      case LyricsShown(:final lyrics, :final refreshing)
+          when lyrics.source == heardSource:
+        final heard = widget.lyrics.heard;
+        final yours = widget.lyrics.chosen == heardSource;
+        return LyricsLines(
+          lyrics: widget.lyrics.timedOf(lyrics),
+          offsetMs: widget.lyrics.offsetOf(lyrics.source),
+          position: widget.position,
+          positions: widget.positions,
+          seek: widget.seek,
+          header: Text(
+            heardCredit(heard, yours: yours, refreshing: refreshing),
+            key: const ValueKey('lyrics-credit'),
+            style: TextStyle(color: colors.dim2, fontSize: 13),
           ),
         );
       case LyricsShown(:final lyrics, :final refreshing):
@@ -210,6 +281,18 @@ class _LyricsPageState extends State<LyricsPage> {
     }
   }
 }
+
+/// The credit line over heard words (I2f): where they come from, and the
+/// rough mark of words the models were not sure of.
+String heardCredit(
+  HeardLyrics? heard, {
+  bool yours = false,
+  bool refreshing = false,
+}) =>
+    'Heard by the app from this recording'
+    '${yours ? ' (your choice)' : ''}'
+    '${heard?.rough ?? false ? '; rough: some words may be wrong' : ''}'
+    '${refreshing ? '; asking the sources for lyrics...' : ''}';
 
 /// The user's moved timing in words (F1): "lines 1.5 s later".
 String lyricsOffsetText(int offsetMs) {
@@ -282,7 +365,14 @@ class LyricsTimingControl extends StatelessWidget {
 /// an optional button under it. It scrolls in a window too short for the
 /// text and its button (the smallest window over For You left 132 px: B25's
 /// test).
-Widget lyricsMessage(BuildContext context, String text, {Widget? action}) {
+Widget lyricsMessage(
+  BuildContext context,
+  String text, {
+  Widget? action,
+  List<Widget> actions = const [],
+  String? note,
+}) {
+  final buttons = [?action, ...actions];
   final colors = OwnColors.of(context);
   return LayoutBuilder(
     builder: (context, constraints) {
@@ -297,7 +387,18 @@ Widget lyricsMessage(BuildContext context, String text, {Widget? action}) {
               key: const ValueKey('lyrics-message'),
               style: TextStyle(color: colors.dim, fontSize: narrow ? 16 : 18),
             ),
-            if (action != null) ...[const SizedBox(height: 16), action],
+            if (buttons.isNotEmpty) ...[
+              const SizedBox(height: 16),
+              Wrap(spacing: 12, runSpacing: 8, children: buttons),
+            ],
+            if (note != null) ...[
+              const SizedBox(height: 12),
+              Text(
+                note,
+                key: const ValueKey('lyrics-note'),
+                style: TextStyle(color: colors.dim2, fontSize: 13),
+              ),
+            ],
           ],
         ),
       );

@@ -5,7 +5,9 @@
 // later by hand (F1); the chooser of every source's lyrics (E2): its list,
 // a preview and a kept choice; and Fit to this recording (G2): the question
 // before the model's download, the download, the fit running, fitted lines
-// and lyrics that do not match. The words are made up.
+// and lyrics that do not match; Hear the words (I2f): the button, the
+// question, a run, heard words marked rough, no singing found, another song
+// being heard, and the chooser's heard row. The words are made up.
 //
 // Run from app/:
 //   flutter test tool/lyrics_shots_test.dart \
@@ -23,6 +25,10 @@ import 'package:ownsemble/library/library_store.dart';
 import 'package:ownsemble/library/track.dart';
 import 'package:ownsemble/lyrics/fit_model.dart';
 import 'package:ownsemble/lyrics/fitted_lines.dart';
+import 'package:ownsemble/lyrics/gigaam.dart' show HeardWord;
+import 'package:ownsemble/lyrics/hear_words.dart';
+import 'package:ownsemble/lyrics/heard_lyrics.dart';
+import 'package:ownsemble/lyrics/lyrics_hearer.dart';
 import 'package:ownsemble/lyrics/lyrics.dart';
 import 'package:ownsemble/lyrics/lyrics_controller.dart';
 import 'package:ownsemble/lyrics/lyrics_fitter.dart';
@@ -39,6 +45,8 @@ import 'package:ownsemble/ui/sources_scope.dart';
 import 'package:ownsemble/ui/theme.dart';
 import 'package:ownsemble/vk/vk_client.dart';
 import 'package:path/path.dart' as p;
+
+import '../test/stt_fakes.dart';
 
 const shotsDir = String.fromEnvironment(
   'OWNSEMBLE_SHOTS',
@@ -209,6 +217,11 @@ void main() {
         ('Okto', 'Glass Garden'),
         ('Пале Кост', 'Утренний паром'),
         ('The Lanterns', 'Copper Rain'),
+        // A long name for the note about another song being heard (I2f).
+        (
+          'Оркестр северного побережья и друзья',
+          'Песня о долгой дороге домой через всё побережье, длинная версия',
+        ),
       ].indexed)
         NewTrack(
           sourceKey: '1_${i + 1}',
@@ -231,7 +244,19 @@ void main() {
     final playback = PlaybackController(player: player);
 
     final never = Completer<Object?>();
+    const hearSteps = {
+      'hear',
+      'hearask',
+      'hearing',
+      'heard',
+      'nosinging',
+      'hearother',
+      'heardrow',
+    };
     Future<Object?> fakeVk(String method, Map<String, String> params) async {
+      if (hearSteps.contains(step) && step != 'heardrow') {
+        throw VkException('audio.getLyrics error 104', code: 104);
+      }
       switch (step) {
         case 'loading':
           return never.future;
@@ -244,7 +269,8 @@ void main() {
             'preview' ||
             'chosen' ||
             'ranked' ||
-            'checkrow':
+            'checkrow' ||
+            'heardrow':
           return _plainReply();
         case 'long':
           return _timedReply(_longWords);
@@ -282,6 +308,46 @@ void main() {
       // F1: the preview shows NetEase's moved timing.
       if (step == 'preview') store.saveLyricsOffset('1_1', 'netease', -1000);
     }
+    // I2f: heard words, timed from the made-up lines, sure enough to show
+    // but marked rough (GigaAM under 0.93).
+    if (step == 'heard' || step == 'heardrow') {
+      final heardWords = <HeardWord>[];
+      for (final (i, line) in _timedWords.indexed) {
+        for (final (k, word) in line.split(' ').indexed) {
+          if (word.isEmpty) continue;
+          final at = 10 + i * 6 + k * 0.45;
+          heardWords.add(HeardWord(at, at + 0.35, word.toLowerCase(), 0.9));
+        }
+      }
+      store.saveHeardLyrics(
+        '1_1',
+        judgeHeard(
+          model: HeardModel.gigaam,
+          words: heardWords,
+          confidence: 0.9,
+          russianConfidence: 0.9,
+          language: 'ru',
+          loud: 120,
+          songMs: 204000,
+          heardAtMs: 1,
+        ),
+      );
+    }
+    if (step == 'nosinging') {
+      store.saveHeardLyrics(
+        '1_1',
+        judgeHeard(
+          model: null,
+          words: const [],
+          confidence: 0,
+          russianConfidence: 0,
+          language: null,
+          loud: 0.4,
+          songMs: 204000,
+          heardAtMs: 1,
+        ),
+      );
+    }
     final lyrics = LyricsController(
       load: store.lyricsOf,
       save: store.saveLyrics,
@@ -289,6 +355,7 @@ void main() {
       savePick: store.saveLyricsPick,
       loadOffset: store.lyricsOffsetOf,
       saveOffset: store.saveLyricsOffset,
+      loadHeard: store.heardLyricsOf,
       routeOf: lyricsRouteBySource((_) => fakeVk),
       sources: choosing
           ? [
@@ -338,6 +405,46 @@ void main() {
       storedAudioOf: (track) => modelThere ? model.path : null,
       hasCachedOutput: (key) => step == 'ranked',
     );
+    // I2f: a worker that holds every job, so a run stays where it is shown.
+    final runner = FakeRunner((job) => throw StateError('held'))
+      ..hold = (_) => true;
+    final hearer = LyricsHearer(
+      lyrics: lyrics,
+      bundleReady: (_) => step != 'hearask',
+      bundleMegabytes: (bundle) => bundle == HearBundle.hearWords ? 395 : 585,
+      download: (bundle, onProgress, stop) => hang.future,
+      audioOf: (track, onProgress) async =>
+          (File(p.join(modelDir.path, 'song.mp3'))..writeAsBytesSync([1])).path,
+      start:
+          ({
+            required ref,
+            required audioPath,
+            required vocalsPath,
+            required audioBytes,
+            required beforeWhisper,
+          }) =>
+              HearWords(
+                runner: runner,
+                paths: const HearWordsPaths(
+                  separatorModel: '',
+                  silero: '',
+                  gigaamFolder: '',
+                  mpv: '',
+                  tempDir: '',
+                  whisperBridge: '',
+                  whisperLibraries: '',
+                  whisperModel: '',
+                ),
+                save: (ref, heard) {},
+              ).start(
+                ref: ref,
+                audioPath: audioPath,
+                vocalsPath: p.join(modelDir.path, 'vocals.f32'),
+                audioBytes: audioBytes,
+              ),
+      vocalsPathOf: (key) => p.join(modelDir.path, 'vocals.f32'),
+      forgetHeard: (_) {},
+    );
     final settings = ShellSettings.inMemory();
     if (!dark) settings.toggleTheme();
     settings.dockTo(PlayerDock.side);
@@ -361,6 +468,7 @@ void main() {
               settings: settings,
               lyrics: lyrics,
               lyricsFitter: fitter,
+              lyricsHearer: hearer,
             ),
           ),
         ),
@@ -422,6 +530,33 @@ void main() {
       }
       if (step == 'ask') {
         await tester.tap(find.byKey(const ValueKey('lyrics-fit')));
+        await settle();
+      }
+      if (step == 'hearask') {
+        await tester.tap(find.byKey(const ValueKey('hear-words')));
+        await settle();
+      }
+      if (step == 'hearing') {
+        unawaited(hearer.hearShown());
+        await settle();
+        runner.jobs.single.progressController.add((
+          stage: 'separate',
+          done: 14,
+          total: 40,
+        ));
+        await settle();
+      }
+      if (step == 'hearother') {
+        // The long-named song is heard; the playing one shows the note.
+        lyrics.show(library.all.last);
+        unawaited(hearer.hearShown());
+        await settle();
+        expect(hearer.job, isNotNull, reason: 'the other song is heard');
+        lyrics.show(player.current);
+        await settle();
+      }
+      if (step == 'heardrow') {
+        await tester.tap(find.byKey(const ValueKey('lyrics-choose')));
         await settle();
       }
       if (const ['choices', 'preview', 'ranked', 'checkrow'].contains(step)) {
@@ -500,6 +635,22 @@ void main() {
     ('ranked', true, const Size(1440, 900)),
     ('ranked', false, const Size(480, 800)),
     ('checkrow', false, const Size(1440, 900)),
+    ('hear', true, const Size(1440, 900)),
+    ('hear', false, const Size(480, 800)),
+    ('hearask', true, const Size(1440, 900)),
+    ('hearask', false, const Size(480, 800)),
+    ('hearing', true, const Size(1440, 900)),
+    ('hearing', false, const Size(760, 900)),
+    ('hearing', true, const Size(480, 800)),
+    ('heard', true, const Size(1440, 900)),
+    ('heard', false, const Size(760, 900)),
+    ('heard', true, const Size(480, 800)),
+    ('nosinging', false, const Size(1440, 900)),
+    ('nosinging', true, const Size(480, 800)),
+    ('hearother', true, const Size(1440, 900)),
+    ('hearother', false, const Size(480, 800)),
+    ('heardrow', true, const Size(1440, 900)),
+    ('heardrow', false, const Size(480, 800)),
   ]) {
     final width = size.width < 600
         ? 'smallest'

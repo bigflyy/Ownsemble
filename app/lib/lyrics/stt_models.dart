@@ -22,6 +22,10 @@ Uri _release(String asset) => Uri.parse('$sttReleaseBase$asset');
 /// floats, 23 MB as 16 kHz vocals).
 const sttWorkingBytes = 300 * 1000 * 1000;
 
+/// The setting that keeps the CPU thread count of every model, chosen once
+/// per PC (plan 10 I2c: the words depend on it).
+const sttThreadsSetting = 'stt.threads';
+
 /// What every heard song needs: MDX-Net Kim Vocal 2 (vocals), Silero VAD
 /// (where the singing is) and GigaAM v3 RNNT int8 (Russian words, and the
 /// confidence that says whether the song is Russian).

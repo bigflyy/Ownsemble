@@ -13,6 +13,11 @@ import 'library/search_index.dart';
 import 'library/similar_seeds.dart';
 import 'library/track.dart';
 import 'lyrics/fit_model.dart';
+import 'lyrics/hear_words.dart';
+import 'lyrics/lyrics_hearer.dart';
+import 'lyrics/model_bundle.dart';
+import 'lyrics/stt_models.dart';
+import 'lyrics/stt_worker.dart';
 import 'lyrics/lyrics_controller.dart';
 import 'lyrics/lyrics_fitter.dart';
 import 'lyrics/lyrics_sources.dart';
@@ -468,6 +473,29 @@ Future<void> main(List<String> args) async {
     return file.existsSync() ? file.path : null;
   }
 
+  // The song's stored file, saved first when it only streams: the fit and
+  // "Hear the words" both read the file.
+  Future<String> audioOf(
+    Track track,
+    void Function(double share) onProgress,
+  ) async {
+    if (!storage.hasFile(track)) {
+      void heard() => onProgress(storage.savedShare(track));
+      storage.progress.addListener(heard);
+      try {
+        final error = await playback.download(track, pin: false);
+        if (error != null) throw FitAudioError(error);
+      } finally {
+        storage.progress.removeListener(heard);
+      }
+    }
+    final path = storage.stateOf(track).path;
+    if (path == null || !storage.fileAt(path).existsSync()) {
+      throw const FitAudioError('the song is not stored');
+    }
+    return storage.fileAt(path).path;
+  }
+
   final fitter = LyricsFitter(
     lyrics: lyrics,
     modelFile: modelFile,
@@ -478,23 +506,7 @@ Future<void> main(List<String> args) async {
       onProgress: onProgress,
       stop: stop,
     ),
-    audioOf: (track, onProgress) async {
-      if (!storage.hasFile(track)) {
-        void heard() => onProgress(storage.savedShare(track));
-        storage.progress.addListener(heard);
-        try {
-          final error = await playback.download(track, pin: false);
-          if (error != null) throw FitAudioError(error);
-        } finally {
-          storage.progress.removeListener(heard);
-        }
-      }
-      final path = storage.stateOf(track).path;
-      if (path == null || !storage.fileAt(path).existsSync()) {
-        throw const FitAudioError('the song is not stored');
-      }
-      return storage.fileAt(path).path;
-    },
+    audioOf: audioOf,
     fit: (key, audioPath, lines, onProgress) {
       final tempDir = Directory(p.join(options.dataDir, 'tmp'))
         ..createSync(recursive: true);
@@ -516,6 +528,146 @@ Future<void> main(List<String> args) async {
     hasCachedOutput: (key) => File(fitCacheOf(key)).existsSync(),
     log: logPerf,
   );
+  // Plan 10 I2f: Hear the words. The hear-words bundle goes into the data
+  // folder on the first run the user agrees to, the Whisper bundle when a
+  // song GigaAM doubts first needs it; the worker runs on its own isolate,
+  // a new one per run, closed after it so its memory goes back.
+  final modelsRoot = Directory(p.join(options.dataDir, 'models'));
+  final vocalsDir = Directory(p.join(options.dataDir, 'hear-vocals'));
+  // Fixed once per PC: the heard words depend on the thread count (I2c).
+  var sttThreads = int.tryParse(store.readSetting(sttThreadsSetting) ?? '');
+  if (sttThreads == null) {
+    sttThreads = sttThreadsFor(Platform.numberOfProcessors);
+    store.writeSetting(sttThreadsSetting, '$sttThreads');
+  }
+  // Each run gets its own scratch folder (the decoded song while it is
+  // separated): a window closed mid-run ends the process at once, and the
+  // next start removes what such a run left (Codex review).
+  final hearScratch = Directory(p.join(options.dataDir, 'hear-tmp'));
+  HearWordsPaths hearPathsIn(String tempDir) => HearWordsPaths(
+    separatorModel: bundleFile(
+      modelsRoot,
+      hearWordsBundle,
+      'Kim_Vocal_2.onnx',
+    ).path,
+    silero: bundleFile(
+      modelsRoot,
+      hearWordsBundle,
+      'silero_vad_scan.onnx',
+    ).path,
+    gigaamFolder: bundleFile(
+      modelsRoot,
+      hearWordsBundle,
+      'gigaam/model.json',
+    ).parent.path,
+    mpv: p.join(appDir, 'libmpv-2.dll'),
+    tempDir: tempDir,
+    whisperBridge: p.join(appDir, 'ownsemble_whisper.dll'),
+    whisperLibraries: bundleFile(
+      modelsRoot,
+      whisperBundle,
+      'whisper.cpp/whisper.dll',
+    ).parent.path,
+    whisperModel: bundleFile(
+      modelsRoot,
+      whisperBundle,
+      'ggml-large-v3-turbo-q5_0.bin',
+    ).path,
+    threads: sttThreads!,
+    bundles: '${hearWordsBundle.folderName} ${whisperBundle.folderName}',
+  );
+  ModelBundle bundleOf(HearBundle bundle) => switch (bundle) {
+    HearBundle.hearWords => hearWordsBundle,
+    HearBundle.whisper => whisperBundle,
+  };
+  final hearer = LyricsHearer(
+    lyrics: lyrics,
+    bundleReady: (bundle) => bundleReady(modelsRoot, bundleOf(bundle)),
+    bundleMegabytes: (bundle) => bundleOf(bundle).megabytes,
+    download: (bundle, onProgress, stop) => downloadBundle(
+      bundleOf(bundle),
+      modelsRoot,
+      freeBytes: () => freeBytesAt(options.dataDir),
+      workingBytes: sttWorkingBytes,
+      onProgress: onProgress,
+      stop: stop,
+    ),
+    audioOf: audioOf,
+    start:
+        ({
+          required ref,
+          required audioPath,
+          required vocalsPath,
+          required audioBytes,
+          required beforeWhisper,
+        }) {
+          final scratch = Directory(
+            p.join(
+              hearScratch.path,
+              '${DateTime.now().millisecondsSinceEpoch}',
+            ),
+          )..createSync(recursive: true);
+          final worker = SttWorker(
+            onnxRuntimePath: p.join(appDir, 'onnxruntime.dll'),
+            log: logPerf,
+          );
+          final run =
+              HearWords(
+                runner: worker,
+                paths: hearPathsIn(scratch.path),
+                save: (ref, heard) {
+                  store.saveHeardLyrics(ref, heard);
+                  lyrics.heardChanged(ref);
+                },
+                log: logPerf,
+                beforeWhisper: beforeWhisper,
+              ).start(
+                ref: ref,
+                audioPath: audioPath,
+                vocalsPath: vocalsPath,
+                audioBytes: audioBytes,
+              );
+          unawaited(
+            run.result.then<void>((_) {}, onError: (Object _) {}).whenComplete(
+              () async {
+                await worker.close();
+                try {
+                  scratch.deleteSync(recursive: true);
+                } on FileSystemException {
+                  // Removed at the next start.
+                }
+              },
+            ),
+          );
+          return run;
+        },
+    vocalsPathOf: (key) =>
+        p.join(vocalsDir.path, '${fitCacheName(key)}.vocals16.f32'),
+    forgetHeard: (ref) => store.saveHeardLyrics(ref, null),
+    freeBytes: () => freeBytesAt(options.dataDir),
+    bundleIntact: (bundle) => bundleIntact(modelsRoot, bundleOf(bundle)),
+    // One heavy lyrics job at a time (Codex review): a fit or a fit check
+    // keeps hearing from starting, and hearing keeps them.
+    busyElsewhere: () => fitter.job == null
+        ? null
+        : 'A fit to the recording is running; hear the words after it.',
+    log: logPerf,
+  );
+  fitter.busyElsewhere = () => hearer.job == null
+      ? null
+      : 'The words of a song are being heard; fit after it.';
+  // What runs of an earlier start left: their scratch folders, and vocals
+  // of runs stopped long ago and never tried again. Before any run can
+  // start (no click before the first frame).
+  try {
+    if (hearScratch.existsSync()) hearScratch.deleteSync(recursive: true);
+  } on FileSystemException {
+    // Still held by something; tried again next start.
+  }
+  final removedVocals = removeOldVocals(vocalsDir, now: DateTime.now());
+  if (removedVocals > 0) {
+    logPerf('hear words: removed $removedVocals old vocals files');
+  }
   artists.onListChanged = library.listChanged;
   library.artistSongsOf = artists.songsOf;
   library.vkLists = CombinedLists(
@@ -614,6 +766,7 @@ Future<void> main(List<String> args) async {
       artists: artists,
       lyrics: lyrics,
       lyricsFitter: fitter,
+      lyricsHearer: hearer,
       settings: settings,
     ),
   );
@@ -840,6 +993,7 @@ class OwnsembleApp extends StatelessWidget {
     this.artists,
     this.lyrics,
     this.lyricsFitter,
+    this.lyricsHearer,
   });
 
   final CoverStore covers;
@@ -857,6 +1011,7 @@ class OwnsembleApp extends StatelessWidget {
   final LibraryArtists? artists;
   final LyricsController? lyrics;
   final LyricsFitter? lyricsFitter;
+  final LyricsHearer? lyricsHearer;
 
   @override
   Widget build(BuildContext context) {
@@ -882,6 +1037,7 @@ class OwnsembleApp extends StatelessWidget {
             artists: artists,
             lyrics: lyrics,
             lyricsFitter: lyricsFitter,
+            lyricsHearer: lyricsHearer,
             settings: settings,
           ),
         ),
