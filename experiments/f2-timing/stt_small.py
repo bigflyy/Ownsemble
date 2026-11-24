@@ -17,6 +17,7 @@ Env: GigaAmTranscriber's dev venv (~/.venvs/gigaam-app). Prints no words.
 import argparse
 import ctypes
 import ctypes.wintypes
+import dataclasses
 import json
 import sys
 import time
@@ -85,10 +86,16 @@ def main():
         words = sum(len(segment.words) for segment in result.segments)
         if result.segments:
             write_outputs(result, ["json"], args.out)
+        else:
+            # An explicit empty result, so a rerun never leaves an older transcript in place.
+            empty = {"source": str(path), "model": args.model, "audio_seconds": result.audio_seconds,
+                     "speech_seconds": 0.0, "segments": [], "text": ""}
+            (args.out / f"{path.stem}-transcript.json").write_text(json.dumps(empty), encoding="utf-8")
         current, peak = memory_mb()
         total_audio += result.audio_seconds
         total_time += elapsed
         row = {"file": path.stem, "model": args.model, "device": transcriber.device_label,
+               "vad": dataclasses.asdict(options),
                "threads": args.threads, "audio_s": round(result.audio_seconds, 1),
                "elapsed_s": round(elapsed, 2), "words": words,
                "ram_mb": round(current), "peak_mb": round(peak)}
