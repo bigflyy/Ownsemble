@@ -9,7 +9,11 @@
 //
 //  --stop-after-mb N  stops the download after N MB of a bundle (an
 //                     interrupt); run again without it to resume.
+//  --only NAME        only the bundle NAME (hear-words or whisper-turbo).
 //  --verify           reads every file and compares the hashes.
+//  --dlls-only DIR    downloads only the whisper.cpp files of the Whisper
+//                     bundle into DIR/whisper.cpp (each checked by its
+//                     hash) and loads them from there, without the model.
 //  --load-whisper     opens ggml-base, ggml and whisper from the bundle's
 //                     whisper.cpp folder, loads the CPU backends from there,
 //                     and prints the version, the backends and where every
@@ -43,11 +47,28 @@ Future<void> main(List<String> args) async {
     exit(2);
   }
   final root = Directory(modelsPath);
+  final dllsOnly = valueOf('--dlls-only');
+  if (dllsOnly != null) {
+    final folder = Directory(p.join(dllsOnly, 'whisper.cpp'));
+    for (final file in whisperBundle.files) {
+      if (!file.fileName.startsWith('whisper.cpp/')) continue;
+      final target = File(p.join(dllsOnly, file.fileName));
+      await downloadModel(file, target);
+      print('${file.fileName}: ${await modelIntact(target, file)}');
+    }
+    _loadWhisper(folder.path);
+    return;
+  }
   final stopAfter = int.tryParse(valueOf('--stop-after-mb') ?? '');
+  final only = valueOf('--only');
+  final bundles = [
+    for (final bundle in [hearWordsBundle, whisperBundle])
+      if (only == null || bundle.name == only) bundle,
+  ];
   final loadOnly = args.contains('--load-whisper') && !args.contains('--get');
 
   if (!loadOnly) {
-    for (final bundle in [hearWordsBundle, whisperBundle]) {
+    for (final bundle in bundles) {
       final left = bundleBytesLeft(root, bundle);
       print(
         '${bundle.folderName}: ready ${bundleReady(root, bundle)}, '
@@ -97,7 +118,7 @@ Future<void> main(List<String> args) async {
   }
 
   if (args.contains('--verify')) {
-    for (final bundle in [hearWordsBundle, whisperBundle]) {
+    for (final bundle in bundles) {
       final clock = Stopwatch()..start();
       final intact = await bundleIntact(root, bundle);
       print(
@@ -149,18 +170,21 @@ void _loadWhisper(String folder) {
     'ggml_backend_reg_count',
   )();
   final regGet = ggml.lookupFunction<_GetC, _Get>('ggml_backend_reg_get');
-  final regName = ggml.lookupFunction<_NameC, _NameC>('ggml_backend_reg_name');
+  // ggml's functions are split between ggml (the registry) and ggml-base.
+  final regName = base.lookupFunction<_NameC, _NameC>('ggml_backend_reg_name');
   for (var i = 0; i < regCount; i++) {
     print('backend $i: ${regName(regGet(i)).toDartString()}');
   }
-  final devCount = ggml.lookupFunction<_CountC, _Count>(
-    'ggml_backend_dev_count',
-  )();
-  final devGet = ggml.lookupFunction<_GetC, _Get>('ggml_backend_dev_get');
-  final devDescription = ggml.lookupFunction<_NameC, _NameC>(
-    'ggml_backend_dev_description',
-  );
-  final devType = ggml.lookupFunction<_TypeC, _Type>('ggml_backend_dev_type');
+  DynamicLibrary has(String symbol) =>
+      ggml.providesSymbol(symbol) ? ggml : base;
+  final devCount = has('ggml_backend_dev_count')
+      .lookupFunction<_CountC, _Count>('ggml_backend_dev_count')();
+  final devGet = has('ggml_backend_dev_get')
+      .lookupFunction<_GetC, _Get>('ggml_backend_dev_get');
+  final devDescription = has('ggml_backend_dev_description')
+      .lookupFunction<_NameC, _NameC>('ggml_backend_dev_description');
+  final devType = has('ggml_backend_dev_type')
+      .lookupFunction<_TypeC, _Type>('ggml_backend_dev_type');
   for (var i = 0; i < devCount; i++) {
     final device = devGet(i);
     print(
@@ -168,7 +192,6 @@ void _loadWhisper(String folder) {
       '${devDescription(device).toDartString()}',
     );
   }
-  base.handle; // kept loaded
   _printModules();
 }
 
