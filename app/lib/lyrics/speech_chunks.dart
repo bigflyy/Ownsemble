@@ -348,3 +348,27 @@ double pythonRound(double x, int digits) {
 
 /// [pythonRound] to one digit: Silero's 0.1 s time resolution.
 double pythonRoundTenth(double x) => pythonRound(x, 1);
+
+/// The chunks to recognise in a song and the singing Silero found.
+typedef SpeechChunks = ({List<SampleRange> ranges, double speechSeconds});
+
+/// Silero through [scan] over the whole of [audio] (16 kHz mono), then
+/// [ChunkFinder]: the chunks GigaAM and Whisper both recognise.
+/// [onProbabilities] sees Silero's output, for checks.
+SpeechChunks findSpeechChunks(
+  Float32List audio,
+  SileroScan scan, {
+  VadOptions options = hearWordsVad,
+  void Function(int first, Float32List probabilities)? onProbabilities,
+}) {
+  final finder = ChunkFinder(audio.length, options);
+  final ranges = <SampleRange>[];
+  sileroBlocks(audio, scan, (first, probabilities) {
+    onProbabilities?.call(first, probabilities);
+    for (var i = 0; i < probabilities.length; i++) {
+      ranges.addAll(finder.feed(first + i, probabilities[i]));
+    }
+  });
+  ranges.addAll(finder.finish());
+  return (ranges: ranges, speechSeconds: finder.speechSeconds);
+}

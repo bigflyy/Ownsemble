@@ -540,15 +540,13 @@ GigaamResult hearRussian(
   void Function(int done, int total)? onChunk,
   void Function(int first, Float32List probabilities)? onProbabilities,
 }) {
-  final finder = ChunkFinder(audio.length, options);
-  final ranges = <SampleRange>[];
-  sileroBlocks(audio, scan, (first, probabilities) {
-    onProbabilities?.call(first, probabilities);
-    for (var i = 0; i < probabilities.length; i++) {
-      ranges.addAll(finder.feed(first + i, probabilities[i]));
-    }
-  });
-  ranges.addAll(finder.finish());
+  final speech = findSpeechChunks(
+    audio,
+    scan,
+    options: options,
+    onProbabilities: onProbabilities,
+  );
+  final ranges = speech.ranges;
   onVadDone?.call();
   final chunks = <HeardChunk>[];
   for (final range in ranges) {
@@ -566,7 +564,7 @@ GigaamResult hearRussian(
   }
   return GigaamResult(
     samples: audio.length,
-    speechSeconds: finder.speechSeconds,
+    speechSeconds: speech.speechSeconds,
     chunks: chunks,
   );
 }
