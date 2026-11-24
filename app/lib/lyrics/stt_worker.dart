@@ -109,6 +109,11 @@ class WorkerContext {
     checkCancelled();
   }
 
+  /// The job's cancel flag (an int32, non-zero once cancelled), for a
+  /// native call that can stop midway on its own (whisper.cpp's abort
+  /// callback reads it). Valid while the job runs.
+  Pointer<Int32> get cancelFlag => _cancelFlag;
+
   /// Throws [WorkerCancelled] if the job was cancelled.
   void checkCancelled() {
     if (_cancelFlag.value != 0) throw const WorkerCancelled();
