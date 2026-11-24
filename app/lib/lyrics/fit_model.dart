@@ -20,9 +20,14 @@ class ModelFile {
     required this.bytes,
     required this.sha256,
     required this.fileName,
+    this.mirrors = const [],
   });
 
   final Uri url;
+
+  /// Other addresses of the same bytes, tried in order when [url] fails
+  /// (the size and hash decide, not the host).
+  final List<Uri> mirrors;
   final int bytes;
 
   /// Lowercase hex.
@@ -110,8 +115,51 @@ Future<void> downloadModel(
   Duration stallTimeout = const Duration(seconds: 30),
 }) async {
   if (hasModel(target, model)) return;
-  final part = File('${target.path}.part');
   target.parent.createSync(recursive: true);
+  final http =
+      client ?? (HttpClient()..connectionTimeout = const Duration(seconds: 15));
+  try {
+    // The first address, then each mirror; a failure the next host may not
+    // have (a broken connection, an error answer, damaged bytes) moves on.
+    ModelDownloadError? last;
+    for (final address in [model.url, ...model.mirrors]) {
+      try {
+        await _downloadFrom(
+          address,
+          model,
+          target,
+          http,
+          freeBytes: freeBytes,
+          onProgress: onProgress,
+          stop: stop,
+          stallTimeout: stallTimeout,
+        );
+        return;
+      } on ModelDownloadError catch (error) {
+        if (!error.retry) rethrow;
+        if (stop?.stopped ?? false) throw const DownloadStopped();
+        last = error;
+      }
+    }
+    throw last!;
+  } finally {
+    if (client == null) http.close(force: true);
+  }
+}
+
+/// One try of [downloadModel] from [address].
+Future<void> _downloadFrom(
+  Uri address,
+  ModelFile model,
+  File target,
+  HttpClient http, {
+  int? Function()? freeBytes,
+  void Function(int bytes, int total)? onProgress,
+  DownloadStop? stop,
+  required Duration stallTimeout,
+}) async {
+  final host = hostName(address);
+  final part = File('${target.path}.part');
   var have = part.existsSync() ? part.lengthSync() : 0;
   if (have > model.bytes) {
     part.deleteSync();
@@ -126,12 +174,12 @@ Future<void> downloadModel(
       retry: false,
     );
   }
-  final http =
-      client ?? (HttpClient()..connectionTimeout = const Duration(seconds: 15));
   try {
     if (have < model.bytes) {
       have = await _fetch(
         http,
+        address,
+        host,
         model,
         part,
         have,
@@ -154,8 +202,8 @@ Future<void> downloadModel(
     if (target.existsSync()) target.deleteSync();
     part.renameSync(target.path);
   } on SocketException {
-    throw const ModelDownloadError(
-      'Could not reach GitHub. Check the connection and try again.',
+    throw ModelDownloadError(
+      'Could not reach $host. Check the connection and try again.',
     );
   } on HttpException {
     throw const ModelDownloadError(
@@ -165,15 +213,26 @@ Future<void> downloadModel(
     throw const ModelDownloadError(
       'The download stalled. Try again to continue it.',
     );
-  } finally {
-    if (client == null) http.close(force: true);
   }
+}
+
+/// The name of a download host for messages: "GitHub", "Hugging Face", or
+/// the host itself.
+String hostName(Uri address) {
+  final host = address.host.toLowerCase();
+  if (host == 'github.com' || host.endsWith('.github.com')) return 'GitHub';
+  if (host == 'huggingface.co' || host.endsWith('.huggingface.co')) {
+    return 'Hugging Face';
+  }
+  return host.isEmpty ? 'the server' : host;
 }
 
 /// Appends the rest of the model to [part] from byte [have]; returns its
 /// size after.
 Future<int> _fetch(
   HttpClient http,
+  Uri address,
+  String host,
   ModelFile model,
   File part,
   int have, {
@@ -181,7 +240,7 @@ Future<int> _fetch(
   DownloadStop? stop,
   required Duration stallTimeout,
 }) async {
-  final request = await http.getUrl(model.url);
+  final request = await http.getUrl(address);
   if (have > 0) request.headers.set(HttpHeaders.rangeHeader, 'bytes=$have-');
   final response = await request.close().timeout(stallTimeout);
   final status = response.statusCode;
@@ -190,14 +249,14 @@ Future<int> _fetch(
     // would fail the same way on every retry: it starts over (Codex review).
     await _drain(response, stallTimeout);
     part.deleteSync();
-    throw const ModelDownloadError(
-      'GitHub would not continue the download. Try again to start over.',
+    throw ModelDownloadError(
+      '$host would not continue the download. Try again to start over.',
     );
   }
   if (status != HttpStatus.ok && status != HttpStatus.partialContent) {
     await _drain(response, stallTimeout);
     throw ModelDownloadError(
-      'GitHub answered $status. Try again later.',
+      '$host answered $status. Try again later.',
       retry: true,
     );
   }
@@ -208,8 +267,8 @@ Future<int> _fetch(
     if (range == null || !range.startsWith('bytes $have-')) {
       await _drain(response, stallTimeout);
       part.deleteSync();
-      throw const ModelDownloadError(
-        'GitHub sent the wrong part of the model. Try again to start over.',
+      throw ModelDownloadError(
+        '$host sent the wrong part of the model. Try again to start over.',
       );
     }
   }
@@ -228,8 +287,8 @@ Future<int> _fetch(
             // after writing who knows how much.
             if (!done.isCompleted) {
               done.completeError(
-                const ModelDownloadError(
-                  'GitHub sent more than the model. Try again to start over.',
+                ModelDownloadError(
+                  '$host sent more than the model. Try again to start over.',
                 ),
               );
             }
