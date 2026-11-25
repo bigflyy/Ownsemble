@@ -436,6 +436,8 @@ Future<void> main(List<String> args) async {
     saveFit: store.saveLyricsFit,
     // I2e: what "Hear the words" heard, per upload, apart from the sources.
     loadHeard: store.heardLyricsOf,
+    // I2g: the user's own edits, per upload, apart from the sources.
+    edits: store,
     audioBytesOf: (track) {
       final path = storage.stateOf(track).path;
       if (path == null) return null;

@@ -12,7 +12,13 @@ import 'dart:convert';
 
 /// One line of lyrics; a timed line knows when it starts and ends.
 class LyricLine {
-  const LyricLine(this.text, {this.startMs, this.endMs, this.label = false});
+  const LyricLine(
+    this.text, {
+    this.startMs,
+    this.endMs,
+    this.label = false,
+    this.passed = false,
+  });
 
   final String text;
 
@@ -26,6 +32,12 @@ class LyricLine {
   /// user 2026-11-23). Set only on lyrics made for showing, never stored.
   final bool label;
 
+  /// Whether the row is a line of the user's edit whose own start is
+  /// missing or earlier than the line above (plan 10 I2g): it is drawn as
+  /// a line, but never lit (the line above stays lit) and a click on it
+  /// does not jump. Set only on lyrics made for showing, never stored.
+  final bool passed;
+
   /// Whether the line has no words: a verse break or an instrumental gap.
   bool get isGap => text.trim().isEmpty;
 
@@ -35,10 +47,11 @@ class LyricLine {
       other.text == text &&
       other.startMs == startMs &&
       other.endMs == endMs &&
-      other.label == label;
+      other.label == label &&
+      other.passed == passed;
 
   @override
-  int get hashCode => Object.hash(text, startMs, endMs, label);
+  int get hashCode => Object.hash(text, startMs, endMs, label, passed);
 
   @override
   String toString() => 'LyricLine($startMs-$endMs ${text.length} chars)';
@@ -58,7 +71,8 @@ class Lyrics {
       lines.isNotEmpty && lines.every((line) => line.startMs != null);
 
   /// The index of the line sung at [ms] into the song: the last line that
-  /// starts at or before it, label rows ([LyricLine.label]) passed over.
+  /// starts at or before it, label rows ([LyricLine.label]) and passed
+  /// rows ([LyricLine.passed]) passed over.
   /// -1 before the first line or for plain lyrics.
   int lineAt(int ms) {
     if (!timed) return -1;
@@ -72,8 +86,9 @@ class Lyrics {
         high = middle - 1;
       }
     }
-    // A label row is never the line sung: the line before it stays lit.
-    while (found >= 0 && lines[found].label) {
+    // A label or passed row is never the line sung: the line before it
+    // stays lit.
+    while (found >= 0 && (lines[found].label || lines[found].passed)) {
       found--;
     }
     return found;

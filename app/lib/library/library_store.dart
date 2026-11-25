@@ -6,6 +6,7 @@ import 'package:sqlite3/sqlite3.dart';
 import '../lyrics/fitted_lines.dart' show StoredFit;
 import '../lyrics/heard_lyrics.dart';
 import '../lyrics/lyrics.dart';
+import '../lyrics/lyrics_edit.dart';
 import '../playback/mp3_length.dart' show FileFacts, otherRecordingSeconds;
 
 import 'artist_credit.dart';
@@ -125,7 +126,7 @@ class NewTrack {
 ///
 /// SQLite calls are synchronous; at 10,000 songs every query here takes a few
 /// milliseconds, so the UI thread calls them directly.
-class LibraryStore implements PlayLog, PlayStatsSource {
+class LibraryStore implements PlayLog, PlayStatsSource, LyricsEditStore {
   LibraryStore._(this._db);
 
   /// Opens (and if needed creates or upgrades) the library at [path].
@@ -1048,6 +1049,70 @@ class LibraryStore implements PlayLog, PlayStatsSource {
       ],
     );
   }
+
+  /// The newest save of the user's edit of the upload [ref]'s lyrics
+  /// (plan 10, I2g), or null for none (or a row that cannot be read).
+  @override
+  LyricsEdit? editOf(String ref) {
+    final row = _db.select(
+      'SELECT body, based_on, saved_at_ms, '
+      '(SELECT COUNT(*) FROM lyrics_edits WHERE ref = ?) AS saves '
+      'FROM lyrics_edits WHERE ref = ? ORDER BY seq DESC LIMIT 1',
+      [ref, ref],
+    ).firstOrNull;
+    if (row == null) return null;
+    try {
+      return LyricsEdit(
+        lines: Lyrics.linesFromJson(row['body'] as String),
+        basedOn: row['based_on'] as String?,
+        savedAtMs: row['saved_at_ms'] as int,
+        saves: row['saves'] as int,
+      );
+    } on Object {
+      // A row a newer or broken build wrote: as if never edited.
+      return null;
+    }
+  }
+
+  /// Keeps [lines] as the newest save of [ref]'s edit; saves past the last
+  /// [lyricsEditsKept] are dropped.
+  @override
+  void saveEdit(
+    String ref,
+    List<LyricLine> lines, {
+    String? basedOn,
+    required int atMs,
+  }) {
+    final body = Lyrics(
+      source: editedSource,
+      lines: storableEditLines(lines),
+    ).linesToJson();
+    _transaction(() {
+      _db.execute(
+        'INSERT INTO lyrics_edits (ref, seq, body, based_on, saved_at_ms) '
+        'VALUES (?, (SELECT COALESCE(MAX(seq), 0) + 1 FROM lyrics_edits '
+        'WHERE ref = ?), ?, ?, ?)',
+        [ref, ref, body, basedOn, atMs],
+      );
+      _db.execute(
+        'DELETE FROM lyrics_edits WHERE ref = ? AND seq NOT IN '
+        '(SELECT seq FROM lyrics_edits WHERE ref = ? '
+        'ORDER BY seq DESC LIMIT ?)',
+        [ref, ref, lyricsEditsKept],
+      );
+    });
+  }
+
+  @override
+  void undoEdit(String ref) => _db.execute(
+    'DELETE FROM lyrics_edits WHERE ref = ? AND seq = '
+    '(SELECT MAX(seq) FROM lyrics_edits WHERE ref = ?)',
+    [ref, ref],
+  );
+
+  @override
+  void forgetEdit(String ref) =>
+      _db.execute('DELETE FROM lyrics_edits WHERE ref = ?', [ref]);
 
   /// What "Hear the words" heard in the recording [ref] (plan 10, I2e), or
   /// null when it was never heard (or the row cannot be read).

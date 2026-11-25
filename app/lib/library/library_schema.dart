@@ -6,7 +6,7 @@ import 'package:sqlite3/sqlite3.dart';
 /// Schema version this build reads and writes (`PRAGMA user_version`).
 ///
 /// 0 is the speed-gate build's single `tracks` table (or an empty file).
-const librarySchemaVersion = 23;
+const librarySchemaVersion = 24;
 
 /// How many colors sources can have; the theme has one per slot, from 1.
 const sourceColorCount = 6;
@@ -63,6 +63,7 @@ void migrateLibrary(Database db, {String? dataDir}) {
     if (version < 21) _addLyricsFits(db);
     if (version < 22) _forgetOutsideLyricsMisses(db);
     if (version < 23) _addHeardLyrics(db);
+    if (version < 24) _addLyricsEdits(db);
     db.execute('PRAGMA user_version = $librarySchemaVersion');
     db.execute('COMMIT');
   } catch (_) {
@@ -453,6 +454,26 @@ void _addHeardLyrics(Database db) {
       audio_bytes INTEGER,
       bundles TEXT NOT NULL,
       heard_at_ms INTEGER NOT NULL
+    )
+  ''');
+}
+
+/// Version 24 (plan 10, I2g): the user's own edits of a song's lyrics, by
+/// the upload's key (`ref`, as in `lyrics`), kept apart from `lyrics` so no
+/// source's refresh can touch them. One row per save: `seq` counts up per
+/// upload, the newest row is the edit and older ones are undo steps (the
+/// store keeps the last 10). `body` holds the lines as `lyrics.body` does,
+/// a start left out where the user gave none; `based_on` the source the
+/// edit started from, null when written from nothing.
+void _addLyricsEdits(Database db) {
+  db.execute('''
+    CREATE TABLE IF NOT EXISTS lyrics_edits (
+      ref TEXT NOT NULL,
+      seq INTEGER NOT NULL,
+      body TEXT NOT NULL,
+      based_on TEXT,
+      saved_at_ms INTEGER NOT NULL,
+      PRIMARY KEY (ref, seq)
     )
   ''');
 }

@@ -581,7 +581,7 @@ class _LyricsLinesState extends State<LyricsLines> {
   void _seekTo(int index) {
     final line = widget.lyrics.lines[index];
     final start = line.startMs;
-    if (start == null || line.label) return;
+    if (start == null || line.label || line.passed) return;
     _handScrollUntil = DateTime.fromMillisecondsSinceEpoch(0);
     setState(() => _line = index);
     _revealLine();

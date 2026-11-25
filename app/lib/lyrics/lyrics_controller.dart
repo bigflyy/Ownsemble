@@ -43,6 +43,7 @@ import '../vk/vk_lyrics.dart';
 import 'fitted_lines.dart';
 import 'heard_lyrics.dart';
 import 'lyrics.dart';
+import 'lyrics_edit.dart';
 import 'lyrics_sources.dart';
 
 /// What the Lyrics place shows for its song.
@@ -194,6 +195,7 @@ class LyricsController extends ChangeNotifier {
     this.saveFit,
     this.audioBytesOf,
     this.loadHeard,
+    this.edits,
     int Function()? now,
     this.log,
   }) : _now = now ?? (() => DateTime.now().millisecondsSinceEpoch);
@@ -257,6 +259,15 @@ class LyricsController extends ChangeNotifier {
   /// [choices] and every ask leave it alone. Its words show when no source
   /// has lyrics, or when the user picks [heardSource].
   final HeardLyrics? Function(String ref)? loadHeard;
+
+  /// Where the user's own edits are kept (LibraryStore), I2g. An edit is
+  /// kept apart from the sources like heard words, and shows first: over
+  /// the automatic pick and heard words, until the user picks a source.
+  final LyricsEditStore? edits;
+
+  /// Edits read from [edits], by upload key, with their lines as shown;
+  /// only this controller changes edits, so it drops an entry when it does.
+  final _editCache = <String, ({LyricsEdit? edit, Lyrics? shown})>{};
 
   /// Sources being asked by [askAll], and those whose ask failed, as
   /// "upload key|source".
@@ -326,7 +337,7 @@ class LyricsController extends ChangeNotifier {
       return;
     }
     _shownKey = route.key;
-    final picked = _pickedLyrics(route.key);
+    final picked = _ownLyrics(route.key);
     if (picked != null) {
       _set(LyricsShown(picked));
       return;
@@ -387,7 +398,7 @@ class LyricsController extends ChangeNotifier {
         onBetter: (lyrics) {
           if (asking == _asking &&
               _shownKey == route.key &&
-              _pickedLyrics(route.key) == null) {
+              _ownLyrics(route.key) == null) {
             _set(LyricsShown(lyrics, refreshing: true));
           }
         },
@@ -398,7 +409,7 @@ class LyricsController extends ChangeNotifier {
         '${clock.elapsedMilliseconds} ms',
       );
       if (asking != _asking) return;
-      final shown = _pickedLyrics(route.key) ?? lyrics;
+      final shown = _ownLyrics(route.key) ?? lyrics;
       _set(shown == null ? _withoutSources(route.key) : LyricsShown(shown));
     } on _Dropped {
       return;
@@ -653,7 +664,9 @@ class LyricsController extends ChangeNotifier {
   /// stored; null when none has lyrics.
   String? get automatic {
     final key = _shownKey;
-    return key == null ? null : _storedPick(key).best?.source;
+    if (key == null) return null;
+    if (_editLyrics(key) != null) return editedSource;
+    return _storedPick(key).best?.source;
   }
 
   /// Every source's answer for the song shown, for the chooser: found
@@ -805,7 +818,7 @@ class LyricsController extends ChangeNotifier {
     if (_shownKey != key || _asks.containsKey(key)) return;
     final current = _state;
     final shown =
-        _pickedLyrics(key) ??
+        _ownLyrics(key) ??
         _storedPick(key).best ??
         (current is LyricsShown ? current.lyrics : null);
     if (shown != null) {
@@ -837,6 +850,12 @@ class LyricsController extends ChangeNotifier {
     _keepPick(key, null);
     log?.call('lyrics use automatic');
     _asking++;
+    // The user's edit is shown first by the automatic pick too (I2g).
+    final own = _editLyrics(key);
+    if (own != null) {
+      _set(LyricsShown(own));
+      return;
+    }
     final stored = _storedPick(key);
     final best = stored.best;
     final route = routeOf(track);
@@ -851,9 +870,142 @@ class LyricsController extends ChangeNotifier {
   /// The heard version of [key] (I2e), when one is kept.
   HeardLyrics? _heardOf(String key) => loadHeard?.call(key);
 
-  /// [source]'s lyrics stored for [key]; for [heardSource] the heard words.
-  Lyrics? _lyricsOf(String source, String key) =>
-      source == heardSource ? _heardOf(key)?.lyrics : load(source, key)?.lyrics;
+  /// [source]'s lyrics stored for [key]; for [heardSource] the heard words,
+  /// for [editedSource] the user's edit as it shows.
+  Lyrics? _lyricsOf(String source, String key) => switch (source) {
+    heardSource => _heardOf(key)?.lyrics,
+    editedSource => _editLyrics(key),
+    _ => load(source, key)?.lyrics,
+  };
+
+  /// The user's edit of [key] (I2g) with its lines as shown, read once.
+  ({LyricsEdit? edit, Lyrics? shown}) _editEntry(String key) =>
+      _editCache[key] ??= switch (edits?.editOf(key)) {
+        final edit? => (edit: edit, shown: editForShow(edit.lines)),
+        null => (edit: null, shown: null),
+      };
+
+  Lyrics? _editLyrics(String key) => _editEntry(key).shown;
+
+  /// What the user chose to see for [key]: a picked source, else their
+  /// edit; null leaves it to the automatic pick.
+  Lyrics? _ownLyrics(String key) => _pickedLyrics(key) ?? _editLyrics(key);
+
+  /// The user's edit of the song shown, null for none.
+  LyricsEdit? get edit {
+    final key = _shownKey;
+    return key == null ? null : _editEntry(key).edit;
+  }
+
+  /// The source an edit started now would be based on: the lyrics on show
+  /// (an edit's own base when the edit shows); null when nothing shows, so
+  /// the editor starts empty (Write).
+  String? get editBase => switch (_state) {
+    LyricsShown(:final lyrics) when lyrics.source == editedSource =>
+      edit?.basedOn,
+    LyricsShown(:final lyrics) => lyrics.source,
+    _ => null,
+  };
+
+  /// The lines the editor starts from: what shows, as it shows (a fit and
+  /// the hand offset applied; an edit's own lines with their missing
+  /// starts kept); label rows and plain words without starts. Empty when
+  /// nothing shows.
+  List<LyricLine> editStartLines() {
+    final state = _state;
+    final key = _shownKey;
+    if (state is! LyricsShown || key == null) return const [];
+    final lyrics = state.lyrics;
+    final offset = offsetOf(lyrics.source);
+    int? moved(int? start) =>
+        start == null ? null : (start + offset).clamp(0, 1 << 31);
+    if (lyrics.source == editedSource) {
+      final own = _editEntry(key).edit;
+      if (own != null) {
+        return [
+          for (final line in own.lines)
+            LyricLine(line.text, startMs: moved(line.startMs)),
+        ];
+      }
+    }
+    final shown = timedOf(lyrics);
+    return [
+      for (final line in shown.lines)
+        LyricLine(
+          line.text,
+          startMs: shown.timed && !line.label ? moved(line.startMs) : null,
+        ),
+    ];
+  }
+
+  /// Keeps [lines] as the user's edit of the song shown and shows it. Its
+  /// times are what the user saw, so its own hand offset starts at 0; a
+  /// pick of a source gives way (the edit shows first).
+  void saveEdit(List<LyricLine> lines) {
+    final key = _shownKey;
+    final store = edits;
+    if (key == null || store == null) return;
+    store.saveEdit(key, lines, basedOn: editBase, atMs: _now());
+    _editCache.remove(key);
+    _keepOffset(key, editedSource, 0);
+    if (_pickOf(key) != null) _keepPick(key, null);
+    log?.call('lyrics edit saved, ${lines.length} lines');
+    _showStored(key);
+  }
+
+  /// Drops the newest save of the song shown's edit: the save before
+  /// shows, or what showed before the edit.
+  void undoLastSave() {
+    final key = _shownKey;
+    final store = edits;
+    if (key == null || store == null) return;
+    store.undoEdit(key);
+    _editChanged(key);
+    log?.call('lyrics edit undone');
+  }
+
+  /// Drops every save of the song shown's edit.
+  void forgetEdit() {
+    final key = _shownKey;
+    final store = edits;
+    if (key == null || store == null) return;
+    store.forgetEdit(key);
+    _editChanged(key);
+    log?.call('lyrics edit forgotten');
+  }
+
+  /// Whether the lyrics the edit started from are still stored, so
+  /// [showOriginal] can show them.
+  bool get canShowOriginal {
+    final key = _shownKey;
+    final base = edit?.basedOn;
+    return key != null && base != null && _lyricsOf(base, key) != null;
+  }
+
+  /// Shows the lyrics the edit started from, as the user's pick; the edit
+  /// stays (the chooser's "Your edit" row shows it again).
+  void showOriginal() {
+    final base = edit?.basedOn;
+    if (base != null && canShowOriginal) use(base);
+  }
+
+  void _editChanged(String key) {
+    _editCache.remove(key);
+    // A pick of an edit no longer kept goes with it.
+    if (_pickOf(key) == editedSource && _editLyrics(key) == null) {
+      _keepPick(key, null);
+    }
+    if (_shownKey == key) _showStored(key);
+  }
+
+  /// Shows what is stored for [key] without asking: the user's own pick or
+  /// edit, the automatic pick, the heard words, or what is missing.
+  void _showStored(String key) {
+    _asking++;
+    final shown =
+        _ownLyrics(key) ?? _storedPick(key).best ?? _heardOf(key)?.lyrics;
+    _set(shown == null ? _withoutSources(key) : LyricsShown(shown));
+  }
 
   /// What shows for [key] when no source has lyrics: the heard words, or
   /// missing (with what hearing found, if it ran).
@@ -896,7 +1048,7 @@ class LyricsController extends ChangeNotifier {
     final state = _state;
     final pending =
         state is LyricsLoading || (state is LyricsShown && state.refreshing);
-    final shown = _pickedLyrics(ref) ?? _storedPick(ref).best ?? heardWords;
+    final shown = _ownLyrics(ref) ?? _storedPick(ref).best ?? heardWords;
     if (shown != null) {
       _set(LyricsShown(shown, refreshing: pending));
       return;
