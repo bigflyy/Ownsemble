@@ -380,5 +380,21 @@ void main() {
     await settle(tester);
     expect(find.text('In the lyrics editor'), findsOneWidget);
     expect(find.text('Save the edit'), findsOneWidget);
+    await tester.tap(find.text('Close'));
+    await settle(tester);
+
+    // F1 also while typing in a line, and the top bar's keyboard button
+    // (a keyboard without a usable F1) opens the same list.
+    await tester.tap(find.byKey(const ValueKey('lyrics-edit-tap')));
+    await settle(tester);
+    await tester.showKeyboard(field(1));
+    await tester.sendKeyEvent(LogicalKeyboardKey.f1);
+    await settle(tester);
+    expect(find.text('In the lyrics editor'), findsOneWidget);
+    await tester.tap(find.text('Close'));
+    await settle(tester);
+    await tester.tap(find.byKey(const ValueKey('keyboard-help')));
+    await settle(tester);
+    expect(find.text('In the lyrics editor'), findsOneWidget);
   });
 }
