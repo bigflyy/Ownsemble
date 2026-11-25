@@ -72,6 +72,7 @@ class AppOptions {
     this.benchParts,
     this.benchVolume = 100,
     this.benchFitKeys = const [],
+    this.benchHearKeys = const [],
     this.mpvOptions = const {},
     this.mpvLog = false,
     this.cacheWhileStreaming = true,
@@ -102,6 +103,7 @@ class AppOptions {
       benchParts: valueOf('--bench-parts')?.split(','),
       benchVolume: double.parse(valueOf('--bench-volume') ?? '100'),
       benchFitKeys: valueOf('--bench-fit-keys')?.split(',') ?? const [],
+      benchHearKeys: valueOf('--bench-hear-keys')?.split(',') ?? const [],
       mpvLog: args.contains('--mpv-log'),
       cacheWhileStreaming: !args.contains('--no-stream-cache'),
       mpvOptions: {
@@ -142,6 +144,9 @@ class AppOptions {
   /// The library songs ("ownerId_audioId") the fitLive part fits to their
   /// recordings (plan 10 G4).
   final List<String> benchFitKeys;
+
+  /// The hearLive part's songs (plan 10 I2f).
+  final List<String> benchHearKeys;
 
   /// mpv option overrides, for tuning playback start.
   final Map<String, String> mpvOptions;
@@ -747,6 +752,8 @@ Future<void> main(List<String> args) async {
         artists: artists,
         lyrics: lyrics,
         fitter: fitter,
+        hearer: hearer,
+        hearThreads: sttThreads!,
       ),
     );
   });
@@ -793,6 +800,8 @@ Future<void> _afterFirstFrame({
   required LibraryArtists artists,
   required LyricsController lyrics,
   required LyricsFitter fitter,
+  required LyricsHearer hearer,
+  required int hearThreads,
 }) async {
   final firstFrameAt = DateTime.now();
   if (options.metricsFile != null) {
@@ -850,6 +859,9 @@ Future<void> _afterFirstFrame({
       lyrics: lyrics,
       fitter: fitter,
       fitKeys: options.benchFitKeys,
+      hearer: hearer,
+      hearKeys: options.benchHearKeys,
+      hearThreads: hearThreads,
     ).run(parts: options.benchParts);
     File(options.benchFile!)
         .writeAsStringSync(const JsonEncoder.withIndent('  ').convert(result));

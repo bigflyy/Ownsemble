@@ -16,6 +16,7 @@
 
 // ignore_for_file: avoid_print
 
+import 'dart:async';
 import 'dart:convert';
 import 'dart:ffi';
 import 'dart:io';
@@ -26,6 +27,7 @@ import 'package:ownsemble/lyrics/hear_words.dart';
 import 'package:ownsemble/lyrics/model_bundle.dart';
 import 'package:ownsemble/lyrics/stt_models.dart';
 import 'package:ownsemble/lyrics/stt_worker.dart';
+import 'package:ownsemble/platform/process_memory.dart';
 import 'package:path/path.dart' as p;
 
 final _cyrillic = RegExp(r'\p{Script=Cyrillic}', unicode: true);
@@ -140,9 +142,31 @@ Future<void> main(List<String> args) async {
         audioBytes: mode == 'full' ? File(audio).lengthSync() : null,
       );
       final steps = <String>[];
+      // Memory every 100 ms, the peak per step and part: the worker
+      // itself measures only at the end of each unit (session 55).
+      var part = 'start';
+      final peaks = <String, (int, int)>{};
+      final sampler = Timer.periodic(const Duration(milliseconds: 100), (_) {
+        final now = processMemory();
+        if (now == null) return;
+        final (working, private) = peaks[part] ?? (0, 0);
+        peaks[part] = (
+          now.workingSet > working ? now.workingSet : working,
+          now.private > private ? now.private : private,
+        );
+      });
       run.progress.listen((unit) {
         if (steps.isEmpty || steps.last != unit.step) steps.add(unit.step);
+        part = '${unit.step}/${unit.stage}';
       });
+      unawaited(
+        run.result.then<void>((_) {}, onError: (Object _) {}).whenComplete(() {
+          sampler.cancel();
+          print(
+            '$tag memory peaks (working/private MB): ${[for (final MapEntry(:key, :value) in peaks.entries) '$key ${value.$1 >> 20}/${value.$2 >> 20}'].join(', ')}',
+          );
+        }),
+      );
       try {
         await run.result;
       } on Object catch (error) {

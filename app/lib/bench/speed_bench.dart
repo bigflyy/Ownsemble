@@ -18,10 +18,12 @@ import '../library/song_filter.dart';
 import '../library/track.dart';
 import '../lyrics/lyrics_controller.dart';
 import '../lyrics/lyrics_fitter.dart';
+import '../lyrics/lyrics_hearer.dart';
 import '../lyrics/recording_fit.dart' show canFitLines;
 import '../playback/playback_controller.dart';
 import '../playback/player_service.dart';
 import '../playback/stream_proxy.dart' show ProxyRequestLog;
+import '../platform/process_memory.dart';
 import '../storage/cover_store.dart';
 import '../ui/artist_page.dart' show vkRefOf;
 import '../ui/artists.dart';
@@ -57,6 +59,9 @@ class SpeedBench {
     this.lyrics,
     this.fitter,
     this.fitKeys = const [],
+    this.hearer,
+    this.hearKeys = const [],
+    this.hearThreads = 0,
   });
 
   /// Where the speed gate seeks to before it closes the window.
@@ -90,6 +95,13 @@ class SpeedBench {
 
   /// The library songs ("ownerId_audioId") the fitLive part fits.
   final List<String> fitKeys;
+
+  /// "Hear the words" and the hearLive part's songs (plan 10 I2f): a
+  /// Russian song, a song in another language, an instrumental; and the
+  /// CPU threads the models use.
+  final LyricsHearer? hearer;
+  final List<String> hearKeys;
+  final int hearThreads;
 
   /// The result file; the restart check writes it while the app stays open.
   final String? resultFile;
@@ -178,6 +190,9 @@ class SpeedBench {
     }
     if (parts?.contains('fitLive') ?? false) {
       result['fitLive'] = await _fitLiveBench();
+    }
+    if (parts?.contains('hearLive') ?? false) {
+      result['hearLive'] = await _hearLiveBench();
     }
     await player.setVolume(volume);
     result['volume'] = volume;
@@ -987,6 +1002,316 @@ class SpeedBench {
           if (buildMs[i] > budgetMs || rasterMs[i] > budgetMs) i,
       ].length,
     };
+  }
+
+  /// Plan 10 I2f: "Hear the words" in the real app, the way the Lyrics
+  /// place runs it, on [hearKeys] = a Russian song, a song in another
+  /// language and an instrumental (library keys; no lyrics anywhere). Each
+  /// heard row and kept vocals of them are removed first. Steps: the
+  /// Russian song stopped during separation (time to stop), then heard to
+  /// the end while the list is scrolled during separation; the other song
+  /// heard while another song plays and is shown (the run goes on for its
+  /// own), Whisper fetched when first needed, scrolled and stopped during
+  /// Whisper (time to stop), then heard again from its kept vocals to the
+  /// end; the instrumental to "No singing found". Muted playback is checked
+  /// to decode throughout; memory (working set and private) is sampled.
+  /// Numbers and outcomes only, no words.
+  Future<Map<String, Object?>> _hearLiveBench() async {
+    final lyrics = this.lyrics!;
+    final hearer = this.hearer!;
+    final result = <String, Object?>{'threads': hearThreads};
+    if (hearKeys.length != 3) return {'error': 'give 3 keys'};
+    Track? songOf(String key) =>
+        library.all.where((t) => t.sourceKey == key && t.inLibrary).firstOrNull;
+    final songs = [for (final key in hearKeys) songOf(key)];
+    if (songs.contains(null)) return {'error': 'a key is not in the library'};
+    final russian = songs[0]!;
+    final other = songs[1]!;
+    final instrumental = songs[2]!;
+    for (final song in songs) {
+      final key = lyrics.routeKeyOf(song!)!;
+      hearer.forget(key);
+      for (final path in [
+        hearer.vocalsPathOf(key),
+        '${hearer.vocalsPathOf(key)}.from',
+      ]) {
+        final file = File(path);
+        if (file.existsSync()) file.deleteSync();
+      }
+    }
+
+    // Memory: the process's working set and private bytes, sampled.
+    int mb(int bytes) => bytes ~/ (1 << 20);
+    Map<String, int> memoryNow() {
+      final now = processMemory();
+      return {
+        'workingSetMB': mb(ProcessInfo.currentRss),
+        'privateMB': now == null ? -1 : mb(now.private),
+      };
+    }
+
+    var peakWorking = 0;
+    var peakPrivate = 0;
+    final sampler = Timer.periodic(const Duration(milliseconds: 250), (_) {
+      final now = memoryNow();
+      peakWorking = max(peakWorking, now['workingSetMB']!);
+      peakPrivate = max(peakPrivate, now['privateMB']!);
+    });
+    final idle = memoryNow();
+    result['memoryBefore'] = idle;
+
+    Future<Map<String, Object?>> play(Track song) async {
+      final timing = await playback.playFrom([song], 0);
+      return {
+        'ok': timing?.ok,
+        'sampleRate': timing?.sampleRate,
+        'stillPlayingAfter1s': await _keepsPlaying(),
+      };
+    }
+
+    /// Waits until [condition] or [limit]; false on the limit.
+    Future<bool> until(bool Function() condition, Duration limit) async {
+      final clock = Stopwatch()..start();
+      while (!condition()) {
+        if (clock.elapsed > limit) return false;
+        await Future<void>.delayed(const Duration(milliseconds: 100));
+      }
+      return true;
+    }
+
+    HearStage? stageOf(Track song) => hearer.stageOf(lyrics.routeKeyOf(song));
+    bool inStep(Track song, String step, {bool started = false}) {
+      final stage = stageOf(song);
+      return stage is HearRunning &&
+          stage.step == step &&
+          (!started || (stage.share ?? 0) > 0);
+    }
+
+    /// The steps a run went through, in order; the previous run's listener
+    /// goes, so each list holds its own run only.
+    VoidCallback? noting;
+    List<String> stepsOf(LyricsHearer hearer, List<String> into) {
+      if (noting != null) hearer.removeListener(noting!);
+      void note() {
+        final stage = hearer.job?.stage;
+        final name = switch (stage) {
+          HearRunning(:final step) => step,
+          HearDownloading(:final whisper) =>
+            whisper ? 'download-whisper' : 'download',
+          HearSaving() => 'save',
+          HearStopping() => 'stopping',
+          null => null,
+        };
+        if (name != null && (into.isEmpty || into.last != name)) {
+          into.add(name);
+        }
+      }
+
+      hearer.addListener(noting = note);
+      return into;
+    }
+
+    Map<String, Object?> outcomeOf(HearOutcome outcome) => switch (outcome) {
+      HearDone(:final heard) => {
+        'outcome': 'done',
+        'heard': heard.outcome.name,
+        'model': heard.model?.name,
+        'language': heard.language,
+        'rough': heard.rough,
+        'words': heard.wordCount,
+        'lines': heard.lines.length,
+        'confidence': heard.confidence,
+        'russianConfidence': heard.russianConfidence,
+      },
+      HearStopped(:final download) => {
+        'outcome': 'stopped',
+        'download': download,
+      },
+      HearFailed(:final message) => {'outcome': 'failed', 'message': message},
+    };
+
+    try {
+      // 1. The Russian song, stopped during separation.
+      final r = <String, Object?>{'seconds': russian.durationSec};
+      result['russian'] = r;
+      r['play'] = await play(russian);
+      lyrics.show(russian);
+      await until(
+        () => lyrics.state is LyricsMissing,
+        const Duration(seconds: 40),
+      );
+      r['before'] = '${lyrics.state.runtimeType}';
+      var steps = <String>[];
+      stepsOf(hearer, steps);
+      var clock = Stopwatch()..start();
+      var running = hearer.hearShown();
+      final separating = await until(
+        () => inStep(russian, 'separate', started: true),
+        const Duration(minutes: 3),
+      );
+      final stopClock = Stopwatch()..start();
+      hearer.stop();
+      var outcome = await running;
+      r['stopDuringSeparation'] = {
+        'reachedSeparation': separating,
+        'afterMs': clock.elapsedMilliseconds - stopClock.elapsedMilliseconds,
+        'stopMs': stopClock.elapsedMilliseconds,
+        ...outcomeOf(outcome),
+        'steps': steps,
+        'heardKept': lyrics.heard != null,
+        'vocalsLeft': File(hearer.vocalsPathOf(lyrics.routeKeyOf(russian)!))
+            .existsSync(),
+        'state': '${lyrics.state.runtimeType}',
+      };
+
+      // 2. Heard to the end; the list scrolled during separation.
+      steps = [];
+      stepsOf(hearer, steps);
+      peakWorking = 0;
+      peakPrivate = 0;
+      clock = Stopwatch()..start();
+      running = hearer.hearShown();
+      await until(
+        () => inStep(russian, 'separate', started: true),
+        const Duration(minutes: 3),
+      );
+      final scrollSeparating = {
+        '1500pxPerSec': await _scrollRun(1500, seconds: 4),
+        '6000pxPerSec': await _scrollRun(6000, seconds: 4),
+      };
+      library.scroll.jumpTo(0);
+      outcome = await running;
+      final shown = lyrics.state;
+      r['full'] = {
+        ...outcomeOf(outcome),
+        'ms': clock.elapsedMilliseconds,
+        'steps': steps,
+        'scrollWhileSeparating': scrollSeparating,
+        'peakWorkingSetMB': peakWorking,
+        'peakPrivateMB': peakPrivate,
+        'shownSource': shown is LyricsShown ? shown.lyrics.source : null,
+        'stillPlaying': player.player.state.playing,
+      };
+
+      // 3. The other song: heard while the Russian one plays and shows.
+      final w = <String, Object?>{'seconds': other.durationSec};
+      result['other'] = w;
+      w['play'] = await play(other);
+      lyrics.show(other);
+      await until(
+        () => lyrics.state is LyricsMissing,
+        const Duration(seconds: 40),
+      );
+      steps = [];
+      stepsOf(hearer, steps);
+      peakWorking = 0;
+      peakPrivate = 0;
+      clock = Stopwatch()..start();
+      running = hearer.hearShown();
+      await until(
+        () => inStep(other, 'separate', started: true),
+        const Duration(minutes: 3),
+      );
+      w['switchPlay'] = await play(russian);
+      lyrics.show(russian);
+      await Future<void>.delayed(const Duration(seconds: 3));
+      final switched = lyrics.state;
+      w['whileOtherShown'] = {
+        'otherStillHeard': stageOf(other) != null,
+        'stageForShownSong': stageOf(russian)?.runtimeType.toString(),
+        'shownSource': switched is LyricsShown ? switched.lyrics.source : null,
+      };
+      lyrics.show(other);
+      // Whisper: fetched when first needed (the bundle may be there).
+      final reachedWhisper = await until(
+        () => inStep(other, 'whisper') || hearer.job == null,
+        const Duration(minutes: 60),
+      );
+      w['whisperDownloadSeen'] = steps.contains('download-whisper');
+      w['msToWhisper'] = clock.elapsedMilliseconds;
+      if (reachedWhisper && hearer.job != null) {
+        // A few seconds into the first chunk's encoder pass.
+        await Future<void>.delayed(const Duration(seconds: 5));
+        final scrollWhisper = {
+          '1500pxPerSec': await _scrollRun(1500, seconds: 4),
+          '6000pxPerSec': await _scrollRun(6000, seconds: 4),
+        };
+        // Again later in the same chunk: the first scroll meets the model's
+        // load (hear-55a: 18 frames over there, 1 in the next scroll).
+        await Future<void>.delayed(const Duration(seconds: 8));
+        scrollWhisper['1500pxPerSecLater'] = await _scrollRun(1500, seconds: 4);
+        library.scroll.jumpTo(0);
+        final memoryWhisper = memoryNow();
+        final stageAtStop = stageOf(other);
+        final stopWhisper = Stopwatch()..start();
+        hearer.stop();
+        outcome = await running;
+        w['stopDuringWhisper'] = {
+          ...outcomeOf(outcome),
+          'stopMs': stopWhisper.elapsedMilliseconds,
+          'stageAtStop': stageAtStop == null
+              ? null
+              : hearStageText(stageAtStop),
+          'scrollWhileWhisper': scrollWhisper,
+          'memoryWhileWhisper': memoryWhisper,
+          'peakWorkingSetMB': peakWorking,
+          'peakPrivateMB': peakPrivate,
+          'steps': steps,
+          'vocalsLeft': File(hearer.vocalsPathOf(lyrics.routeKeyOf(other)!))
+              .existsSync(),
+          'heardKept': lyrics.heard != null,
+        };
+      } else {
+        w['noWhisper'] = outcomeOf(await running);
+      }
+
+      // 4. Again, from the kept vocals, to the end.
+      steps = [];
+      stepsOf(hearer, steps);
+      clock = Stopwatch()..start();
+      outcome = await hearer.hearShown();
+      final againShown = lyrics.state;
+      w['again'] = {
+        ...outcomeOf(outcome),
+        'ms': clock.elapsedMilliseconds,
+        'steps': steps,
+        'shownSource': againShown is LyricsShown
+            ? againShown.lyrics.source
+            : null,
+      };
+
+      // 5. The instrumental.
+      final i = <String, Object?>{'seconds': instrumental.durationSec};
+      result['instrumental'] = i;
+      i['play'] = await play(instrumental);
+      lyrics.show(instrumental);
+      await until(
+        () => lyrics.state is LyricsMissing,
+        const Duration(seconds: 40),
+      );
+      steps = [];
+      stepsOf(hearer, steps);
+      clock = Stopwatch()..start();
+      outcome = await hearer.hearShown();
+      final missing = lyrics.state;
+      i['run'] = {
+        ...outcomeOf(outcome),
+        'ms': clock.elapsedMilliseconds,
+        'steps': steps,
+        'state': '${missing.runtimeType}',
+        'stateHeard': missing is LyricsMissing
+            ? missing.heard?.outcome.name
+            : null,
+      };
+      i['stillPlaying'] = player.player.state.playing;
+    } on Object catch (error) {
+      result['error'] = '$error';
+    } finally {
+      sampler.cancel();
+    }
+    await Future<void>.delayed(const Duration(seconds: 5));
+    result['memoryAfter'] = memoryNow();
+    return result;
   }
 
   /// Plan 10 G4: fits the lyrics of each of [fitKeys] to its recording the
