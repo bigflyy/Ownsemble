@@ -727,16 +727,19 @@ class _LyricsEditPageState extends State<LyricsEditPage> {
               // A narrow place has no room for -, + and now in the row.
               if (narrow) ...[
                 PopupMenuItem<void>(
+                  key: const ValueKey('lyrics-edit-menu-earlier'),
                   enabled: line.startMs != null,
                   onTap: () => editor.nudge(index, -editNudgeMs),
                   child: const Text('Earlier by 0.1 s'),
                 ),
                 PopupMenuItem<void>(
+                  key: const ValueKey('lyrics-edit-menu-later'),
                   enabled: line.startMs != null,
                   onTap: () => editor.nudge(index, editNudgeMs),
                   child: const Text('Later by 0.1 s'),
                 ),
                 PopupMenuItem<void>(
+                  key: const ValueKey('lyrics-edit-menu-now'),
                   enabled: playing,
                   onTap: () => editor.setStart(index, _positionMs),
                   child: const Text('Starts now'),
