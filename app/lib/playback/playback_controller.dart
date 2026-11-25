@@ -511,13 +511,20 @@ class PlaybackController extends ChangeNotifier {
     return timing;
   }
 
+  /// While true a song that ends starts again (the lyrics editor is open,
+  /// plan 10 I2g), whatever the repeat setting says.
+  bool holdSong = false;
+
   /// A song played to its end: the next one per shuffle and repeat. Songs
   /// that cannot play are skipped, up to [maxSkips] in a row.
   Future<void> _onEnded() async {
     _endPlay(PlayEnd.finished);
     for (var skips = 0; skips < maxSkips; skips++) {
-      final fromQueue = queue.queued.isNotEmpty;
-      final track = queue.next(auto: true);
+      // The lyrics editor keeps its song playing (plan 10 I2g): the song
+      // starts again instead of the next one; the repeat setting stays.
+      final held = holdSong ? queue.current : null;
+      final fromQueue = held == null && queue.queued.isNotEmpty;
+      final track = held ?? queue.next(auto: true);
       if (track == null) {
         _idle = true;
         saveSession();
@@ -531,6 +538,7 @@ class PlaybackController extends ChangeNotifier {
       // Stop once a song plays, when the user picked another song meanwhile,
       // or when repeat one would retry the same failing song.
       if (timing.ok || request != _request) return;
+      if (held != null) return;
       if (queue.repeat == Repeat.one && queue.queued.isEmpty) return;
     }
   }

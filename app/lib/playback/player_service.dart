@@ -840,6 +840,14 @@ class PlayerService {
     await _mpv.command(['seek', seconds.toStringAsFixed(3), 'absolute']);
   }
 
+  /// Plays at [rate] (1 = normal speed; the lyrics editor's "Slower 0.75x"
+  /// while tapping times, plan 10 I2g). mpv keeps the pitch and the speed
+  /// across songs, so the editor sets 1 again when done.
+  Future<void> setRate(double rate) async {
+    if (!_ready) return;
+    await _player.setRate(rate);
+  }
+
   /// Moves by [offset] from where the song is. mpv adds up seeks it has not
   /// finished yet, so quick presses on a stream all count.
   Future<void> seekBy(Duration offset) async {
