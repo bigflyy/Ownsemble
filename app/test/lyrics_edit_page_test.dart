@@ -393,6 +393,17 @@ void main() {
     expect(find.text('In the lyrics editor'), findsOneWidget);
     await tester.tap(find.text('Close'));
     await settle(tester);
+    // Ctrl+/ for keyboards whose F1 opens something else (the user's
+    // opens the browser, session 57), also while typing.
+    await tester.showKeyboard(field(1));
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+    await tester.sendKeyEvent(LogicalKeyboardKey.slash);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+    await settle(tester);
+    expect(find.text('In the lyrics editor'), findsOneWidget);
+    expect(fieldText(tester, 1), 'Second line here', reason: 'nothing typed');
+    await tester.tap(find.text('Close'));
+    await settle(tester);
     await tester.tap(find.byKey(const ValueKey('keyboard-help')));
     await settle(tester);
     expect(find.text('In the lyrics editor'), findsOneWidget);

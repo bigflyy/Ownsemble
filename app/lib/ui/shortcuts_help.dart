@@ -22,7 +22,7 @@ const shortcuts = <(String keys, String action)>[
   ('Enter after letters', 'Play the song jumped to'),
   ('Ctrl + Backspace after letters', 'Delete the last word typed'),
   ('Esc', 'End the jump, clear the search, leave the search box'),
-  ('F1', 'This list'),
+  ('F1 or Ctrl + /', 'This list'),
 ];
 
 /// The lyrics editor's own keys (plan 10 I2g5): they work while the editor

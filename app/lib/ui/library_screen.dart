@@ -302,7 +302,14 @@ class _LibraryScreenState extends State<LibraryScreen> {
       _searchFocus.unfocus();
       return true;
     }
-    if (key == LogicalKeyboardKey.f1 && !_covered) {
+    // Ctrl+/ too: on some keyboards F1 opens something else (the user's
+    // opens the browser, session 57). Physical, so the Russian layout works.
+    final helpKey =
+        key == LogicalKeyboardKey.f1 ||
+        (HardwareKeyboard.instance.isControlPressed &&
+            (event.physicalKey == PhysicalKeyboardKey.slash ||
+                event.physicalKey == PhysicalKeyboardKey.numpadDivide));
+    if (helpKey && !_covered) {
       unawaited(
         showShortcutsHelp(
           context,
@@ -1152,7 +1159,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
               ),
               IconButton(
                 key: const ValueKey('keyboard-help'),
-                tooltip: 'Keyboard shortcuts (F1)',
+                tooltip: 'Keyboard shortcuts (F1 or Ctrl+/)',
                 onPressed: () => showShortcutsHelp(
                   context,
                   editing: library.view.kind == ViewKind.lyricsEdit,

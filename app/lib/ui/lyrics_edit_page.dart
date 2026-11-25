@@ -546,7 +546,7 @@ class _LyricsEditPageState extends State<LyricsEditPage> {
                       : 'Click a time to play from there. Enter splits a '
                             'line (at its end: a new line below), Backspace at '
                             'its start joins it to the line above. Ctrl+Z '
-                            'undoes, Ctrl+S saves, F1 lists the keys.',
+                            'undoes, Ctrl+S saves, Ctrl+/ lists the keys.',
                   key: const ValueKey('lyrics-edit-help'),
                 ),
         ),
