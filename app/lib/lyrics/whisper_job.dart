@@ -53,6 +53,7 @@ class WhisperJob extends WorkerJob<WhisperJobResult> {
     this.ranges,
     this.speechSeconds = 0,
     this.language,
+    this.gpu,
   }) : assert(sileroPath != null || ranges != null);
 
   final String vocalsPath;
@@ -68,6 +69,10 @@ class WhisperJob extends WorkerJob<WhisperJobResult> {
 
   /// CPU threads for whisper.cpp.
   final int threads;
+
+  /// The GPU to hear on (an index into WhisperLibrary.gpus), or null for
+  /// the CPU (plan 10 I2i).
+  final int? gpu;
 
   /// silero_vad_scan.onnx, when [ranges] are not given.
   final String? sileroPath;
@@ -141,7 +146,7 @@ class WhisperJob extends WorkerJob<WhisperJobResult> {
     }
     final opening = clock.elapsedMilliseconds;
     final library = WhisperLibrary.load(bridgePath, libraryFolder);
-    final model = library.open(modelPath);
+    final model = library.open(modelPath, gpu: gpu);
     final openMs = clock.elapsedMilliseconds - opening;
     final chunkMs = <int>[];
     try {

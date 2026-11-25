@@ -54,6 +54,7 @@ class VocalsJob extends WorkerJob<VocalsResult> {
     required this.tempDir,
     required this.threads,
     this.memoryArena = false,
+    this.directMlDevice,
     this.keepStereoAt,
   });
 
@@ -73,6 +74,10 @@ class VocalsJob extends WorkerJob<VocalsResult> {
   /// ONNX Runtime's memory arena (off by default: with it the separator
   /// kept about 4.5 GB private memory, session 51).
   final bool memoryArena;
+
+  /// The DirectML adapter to separate on, or null for the CPU (plan 10
+  /// I2i; the worker's runtime must be the DirectML build).
+  final int? directMlDevice;
 
   /// For checks only: the decoded mix and the 44.1 kHz stereo vocals
   /// before the final scale are kept as `<keepStereoAt>.mix.f32` and
@@ -103,6 +108,7 @@ class VocalsJob extends WorkerJob<VocalsResult> {
         modelPath,
         threads: threads,
         memoryArena: memoryArena,
+        directMlDevice: directMlDevice,
       );
       final vocals44 = File('${mix.path}.vocals');
       temps.add(vocals44);

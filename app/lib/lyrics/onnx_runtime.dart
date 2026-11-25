@@ -2,7 +2,9 @@
 // Microsoft's NuGet package Microsoft.ML.OnnxRuntime, 1.31.1), enough to
 // run models on the CPU with float32, int32 and int64 tensors (plan
 // 10 G1; several typed inputs and outputs since I2c, for GigaAM's encoder
-// and Silero's carried state).
+// and Silero's carried state). The same code drives the DirectML build
+// (Microsoft.ML.OnnxRuntime.DirectML 1.24.4) to run a model on the GPU
+// (plan 10 I2i).
 //
 // The C API is one table of function pointers (struct OrtApi in
 // onnxruntime_c_api.h), reached through OrtGetApiBase. Entries are only
@@ -15,8 +17,11 @@ import 'dart:typed_data';
 
 import 'package:ffi/ffi.dart';
 
-/// The API version asked for (ORT_API_VERSION of 1.31).
-const _apiVersion = 31;
+/// The API version asked for: ORT_API_VERSION of 1.24, the newest
+/// DirectML build on NuGet (plan 10 I2i). Every entry used here is far
+/// older, and a newer library gives the same table for an older version,
+/// so the CPU 1.31.1 and the DirectML 1.24.4 both load.
+const _apiVersion = 24;
 
 // Positions in struct OrtApi (counted from onnxruntime_c_api.h 1.31.1).
 const _getErrorMessage = 2;
@@ -73,10 +78,22 @@ class OnnxError implements Exception {
 
 /// A loaded onnxruntime library and its function table.
 class OnnxRuntime {
-  OnnxRuntime._(this._table, this.version);
+  OnnxRuntime._(this._library, this._table, this.version);
 
   /// Loads the library from [libraryPath] (onnxruntime.dll on Windows).
+  ///
+  /// A DirectML.dll beside it (the DirectML build's runtime, plan 10 I2i)
+  /// is opened first, by its full path: onnxruntime.dll loads DirectML.dll
+  /// by name only when a session first uses it, and Windows then takes a
+  /// module of that name already in the process instead of the older copy
+  /// in System32.
   factory OnnxRuntime.load(String libraryPath) {
+    final directMl = File(
+      '${File(libraryPath).parent.path}${Platform.pathSeparator}DirectML.dll',
+    );
+    if (Platform.isWindows && directMl.existsSync()) {
+      DynamicLibrary.open(directMl.absolute.path);
+    }
     final library = DynamicLibrary.open(libraryPath);
     final base = library
         .lookupFunction<
@@ -91,10 +108,16 @@ class OnnxRuntime {
     if (table == nullptr) {
       throw OnnxError('onnxruntime $version lacks API version $_apiVersion');
     }
-    return OnnxRuntime._(table, version);
+    return OnnxRuntime._(library, table, version);
   }
 
+  final DynamicLibrary _library;
   final Pointer<Pointer<Void>> _table;
+
+  /// Whether this is a DirectML build (it exports the provider's own
+  /// append function; the CPU build does not).
+  bool get hasDirectMl =>
+      _library.providesSymbol('OrtSessionOptionsAppendExecutionProvider_DML');
 
   /// The library's own version, such as "1.31.1".
   final String version;
@@ -123,11 +146,20 @@ class OnnxRuntime {
   /// arena and the memory pattern: ONNX Runtime then frees each
   /// intermediate tensor after use instead of keeping the largest set it
   /// ever needed (plan 10 I2b: the separator's peak).
+  ///
+  /// [directMlDevice] runs the model on that DirectML adapter (0 is the
+  /// first one Windows lists), with the CPU only for operations DirectML
+  /// lacks; it needs a DirectML build ([hasDirectMl]) and turns the memory
+  /// pattern off, as DirectML requires.
   OnnxSession open(
     String modelPath, {
     int threads = 4,
     bool memoryArena = true,
+    int? directMlDevice,
   }) {
+    if (directMlDevice != null && !hasDirectMl) {
+      throw OnnxError('onnxruntime $version has no DirectML');
+    }
     return using((arena) {
       final out = arena<Pointer<Void>>();
       _check(
@@ -169,15 +201,28 @@ class OnnxRuntime {
             1,
           ),
         );
+        final call = _entry<Pointer<Void> Function(Pointer<Void>)>;
         if (!memoryArena) {
-          final call = _entry<Pointer<Void> Function(Pointer<Void>)>;
           _check(
             call(_disableCpuMemArena)
                 .asFunction<Pointer<Void> Function(Pointer<Void>)>()(options),
           );
+        }
+        if (!memoryArena || directMlDevice != null) {
           _check(
             call(_disableMemPattern)
                 .asFunction<Pointer<Void> Function(Pointer<Void>)>()(options),
+          );
+        }
+        if (directMlDevice != null) {
+          _check(
+            _library.lookupFunction<
+              Pointer<Void> Function(Pointer<Void>, Int32),
+              Pointer<Void> Function(Pointer<Void>, int)
+            >('OrtSessionOptionsAppendExecutionProvider_DML')(
+              options,
+              directMlDevice,
+            ),
           );
         }
         _check(

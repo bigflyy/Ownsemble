@@ -52,43 +52,74 @@ abstract class WorkerJob<R> {
 
 /// What a job sees of the worker.
 class WorkerContext {
-  WorkerContext._(this._onnxPath, this._cancelFlag, this._progress);
+  WorkerContext._(
+    this._onnxPath,
+    this._gpuOnnxPath,
+    this._cancelFlag,
+    this._progress,
+  );
 
   final String _onnxPath;
+  final String? _gpuOnnxPath;
   final Pointer<Int32> _cancelFlag;
   final void Function(String stage, int done, int total) _progress;
 
   static OnnxRuntime? _runtime;
-  static ({String path, int threads, bool arena, OnnxSession session})? _open;
+  static OnnxRuntime? _gpuRuntime;
+  static ({
+    String path,
+    int threads,
+    bool arena,
+    int? directMl,
+    OnnxSession session,
+  })?
+  _open;
 
   var _peakWorkingSet = 0;
   var _peakPrivate = 0;
 
   /// The model at [path], opened for this job; the one open before it (a
   /// different model) is closed first, so only one is in memory.
+  /// [directMlDevice] opens it on that DirectML adapter (plan 10 I2i).
   OnnxSession model(
     String path, {
     required int threads,
     bool memoryArena = true,
+    int? directMlDevice,
   }) {
     final open = _open;
     if (open != null &&
         open.path == path &&
         open.threads == threads &&
-        open.arena == memoryArena) {
+        open.arena == memoryArena &&
+        open.directMl == directMlDevice) {
       return open.session;
     }
     freeModel();
-    final runtime = _runtime ??= OnnxRuntime.load(_onnxPath);
+    // A model on the GPU opens in the DirectML build (1.24.4); every other
+    // one in the app's CPU runtime (1.31.1): the results the research
+    // measured, and Silero does not open in 1.24.4 (plan 10 I2i1).
+    final OnnxRuntime runtime;
+    if (directMlDevice == null) {
+      runtime = _runtime ??= OnnxRuntime.load(_onnxPath);
+    } else {
+      final gpuPath = _gpuOnnxPath;
+      if (gpuPath == null) {
+        throw const OnnxError('no DirectML runtime given to the worker');
+      }
+      runtime = _gpuRuntime ??= OnnxRuntime.load(gpuPath);
+    }
     final session = runtime.open(
       path,
       threads: threads,
       memoryArena: memoryArena,
+      directMlDevice: directMlDevice,
     );
     _open = (
       path: path,
       threads: threads,
       arena: memoryArena,
+      directMl: directMlDevice,
       session: session,
     );
     _measure();
@@ -189,10 +220,14 @@ class WorkerTask<R> implements RunningJob<R> {
 
 /// The worker isolate, started on the first job.
 class SttWorker implements JobRunner {
-  SttWorker({required this.onnxRuntimePath, this.log});
+  SttWorker({required this.onnxRuntimePath, this.gpuOnnxRuntimePath, this.log});
 
   /// onnxruntime.dll beside the app.
   final String onnxRuntimePath;
+
+  /// The DirectML build's onnxruntime.dll (with DirectML.dll beside it),
+  /// for jobs that run a model on the GPU (plan 10 I2i); null: CPU only.
+  final String? gpuOnnxRuntimePath;
 
   /// One line to perf.log per job: time, outcome and memory.
   final void Function(String line)? log;
@@ -278,7 +313,7 @@ class SttWorker implements JobRunner {
     });
     _isolate = await Isolate.spawn(
       _workerMain,
-      (port.sendPort, onnxRuntimePath),
+      (port.sendPort, onnxRuntimePath, gpuOnnxRuntimePath),
       debugName: 'hear the words',
       onExit: port.sendPort,
       onError: port.sendPort,
@@ -372,8 +407,8 @@ class SttWorker implements JobRunner {
 
 int _mb(int bytes) => (bytes / (1024 * 1024)).round();
 
-void _workerMain((SendPort, String) start) {
-  final (toMain, onnxPath) = start;
+void _workerMain((SendPort, String, String?) start) {
+  final (toMain, onnxPath, gpuOnnxPath) = start;
   final port = ReceivePort();
   toMain.send(port.sendPort);
   port.listen((message) {
@@ -381,6 +416,7 @@ void _workerMain((SendPort, String) start) {
         message as List<Object?>;
     final context = WorkerContext._(
       onnxPath,
+      gpuOnnxPath,
       Pointer<Int32>.fromAddress(flag),
       (stage, done, total) => toMain.send([id, 'progress', stage, done, total]),
     );

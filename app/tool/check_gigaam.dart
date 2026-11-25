@@ -5,7 +5,9 @@
 //
 // Run from app/ (a model run: through agg-queue):
 //   dart run tool/check_gigaam.dart --vocals DIR --models DIR --out DIR
-//       [--threads 8] [--arena] [--repeat N] NAMES...
+//       [--threads 8] [--arena] [--repeat N] [--gpu-onnx DLL] [--dml N] NAMES...
+// --gpu-onnx is the DirectML build's onnxruntime.dll (plan 10 I2i),
+// --dml N runs the encoder on DirectML adapter N.
 //
 // For each NAME (DIR/NAME.vocals16.f32): OUT/NAME.dart.json (chunks,
 // tokens, words, confidences, times, memory), OUT/NAME.dart.vad.f32 and
@@ -71,6 +73,8 @@ Future<void> main(List<String> args) async {
   ).path;
   final release = p.join('build', 'windows', 'x64', 'runner', 'Release');
   final onnxPath = p.absolute(release, 'onnxruntime.dll');
+  final gpuOnnx = values['--gpu-onnx'];
+  final directMl = int.tryParse(values['--dml'] ?? '');
   final out = Directory(outDir)..createSync(recursive: true);
 
   final model = GigaamModel.load(gigaamFolder);
@@ -78,7 +82,11 @@ Future<void> main(List<String> args) async {
     jsonEncode([for (final group in model.groups) group?.toList()]),
   );
 
-  final worker = SttWorker(onnxRuntimePath: onnxPath, log: print);
+  final worker = SttWorker(
+    onnxRuntimePath: onnxPath,
+    gpuOnnxRuntimePath: gpuOnnx == null ? null : p.absolute(gpuOnnx),
+    log: print,
+  );
   try {
     for (var run = 0; run < repeat; run++) {
       for (final name in names) {
@@ -89,6 +97,7 @@ Future<void> main(List<String> args) async {
             sileroPath: sileroPath,
             threads: threads,
             memoryArena: arena,
+            directMlDevice: directMl,
             keepForChecks: true,
           ),
         );
@@ -116,6 +125,8 @@ Future<void> main(List<String> args) async {
           'decode_ms': job.decodeMs,
           'threads': threads,
           'arena': arena,
+          'gpu_onnx': gpuOnnx,
+          'dml': directMl,
           'peak_ws_mb': memory.peakWorkingSet ~/ (1 << 20),
           'peak_private_mb': memory.peakPrivate ~/ (1 << 20),
           'after_ws_mb': memory.afterWorkingSet ~/ (1 << 20),

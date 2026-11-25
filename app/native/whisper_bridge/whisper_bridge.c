@@ -71,6 +71,11 @@ typedef void (*fn_ggml_backend_load_all_from_path)(const char *);
 typedef size_t (*fn_ggml_backend_reg_count)(void);
 typedef ggml_backend_reg_t (*fn_ggml_backend_reg_get)(size_t);
 typedef const char *(*fn_ggml_backend_reg_name)(ggml_backend_reg_t);
+typedef size_t (*fn_ggml_backend_dev_count)(void);
+typedef ggml_backend_dev_t (*fn_ggml_backend_dev_get)(size_t);
+typedef enum ggml_backend_dev_type (*fn_ggml_backend_dev_type)(
+    ggml_backend_dev_t);
+typedef const char *(*fn_ggml_backend_dev_description)(ggml_backend_dev_t);
 
 typedef struct {
   fn_whisper_version whisper_version;
@@ -95,6 +100,10 @@ typedef struct {
   fn_ggml_backend_reg_count ggml_backend_reg_count;
   fn_ggml_backend_reg_get ggml_backend_reg_get;
   fn_ggml_backend_reg_name ggml_backend_reg_name;
+  fn_ggml_backend_dev_count ggml_backend_dev_count;
+  fn_ggml_backend_dev_get ggml_backend_dev_get;
+  fn_ggml_backend_dev_type ggml_backend_dev_type;
+  fn_ggml_backend_dev_description ggml_backend_dev_description;
 } function_table;
 
 /* The functions, filled in only once ow_load has checked everything. */
@@ -327,6 +336,10 @@ static int bind_all(function_table *table, ow_library base, ow_library ggml,
   BIND(ggml_backend_reg_count, ggml, base);
   BIND(ggml_backend_reg_get, ggml, base);
   BIND(ggml_backend_reg_name, ggml, base);
+  BIND(ggml_backend_dev_count, ggml, base);
+  BIND(ggml_backend_dev_get, ggml, base);
+  BIND(ggml_backend_dev_type, ggml, base);
+  BIND(ggml_backend_dev_description, ggml, base);
   return 0;
 }
 
@@ -437,6 +450,41 @@ OW_API const char *ow_backend_name(int index) {
   return w.ggml_backend_reg_name(w.ggml_backend_reg_get((size_t)index));
 }
 
+/* The ggml device of the gpu-th GPU, counted as whisper.cpp 1.9.5's
+ * whisper_backend_init_gpu counts gpu_device: discrete and integrated GPUs
+ * in ggml's device order. NULL if there is no such GPU. */
+static ggml_backend_dev_t gpu_device(int gpu) {
+  if (!loaded() || gpu < 0) return NULL;
+  int seen = 0;
+  for (size_t i = 0; i < w.ggml_backend_dev_count(); i++) {
+    ggml_backend_dev_t device = w.ggml_backend_dev_get(i);
+    enum ggml_backend_dev_type type = w.ggml_backend_dev_type(device);
+    if (type == GGML_BACKEND_DEVICE_TYPE_GPU ||
+        type == GGML_BACKEND_DEVICE_TYPE_IGPU) {
+      if (seen == gpu) return device;
+      seen++;
+    }
+  }
+  return NULL;
+}
+
+OW_API int ow_gpu_count(void) {
+  int count = 0;
+  while (gpu_device(count) != NULL) count++;
+  return count;
+}
+
+OW_API const char *ow_gpu_name(int gpu) {
+  ggml_backend_dev_t device = gpu_device(gpu);
+  return device ? w.ggml_backend_dev_description(device) : "";
+}
+
+OW_API int ow_gpu_integrated(int gpu) {
+  ggml_backend_dev_t device = gpu_device(gpu);
+  return device != NULL &&
+         w.ggml_backend_dev_type(device) == GGML_BACKEND_DEVICE_TYPE_IGPU;
+}
+
 OW_API int ow_is_language(const char *code) {
   return loaded() && code != NULL && w.whisper_lang_id(code) >= 0;
 }
@@ -500,6 +548,10 @@ static struct whisper_context *open_model(
 #endif
 
 OW_API ow_context *ow_open(const char *model_path) {
+  return ow_open_on(model_path, -1);
+}
+
+OW_API ow_context *ow_open_on(const char *model_path, int gpu) {
   if (!loaded()) {
     set_error("whisper.cpp is not loaded");
     return NULL;
@@ -508,16 +560,22 @@ OW_API ow_context *ow_open(const char *model_path) {
     set_error("no model path given");
     return NULL;
   }
+  /* whisper.cpp quietly falls back to the CPU when it finds no such GPU;
+   * a GPU asked for must be there. */
+  if (gpu >= 0 && gpu_device(gpu) == NULL) {
+    set_error("no GPU %d among the loaded ggml backends", gpu);
+    return NULL;
+  }
   ow_context *context = (ow_context *)calloc(1, sizeof *context);
   if (context == NULL) {
     set_error("out of memory");
     return NULL;
   }
-  /* As gigaam_app's whisper_cpp.Context(use_gpu=False): CPU, flash
-   * attention on, the other fields whisper.cpp's defaults. */
+  /* As gigaam_app's whisper_cpp.Context: flash attention on, the other
+   * fields whisper.cpp's defaults; the GPU only when one is asked for. */
   struct whisper_context_params params = w.whisper_context_default_params();
-  params.use_gpu = false;
-  params.gpu_device = 0;
+  params.use_gpu = gpu >= 0;
+  params.gpu_device = gpu >= 0 ? gpu : 0;
   params.flash_attn = true;
   last_error[0] = 0;
   context->whisper = open_model(model_path, params);

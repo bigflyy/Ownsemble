@@ -39,7 +39,7 @@ extern "C" {
 #endif
 
 /* Raised when the functions below change; the Dart side refuses another. */
-#define OW_BRIDGE_VERSION 1
+#define OW_BRIDGE_VERSION 2
 
 /* ow_transcribe's results besides whisper_full's own negative codes. */
 #define OW_OK 0
@@ -68,9 +68,20 @@ OW_API const char *ow_system_info(void);
 OW_API int ow_backend_count(void);
 OW_API const char *ow_backend_name(int index);
 
+/* The GPUs of the loaded backends (ggml-vulkan.dll in the folder, plan 10
+ * I2i), numbered as whisper.cpp's gpu_device: count, description, and 1
+ * for an integrated one. */
+OW_API int ow_gpu_count(void);
+OW_API const char *ow_gpu_name(int gpu);
+OW_API int ow_gpu_integrated(int gpu);
+
 /* Loads the model on the CPU, flash attention on (as gigaam_app). NULL on
  * failure (ow_error() has whisper.cpp's last error lines). */
 OW_API ow_context *ow_open(const char *model_path);
+
+/* The same on GPU gpu (0 .. ow_gpu_count() - 1), or the CPU when gpu < 0;
+ * NULL if there is no such GPU. */
+OW_API ow_context *ow_open_on(const char *model_path, int gpu);
 OW_API void ow_close(ow_context *context);
 
 /* 1 if Whisper knows the language code ("ru", "en", ...). */

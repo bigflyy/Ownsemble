@@ -5,6 +5,9 @@
 // Run from app/ (a model run: through agg-queue):
 //   dart run tool/check_separator.dart --audio DIR --songs 13,55,57
 //       --models DIR --out DIR [--asym 13,55] [--threads 8] [--arena]
+//       [--gpu-onnx DLL] [--dml N]
+// --gpu-onnx is the DirectML build's onnxruntime.dll (plan 10 I2i),
+// --dml N separates on DirectML adapter N.
 //
 // For each song DIR/<n>.mp3: OUT/<n>.mix.f32 (the decoded 44.1 kHz stereo
 // mix), OUT/<n>.vocals.f32 (44.1 kHz stereo vocals before the last
@@ -58,6 +61,8 @@ Future<void> main(List<String> args) async {
   final release = p.join('build', 'windows', 'x64', 'runner', 'Release');
   final mpvPath = p.absolute(release, 'libmpv-2.dll');
   final onnxPath = p.absolute(release, 'onnxruntime.dll');
+  final gpuOnnx = valueOf('--gpu-onnx');
+  final directMl = int.tryParse(valueOf('--dml') ?? '');
   final out = Directory(outDir)..createSync(recursive: true);
   final temp = Directory(p.join(outDir, 'tmp'))..createSync();
 
@@ -76,7 +81,11 @@ Future<void> main(List<String> args) async {
     );
   }
 
-  final worker = SttWorker(onnxRuntimePath: onnxPath, log: print);
+  final worker = SttWorker(
+    onnxRuntimePath: onnxPath,
+    gpuOnnxRuntimePath: gpuOnnx == null ? null : p.absolute(gpuOnnx),
+    log: print,
+  );
   try {
     for (final MapEntry(key: name, value: path) in inputs.entries) {
       final keep = p.join(out.path, name);
@@ -89,6 +98,7 @@ Future<void> main(List<String> args) async {
           tempDir: temp.path,
           threads: threads,
           memoryArena: arena,
+          directMlDevice: directMl,
           keepStereoAt: keep,
         ),
       );
@@ -105,6 +115,8 @@ Future<void> main(List<String> args) async {
         'spectrum_ms': result.spectrumMs,
         'threads': threads,
         'arena': arena,
+        'gpu_onnx': gpuOnnx,
+        'dml': directMl,
         'scale': result.scale,
         'peak_ws_mb': memory.peakWorkingSet ~/ (1 << 20),
         'peak_private_mb': memory.peakPrivate ~/ (1 << 20),

@@ -59,6 +59,7 @@ class GigaamJob extends WorkerJob<GigaamJobResult> {
     required this.sileroPath,
     required this.threads,
     this.memoryArena = false,
+    this.directMlDevice,
     this.keepForChecks = false,
   });
 
@@ -73,6 +74,10 @@ class GigaamJob extends WorkerJob<GigaamJobResult> {
   /// Threads inside each encoder operation.
   final int threads;
   final bool memoryArena;
+
+  /// The DirectML adapter for the encoder, or null for the CPU (plan 10
+  /// I2i); Silero stays on the CPU.
+  final int? directMlDevice;
 
   /// Keeps [GigaamJobResult.probabilities] and
   /// [GigaamJobResult.firstEncoded].
@@ -140,6 +145,7 @@ class GigaamJob extends WorkerJob<GigaamJobResult> {
           model.encoderPath,
           threads: threads,
           memoryArena: memoryArena,
+          directMlDevice: directMlDevice,
         );
         final started = clock.elapsedMilliseconds;
         openMs += started - opening;

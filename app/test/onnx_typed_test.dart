@@ -83,6 +83,25 @@ void main() {
     skip: available ? false : 'no release build with onnxruntime.dll',
   );
 
+  test('the CPU build has no DirectML, and a DirectML session is refused', () {
+    final runtime = OnnxRuntime.load(File(dll).absolute.path);
+    expect(runtime.hasDirectMl, isFalse);
+    expect(
+      () => runtime.open(
+        File('test/fixtures/gigaam/typed.onnx').absolute.path,
+        threads: 1,
+        directMlDevice: 0,
+      ),
+      throwsA(
+        isA<OnnxError>().having(
+          (e) => e.message,
+          'message',
+          contains('no DirectML'),
+        ),
+      ),
+    );
+  }, skip: available ? false : 'no release build with onnxruntime.dll');
+
   test('a shape that does not hold the values is refused before the run', () {
     expect(
       () => OnnxTensor.float(Float32List(3), const [1, 4]),

@@ -14,7 +14,7 @@ import 'package:ffi/ffi.dart';
 import 'package:path/path.dart' as p;
 
 /// The bridge's OW_BRIDGE_VERSION this binding is written for.
-const _bridgeVersion = 1;
+const _bridgeVersion = 2;
 
 // ow_transcribe's results (whisper_bridge.h).
 const _ok = 0;
@@ -69,7 +69,8 @@ typedef _IntStringC = Int32 Function(Pointer<Utf8>);
 typedef _IntString = int Function(Pointer<Utf8>);
 typedef _StringIntC = Pointer<Utf8> Function(Int32);
 typedef _StringInt = Pointer<Utf8> Function(int);
-typedef _OpenC = Pointer<Void> Function(Pointer<Utf8>);
+typedef _OpenOnC = Pointer<Void> Function(Pointer<Utf8>, Int32);
+typedef _OpenOn = Pointer<Void> Function(Pointer<Utf8>, int);
 typedef _CloseC = Void Function(Pointer<Void>);
 typedef _Close = void Function(Pointer<Void>);
 typedef _TranscribeC = Int32 Function(
@@ -129,7 +130,13 @@ class WhisperLibrary {
       _isLanguage = bridge.lookupFunction<_IntStringC, _IntString>(
         'ow_is_language',
       ),
-      _open = bridge.lookupFunction<_OpenC, _OpenC>('ow_open'),
+      _gpuCount = bridge.lookupFunction<_IntVoidC, _IntVoid>('ow_gpu_count'),
+      _gpuName = bridge.lookupFunction<_StringIntC, _StringInt>('ow_gpu_name'),
+      _gpuIntegrated = bridge
+          .lookupFunction<Int32 Function(Int32), int Function(int)>(
+            'ow_gpu_integrated',
+          ),
+      _open = bridge.lookupFunction<_OpenOnC, _OpenOn>('ow_open_on'),
       _close = bridge.lookupFunction<_CloseC, _Close>('ow_close'),
       _transcribe = bridge.lookupFunction<_TranscribeC, _Transcribe>(
         'ow_transcribe',
@@ -144,7 +151,10 @@ class WhisperLibrary {
   final _IntVoid _backendCount;
   final _StringInt _backendName;
   final _IntString _isLanguage;
-  final Pointer<Void> Function(Pointer<Utf8>) _open;
+  final _IntVoid _gpuCount;
+  final _StringInt _gpuName;
+  final int Function(int) _gpuIntegrated;
+  final _OpenOn _open;
   final _Close _close;
   final _Transcribe _transcribe;
   final Pointer<Utf8> Function(Pointer<Void>) _language;
@@ -205,10 +215,18 @@ class WhisperLibrary {
   bool isLanguage(String code) =>
       using((arena) => _isLanguage(code.toNativeUtf8(allocator: arena))) != 0;
 
-  /// Loads the ggml model file at [modelPath] on the CPU.
-  WhisperModel open(String modelPath) {
+  /// The GPUs the loaded backends offer (ggml-vulkan.dll in the folder,
+  /// plan 10 I2i), in whisper.cpp's gpu_device order.
+  List<({String name, bool integrated})> get gpus => [
+    for (var i = 0; i < _gpuCount(); i++)
+      (name: _gpuName(i).toDartString(), integrated: _gpuIntegrated(i) != 0),
+  ];
+
+  /// Loads the ggml model file at [modelPath] on the CPU, or on GPU [gpu]
+  /// (an index into [gpus]).
+  WhisperModel open(String modelPath, {int? gpu}) {
     final handle = using(
-      (arena) => _open(modelPath.toNativeUtf8(allocator: arena)),
+      (arena) => _open(modelPath.toNativeUtf8(allocator: arena), gpu ?? -1),
     );
     if (handle == nullptr) throw WhisperError(_lastError());
     return WhisperModel._(this, handle);

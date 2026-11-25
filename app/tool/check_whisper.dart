@@ -5,7 +5,9 @@
 //
 // Run from app/ (a model run: through agg-queue):
 //   dart run tool/check_whisper.dart --vocals DIR --models DIR --out DIR
-//       --bridge DLL [--threads 8] [--language CODE] [--tag dart]
+//       --bridge DLL [--threads 8] [--language CODE] [--tag dart] [--gpu N]
+// --gpu N hears on whisper.cpp's GPU N (plan 10 I2i: --libs a folder with
+// ggml-vulkan.dll).
 //       [--model FILE] [--libs DIR] [--cancel-in-chunk N] NAMES...
 //
 // For each NAME (DIR/NAME.vocals16.f32): OUT/NAME.TAG.json (chunks with
@@ -75,6 +77,7 @@ Future<void> main(List<String> args) async {
     final library = WhisperLibrary.load(bridge, libs);
     print('whisper_version: ${library.version}');
     print('backends: ${library.backends}');
+    print('gpus: ${library.gpus}');
     print('system: ${library.systemInfo}');
     return;
   }
@@ -88,6 +91,7 @@ Future<void> main(List<String> args) async {
   final language = values['--language'];
   final tag = values['--tag'] ?? 'dart';
   final cancelIn = int.tryParse(values['--cancel-in-chunk'] ?? '');
+  final gpu = int.tryParse(values['--gpu'] ?? '');
   final sileroPath = bundleFile(
     root,
     hearWordsBundle,
@@ -109,6 +113,7 @@ Future<void> main(List<String> args) async {
           sileroPath: sileroPath,
           threads: threads,
           language: language,
+          gpu: gpu,
         ),
       );
       final clock = Stopwatch()..start();
@@ -141,6 +146,8 @@ Future<void> main(List<String> args) async {
         'transcribe_ms': job.transcribeMs,
         'threads': threads,
         'language': language ?? 'auto',
+        'gpu': gpu,
+        'libs': libs,
         'peak_ws_mb': memory.peakWorkingSet ~/ (1 << 20),
         'peak_private_mb': memory.peakPrivate ~/ (1 << 20),
         'after_ws_mb': memory.afterWorkingSet ~/ (1 << 20),
