@@ -91,6 +91,22 @@ final _setDpiAwareness = _user32
       'SetThreadDpiAwarenessContext',
     );
 
+final _setProcessDpiAwareness = _user32
+    .lookupFunction<Int32 Function(IntPtr), int Function(int)>(
+      'SetProcessDpiAwarenessContext',
+    );
+final _threadDpiAwareness = _user32
+    .lookupFunction<IntPtr Function(), int Function()>(
+      'GetThreadDpiAwarenessContext',
+    );
+final _awarenessOf = _user32
+    .lookupFunction<Int32 Function(IntPtr), int Function(int)>(
+      'GetAwarenessFromDpiAwarenessContext',
+    );
+
+/// This thread's DPI awareness now: 0 unaware, 1 system, 2 per monitor.
+int _awarenessNow() => _awarenessOf(_threadDpiAwareness());
+
 /// DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2.
 const _perMonitorAware = -4;
 
@@ -127,7 +143,12 @@ late final List<String> appArgs;
 
 Future<void> main(List<String> args) async {
   // Real pixels: at a display scale above 100% Windows would otherwise report
-  // this process every window size divided by the scale.
+  // this process every window size divided by the scale. For the whole
+  // process, not one thread: the isolate may run on other threads (B33).
+  // GATE_THREAD_DPI_ONLY=1 keeps the old thread-only call, to compare.
+  if (Platform.environment['GATE_THREAD_DPI_ONLY'] != '1') {
+    _setProcessDpiAwareness(_perMonitorAware);
+  }
   _setDpiAwareness(_perMonitorAware);
   String? valueOf(String name) {
     final index = args.indexOf(name);
@@ -179,6 +200,12 @@ Future<void> main(List<String> args) async {
     print(
       'keys runs: $keysRuns, failed: $failed, of them not the app: $excused',
     );
+    return;
+  }
+
+  // Only the window size and place check (B33).
+  if (args.contains('--only-window')) {
+    print(jsonEncode(await _checkWindowPlacement(dataDir)));
     return;
   }
 
@@ -353,7 +380,9 @@ Future<Map<String, Object?>> _checkWindowPlacement(String dataDir) async {
   // saved size is expected in the scale it ends up in.
   var savedDpi = 96;
   var windowDpi = 96;
+  var awareness = -1;
   final normal = await withWindow('100 100 900 700 0\n', (window, _) async {
+    awareness = _awarenessNow();
     savedDpi = _dpiAt(100 + 450, 100 + 12);
     windowDpi = _getDpiForWindow(window);
     return (_windowSize(window), _isZoomed(window) != 0);
@@ -399,6 +428,7 @@ Future<Map<String, Object?>> _checkWindowPlacement(String dataDir) async {
   return {
     'normal': '${normal.$1}',
     'normalExpected': '$normalExpected (dpi $savedDpi saved, $windowDpi now)',
+    'dpiAwareness': awareness,
     'maximized': maximized,
     'offScreenFallsBackTo': '$offScreen',
     'smallSavedOpensAt': '$smallSaved',
