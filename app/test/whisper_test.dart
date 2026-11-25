@@ -261,6 +261,42 @@ void main() {
           ? 'no release build or no test bundle'
           : false,
     );
+
+    test(
+      'after a failed load the bundle loads, offers no GPU, refuses one',
+      () {
+        // A folder with ggml-base.dll alone: ggml-base loads (and sets its
+        // terminate handler), the load fails, ggml-base is unloaded. The
+        // next load used to abort the process in ggml's own assert (plan
+        // 10 I2i1): the bridge now puts the old handler back.
+        final source = _bundleLibraries()!;
+        final partial = Directory.systemTemp.createTempSync('ow-partial2');
+        addTearDown(() {
+          if (partial.existsSync()) partial.deleteSync(recursive: true);
+        });
+        File(p.join(source, 'ggml-base.dll'))
+            .copySync(p.join(partial.path, 'ggml-base.dll'));
+        expect(
+          () => WhisperLibrary.load(bridge!, partial.path),
+          throwsA(isA<WhisperError>()),
+        );
+        final library = WhisperLibrary.load(bridge!, source);
+        expect(library.gpus, isEmpty);
+        expect(
+          () => library.open('no-model.bin', gpu: 0),
+          throwsA(
+            isA<WhisperError>().having(
+              (e) => e.message,
+              'message',
+              contains('no GPU 0'),
+            ),
+          ),
+        );
+      },
+      skip: bridge == null || _bundleLibraries() == null
+          ? 'no release build or no test bundle'
+          : false,
+    );
   });
 }
 

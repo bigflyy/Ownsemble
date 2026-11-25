@@ -29,6 +29,12 @@
 #include <windows.h>
 typedef HMODULE ow_library;
 #define OW_THREAD_LOCAL __declspec(thread)
+/* The C runtime's terminate handler (C linkage in the UCRT; eh.h is C++
+ * only). ggml-base installs its own one when it loads, see load_locked. */
+typedef void(__cdecl *ow_terminate_handler)(void);
+__declspec(dllimport) ow_terminate_handler __cdecl _get_terminate(void);
+__declspec(dllimport) ow_terminate_handler __cdecl set_terminate(
+    ow_terminate_handler handler);
 #else
 #include <dlfcn.h>
 #include <pthread.h>
@@ -371,6 +377,14 @@ static int load_locked(const char *lib_dir) {
   int result = -1;
   const char *version = NULL;
   struct whisper_full_params defaults;
+#ifdef _WIN32
+  /* ggml-base's static initialiser replaces the terminate handler with its
+   * own function and asserts it was not already its own. Unloading the DLL
+   * after a failure would leave the handler pointing into freed code, and
+   * the next load in this thread would hit that assert and abort the app
+   * (plan 10 I2i1, found when a failed load was followed by a good one). */
+  ow_terminate_handler terminate_before = _get_terminate();
+#endif
   base = open_library(lib_dir, names[0]);
   if (base == NULL) goto fail;
   ggml = open_library(lib_dir, names[1]);
@@ -413,7 +427,12 @@ fail:
   if (table.ggml_log_set) table.ggml_log_set(NULL, NULL);
   close_library(whisper);
   close_library(ggml);
-  close_library(base);
+  if (base != NULL) {
+    close_library(base);
+#ifdef _WIN32
+    set_terminate(terminate_before);
+#endif
+  }
   return result;
 }
 
