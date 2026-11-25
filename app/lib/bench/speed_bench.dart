@@ -36,6 +36,7 @@ import '../ui/song_filters.dart';
 import '../ui/song_remover.dart';
 import '../vk/vk_client.dart';
 import 'edit_live.dart';
+import 'hear_accept.dart';
 import 'key_state.dart';
 
 /// Measures the speed targets inside the running release app, driving the
@@ -100,7 +101,8 @@ class SpeedBench {
 
   /// "Hear the words" and the hearLive part's songs (plan 10 I2f): a
   /// Russian song, a song in another language, an instrumental; and the
-  /// CPU threads the models use.
+  /// CPU threads the models use. The hearAccept part (I2h) hears every
+  /// song of [hearKeys] in turn, see [HearAcceptBench].
   final LyricsHearer? hearer;
   final List<String> hearKeys;
   final int hearThreads;
@@ -199,6 +201,17 @@ class SpeedBench {
     }
     if (parts?.contains('hearLive') ?? false) {
       result['hearLive'] = await _hearLiveBench();
+    }
+    if (parts?.contains('hearAccept') ?? false) {
+      result['hearAccept'] = await HearAcceptBench(
+        library: library,
+        player: player,
+        playback: playback,
+        lyrics: lyrics!,
+        hearer: hearer!,
+        keys: hearKeys,
+        threads: hearThreads,
+      ).run();
     }
     for (final part in const ['editLive', 'editLiveAfter']) {
       if (!(parts?.contains(part) ?? false)) continue;
