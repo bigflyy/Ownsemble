@@ -348,6 +348,25 @@ void main() {
       await expectLater(run.result, throwsA(isA<WorkerCancelled>()));
       expect(fake.names, ['separate']);
       expect(saved, isEmpty);
+      // The whole vocals file it wrote is kept for the next run, marked.
+      expect(File(vocalsMarkerOf(vocals)).existsSync(), isTrue);
+      final again = normal();
+      await start(again).result;
+      expect(again.names, ['gigaam', 'whisper']);
+    });
+
+    test('old vocals of another file are gone before separation', () async {
+      File(vocals).writeAsBytesSync([9, 9]);
+      File(vocalsMarkerOf(vocals)).writeAsStringSync('{"audio":"other.mp3"}');
+      final fake = normal()..hold = (job) => job is VocalsJob;
+      final run = start(fake);
+      await Future<void>.delayed(Duration.zero);
+      expect(File(vocals).existsSync(), isFalse);
+      expect(File(vocalsMarkerOf(vocals)).existsSync(), isFalse);
+      // Stopped before the separator wrote anything: nothing is marked.
+      run.cancel();
+      await expectLater(run.result, throwsA(isA<WorkerCancelled>()));
+      expect(File(vocalsMarkerOf(vocals)).existsSync(), isFalse);
     });
 
     test(
@@ -448,6 +467,7 @@ void main() {
       gigaam.finish(normal().answer(gigaam.job));
       await run.result;
       expect(seen, [
+        (step: 'separate', stage: 'start', done: 0, total: 0),
         (step: 'gigaam', stage: 'start', done: 0, total: 0),
         (step: 'gigaam', stage: 'hear', done: 1, total: 2),
         (step: 'whisper', stage: 'start', done: 0, total: 0),

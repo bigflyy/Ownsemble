@@ -187,6 +187,8 @@ class HearWords {
   }) {
     final run = HearRun._(ref);
     unawaited(() async {
+      // A turn later, so the caller listens before the first step starts.
+      await Future<void>.value();
       try {
         final heard = await _hear(run, audioPath, vocalsPath, audioBytes);
         run._result.complete(heard);
@@ -224,18 +226,31 @@ class HearWords {
       // used; the marker goes first, so a separation that stops halfway
       // never leaves old vocals marked as these.
       if (marker.existsSync()) marker.deleteSync();
-      await run._stage(
-        'separate',
-        runner,
-        VocalsJob(
-          audioPath: audioPath,
-          outPath: vocalsPath,
-          modelPath: paths.separatorModel,
-          mpvPath: paths.mpv,
-          tempDir: paths.tempDir,
-          threads: paths.threads,
-        ),
-      );
+      // The old vocals go too: a vocals file found after this stage is
+      // then always this run's (it appears only whole: vocals_job.dart).
+      final old = File(vocalsPath);
+      if (old.existsSync()) old.deleteSync();
+      try {
+        await run._stage(
+          'separate',
+          runner,
+          VocalsJob(
+            audioPath: audioPath,
+            outPath: vocalsPath,
+            modelPath: paths.separatorModel,
+            mpvPath: paths.mpv,
+            tempDir: paths.tempDir,
+            threads: paths.threads,
+          ),
+        );
+      } on WorkerCancelled {
+        // Stopped after the separator wrote the whole file but before its
+        // result came: the vocals are kept for the next run (Codex review).
+        if (File(vocalsPath).existsSync()) {
+          marker.writeAsStringSync(from, flush: true);
+        }
+        rethrow;
+      }
       marker.writeAsStringSync(from, flush: true);
     }
     final separateMs = clock.elapsedMilliseconds;
