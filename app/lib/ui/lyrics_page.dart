@@ -112,6 +112,26 @@ class _LyricsPageState extends State<LyricsPage> {
 
   @override
   Widget build(BuildContext context) {
+    final hearer = widget.hearer;
+    final hearing = hearer?.stageOf(widget.lyrics.shownKey);
+    final content = _content(context);
+    // Words on show while the song is heard (again): Stop stays at hand
+    // above them (Codex review of I2f).
+    if (hearer != null &&
+        hearing != null &&
+        widget.lyrics.state is LyricsShown) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          HearProgressStrip(hearer: hearer, stage: hearing),
+          Expanded(child: content),
+        ],
+      );
+    }
+    return content;
+  }
+
+  Widget _content(BuildContext context) {
     final colors = OwnColors.of(context);
     final state = widget.lyrics.state;
     final track = widget.lyrics.track;

@@ -200,3 +200,59 @@ class HearProgressPanel extends StatelessWidget {
     );
   }
 }
+
+/// One line over words on show while their song is heard (again): what the
+/// run does now and Stop.
+class HearProgressStrip extends StatelessWidget {
+  const HearProgressStrip({
+    super.key,
+    required this.hearer,
+    required this.stage,
+  });
+
+  final LyricsHearer hearer;
+  final HearStage stage;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = OwnColors.of(context);
+    final text = hearStageText(stage);
+    final stopping = stage is HearStopping;
+    return LayoutBuilder(
+      builder: (context, constraints) => Padding(
+        key: const ValueKey('hear-strip'),
+        padding: EdgeInsets.fromLTRB(
+          constraints.maxWidth < 640 ? 24 : 56,
+          8,
+          24,
+          0,
+        ),
+        child: Row(
+          children: [
+            const SizedBox(
+              width: 16,
+              height: 16,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                'Hearing again: $text',
+                key: const ValueKey('hear-strip-stage'),
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(color: colors.dim, fontSize: 13),
+              ),
+            ),
+            const SizedBox(width: 8),
+            TextButton(
+              key: const ValueKey('hear-stop'),
+              onPressed: stopping ? null : hearer.stop,
+              child: Text(stopping ? 'Stopping...' : 'Stop'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}

@@ -165,6 +165,9 @@ class _LyricsChoicesPageState extends State<LyricsChoicesPage> {
       ],
     );
     if (!mounted || action == null) return;
+    // The song moved on while the menu was open: its choices are not this
+    // song's (Codex review of I2f).
+    if (widget.lyrics.shownKey != key) return;
     switch (action) {
       case 'use':
         _use(choice.source);

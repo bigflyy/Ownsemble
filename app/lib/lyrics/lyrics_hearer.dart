@@ -53,8 +53,8 @@ class HearSaving extends HearStage {
   final double share;
 }
 
-/// A stage of [HearWords] runs: [step] is 'separate', 'gigaam', 'whisper'
-/// or 'whisper-ru'; [share] of its main part is done (null while it
+/// A stage of [HearWords] runs: [step] is 'start' (before the first),
+/// 'separate', 'gigaam', 'whisper' or 'whisper-ru'; [share] of its main part is done (null while it
 /// starts or between parts).
 class HearRunning extends HearStage {
   const HearRunning(this.step, this.share);
@@ -186,6 +186,16 @@ class LyricsHearer extends ChangeNotifier {
   /// One line to perf.log: times and outcomes only, never words or keys.
   final void Function(String line)? log;
 
+  /// [log], never throwing: a line perf.log cannot take must not change
+  /// what a run came to (its words may be saved already; Codex review).
+  void _log(String line) {
+    try {
+      log?.call(line);
+    } on Object {
+      // Lost line.
+    }
+  }
+
   HearJob? _job;
   DownloadStop? _stop;
   HearRun? _run;
@@ -238,7 +248,7 @@ class LyricsHearer extends ChangeNotifier {
     if (stageOf(key) != null) return;
     forgetHeard(key);
     lyrics.heardChanged(key);
-    log?.call('hear words forgotten');
+    _log('hear words forgotten');
   }
 
   /// [future], or [HearStopped] as soon as Stop is pressed: saving the
@@ -290,6 +300,9 @@ class LyricsHearer extends ChangeNotifier {
       if (!bundleReady(HearBundle.hearWords)) {
         await _download(job, HearBundle.hearWords);
       }
+      // Stop during the last file's hash: the bundle may have finished;
+      // no song is saved for a stopped run (Codex review).
+      if (_stopping) throw const DownloadStopped();
       phase = 'save';
       final free = freeBytes?.call();
       final needed = hearWorkingBytes(track.durationSec.ceil());
@@ -316,7 +329,9 @@ class LyricsHearer extends ChangeNotifier {
       final audioBytes = File(path).lengthSync();
       final vocalsPath = vocalsPathOf(key);
       Directory(p.dirname(vocalsPath)).createSync(recursive: true);
-      _move(job, const HearRunning('separate', null));
+      // Until the pipeline names its first step: kept vocals skip the
+      // separation, so it is not named here (seen in hear-55a).
+      _move(job, const HearRunning('start', null));
       final run = _run = start(
         ref: key,
         audioPath: path,
@@ -344,7 +359,7 @@ class LyricsHearer extends ChangeNotifier {
       });
       try {
         final heard = await run.result;
-        log?.call(
+        _log(
           'hear words ${heard.outcome.name} ${clock.elapsedMilliseconds} ms',
         );
         return HearDone(heard);
@@ -352,14 +367,14 @@ class LyricsHearer extends ChangeNotifier {
         await listening.cancel();
       }
     } on DownloadStopped {
-      log?.call('hear words download stopped');
+      _log('hear words download stopped');
       return const HearStopped(download: true);
     } on WorkerCancelled {
-      log?.call('hear words stopped in $phase ${clock.elapsedMilliseconds} ms');
+      _log('hear words stopped in $phase ${clock.elapsedMilliseconds} ms');
       return HearStopped(download: phase.startsWith('download'));
     } on Object catch (error) {
       if (_stopping) return HearStopped(download: phase.startsWith('download'));
-      log?.call(
+      _log(
         'hear words failed in $phase ${error.runtimeType} '
         '${clock.elapsedMilliseconds} ms',
       );
@@ -372,7 +387,7 @@ class LyricsHearer extends ChangeNotifier {
       if (bundle != null &&
           bundleIntact != null &&
           !await bundleIntact!(bundle)) {
-        log?.call('hear words ${bundle.name} damaged, deleted');
+        _log('hear words ${bundle.name} damaged, deleted');
         return const HearFailed(
           'A model file was damaged and was deleted; the next try downloads '
           'it again.',
@@ -422,7 +437,7 @@ HearBundle? damagedBundleOf(String message) {
 /// download reports every few kilobytes).
 String hearStageText(HearStage stage) => switch (stage) {
   HearDownloading(:final bytes, :final total, :final whisper) =>
-    'downloading ${whisper ? 'Whisper (this song is not Russian)' : 'the models'}, '
+    'downloading ${whisper ? 'Whisper (GigaAM was not sure of this song)' : 'the models'}, '
         '${total == 0 ? 0 : bytes * 100 ~/ total}% of ${total ~/ 1000000} MB',
   HearSaving(:final share) => 'saving the song, ${(share * 100).floor()}%',
   HearRunning(:final step, :final share) =>
@@ -433,9 +448,10 @@ String hearStageText(HearStage stage) => switch (stage) {
 
 /// A stage of the run in words.
 String hearStepText(String step) => switch (step) {
+  'start' => 'getting ready',
   'separate' => 'separating the voice from the music',
   'gigaam' => 'hearing the words',
-  'whisper' => 'hearing the words with Whisper (not Russian)',
+  'whisper' => 'hearing the words with Whisper (GigaAM was not sure)',
   'whisper-ru' => 'hearing some parts again as Russian',
   _ => 'hearing the words',
 };

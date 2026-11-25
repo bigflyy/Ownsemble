@@ -275,6 +275,35 @@ void main() {
     );
   });
 
+  testWidgets('heard again while its words show: Stop stays above them', (
+    tester,
+  ) async {
+    final hear = hearer();
+    lyrics.show(tracks[0]);
+    await tester.runAsync(hear.hearShown);
+    await openPlace(tester, hear);
+    expect(find.byKey(const ValueKey('hear-strip')), findsNothing);
+    runner.hold = (job) => job is GigaamJob;
+    late Future<HearOutcome> again;
+    await tester.runAsync(() async {
+      again = hear.hearShown();
+      for (var i = 0; i < 50 && hear.stageOf('1_0') is! HearRunning; i++) {
+        await Future<void>.delayed(const Duration(milliseconds: 5));
+      }
+    });
+    await settle(tester);
+    expect(find.byKey(const ValueKey('hear-strip')), findsOneWidget);
+    expect(find.byKey(const ValueKey('lyrics-credit')), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('hear-stop')));
+    await tester.runAsync(() async {
+      expect(await again, isA<HearStopped>());
+    });
+    await settle(tester);
+    expect(find.byKey(const ValueKey('hear-strip')), findsNothing);
+    // The words heard before are still there.
+    expect(find.text('come home.'), findsOneWidget);
+  });
+
   testWidgets('no singing found: said, and no Hear again', (tester) async {
     store.saveHeardLyrics(
       '1_0',

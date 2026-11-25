@@ -274,8 +274,102 @@ void main() {
     expect(File('${temp.path}/vocals/1_0.vocals16.f32').existsSync(), isTrue);
     downloadGate = null;
     final names = runner.names.length;
+    // The retry never says it separates (seen in hear-55a).
+    final texts = <String>[];
+    hear.addListener(() {
+      final stage = hear.stageOf('1_0');
+      if (stage != null) texts.add(hearStageText(stage));
+    });
     expect(await hear.hearShown(), isA<HearDone>());
     expect(runner.names.skip(names), ['gigaam', 'whisper']);
+    expect(texts, contains('getting ready'));
+    expect(texts, contains('hearing the words'));
+    expect(texts.where((text) => text.startsWith('separating')), isEmpty);
+  });
+
+  test(
+    'Stop during the last hash: the download ends, no song is saved',
+    () async {
+      ready.clear();
+      final gate = Completer<void>();
+      lyrics.show(tracks[0]);
+      final hear = LyricsHearer(
+        lyrics: lyrics,
+        bundleReady: ready.contains,
+        bundleMegabytes: (_) => 1,
+        // Ignores the stop: the hash was already being read.
+        download: (bundle, onProgress, stop) async {
+          onProgress(1, 2);
+          await gate.future;
+          ready.add(bundle);
+        },
+        audioOf: (track, onProgress) async {
+          audioAsked.add(track.sourceKey!);
+          return 'x';
+        },
+        start: ({
+          required ref,
+          required audioPath,
+          required vocalsPath,
+          required audioBytes,
+          required beforeWhisper,
+        }) => throw StateError('no run'),
+        vocalsPathOf: (key) => key,
+        forgetHeard: (_) {},
+      );
+      final running = hear.hearShown();
+      await until(() => hear.stageOf('1_0') is HearDownloading);
+      hear.stop();
+      gate.complete();
+      expect(await running, isA<HearStopped>());
+      expect(audioAsked, isEmpty);
+    },
+  );
+
+  test('a log that throws changes no outcome', () async {
+    lyrics.show(tracks[0]);
+    final hear = LyricsHearer(
+      lyrics: lyrics,
+      bundleReady: (_) => true,
+      bundleMegabytes: (_) => 1,
+      download: (_, _, _) async {},
+      audioOf: (track, onProgress) async {
+        final path = '${temp.path}/${track.sourceKey}.mp3';
+        File(path).writeAsBytesSync([1, 2, 3]);
+        return path;
+      },
+      start:
+          ({
+            required ref,
+            required audioPath,
+            required vocalsPath,
+            required audioBytes,
+            required beforeWhisper,
+          }) =>
+              HearWords(
+                runner: runner,
+                paths: const HearWordsPaths(
+                  separatorModel: 'kim.onnx',
+                  silero: '',
+                  gigaamFolder: '',
+                  mpv: '',
+                  tempDir: '',
+                  whisperBridge: '',
+                  whisperLibraries: '',
+                  whisperModel: '',
+                ),
+                save: store.saveHeardLyrics,
+              ).start(
+                ref: ref,
+                audioPath: audioPath,
+                vocalsPath: vocalsPath,
+                audioBytes: audioBytes,
+              ),
+      vocalsPathOf: (key) => '${temp.path}/vocals/$key.vocals16.f32',
+      forgetHeard: (_) {},
+      log: (_) => throw const FileSystemException('disk full'),
+    );
+    expect(await hear.hearShown(), isA<HearDone>());
   });
 
   test('Stop during the first download', () async {
