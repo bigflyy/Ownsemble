@@ -73,6 +73,10 @@ enum ViewKind {
   /// from (plan 10, E2), opened from the Lyrics place.
   lyricsChoices,
 
+  /// The lyrics editor for the playing song (plan 10, I2g), opened from
+  /// the Lyrics place by Edit or Write.
+  lyricsEdit,
+
   /// One recommended list (a VK list, "Similar to", VK Mix), opened from
   /// For you or a song's "Similar songs" (plan 07).
   vkList,
@@ -137,7 +141,9 @@ class LibraryView {
   /// Whether the view is the Lyrics place or its chooser: the mic button
   /// is lit and closes them.
   bool get showsLyrics =>
-      kind == ViewKind.lyrics || kind == ViewKind.lyricsChoices;
+      kind == ViewKind.lyrics ||
+      kind == ViewKind.lyricsChoices ||
+      kind == ViewKind.lyricsEdit;
 
   /// Whether the view is opened from another one and shows a Back button.
   bool get hasBack =>
@@ -272,7 +278,8 @@ class LibraryController extends ChangeNotifier {
         kind == ViewKind.versions ||
         kind == ViewKind.vkList ||
         kind == ViewKind.lyrics ||
-        kind == ViewKind.lyricsChoices) {
+        kind == ViewKind.lyricsChoices ||
+        kind == ViewKind.lyricsEdit) {
       return null;
     }
     // A year report opens from Stats, and Back has nothing to return to
@@ -802,6 +809,14 @@ class LibraryController extends ChangeNotifier {
     if (_view.kind == ViewKind.lyricsChoices) return;
     _places.leave(_here);
     _showList(const LibraryView(ViewKind.lyricsChoices), '', _source);
+  }
+
+  /// Opens the lyrics editor for the playing song, from the Lyrics place
+  /// (Back returns there; plan 10, I2g).
+  void openLyricsEdit() {
+    if (_view.kind == ViewKind.lyricsEdit) return;
+    _places.leave(_here);
+    _showList(const LibraryView(ViewKind.lyricsEdit), '', _source);
   }
 
   /// Shows the report of [year] in place of the one shown (its arrows):
@@ -1509,7 +1524,8 @@ class LibraryController extends ChangeNotifier {
           ViewKind.yearReport ||
           ViewKind.forYou ||
           ViewKind.lyrics ||
-          ViewKind.lyricsChoices:
+          ViewKind.lyricsChoices ||
+          ViewKind.lyricsEdit:
         _base = const [];
     }
     _filterBaseBySource();

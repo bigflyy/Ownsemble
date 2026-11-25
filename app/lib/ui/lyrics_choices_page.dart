@@ -18,6 +18,7 @@ import 'package:flutter/material.dart';
 
 import '../library/track.dart';
 import '../lyrics/heard_lyrics.dart';
+import '../lyrics/lyrics_edit.dart';
 import '../lyrics/lyrics.dart';
 import '../lyrics/lyrics_controller.dart';
 import '../lyrics/lyrics_fitter.dart';
@@ -148,6 +149,12 @@ class _LyricsChoicesPageState extends State<LyricsChoicesPage> {
             value: 'preview',
             child: Text('Preview'),
           ),
+        if (choice.source == editedSource)
+          const PopupMenuItem(
+            key: ValueKey('menu-forget-edit'),
+            value: 'forget-edit',
+            child: Text('Forget your edit'),
+          ),
         if (heard && hearer != null) ...[
           PopupMenuItem(
             key: const ValueKey('menu-hear-again'),
@@ -179,7 +186,24 @@ class _LyricsChoicesPageState extends State<LyricsChoicesPage> {
         unawaited(hearShownWords(context, hearer!, forKey: key));
       case 'forget':
         if (key != null) hearer!.forget(key);
+      case 'forget-edit':
+        widget.lyrics.forgetEdit();
     }
+  }
+
+  /// The user's edit as a row of its own (I2g), first: null without one.
+  LyricsChoice? _editChoice() {
+    final words = widget.lyrics.editLyrics;
+    final track = widget.lyrics.track;
+    if (words == null || track == null) return null;
+    return LyricsChoice(
+      source: editedSource,
+      status: LyricsChoiceStatus.found,
+      lyrics: words,
+      seconds: track.durationSec,
+      lengthDiff: 0,
+      exact: true,
+    );
   }
 
   /// The heard version as a row of its own (I2f), never one of the
@@ -206,9 +230,12 @@ class _LyricsChoicesPageState extends State<LyricsChoicesPage> {
     final fitter = widget.fitter;
     final ranked = _ranked(widget.lyrics.choices);
     final heardChoice = _heardChoice();
+    final editChoice = _editChoice();
     final foundCount = ranked.where((choice) => choice.lyrics != null).length;
-    // The heard version after the sources' lyrics, before those without.
+    // The user's edit first; the heard version after the sources' lyrics,
+    // before those without.
     final choices = [
+      ?editChoice,
       ...ranked.take(foundCount),
       ?heardChoice,
       ...ranked.skip(foundCount),
@@ -243,8 +270,11 @@ class _LyricsChoicesPageState extends State<LyricsChoicesPage> {
                     widget.lyrics.isFitted(choice.lyrics!),
                 inUse: choice.source == heardSource
                     ? shownSource == heardSource
+                    : choice.source == editedSource
+                    ? shownSource == editedSource
                     : choice.source == (chosen ?? automatic),
-                automatic: choice.source == automatic,
+                automatic:
+                    choice.source == automatic && choice.source != editedSource,
                 rough:
                     choice.source == heardSource &&
                     (widget.lyrics.heard?.rough ?? false),
@@ -336,8 +366,8 @@ class _LyricsChoicesPageState extends State<LyricsChoicesPage> {
     final lyrics = choice.lyrics!;
     final chosen = widget.lyrics.chosen;
     final state = widget.lyrics.state;
-    final inUse = choice.source == heardSource
-        ? state is LyricsShown && state.lyrics.source == heardSource
+    final inUse = choice.source == heardSource || choice.source == editedSource
+        ? state is LyricsShown && state.lyrics.source == choice.source
         : choice.source == (chosen ?? widget.lyrics.automatic);
     return LayoutBuilder(
       builder: (context, constraints) {
@@ -526,9 +556,16 @@ class _ChoiceRow extends StatelessWidget {
           'What the app picks by itself: timed lyrics first, then the '
               'closest names and length.',
         ),
+      if (choice.source == editedSource)
+        (
+          'yours',
+          'Your own version of these lyrics: it shows first until you '
+              'pick other lyrics.',
+        ),
       if (found &&
           choice.source != 'vk' &&
           choice.source != heardSource &&
+          choice.source != editedSource &&
           !choice.exact)
         (
           'similar names',
@@ -541,6 +578,8 @@ class _ChoiceRow extends StatelessWidget {
       _ when heard && hearing => 'Being heard again...',
       LyricsChoiceStatus.found when heard =>
         'From this recording, on this PC · ${_wordLines(lyrics!)} lines',
+      LyricsChoiceStatus.found when choice.source == editedSource =>
+        'Edited by you, on this PC · ${_wordLines(lyrics!)} lines',
       LyricsChoiceStatus.none when heard =>
         heardOutcome == HeardOutcome.noSinging
             ? 'No singing found in this recording'
@@ -563,6 +602,7 @@ class _ChoiceRow extends StatelessWidget {
     };
     final icon = switch (choice.status) {
       _ when heard => Icons.hearing,
+      _ when choice.source == editedSource => Icons.edit_note,
       LyricsChoiceStatus.found =>
         lyrics!.timed || fitted ? Icons.lyrics_outlined : Icons.notes,
       LyricsChoiceStatus.none => Icons.block,

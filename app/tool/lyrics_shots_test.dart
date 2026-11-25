@@ -7,7 +7,11 @@
 // before the model's download, the download, the fit running, fitted lines
 // and lyrics that do not match; Hear the words (I2f): the button, the
 // question, a run, heard words marked rough, no singing found, another song
-// being heard, and the chooser's heard row. The words are made up.
+// being heard, and the chooser's heard row; editing by hand (I2g): the
+// heading with every button's words or icons only, an edit with its
+// Edited menu, the editor's rows with a line without a time and one too
+// early, Tap to time, Edit as text, the chooser's "Your edit" row, and a
+// song heard while found lyrics show. The words are made up.
 //
 // Run from app/:
 //   flutter test tool/lyrics_shots_test.dart \
@@ -356,6 +360,7 @@ void main() {
       loadOffset: store.lyricsOffsetOf,
       saveOffset: store.saveLyricsOffset,
       loadHeard: store.heardLyricsOf,
+      edits: store,
       routeOf: lyricsRouteBySource((_) => fakeVk),
       sources: choosing
           ? [
@@ -559,6 +564,71 @@ void main() {
         await tester.tap(find.byKey(const ValueKey('lyrics-choose')));
         await settle();
       }
+      if (step == 'hearfound') {
+        unawaited(hearer.hearShown());
+        await settle();
+        runner.jobs.single.progressController.add((
+          stage: 'separate',
+          done: 14,
+          total: 40,
+        ));
+        await settle();
+      }
+      const editSteps = {
+        'edited',
+        'editedmenu',
+        'editor',
+        'tapping',
+        'edittext',
+        'editrow',
+      };
+      if (editSteps.contains(step)) {
+        // I2g: an edit of the shown lines: one fixed, one added without a
+        // time, one moved earlier than the line above.
+        final start = lyrics.editStartLines();
+        lyrics.saveEdit([
+          for (final (i, line) in start.indexed) ...[
+            if (i == 3)
+              LyricLine('${line.text}, и ещё раз', startMs: line.startMs)
+            else if (i == 8)
+              LyricLine(line.text, startMs: line.startMs! - 9000)
+            else
+              line,
+            if (i == 4) const LyricLine('Строка, которую я добавил сам'),
+          ],
+        ]);
+        await tester.pump(const Duration(milliseconds: 600));
+        await settle();
+      }
+      if (const {
+        'editedmenu',
+        'editor',
+        'tapping',
+        'edittext',
+      }.contains(step)) {
+        await tester.tap(find.byKey(const ValueKey('lyrics-edited')));
+        await settle();
+        if (step != 'editedmenu') {
+          await tester.tap(find.byKey(const ValueKey('lyrics-edit-again')));
+          await settle();
+          await tester.pump(const Duration(milliseconds: 600));
+          await settle();
+        }
+      }
+      if (step == 'tapping') {
+        await tester.tap(find.byKey(const ValueKey('lyrics-edit-tap')));
+        await settle();
+        await tester.sendKeyEvent(LogicalKeyboardKey.space);
+        await settle();
+      }
+      if (step == 'edittext') {
+        await tester.tap(find.byKey(const ValueKey('lyrics-edit-text')));
+        await settle();
+      }
+      if (step == 'editrow') {
+        await tester.tap(find.byKey(const ValueKey('lyrics-choose')));
+        await settle();
+      }
       if (const ['choices', 'preview', 'ranked', 'checkrow'].contains(step)) {
         await tester.tap(find.byKey(const ValueKey('lyrics-choose')));
         await settle();
@@ -651,12 +721,33 @@ void main() {
     ('hearother', false, const Size(480, 800)),
     ('heardrow', true, const Size(1440, 900)),
     ('heardrow', false, const Size(480, 800)),
+    // I2g: the heading's rule around its width, then editing.
+    ('timed', true, const Size(1280, 900)),
+    ('timed', false, const Size(1180, 900)),
+    ('timed', true, const Size(1100, 900)),
+    ('hearfound', true, const Size(1440, 900)),
+    ('hearfound', false, const Size(760, 900)),
+    ('edited', true, const Size(1440, 900)),
+    ('edited', false, const Size(480, 800)),
+    ('editedmenu', true, const Size(1440, 900)),
+    ('editor', true, const Size(1440, 900)),
+    ('editor', false, const Size(1440, 900)),
+    ('editor', true, const Size(760, 900)),
+    ('editor', false, const Size(480, 800)),
+    ('tapping', true, const Size(1440, 900)),
+    ('tapping', false, const Size(480, 800)),
+    ('edittext', true, const Size(1440, 900)),
+    ('edittext', false, const Size(760, 900)),
+    ('editrow', true, const Size(1440, 900)),
+    ('none', false, const Size(760, 900)),
   ]) {
     final width = size.width < 600
         ? 'smallest'
         : size.width < 1000
         ? 'narrow'
-        : 'wide';
+        : size.width == 1440
+        ? 'wide'
+        : 'w${size.width.round()}';
     testWidgets(
       'Lyrics: $step, ${dark ? 'dark' : 'light'}, $width',
       (t) => shoot(

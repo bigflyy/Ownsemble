@@ -7,6 +7,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import '../lyrics/heard_lyrics.dart' show HeardOutcome;
 import '../lyrics/lyrics_hearer.dart';
 import 'theme.dart';
 
@@ -208,10 +209,15 @@ class HearProgressStrip extends StatelessWidget {
     super.key,
     required this.hearer,
     required this.stage,
+    this.again = true,
   });
 
   final LyricsHearer hearer;
   final HearStage stage;
+
+  /// Heard words on show are heard again; other lyrics on show (found or
+  /// the user's edit) stay while the song is heard (I2g heading button).
+  final bool again;
 
   @override
   Widget build(BuildContext context) {
@@ -237,7 +243,7 @@ class HearProgressStrip extends StatelessWidget {
             const SizedBox(width: 10),
             Expanded(
               child: Text(
-                'Hearing again: $text',
+                '${again ? 'Hearing again' : 'Hearing the words'}: $text',
                 key: const ValueKey('hear-strip-stage'),
                 maxLines: 2,
                 overflow: TextOverflow.ellipsis,
@@ -251,6 +257,106 @@ class HearProgressStrip extends StatelessWidget {
               child: Text(stopping ? 'Stopping...' : 'Stop'),
             ),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+/// "Hear the words" in the Lyrics heading (I2g, user pick 2026-11-25:
+/// mockup "Hear icon A"): for every song in the library, also when found
+/// lyrics show (to check or replace wrong ones: the heard words then go to
+/// the chooser's "Heard by the app" row). While the song shown is heard it
+/// says how far it is, and a click stops it. With [compact] an icon with
+/// its words in the tooltip (the heading's rule: words for all or none).
+class HearHeadingButton extends StatelessWidget {
+  const HearHeadingButton({
+    super.key,
+    required this.hearer,
+    required this.compact,
+  });
+
+  final LyricsHearer hearer;
+  final bool compact;
+
+  @override
+  Widget build(BuildContext context) => ListenableBuilder(
+    listenable: Listenable.merge([hearer, hearer.lyrics]),
+    builder: (context, _) {
+      final lyrics = hearer.lyrics;
+      final track = lyrics.track;
+      final key = lyrics.shownKey;
+      if (track == null || key == null) return const SizedBox.shrink();
+      final stage = hearer.stageOf(key);
+      if (stage != null) return _running(context, stage);
+      final heard = lyrics.heard;
+      final noSinging = heard?.outcome == HeardOutcome.noSinging;
+      final other = hearer.job != null;
+      final label = heard == null ? 'Hear the words' : 'Hear again';
+      final tooltip = !track.inLibrary
+          ? 'Add the song to your library to hear its words'
+          : other
+          ? 'Another song is being heard now. One song at a time.'
+          : noSinging
+          ? 'No singing was found in this song'
+          : 'Listen to this recording and write down what is sung';
+      final onPressed = track.inLibrary && !other && !noSinging
+          ? () => unawaited(hearShownWords(context, hearer))
+          : null;
+      return compact
+          ? IconButton(
+              key: const ValueKey('lyrics-hear'),
+              tooltip: '$label: $tooltip',
+              onPressed: onPressed,
+              icon: const Icon(Icons.hearing),
+            )
+          : Tooltip(
+              message: tooltip,
+              child: TextButton.icon(
+                key: const ValueKey('lyrics-hear'),
+                onPressed: onPressed,
+                icon: const Icon(Icons.hearing, size: 20),
+                label: Text(label),
+              ),
+            );
+    },
+  );
+
+  Widget _running(BuildContext context, HearStage stage) {
+    final share = switch (stage) {
+      HearDownloading(:final bytes, :final total) =>
+        total == 0 ? null : bytes / total,
+      HearSaving(:final share) => share == 0 ? null : share,
+      HearRunning(:final share) => share,
+      HearStopping() => null,
+    };
+    final stopping = stage is HearStopping;
+    final spinner = SizedBox(
+      width: 18,
+      height: 18,
+      child: CircularProgressIndicator(strokeWidth: 2.2, value: share),
+    );
+    final tooltip = stopping
+        ? 'Stopping...'
+        : 'Hearing: ${hearStageText(stage)}. Click to stop.';
+    if (compact) {
+      return IconButton(
+        key: const ValueKey('lyrics-hear-progress'),
+        tooltip: tooltip,
+        onPressed: stopping ? null : hearer.stop,
+        icon: spinner,
+      );
+    }
+    final percent = share == null ? '' : ' ${(share * 100).round()}%';
+    return Tooltip(
+      message: tooltip,
+      child: FilledButton.tonalIcon(
+        key: const ValueKey('lyrics-hear-progress'),
+        onPressed: stopping ? null : hearer.stop,
+        icon: spinner,
+        label: Text(
+          stopping ? 'Stopping...' : 'Hearing$percent · Stop',
+          style: const TextStyle(fontFeatures: [FontFeature.tabularFigures()]),
         ),
       ),
     );

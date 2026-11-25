@@ -891,6 +891,13 @@ class LyricsController extends ChangeNotifier {
   /// edit; null leaves it to the automatic pick.
   Lyrics? _ownLyrics(String key) => _pickedLyrics(key) ?? _editLyrics(key);
 
+  /// The user's edit of the song shown as it shows, null for none: the
+  /// chooser's own row, never one of [choices].
+  Lyrics? get editLyrics {
+    final key = _shownKey;
+    return key == null ? null : _editLyrics(key);
+  }
+
   /// The user's edit of the song shown, null for none.
   LyricsEdit? get edit {
     final key = _shownKey;
@@ -941,22 +948,28 @@ class LyricsController extends ChangeNotifier {
   /// Keeps [lines] as the user's edit of the song shown and shows it. Its
   /// times are what the user saw, so its own hand offset starts at 0; a
   /// pick of a source gives way (the edit shows first).
-  void saveEdit(List<LyricLine> lines) {
-    final key = _shownKey;
+  ///
+  /// [key] and [basedOn] are the upload and base the editor opened with
+  /// (the song may have moved on since); by default the song shown and
+  /// [editBase].
+  void saveEdit(List<LyricLine> lines, {String? key, String? basedOn}) {
+    final upload = key ?? _shownKey;
     final store = edits;
-    if (key == null || store == null) return;
-    store.saveEdit(key, lines, basedOn: editBase, atMs: _now());
-    _editCache.remove(key);
-    _keepOffset(key, editedSource, 0);
-    if (_pickOf(key) != null) _keepPick(key, null);
+    if (upload == null || store == null) return;
+    final base = key == null ? editBase : basedOn;
+    store.saveEdit(upload, lines, basedOn: base, atMs: _now());
+    _editCache.remove(upload);
+    _keepOffset(upload, editedSource, 0);
+    if (_pickOf(upload) != null) _keepPick(upload, null);
     log?.call('lyrics edit saved, ${lines.length} lines');
-    _showStored(key);
+    if (_shownKey == upload) _showStored(upload);
   }
 
   /// Drops the newest save of the song shown's edit: the save before
   /// shows, or what showed before the edit.
-  void undoLastSave() {
-    final key = _shownKey;
+  /// [key]: the upload saved (the toast's Undo), by default the song shown.
+  void undoLastSave({String? key}) {
+    key ??= _shownKey;
     final store = edits;
     if (key == null || store == null) return;
     store.undoEdit(key);

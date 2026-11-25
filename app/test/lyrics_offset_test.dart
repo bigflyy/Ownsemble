@@ -136,14 +136,19 @@ void main() {
     await tester.pump(const Duration(milliseconds: 400));
   }
 
-  String offsetLabel(WidgetTester tester) => tester
-      .widget<Text>(
-        find.descendant(
-          of: find.byKey(const ValueKey('lyrics-offset')),
-          matching: find.byType(Text),
-        ),
-      )
-      .data!;
+  // With icons only (the heading's rule, I2g) an unmoved timing has no
+  // middle label: it counts as "Timing".
+  String offsetLabel(WidgetTester tester) =>
+      find.byKey(const ValueKey('lyrics-offset')).evaluate().isEmpty
+      ? 'Timing'
+      : tester
+            .widget<Text>(
+              find.descendant(
+                of: find.byKey(const ValueKey('lyrics-offset')),
+                matching: find.byType(Text),
+              ),
+            )
+            .data!;
 
   testWidgets('earlier and later move the lit line, show in the heading and '
       'the preview, are kept per source, and the label resets them (wide, '

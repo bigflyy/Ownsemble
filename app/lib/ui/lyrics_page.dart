@@ -12,6 +12,7 @@ import '../library/track.dart';
 import '../lyrics/heard_lyrics.dart';
 import '../lyrics/lyrics.dart';
 import '../lyrics/lyrics_controller.dart';
+import '../lyrics/lyrics_edit.dart';
 import '../lyrics/lyrics_hearer.dart';
 import '../lyrics/lyrics_sources.dart' show lyricsSourceLabel;
 import 'hear_words_ui.dart';
@@ -19,6 +20,12 @@ import 'theme.dart';
 
 /// Below this width the lines get a smaller size.
 const lyricsNarrowWidth = 640.0;
+
+/// Below this width of the place every Lyrics heading button is an icon
+/// (the heading's rule, user 2026-11-25: words for all buttons or none):
+/// with words, Timing, Fit to recording, Hear the words, Edit and Choose
+/// lyrics need about 700 px beside the title (measured in the shots).
+const lyricsHeadingWordsWidth = 900.0;
 
 /// How long a hand scroll stops the lines from following the song.
 const lyricsHandScrollPause = Duration(seconds: 4);
@@ -37,6 +44,7 @@ class LyricsPage extends StatefulWidget {
     required this.positions,
     required this.seek,
     this.onChoose,
+    this.onWrite,
     this.hearer,
   });
 
@@ -60,6 +68,9 @@ class LyricsPage extends StatefulWidget {
   /// found" message; the place's heading has its own button (a link by the
   /// credit line scrolled away with following lines: shots-41).
   final VoidCallback? onChoose;
+
+  /// Opens the editor empty from the "No lyrics found" message (I2g).
+  final VoidCallback? onWrite;
 
   @override
   State<LyricsPage> createState() => _LyricsPageState();
@@ -123,7 +134,14 @@ class _LyricsPageState extends State<LyricsPage> {
       return Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          HearProgressStrip(hearer: hearer, stage: hearing),
+          HearProgressStrip(
+            hearer: hearer,
+            stage: hearing,
+            again: switch (widget.lyrics.state) {
+              LyricsShown(:final lyrics) => lyrics.source == heardSource,
+              _ => false,
+            },
+          ),
           Expanded(child: content),
         ],
       );
@@ -170,6 +188,13 @@ class _LyricsPageState extends State<LyricsPage> {
               )
             : const SizedBox.shrink();
       case LyricsMissing(:final heard):
+        final write = widget.onWrite == null
+            ? null
+            : OutlinedButton(
+                key: const ValueKey('lyrics-write'),
+                onPressed: widget.onWrite,
+                child: const Text('Write them yourself'),
+              );
         final seeAll = choose == null
             ? null
             : OutlinedButton(
@@ -215,6 +240,7 @@ class _LyricsPageState extends State<LyricsPage> {
           actions: [
             // Hearing again finds no voice where none was found.
             if (hear != null && heard?.outcome != HeardOutcome.noSinging) hear,
+            ?write,
             ?seeAll,
           ],
           note: note,
@@ -241,6 +267,25 @@ class _LyricsPageState extends State<LyricsPage> {
           seek: widget.seek,
           header: Text(
             heardCredit(heard, yours: yours, refreshing: refreshing),
+            key: const ValueKey('lyrics-credit'),
+            style: TextStyle(color: colors.dim2, fontSize: 13),
+          ),
+        );
+      case LyricsShown(:final lyrics) when lyrics.source == editedSource:
+        final fitted = widget.lyrics.isFitted(lyrics);
+        return LyricsLines(
+          lyrics: widget.lyrics.timedOf(lyrics),
+          offsetMs: widget.lyrics.offsetOf(lyrics.source),
+          position: widget.position,
+          positions: widget.positions,
+          seek: widget.seek,
+          header: Text(
+            '${editCredit(widget.lyrics.edit?.basedOn)}'
+            '${fitted
+                ? ', fitted to this recording'
+                : lyrics.timed
+                ? ''
+                : '; words only'}',
             key: const ValueKey('lyrics-credit'),
             style: TextStyle(color: colors.dim2, fontSize: 13),
           ),
@@ -314,6 +359,13 @@ String heardCredit(
     '${heard?.rough ?? false ? '; rough: some words may be wrong' : ''}'
     '${refreshing ? '; asking the sources for lyrics...' : ''}';
 
+/// The credit line over the user's edit (I2g): what it started from.
+String editCredit(String? basedOn) => switch (basedOn) {
+  null => 'Written by you',
+  heardSource => 'Edited by you, from the words the app heard',
+  final source => "Edited by you, from ${lyricsSourceLabel(source)}'s lyrics",
+};
+
 /// The user's moved timing in words (F1): "lines 1.5 s later".
 String lyricsOffsetText(int offsetMs) {
   final seconds = (offsetMs.abs() / 1000).toStringAsFixed(1);
@@ -324,9 +376,17 @@ String lyricsOffsetText(int offsetMs) {
 /// click there goes back to the source's timing), later; each press moves
 /// the lines [lyricsOffsetStepMs], like a player's subtitle delay.
 class LyricsTimingControl extends StatelessWidget {
-  const LyricsTimingControl({super.key, required this.lyrics});
+  const LyricsTimingControl({
+    super.key,
+    required this.lyrics,
+    this.compact = false,
+  });
 
   final LyricsController lyrics;
+
+  /// Icons only (the heading's rule): the middle word "Timing" goes; a
+  /// moved time still shows, as it says how far the lines are moved.
+  final bool compact;
 
   @override
   Widget build(BuildContext context) {
@@ -345,29 +405,30 @@ class LyricsTimingControl extends StatelessWidget {
               : () => lyrics.shiftShown(-lyricsOffsetStepMs),
           icon: const Icon(Icons.remove),
         ),
-        Tooltip(
-          message: offset == 0
-              ? 'Move the lines when they come too early or too late'
-              : "Back to the source's timing",
-          child: TextButton(
-            key: const ValueKey('lyrics-offset'),
-            style: TextButton.styleFrom(
-              minimumSize: const Size(56, 40),
-              padding: const EdgeInsets.symmetric(horizontal: 6),
-              foregroundColor: colors.text,
-              disabledForegroundColor: colors.dim,
-            ),
-            onPressed: offset == 0
-                ? null
-                : () => lyrics.setOffset(lyrics.shownSource!, 0),
-            child: Text(
-              offset == 0 ? 'Timing' : '${offset > 0 ? '+' : '-'}$seconds s',
-              style: const TextStyle(
-                fontFeatures: [FontFeature.tabularFigures()],
+        if (!compact || offset != 0)
+          Tooltip(
+            message: offset == 0
+                ? 'Move the lines when they come too early or too late'
+                : "Back to the source's timing",
+            child: TextButton(
+              key: const ValueKey('lyrics-offset'),
+              style: TextButton.styleFrom(
+                minimumSize: const Size(56, 40),
+                padding: const EdgeInsets.symmetric(horizontal: 6),
+                foregroundColor: colors.text,
+                disabledForegroundColor: colors.dim,
+              ),
+              onPressed: offset == 0
+                  ? null
+                  : () => lyrics.setOffset(lyrics.shownSource!, 0),
+              child: Text(
+                offset == 0 ? 'Timing' : '${offset > 0 ? '+' : '-'}$seconds s',
+                style: const TextStyle(
+                  fontFeatures: [FontFeature.tabularFigures()],
+                ),
               ),
             ),
           ),
-        ),
         IconButton(
           key: const ValueKey('lyrics-later'),
           tooltip: 'Lines later by $step s',

@@ -11,6 +11,7 @@ import '../library/song_filter.dart';
 import '../library/song_version.dart';
 import '../library/track.dart';
 import '../lyrics/lyrics_controller.dart';
+import '../lyrics/lyrics_edit.dart' show editedSource;
 import '../lyrics/heard_lyrics.dart' show heardSource;
 import '../lyrics/lyrics_fitter.dart';
 import '../lyrics/lyrics_hearer.dart';
@@ -37,8 +38,10 @@ import 'filling_icon.dart';
 import 'filter_bar.dart';
 import 'for_you.dart';
 import 'for_you_page.dart';
+import 'hear_words_ui.dart';
 import 'library_controller.dart';
 import 'lyrics_choices_page.dart';
+import 'lyrics_edit_page.dart';
 import 'lyrics_fit_button.dart';
 import 'lyrics_page.dart';
 import 'outside_songs.dart';
@@ -208,6 +211,8 @@ class _LibraryScreenState extends State<LibraryScreen> {
     // Playlists read again after a sync: every playlist place opened
     // takes the new songs (Back to one shows them too).
     widget.playlists?.addListener(_playlistsChanged);
+    // The lyrics editor keeps its song playing while it is open (I2g).
+    library.addListener(_editorViewChanged);
     // A playlist lists every entry, so each can be taken out or moved
     // (plan 08, C4).
     if (widget.playlists != null) library.keepsEveryEntry ??= isPlaylistRef;
@@ -253,6 +258,20 @@ class _LibraryScreenState extends State<LibraryScreen> {
 
   /// Acts on [event]; true when the key was used.
   bool _onKey(KeyEvent event) {
+    final edit = _edit;
+    if (edit != null &&
+        library.view.kind == ViewKind.lyricsEdit &&
+        !_covered &&
+        onLyricsEditKey(
+          edit,
+          event,
+          typing: _typing,
+          songPlaying: _editedSongPlaying(),
+          positionMs: widget.player.position.inMilliseconds,
+          seek: widget.playback.seek,
+        )) {
+      return true;
+    }
     if (_onJumpKey(event)) return true;
     // A held key repeats only for the volume, see _onPlayerKey.
     if (event is KeyRepeatEvent) return _onPlayerKey(event);
@@ -508,6 +527,8 @@ class _LibraryScreenState extends State<LibraryScreen> {
   @override
   void dispose() {
     widget.playlists?.removeListener(_playlistsChanged);
+    library.removeListener(_editorViewChanged);
+    _edit?.dispose();
     FocusManager.instance.removeEarlyKeyEventHandler(_onEarlyKey);
     _searchFocus.removeListener(_endJumpInSearch);
     for (final subscription in _subscriptions) {
@@ -1225,7 +1246,9 @@ class _LibraryScreenState extends State<LibraryScreen> {
                       jump: library.jump,
                       tight: tight,
                       onBack: view.hasBack ? library.goBack : null,
-                      detail: view.kind == ViewKind.versions
+                      detail: view.kind == ViewKind.lyricsEdit && _edit != null
+                          ? lyricsEditDetail(_edit!)
+                          : view.kind == ViewKind.versions
                           ? _versionsDetail()
                           : view.kind == ViewKind.lyrics
                           ? _lyricsDetail()
@@ -1250,20 +1273,43 @@ class _LibraryScreenState extends State<LibraryScreen> {
                                 widget.lyrics!.timedOf(lyrics).timed,
                               _ => false,
                             })
-                          LyricsTimingControl(lyrics: widget.lyrics!),
+                          LyricsTimingControl(
+                            lyrics: widget.lyrics!,
+                            compact: listWidth < lyricsHeadingWordsWidth,
+                          ),
+                        // The heading's rule (user, 2026-11-25): every
+                        // button has its words while all of them fit, else
+                        // all are icons with their words in the tooltip.
                         if (view.kind == ViewKind.lyrics &&
                             widget.lyricsFitter != null)
                           LyricsFitButton(
                             fitter: widget.lyricsFitter!,
-                            // With its label it needs about 170 px more
-                            // than the Timing control and Choose lyrics.
-                            compact: listWidth < lyricsFitLabelWidth,
+                            compact: listWidth < lyricsHeadingWordsWidth,
                             onChoose: library.openLyricsChoices,
+                          ),
+                        if (view.kind == ViewKind.lyrics &&
+                            widget.lyricsHearer != null)
+                          HearHeadingButton(
+                            hearer: widget.lyricsHearer!,
+                            compact: listWidth < lyricsHeadingWordsWidth,
+                          ),
+                        if (view.kind == ViewKind.lyricsEdit && _edit != null)
+                          LyricsEditActions(
+                            session: _edit!,
+                            compact: listWidth < lyricsEditLabelWidth,
+                            onTapping: _setTapping,
+                            onCancel: () => unawaited(_cancelEditor()),
+                            onSave: _saveEditor,
+                          ),
+                        if (view.kind == ViewKind.lyrics &&
+                            widget.lyrics?.track != null)
+                          _lyricsEditButton(
+                            compact: listWidth < lyricsHeadingWordsWidth,
                           ),
                         if (view.kind == ViewKind.lyrics &&
                             widget.lyrics?.track != null)
                           _lyricsChooseButton(
-                            compact: listWidth < lyricsNarrowWidth,
+                            compact: listWidth < lyricsHeadingWordsWidth,
                           ),
                         ?_albumAddAll(view, tight: tight),
                         ?_listActions(
@@ -1337,7 +1383,20 @@ class _LibraryScreenState extends State<LibraryScreen> {
                       filters: filters,
                     ),
                   Expanded(
-                    child: view.kind == ViewKind.lyrics && widget.lyrics != null
+                    child: view.kind == ViewKind.lyricsEdit && _edit != null
+                        ? LyricsEditPage(
+                            session: _edit!,
+                            position: () => widget.player.position,
+                            positions: () => widget.player.isReady
+                                ? widget.player.positions
+                                : null,
+                            seek: widget.playback.seek,
+                            songPlaying: _editedSongPlaying,
+                            onPlaySong: () => unawaited(
+                              widget.playback.playFrom([_edit!.track], 0),
+                            ),
+                          )
+                        : view.kind == ViewKind.lyrics && widget.lyrics != null
                         ? LyricsPage(
                             lyrics: widget.lyrics!,
                             current: () => widget.player.current,
@@ -1348,6 +1407,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
                                 : null,
                             seek: widget.playback.seek,
                             onChoose: library.openLyricsChoices,
+                            onWrite: _openEditor,
                             hearer: widget.lyricsHearer,
                           )
                         : view.kind == ViewKind.lyricsChoices &&
@@ -1493,6 +1553,14 @@ class _LibraryScreenState extends State<LibraryScreen> {
           '${lyrics.heard?.rough ?? false ? ', rough' : ''}'
           '${offset == 0 ? '' : ', ${lyricsOffsetText(offset)}'}';
     }
+    if (source == editedSource) {
+      final offset = lyrics.timedOf(state.lyrics).timed
+          ? lyrics.shownOffset
+          : 0;
+      return '$song · edited by you'
+          '${lyrics.isFitted(state.lyrics) ? ', fitted to this recording' : ''}'
+          '${offset == 0 ? '' : ', ${lyricsOffsetText(offset)}'}';
+    }
     // As shown: plain words fitted to the recording are timed (H2).
     final offset = lyrics.timedOf(state.lyrics).timed ? lyrics.shownOffset : 0;
     final fit = lyrics.fitFor(state.lyrics);
@@ -1543,7 +1611,9 @@ class _LibraryScreenState extends State<LibraryScreen> {
     final song = track.artist.isEmpty
         ? track.title
         : '${track.title} - ${track.artist}';
-    final shows = shown?.lyrics == null
+    final shows = source == editedSource
+        ? ' Shows your edit: it comes first until you pick other lyrics.'
+        : shown?.lyrics == null
         ? asking > 0
               ? ''
               : ' No source has lyrics for this song.'
@@ -1558,6 +1628,286 @@ class _LibraryScreenState extends State<LibraryScreen> {
         ? ''
         : '  Asking ${asking == 1 ? '1 source' : '$asking sources'}...';
     return '$song.$shows$status';
+  }
+
+  /// The lyrics editor's session (I2g): kept while the editor is open, and
+  /// after leaving it by Back or another place with changes not saved (a
+  /// draft: Edit on the same upload goes on from it).
+  LyricsEditSession? _edit;
+
+  /// Whether the editor's view holds the song (PlaybackController
+  /// .holdSong) now.
+  bool _holdingSong = false;
+
+  /// The editor's view opened or closed: the edited song repeats only
+  /// while it shows, and a slower speed ends with it.
+  void _editorViewChanged() {
+    final editing = library.view.kind == ViewKind.lyricsEdit && _edit != null;
+    if (editing == _holdingSong) return;
+    _holdingSong = editing;
+    widget.playback.holdSong = editing;
+    if (!editing) {
+      final edit = _edit;
+      edit?.editor.stopTapping();
+      if (_rate != 1) {
+        _rate = 1;
+        unawaited(widget.player.setRate(1));
+      }
+      // Nothing changed: nothing to keep as a draft.
+      if (edit != null && !edit.changed) {
+        _edit = null;
+        edit.dispose();
+      } else if (edit != null) {
+        ScaffoldMessenger.of(context)
+          ..hideCurrentSnackBar()
+          ..showSnackBar(
+            const SnackBar(
+              key: ValueKey('lyrics-edit-draft'),
+              content: Text(
+                'Your lyrics changes are kept: Edit goes on from them.',
+              ),
+            ),
+          );
+      }
+    }
+  }
+
+  /// Whether the song being edited is the one playing (its upload too).
+  bool _editedSongPlaying() {
+    final edit = _edit;
+    final current = widget.player.current;
+    final lyrics = widget.lyrics;
+    if (edit == null || current == null || lyrics == null) return false;
+    return current.id == edit.track.id &&
+        lyrics.routeKeyOf(current) == edit.uploadKey;
+  }
+
+  /// Opens the editor on what the Lyrics place shows (Edit), or empty
+  /// (Write); a draft of the same upload goes on.
+  void _openEditor() {
+    final lyrics = widget.lyrics;
+    final key = lyrics?.shownKey;
+    final track = lyrics?.track;
+    if (lyrics == null || key == null || track == null) return;
+    final draft = _edit;
+    if (draft == null || draft.uploadKey != key) {
+      draft?.dispose();
+      _edit = LyricsEditSession(
+        start: lyrics.editStartLines(),
+        uploadKey: key,
+        basedOn: lyrics.editBase,
+        track: track,
+      )..addListener(_editSessionChanged);
+    }
+    library.openLyricsEdit();
+    _editorViewChanged();
+  }
+
+  /// Tap to time and Slower set the play speed.
+  void _editSessionChanged() {
+    final edit = _edit;
+    if (edit == null || !_holdingSong) return;
+    final rate = edit.editor.tapping && edit.slower ? tapSlowRate : 1.0;
+    if (rate != _rate) {
+      _rate = rate;
+      unawaited(widget.player.setRate(rate));
+    }
+  }
+
+  double _rate = 1;
+
+  void _setTapping(bool on) {
+    final edit = _edit;
+    if (edit == null) return;
+    if (on) {
+      edit.editor.startTapping(widget.player.position.inMilliseconds);
+    } else {
+      edit.editor.stopTapping();
+    }
+  }
+
+  void _closeEditor() {
+    final edit = _edit;
+    _edit = null;
+    library.goBack();
+    _editorViewChanged();
+    edit?.dispose();
+  }
+
+  void _saveEditor() {
+    final edit = _edit;
+    final lyrics = widget.lyrics;
+    if (edit == null || lyrics == null) return;
+    final changed = edit.changed;
+    final lines = edit.finish();
+    if (!changed) {
+      _closeEditor();
+      return;
+    }
+    if (lines.every((line) => line.isGap)) {
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+          const SnackBar(
+            content: Text(
+              'The lyrics are empty. Cancel to keep them as they were.',
+            ),
+          ),
+        );
+      return;
+    }
+    lyrics.saveEdit(lines, key: edit.uploadKey, basedOn: edit.basedOn);
+    final key = edit.uploadKey;
+    _closeEditor();
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        SnackBar(
+          key: const ValueKey('lyrics-edit-saved'),
+          content: const Text('Your edit is saved.'),
+          action: SnackBarAction(
+            label: 'Undo',
+            onPressed: () => lyrics.undoLastSave(key: key),
+          ),
+        ),
+      );
+  }
+
+  Future<void> _cancelEditor() async {
+    final edit = _edit;
+    if (edit == null) return;
+    if (edit.changed) {
+      final drop = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('Drop your changes?'),
+          content: const Text(
+            'The lyrics stay as they were before you opened the editor.',
+          ),
+          actions: [
+            TextButton(
+              key: const ValueKey('lyrics-edit-keep'),
+              onPressed: () => Navigator.of(context).pop(false),
+              child: const Text('Keep editing'),
+            ),
+            FilledButton(
+              key: const ValueKey('lyrics-edit-drop'),
+              onPressed: () => Navigator.of(context).pop(true),
+              child: const Text('Drop changes'),
+            ),
+          ],
+        ),
+      );
+      if (drop != true || !mounted || _edit != edit) return;
+    }
+    _closeEditor();
+  }
+
+  /// Edit (or Write with nothing on show) in the Lyrics heading (I2g);
+  /// with the user's edit on show, "Edited" and its menu: Edit again, Undo
+  /// the last save, Back to the lyrics it started from.
+  Widget _lyricsEditButton({required bool compact}) {
+    final lyrics = widget.lyrics!;
+    final state = lyrics.state;
+    final shown = state is LyricsShown;
+    final edit = lyrics.edit;
+    if (edit != null && shown && state.lyrics.source == editedSource) {
+      final base = edit.basedOn;
+      final upload = lyrics.shownKey;
+      final button = compact
+          ? const IgnorePointer(
+              child: IconButton(
+                key: ValueKey('lyrics-edited-button'),
+                isSelected: true,
+                onPressed: _noAction,
+                icon: Icon(Icons.edit),
+              ),
+            )
+          : IgnorePointer(
+              child: FilledButton.tonalIcon(
+                key: const ValueKey('lyrics-edited-button'),
+                onPressed: () {},
+                icon: const Icon(Icons.edit, size: 20),
+                label: const Text('Edited'),
+              ),
+            );
+      return PopupMenuButton<void>(
+        key: const ValueKey('lyrics-edited'),
+        tooltip: 'Your edit of these lyrics',
+        itemBuilder: (context) => [
+          PopupMenuItem<void>(
+            key: const ValueKey('lyrics-edit-again'),
+            onTap: _openEditor,
+            child: const Text('Edit again'),
+          ),
+          PopupMenuItem<void>(
+            key: const ValueKey('lyrics-undo-save'),
+            onTap: () => lyrics.undoLastSave(key: upload),
+            child: _menuText(
+              'Undo the last save',
+              '${_savedAgo(edit.savedAtMs)}; '
+                  '${edit.saves} ${edit.saves == 1 ? 'save' : 'saves'} kept',
+            ),
+          ),
+          if (base != null)
+            PopupMenuItem<void>(
+              key: const ValueKey('lyrics-show-original'),
+              enabled: lyrics.canShowOriginal,
+              onTap: lyrics.showOriginal,
+              child: _menuText(
+                base == heardSource
+                    ? 'Back to the heard words'
+                    : "Back to ${lyricsSourceLabel(base)}'s lyrics",
+                'Your edit stays in Choose lyrics',
+              ),
+            ),
+        ],
+        child: button,
+      );
+    }
+    final label = shown ? 'Edit' : 'Write';
+    return compact
+        ? IconButton(
+            key: const ValueKey('lyrics-edit'),
+            tooltip: shown ? 'Edit these lyrics' : 'Write the lyrics',
+            onPressed: _openEditor,
+            icon: const Icon(Icons.edit_outlined),
+          )
+        : TextButton.icon(
+            key: const ValueKey('lyrics-edit'),
+            onPressed: _openEditor,
+            icon: const Icon(Icons.edit_outlined, size: 20),
+            label: Text(label),
+          );
+  }
+
+  static void _noAction() {}
+
+  /// A menu item's words with a smaller line under them.
+  Widget _menuText(String text, String under) => Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    mainAxisSize: MainAxisSize.min,
+    children: [
+      Text(text),
+      Text(
+        under,
+        style: TextStyle(fontSize: 12, color: OwnColors.of(context).dim2),
+      ),
+    ],
+  );
+
+  /// When an edit was saved, in words: "saved just now", "saved 5 min ago",
+  /// "saved on 2026-11-25".
+  static String _savedAgo(int savedAtMs) {
+    final ago = DateTime.now().millisecondsSinceEpoch - savedAtMs;
+    final minutes = ago ~/ 60000;
+    if (minutes < 1) return 'saved just now';
+    if (minutes < 60) return 'saved $minutes min ago';
+    final hours = minutes ~/ 60;
+    if (hours < 24) return 'saved $hours h ago';
+    final day = DateTime.fromMillisecondsSinceEpoch(savedAtMs);
+    return 'saved on ${day.year}-${day.month.toString().padLeft(2, '0')}-'
+        '${day.day.toString().padLeft(2, '0')}';
   }
 
   /// The Lyrics place's button that opens the chooser of every source's
@@ -1748,6 +2098,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
     // The song is named in the line under it: "Lyrics of <title>" left
     // "Lyrics o..." in the smallest window (shots-41).
     ViewKind.lyricsChoices => 'Choose lyrics',
+    ViewKind.lyricsEdit => 'Editing lyrics',
     ViewKind.yearReport => 'Your ${view.year}',
     ViewKind.album => view.album?.title ?? 'Album',
     ViewKind.versions =>

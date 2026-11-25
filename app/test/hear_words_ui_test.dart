@@ -16,9 +16,11 @@ import 'package:ownsemble/library/track.dart';
 import 'package:ownsemble/lyrics/gigaam_job.dart';
 import 'package:ownsemble/lyrics/hear_words.dart';
 import 'package:ownsemble/lyrics/heard_lyrics.dart';
+import 'package:ownsemble/lyrics/lyrics.dart';
 import 'package:ownsemble/lyrics/lyrics_controller.dart';
 import 'package:ownsemble/lyrics/lyrics_hearer.dart';
 import 'package:ownsemble/lyrics/vocals_job.dart';
+import 'package:ownsemble/ui/hear_words_ui.dart';
 import 'package:ownsemble/ui/lyrics_choices_page.dart';
 import 'package:ownsemble/ui/lyrics_page.dart';
 import 'package:ownsemble/ui/theme.dart';
@@ -439,5 +441,66 @@ void main() {
     await settle(tester);
     expect(store.heardLyricsOf('1_0'), isNull);
     expect(find.byKey(const ValueKey('lyrics-choice-heard')), findsNothing);
+  });
+
+  testWidgets('the heading button hears a song with found lyrics; they stay '
+      'on show and the heard words go to the chooser (I2g)', (tester) async {
+    store.saveLyrics(
+      'vk',
+      '1_0',
+      const Lyrics(source: 'vk', lines: [LyricLine('found words', startMs: 1)]),
+    );
+    final hear = hearer();
+    tester.view.physicalSize = const Size(1200, 700);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: buildTheme(OwnColors.dark),
+        home: Scaffold(
+          body: Column(
+            children: [
+              HearHeadingButton(hearer: hear, compact: false),
+              Expanded(
+                child: LyricsPage(
+                  lyrics: lyrics,
+                  current: () => playing,
+                  currentStream: songs.stream,
+                  position: () => Duration.zero,
+                  positions: () => null,
+                  seek: (_) async {},
+                  hearer: hear,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+    await settle(tester);
+    expect(find.text('Hear the words'), findsOneWidget);
+    expect(find.text('found words'), findsOneWidget);
+    runner.hold = (job) => job is GigaamJob;
+    await tester.runAsync(() async {
+      await tester.tap(find.byKey(const ValueKey('lyrics-hear')));
+      for (var i = 0; i < 50 && runner.jobs.length < 2; i++) {
+        await Future<void>.delayed(const Duration(milliseconds: 5));
+      }
+    });
+    await settle(tester);
+    expect(find.byKey(const ValueKey('lyrics-hear-progress')), findsOneWidget);
+    expect(find.textContaining('Hearing the words:'), findsOneWidget);
+    expect(find.text('found words'), findsOneWidget, reason: 'still shown');
+    await tester.runAsync(() async {
+      final gigaam = runner.jobs.last;
+      gigaam.finish(runner.answer(gigaam.job));
+      for (var i = 0; i < 50 && hear.job != null; i++) {
+        await Future<void>.delayed(const Duration(milliseconds: 5));
+      }
+    });
+    await settle(tester);
+    expect(lyrics.shownSource, 'vk', reason: 'found lyrics stay on show');
+    expect(lyrics.heard, isNotNull);
+    expect(find.text('Hear again'), findsOneWidget);
   });
 }
