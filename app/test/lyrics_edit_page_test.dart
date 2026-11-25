@@ -307,4 +307,78 @@ void main() {
     expect(store.editOf('1_1'), isNull);
     expect(find.byKey(const ValueKey('lyrics-choice-edited')), findsNothing);
   });
+
+  // Plan 10 I2g5, from the user's first try (session 57): a line below, a
+  // music break that says what it is, and the keys shown and listed.
+  Future<void> openMenu(WidgetTester tester, int row, String item) async {
+    await tester.tap(find.byKey(ValueKey('lyrics-edit-menu-$row')));
+    await settle(tester);
+    await tester.tap(find.byKey(ValueKey('lyrics-edit-$item')));
+    await settle(tester);
+  }
+
+  testWidgets('The line menu inserts a line below and a timed music break', (
+    tester,
+  ) async {
+    await pumpEditor(tester, const Size(1400, 900));
+    await tester.tap(find.byKey(const ValueKey('lyrics-edit-menu-1')));
+    await settle(tester);
+    expect(
+      find.text('Make it a music break'),
+      findsNothing,
+      reason: 'it only cleared the words',
+    );
+    await tester.tapAt(Offset.zero);
+    await settle(tester);
+
+    await openMenu(tester, 1, 'insert-below');
+    expect(fieldText(tester, 1), 'Second line here');
+    expect(fieldText(tester, 2), '', reason: 'the new row is below');
+    expect(fieldText(tester, 3), 'Third line');
+    expect(find.text('(gap between verses)'), findsOneWidget);
+    expect(find.text('a time makes it a music break'), findsOneWidget);
+
+    // The song is at 4.2 s, past row 1's start: the break starts now.
+    await openMenu(tester, 1, 'insert-break');
+    expect(fieldText(tester, 2), '');
+    expect(find.text('0:04.2'), findsOneWidget);
+    expect(find.text('(music break)'), findsOneWidget);
+    await openMenu(tester, 0, 'insert-above');
+    expect(fieldText(tester, 0), '');
+    expect(fieldText(tester, 1), 'Первая строка');
+  });
+
+  testWidgets('Ctrl+S saves, also while typing in a line', (tester) async {
+    await pumpEditor(tester, const Size(1400, 900));
+    await tester.enterText(field(1), 'Saved by keys');
+    await settle(tester);
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyS);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+    await settle(tester);
+    expect(library.view.kind, ViewKind.lyrics);
+    expect(store.editOf('1_1')!.lines[1].text, 'Saved by keys');
+    expect(playback.shuffle, isFalse, reason: 'not Shuffle here');
+    await tester.pump(const Duration(seconds: 5));
+  });
+
+  testWidgets('Tap to time shows its keys; F1 lists the editor keys', (
+    tester,
+  ) async {
+    await pumpEditor(tester, const Size(1400, 900));
+    await tester.tap(find.byKey(const ValueKey('lyrics-edit-tap')));
+    await settle(tester);
+    for (final words in const [
+      'line starts now',
+      'back a line',
+      'skip a line',
+      'play 3 s back',
+    ]) {
+      expect(find.text(words), findsOneWidget, reason: words);
+    }
+    await tester.sendKeyEvent(LogicalKeyboardKey.f1);
+    await settle(tester);
+    expect(find.text('In the lyrics editor'), findsOneWidget);
+    expect(find.text('Save the edit'), findsOneWidget);
+  });
 }

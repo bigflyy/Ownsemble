@@ -581,6 +581,9 @@ void main() {
         'tapping',
         'edittext',
         'editrow',
+        'editbreaks',
+        'editmenu',
+        'editkeys',
       };
       if (editSteps.contains(step)) {
         // I2g: an edit of the shown lines: one fixed, one added without a
@@ -595,6 +598,10 @@ void main() {
             else
               line,
             if (i == 4) const LyricLine('Строка, которую я добавил сам'),
+            // I2g5: a gap between verses (no time) and a music break.
+            if (i == 1 && step == 'editbreaks') const LyricLine(''),
+            if (i == 5 && step == 'editbreaks')
+              LyricLine('', startMs: line.startMs! + 2500),
           ],
         ]);
         await tester.pump(const Duration(milliseconds: 600));
@@ -605,6 +612,9 @@ void main() {
         'editor',
         'tapping',
         'edittext',
+        'editbreaks',
+        'editmenu',
+        'editkeys',
       }.contains(step)) {
         await tester.tap(find.byKey(const ValueKey('lyrics-edited')));
         await settle();
@@ -623,6 +633,14 @@ void main() {
       }
       if (step == 'edittext') {
         await tester.tap(find.byKey(const ValueKey('lyrics-edit-text')));
+        await settle();
+      }
+      if (step == 'editmenu') {
+        await tester.tap(find.byKey(const ValueKey('lyrics-edit-menu-2')));
+        await settle();
+      }
+      if (step == 'editkeys') {
+        await tester.sendKeyEvent(LogicalKeyboardKey.f1);
         await settle();
       }
       if (step == 'editrow') {
@@ -739,6 +757,13 @@ void main() {
     ('edittext', true, const Size(1440, 900)),
     ('edittext', false, const Size(760, 900)),
     ('editrow', true, const Size(1440, 900)),
+    // I2g5: empty rows say what they are, the line menu, the keys.
+    ('editbreaks', true, const Size(1440, 900)),
+    ('editbreaks', false, const Size(480, 800)),
+    ('editmenu', true, const Size(1440, 900)),
+    ('editmenu', false, const Size(480, 800)),
+    ('editkeys', true, const Size(1440, 900)),
+    ('editkeys', false, const Size(480, 800)),
     ('none', false, const Size(760, 900)),
   ]) {
     final width = size.width < 600

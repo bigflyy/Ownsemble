@@ -28,6 +28,14 @@ const lyricsEditLabelWidth = 900.0;
 /// "Slower" plays at this speed while tapping times.
 const tapSlowRate = 0.75;
 
+/// The keys of Tap to time as its bar shows them (mockup board 2).
+const tapKeys = <(String key, String words)>[
+  ('Space', 'line starts now'),
+  ('←', 'back a line'),
+  ('↓', 'skip a line'),
+  ('R', 'play 3 s back'),
+];
+
 /// One opening of the editor: its working copy, the upload and base it is
 /// for, and the place's own switches (text mode, slower).
 class LyricsEditSession extends ChangeNotifier {
@@ -106,7 +114,9 @@ class LyricsEditSession extends ChangeNotifier {
 /// before the focus tree): in Tap to time Space times the next line, Left
 /// goes back a line, Down skips one and R plays 3 s back; Ctrl+Z and Ctrl+Y
 /// undo and redo outside a text field (inside one the field's own undo is
-/// overridden, see [LyricsEditPage]). True when the key was used.
+/// overridden, see [LyricsEditPage]); Ctrl+S saves, also while typing (in
+/// the editor it is Save, as in any editor, not Shuffle). True when the key
+/// was used.
 bool onLyricsEditKey(
   LyricsEditSession session,
   KeyEvent event, {
@@ -114,10 +124,16 @@ bool onLyricsEditKey(
   required bool songPlaying,
   required int positionMs,
   required Future<void> Function(Duration to) seek,
+  required VoidCallback onSave,
 }) {
   if (event is! KeyDownEvent) return false;
   final editor = session.editor;
   final keyboard = HardwareKeyboard.instance;
+  if (keyboard.isControlPressed &&
+      event.physicalKey == PhysicalKeyboardKey.keyS) {
+    onSave();
+    return true;
+  }
   if (keyboard.isControlPressed && !typing) {
     if (event.physicalKey == PhysicalKeyboardKey.keyZ) {
       keyboard.isShiftPressed ? editor.redo() : editor.undo();
@@ -525,11 +541,12 @@ class _LyricsEditPageState extends State<LyricsEditPage> {
                   context,
                   editor.tapping
                       ? 'Tap to time: press Space the moment the marked line '
-                            'starts. Left: back a line, Down: skip one, R: play '
-                            '3 s back.'
+                            'starts. Empty lines get a time too: there the '
+                            'music plays without words.'
                       : 'Click a time to play from there. Enter splits a '
-                            'line, Backspace at its start joins it to the line '
-                            'above. Ctrl+Z undoes.',
+                            'line (at its end: a new line below), Backspace at '
+                            'its start joins it to the line above. Ctrl+Z '
+                            'undoes, Ctrl+S saves, F1 lists the keys.',
                   key: const ValueKey('lyrics-edit-help'),
                 ),
         ),
@@ -579,6 +596,12 @@ class _LyricsEditPageState extends State<LyricsEditPage> {
     final noteText = switch (note) {
       EditTimeNote.none => 'no time: lit with the line above',
       EditTimeNote.early => 'earlier than the line above',
+      // In timed words an empty row without a time is only a gap; with
+      // one the words go dark there (user, session 57: the break was not
+      // obvious).
+      EditTimeNote.fine
+          when line.isBreak && line.startMs == null && editor.anyStart =>
+        'a time makes it a music break',
       EditTimeNote.fine => null,
     };
     final noteColor = note == EditTimeNote.early
@@ -721,6 +744,7 @@ class _LyricsEditPageState extends State<LyricsEditPage> {
                 const PopupMenuDivider(),
               ],
               PopupMenuItem<void>(
+                key: const ValueKey('lyrics-edit-insert-above'),
                 onTap: () {
                   final at = editor.insertAt(index);
                   _focusRow(editor.lines[at].id, 0);
@@ -728,9 +752,29 @@ class _LyricsEditPageState extends State<LyricsEditPage> {
                 child: const Text('Insert a line above'),
               ),
               PopupMenuItem<void>(
-                enabled: !line.isBreak,
-                onTap: () => editor.makeBreak(index),
-                child: const Text('Make it a music break'),
+                key: const ValueKey('lyrics-edit-insert-below'),
+                onTap: () {
+                  final at = editor.insertAt(index + 1);
+                  _focusRow(editor.lines[at].id, 0);
+                },
+                child: const Text('Insert a line below'),
+              ),
+              // A music break is an empty row with a time: the words go
+              // dark there. It starts now when this song plays past the
+              // line; else it waits for a time (now, a tap).
+              PopupMenuItem<void>(
+                key: const ValueKey('lyrics-edit-insert-break'),
+                onTap: () {
+                  final now = _positionMs;
+                  final start = line.startMs;
+                  editor.insertAt(
+                    index + 1,
+                    startMs: playing && (start == null || now > start)
+                        ? now
+                        : null,
+                  );
+                },
+                child: const Text('Insert a music break below'),
               ),
               PopupMenuItem<void>(
                 enabled: line.startMs != null,
@@ -784,7 +828,14 @@ class _LyricsEditPageState extends State<LyricsEditPage> {
           isDense: true,
           border: InputBorder.none,
           contentPadding: const EdgeInsets.symmetric(vertical: 10),
-          hintText: line.startMs != null ? '(music, no words)' : '(empty line)',
+          // An empty row says which it is: a music break has a time; one
+          // without is a gap between verses (its note says a time makes it
+          // a break).
+          hintText: line.text.isNotEmpty
+              ? null
+              : line.startMs != null
+              ? '(music break)'
+              : '(gap between verses)',
           hintStyle: TextStyle(
             color: colors.dim2,
             fontStyle: FontStyle.italic,
@@ -800,34 +851,71 @@ class _LyricsEditPageState extends State<LyricsEditPage> {
     final session = widget.session;
     return Padding(
       padding: EdgeInsets.fromLTRB(narrow ? 16 : 48, 8, 16, 14),
-      child: Wrap(
-        spacing: 16,
-        runSpacing: 8,
-        crossAxisAlignment: WrapCrossAlignment.center,
+      // The buttons, then the keys on their own line (the side panel
+      // leaves too little width for both on one).
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
         children: [
-          FilledButton.icon(
-            key: const ValueKey('lyrics-edit-tap-now'),
-            style: FilledButton.styleFrom(minimumSize: const Size(120, 52)),
-            onPressed: playing && _editor.nextTap < _editor.lines.length
-                ? () => _editor.tap(_positionMs)
-                : null,
-            icon: const Icon(Icons.touch_app),
-            label: const Text('Tap'),
+          Wrap(
+            spacing: 12,
+            runSpacing: 8,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            children: [
+              FilledButton.icon(
+                key: const ValueKey('lyrics-edit-tap-now'),
+                style: FilledButton.styleFrom(minimumSize: const Size(120, 52)),
+                onPressed: playing && _editor.nextTap < _editor.lines.length
+                    ? () => _editor.tap(_positionMs)
+                    : null,
+                icon: const Icon(Icons.touch_app),
+                label: const Text('Tap'),
+              ),
+              FilterChip(
+                key: const ValueKey('lyrics-edit-slower'),
+                label: const Text('Slower 0.75x'),
+                selected: session.slower,
+                onSelected: session.setSlower,
+              ),
+            ],
           ),
-          FilterChip(
-            key: const ValueKey('lyrics-edit-slower'),
-            label: const Text('Slower 0.75x'),
-            selected: session.slower,
-            onSelected: session.setSlower,
-          ),
-          _caption(
-            context,
-            _editor.nextTap >= _editor.lines.length
-                ? 'Every line is timed. Done? Switch Tap to time off.'
-                : 'Space: the marked line starts now',
-          ),
+          const SizedBox(height: 10),
+          if (_editor.nextTap >= _editor.lines.length)
+            _caption(
+              context,
+              'Every line is timed. Done? Switch Tap to time off.',
+            )
+          else
+            Wrap(
+              spacing: 14,
+              runSpacing: 6,
+              children: [
+                for (final (key, words) in tapKeys)
+                  _keyHint(context, key, words),
+              ],
+            ),
         ],
       ),
+    );
+  }
+
+  /// One key and what it does, as on the mockup: the key in a box.
+  Widget _keyHint(BuildContext context, String key, String words) {
+    final colors = OwnColors.of(context);
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+          decoration: BoxDecoration(
+            border: Border.all(color: colors.dim2),
+            borderRadius: BorderRadius.circular(5),
+          ),
+          child: Text(key, style: TextStyle(color: colors.dim, fontSize: 12)),
+        ),
+        const SizedBox(width: 6),
+        _caption(context, words),
+      ],
     );
   }
 

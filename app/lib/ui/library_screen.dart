@@ -269,6 +269,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
           songPlaying: _editedSongPlaying(),
           positionMs: widget.player.position.inMilliseconds,
           seek: widget.playback.seek,
+          onSave: _saveEditor,
         )) {
       return true;
     }
@@ -302,7 +303,12 @@ class _LibraryScreenState extends State<LibraryScreen> {
       return true;
     }
     if (key == LogicalKeyboardKey.f1 && !_covered) {
-      unawaited(showShortcutsHelp(context));
+      unawaited(
+        showShortcutsHelp(
+          context,
+          editing: library.view.kind == ViewKind.lyricsEdit,
+        ),
+      );
       return true;
     }
     // Media keys of keyboards and headsets.
@@ -1147,7 +1153,10 @@ class _LibraryScreenState extends State<LibraryScreen> {
               IconButton(
                 key: const ValueKey('keyboard-help'),
                 tooltip: 'Keyboard shortcuts (F1)',
-                onPressed: () => showShortcutsHelp(context),
+                onPressed: () => showShortcutsHelp(
+                  context,
+                  editing: library.view.kind == ViewKind.lyricsEdit,
+                ),
                 icon: const Icon(Icons.keyboard_outlined),
               ),
               IconButton(

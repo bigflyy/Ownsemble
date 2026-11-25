@@ -166,22 +166,18 @@ class LyricsEditor extends ChangeNotifier {
   }
 
   /// A new empty row above [index] (at the end for [index] == length),
-  /// without a time. Returns its index.
-  int insertAt(int index) {
+  /// one undo step. Without [startMs] it is a gap between verses; with one
+  /// it is a music break (the words go dark there). Returns its index.
+  int insertAt(int index, {int? startMs}) {
     final at = index.clamp(0, _lines.length);
-    _apply([..._lines]..insert(at, EditLine(_nextId++, '', null)));
+    final start = startMs == null ? null : math.max(0, startMs);
+    _apply([..._lines]..insert(at, EditLine(_nextId++, '', start)));
     return at;
   }
 
   void delete(int index) {
     if (index < 0 || index >= _lines.length) return;
     _apply([..._lines]..removeAt(index));
-  }
-
-  /// Makes row [index] a music break: no words, its time kept.
-  void makeBreak(int index) {
-    if (index < 0 || index >= _lines.length) return;
-    _apply([..._lines]..[index] = _lines[index].withText(''));
   }
 
   /// Sets row [index]'s start ("now", a tap); null takes the time away.
@@ -204,7 +200,7 @@ class LyricsEditor extends ChangeNotifier {
     final line = _lines[index];
     final start = line.startMs;
     if (start == null) {
-      return line.isBreak || !_anyStart ? EditTimeNote.fine : EditTimeNote.none;
+      return line.isBreak || !anyStart ? EditTimeNote.fine : EditTimeNote.none;
     }
     for (var i = index - 1; i >= 0; i--) {
       final above = _lines[i].startMs;
@@ -214,8 +210,8 @@ class LyricsEditor extends ChangeNotifier {
   }
 
   /// Whether any row has a time: without one the words are plain, and no
-  /// row is missing a time.
-  bool get _anyStart => _lines.any((line) => line.startMs != null);
+  /// row is missing a time (nor can an empty row be a music break).
+  bool get anyStart => _lines.any((line) => line.startMs != null);
 
   // Tap to time.
 

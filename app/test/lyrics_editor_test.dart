@@ -66,19 +66,21 @@ void main() {
     expect(editor.joinUp(0), -1, reason: 'nothing above the first row');
   });
 
-  test('insert, break, delete and nudges, each undoable', () {
+  test('insert, a timed music break, delete and nudges, each undoable', () {
     final editor = LyricsEditor(start);
     expect(editor.insertAt(1), 1);
     expect(editor.lines[1].startMs, isNull);
-    editor.makeBreak(0);
-    expect(editor.lines[0].text, '');
-    expect(editor.lines[0].startMs, 12400);
+    // A music break is an empty row with a time, inserted as one step.
+    expect(editor.insertAt(3, startMs: 20000), 3);
+    expect(editor.lines[3].text, '');
+    expect(editor.lines[3].startMs, 20000);
+    expect(editor.lines[3].isBreak, isTrue);
     editor.nudge(2, -editNudgeMs);
     expect(editor.lines[2].startMs, 16000);
     editor.nudge(1, editNudgeMs);
     expect(editor.lines[1].startMs, isNull, reason: 'no time to move');
     editor.delete(1);
-    expect(editor.lines.length, start.length);
+    expect(editor.lines.length, start.length + 1);
     editor
       ..undo()
       ..undo()
