@@ -230,7 +230,17 @@ class SttWorker implements JobRunner {
           task._end();
           return;
         }
-        await _start();
+        try {
+          await _start();
+        } on Object catch (error) {
+          // The isolate would not start, or ended before it was ready: the
+          // job fails (a pending one would keep Stop waiting for good;
+          // Codex review of I2f), and the next job tries a new isolate.
+          _starting = null;
+          task._result.completeError(WorkerJobError('no worker: $error'));
+          task._end();
+          return;
+        }
         _tasks[id] = (task, job.name, Stopwatch()..start());
         try {
           _toWorker!.send([id, job, task._flag.address]);
@@ -252,7 +262,7 @@ class SttWorker implements JobRunner {
   Future<void> _start() => _starting ??= () async {
     final port = ReceivePort();
     _fromWorker = port;
-    final ready = Completer<SendPort>();
+    final ready = _ready = Completer<SendPort>();
     port.listen((message) {
       if (message is SendPort) {
         ready.complete(message);
@@ -276,8 +286,15 @@ class SttWorker implements JobRunner {
     _toWorker = await ready.future;
   }();
 
+  /// The start's wait for the isolate's port.
+  Completer<SendPort>? _ready;
+
   /// Fails every running job and lets the next job start a new isolate.
   void _lost(String reason) {
+    final ready = _ready;
+    if (ready != null && !ready.isCompleted) {
+      ready.completeError(StateError(reason));
+    }
     for (final (task, _, _) in _tasks.values) {
       task._result.completeError(WorkerJobError(reason));
       task._end();
