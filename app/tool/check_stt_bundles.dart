@@ -9,7 +9,8 @@
 //
 //  --stop-after-mb N  stops the download after N MB of a bundle (an
 //                     interrupt); run again without it to resume.
-//  --only NAME        only the bundle NAME (hear-words or whisper-turbo).
+//  --only NAME        only the bundle NAME (hear-words, whisper-turbo or
+//                     hear-gpu).
 //  --verify           reads every file and compares the hashes.
 //  --dlls-only DIR    downloads only the whisper.cpp files of the Whisper
 //                     bundle into DIR/whisper.cpp (each checked by its
@@ -62,7 +63,7 @@ Future<void> main(List<String> args) async {
   final stopAfter = int.tryParse(valueOf('--stop-after-mb') ?? '');
   final only = valueOf('--only');
   final bundles = [
-    for (final bundle in [hearWordsBundle, whisperBundle])
+    for (final bundle in [hearWordsBundle, whisperBundle, hearGpuBundle])
       if (only == null || bundle.name == only) bundle,
   ];
   final loadOnly = args.contains('--load-whisper') && !args.contains('--get');

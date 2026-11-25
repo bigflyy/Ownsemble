@@ -14,7 +14,7 @@ import 'package:ffi/ffi.dart';
 import 'package:path/path.dart' as p;
 
 /// The bridge's OW_BRIDGE_VERSION this binding is written for.
-const _bridgeVersion = 2;
+const _bridgeVersion = 3;
 
 // ow_transcribe's results (whisper_bridge.h).
 const _ok = 0;
@@ -130,6 +130,9 @@ class WhisperLibrary {
       _isLanguage = bridge.lookupFunction<_IntStringC, _IntString>(
         'ow_is_language',
       ),
+      _loadBackends = bridge.lookupFunction<_IntStringC, _IntString>(
+        'ow_load_backends',
+      ),
       _gpuCount = bridge.lookupFunction<_IntVoidC, _IntVoid>('ow_gpu_count'),
       _gpuName = bridge.lookupFunction<_StringIntC, _StringInt>('ow_gpu_name'),
       _gpuIntegrated = bridge
@@ -151,6 +154,7 @@ class WhisperLibrary {
   final _IntVoid _backendCount;
   final _StringInt _backendName;
   final _IntString _isLanguage;
+  final _IntString _loadBackends;
   final _IntVoid _gpuCount;
   final _StringInt _gpuName;
   final int Function(int) _gpuIntegrated;
@@ -214,6 +218,15 @@ class WhisperLibrary {
   /// Whether Whisper knows the language [code] ('ru', 'en', ...).
   bool isLanguage(String code) =>
       using((arena) => _isLanguage(code.toNativeUtf8(allocator: arena))) != 0;
+
+  /// Loads the ggml backends in [folder] as well (the GPU bundle's
+  /// ggml-vulkan.dll); once per process, the same folder again is a no-op.
+  void loadBackends(String folder) {
+    final result = using(
+      (arena) => _loadBackends(folder.toNativeUtf8(allocator: arena)),
+    );
+    if (result != 0) throw WhisperError(_lastError());
+  }
 
   /// The GPUs the loaded backends offer (ggml-vulkan.dll in the folder,
   /// plan 10 I2i), in whisper.cpp's gpu_device order.

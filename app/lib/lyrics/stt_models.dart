@@ -17,6 +17,13 @@ const sttReleaseBase =
 
 Uri _release(String asset) => Uri.parse('$sttReleaseBase$asset');
 
+/// The release with the GPU files (plan 10 I2i; user 2026-11-26, session
+/// 60: "Ownsemble release (Recommended)").
+const sttGpuReleaseBase =
+    'https://github.com/bigflyy/Ownsemble/releases/download/stt-models-2/';
+
+Uri _gpuRelease(String asset) => Uri.parse('$sttGpuReleaseBase$asset');
+
 /// Room a job needs besides the models: the song decoded and its vocals
 /// kept between stages (a 6 min song: about 130 MB as 44.1 kHz stereo
 /// floats, 23 MB as 16 kHz vocals).
@@ -257,5 +264,96 @@ whisper.cpp/*.dll, whisper.cpp/LICENSE.txt, whisper.cpp/build-info.json
   patch, "one-encoder-pass-auto-language"; build-info.json records the
   source, options and every file's SHA-256.
   From https://github.com/bigflyy/Ownsemble/releases/tag/stt-models-1
+''',
+);
+
+/// What hearing on the GPU adds (plan 10 I2i; user 2026-11-26, session 60:
+/// "Auto + CPU switch", "GPU too"): ONNX Runtime's DirectML build for the
+/// separator and GigaAM, DirectML itself, and whisper.cpp's Vulkan backend
+/// of the same 1.9.5 build as the Whisper bundle's CPU libraries.
+final hearGpuBundle = ModelBundle(
+  name: 'hear-gpu',
+  version: 1,
+  files: [
+    ModelFile(
+      url: _gpuRelease('directml-1.24.4.onnxruntime.dll'),
+      bytes: 17328152,
+      sha256:
+          'e7eedec6a6f26dc39dc948276a75ef6d2bee3fff944d874ceed0bbd3b97bff40',
+      fileName: 'directml/onnxruntime.dll',
+    ),
+    ModelFile(
+      url: _gpuRelease('directml-1.24.4.onnxruntime-LICENSE.txt'),
+      bytes: 1094,
+      sha256:
+          'c250d6278f0b47a6439fb7592b08b58a55eb9f535aa49a1db63211c3f982b674',
+      fileName: 'directml/onnxruntime-LICENSE.txt',
+    ),
+    ModelFile(
+      url: _gpuRelease('directml-1.24.4.onnxruntime-ThirdPartyNotices.txt'),
+      bytes: 331175,
+      sha256:
+          'fb0af774b4d7cffc5b9d046f2aaeade2f37df2f80abf8033c95dfffcc77a8866',
+      fileName: 'directml/onnxruntime-ThirdPartyNotices.txt',
+    ),
+    ModelFile(
+      url: _gpuRelease('DirectML-1.15.4.DirectML.dll'),
+      bytes: 18527776,
+      sha256:
+          '9c9e6d822561c6c41b90e6994b3e8857cf1d66dbfb1e0c4c799c7c89b4e92da1',
+      fileName: 'directml/DirectML.dll',
+    ),
+    ModelFile(
+      url: _gpuRelease('DirectML-1.15.4.LICENSE.txt'),
+      bytes: 10439,
+      sha256:
+          'a05138e3a085ff60a44881eedfa58dccb03ecc1d7b1f6ae888418e8c2fec4b8d',
+      fileName: 'directml/DirectML-LICENSE.txt',
+    ),
+    ModelFile(
+      url: _gpuRelease('DirectML-1.15.4.ThirdPartyNotices.txt'),
+      bytes: 4577,
+      sha256:
+          '2c95795c13ff48a58b6ed916f37901c23d964b5d9d601af422f17ad2172e7950',
+      fileName: 'directml/DirectML-ThirdPartyNotices.txt',
+    ),
+    ModelFile(
+      url: _gpuRelease('whisper.cpp-1.9.5.ggml-vulkan.dll'),
+      bytes: 45314048,
+      sha256:
+          'b21e70cc36a881a1e69244fb2e6015246d7a63db74da369487f2bad4273208ac',
+      fileName: 'vulkan/ggml-vulkan.dll',
+    ),
+    ModelFile(
+      url: _release('whisper.cpp-1.9.5.LICENSE.txt'),
+      bytes: 1078,
+      sha256:
+          '94f29bbed6a22c35b992c5c6ebf0e7c92f13b836b90f36f461c9cf2f0f1d010d',
+      fileName: 'vulkan/LICENSE.txt',
+    ),
+  ],
+  notices: r'''
+Ownsemble "Hear the words": GPU files and their licences
+
+directml/onnxruntime.dll, directml/onnxruntime-*.txt
+  ONNX Runtime 1.24.4, DirectML build (NuGet Microsoft.ML.OnnxRuntime.DirectML
+  1.24.4), MIT licence (directml/onnxruntime-LICENSE.txt), Copyright (c)
+  Microsoft Corporation; third-party notices in
+  directml/onnxruntime-ThirdPartyNotices.txt.
+
+directml/DirectML.dll, directml/DirectML-*.txt
+  DirectML 1.15.4 (NuGet Microsoft.AI.DirectML 1.15.4), Microsoft's DirectML
+  licence (directml/DirectML-LICENSE.txt), distributed here as part of
+  Ownsemble for use on Windows; third-party notices in
+  directml/DirectML-ThirdPartyNotices.txt.
+
+vulkan/ggml-vulkan.dll, vulkan/LICENSE.txt
+  The Vulkan backend of whisper.cpp 1.9.5 and ggml
+  (https://github.com/ggml-org/whisper.cpp), MIT licence (vulkan/LICENSE.txt),
+  Copyright (c) 2023-2026 The ggml authors; from the same build as the
+  Whisper bundle's CPU libraries (its build-info.json lists this file).
+
+All from https://github.com/bigflyy/Ownsemble/releases/tag/stt-models-2
+(the licence file of whisper.cpp from stt-models-1).
 ''',
 );

@@ -48,6 +48,20 @@ const _releaseSession = 95;
 const _releaseValue = 96;
 const _releaseTensorTypeAndShapeInfo = 99;
 const _releaseSessionOptions = 100;
+const _getExecutionProviderApi = 195;
+
+// Positions in struct OrtDmlApi (dml_provider_factory.h of 1.24.4).
+const _dmlAppend2 = 5;
+
+// OrtDmlDeviceOptions values: OrtDmlPerformancePreference HighPerformance,
+// OrtDmlDeviceFilter Gpu.
+const _dmlHighPerformance = 1;
+const _dmlFilterGpu = 1;
+
+/// [OnnxRuntime.open]'s directMlDevice for "the fastest GPU": DirectML's
+/// own choice by performance (a laptop's discrete GPU over the built-in
+/// one), where adapter 0 is only the one Windows lists first.
+const directMlBestGpu = -1;
 
 // C enum values used here.
 const _loggingLevelWarning = 2;
@@ -141,6 +155,35 @@ class OnnxRuntime {
     _entry<_Release>(index).asFunction<_ReleaseDart>()(handle);
   }
 
+  /// Adds DirectML on the fastest GPU to [options], through the OrtDmlApi
+  /// table (SessionOptionsAppendExecutionProvider_DML2).
+  void _appendBestDirectMl(Pointer<Void> options, Arena arena) {
+    final table = arena<Pointer<Void>>();
+    _check(
+      _entry<
+            Pointer<Void> Function(
+              Pointer<Utf8>,
+              Uint32,
+              Pointer<Pointer<Void>>,
+            )
+          >(_getExecutionProviderApi)
+          .asFunction<
+            Pointer<Void> Function(Pointer<Utf8>, int, Pointer<Pointer<Void>>)
+          >()('DML'.toNativeUtf8(allocator: arena), _apiVersion, table),
+    );
+    if (table.value == nullptr) throw const OnnxError('no DirectML API');
+    final device = arena<Uint32>(2)
+      ..[0] = _dmlHighPerformance
+      ..[1] = _dmlFilterGpu;
+    final append = table.value
+        .cast<Pointer<Void>>()[_dmlAppend2]
+        .cast<
+          NativeFunction<Pointer<Void> Function(Pointer<Void>, Pointer<Uint32>)>
+        >()
+        .asFunction<Pointer<Void> Function(Pointer<Void>, Pointer<Uint32>)>();
+    _check(append(options, device));
+  }
+
   /// Opens the model at [modelPath] for CPU runs with [threads] threads
   /// inside each operation. [memoryArena] false turns off the CPU memory
   /// arena and the memory pattern: ONNX Runtime then frees each
@@ -148,9 +191,10 @@ class OnnxRuntime {
   /// ever needed (plan 10 I2b: the separator's peak).
   ///
   /// [directMlDevice] runs the model on that DirectML adapter (0 is the
-  /// first one Windows lists), with the CPU only for operations DirectML
-  /// lacks; it needs a DirectML build ([hasDirectMl]) and turns the memory
-  /// pattern off, as DirectML requires.
+  /// first one Windows lists; [directMlBestGpu] the fastest GPU), with the
+  /// CPU only for operations DirectML lacks; it needs a DirectML build
+  /// ([hasDirectMl]) and turns the memory pattern off, as DirectML
+  /// requires.
   OnnxSession open(
     String modelPath, {
     int threads = 4,
@@ -214,7 +258,9 @@ class OnnxRuntime {
                 .asFunction<Pointer<Void> Function(Pointer<Void>)>()(options),
           );
         }
-        if (directMlDevice != null) {
+        if (directMlDevice == directMlBestGpu) {
+          _appendBestDirectMl(options, arena);
+        } else if (directMlDevice != null) {
           _check(
             _library.lookupFunction<
               Pointer<Void> Function(Pointer<Void>, Int32),

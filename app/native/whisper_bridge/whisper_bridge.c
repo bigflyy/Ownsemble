@@ -469,6 +469,41 @@ OW_API const char *ow_backend_name(int index) {
   return w.ggml_backend_reg_name(w.ggml_backend_reg_get((size_t)index));
 }
 
+/* The extra backend folder loaded by ow_load_backends ("" while none). */
+static char backends_dir[4096];
+
+OW_API int ow_load_backends(const char *dir) {
+  if (!loaded()) {
+    set_error("whisper.cpp is not loaded");
+    return OW_BAD_ARGUMENT;
+  }
+  if (dir == NULL || dir[0] == 0 || strlen(dir) >= sizeof backends_dir) {
+    set_error("no backend folder given");
+    return OW_BAD_ARGUMENT;
+  }
+  lock_load();
+  int result = 0;
+  if (backends_dir[0] == 0) {
+    size_t before = w.ggml_backend_reg_count();
+    /* The folder form takes UTF-8 (ggml_backend_load reads a path in the
+     * ANSI code page); it loads each ggml-<backend>.dll found there. */
+    w.ggml_backend_load_all_from_path(dir);
+    if (w.ggml_backend_reg_count() == before) {
+      char details[1024];
+      recent_errors(details, sizeof details);
+      set_error("no ggml backend could be loaded from %s: %s", dir, details);
+      result = -6;
+    } else {
+      snprintf(backends_dir, sizeof backends_dir, "%s", dir);
+    }
+  } else if (strcmp(backends_dir, dir) != 0) {
+    set_error("backends are already loaded from %s", backends_dir);
+    result = -3;
+  }
+  unlock_load();
+  return result;
+}
+
 /* The ggml device of the gpu-th GPU, counted as whisper.cpp 1.9.5's
  * whisper_backend_init_gpu counts gpu_device: discrete and integrated GPUs
  * in ggml's device order. NULL if there is no such GPU. */

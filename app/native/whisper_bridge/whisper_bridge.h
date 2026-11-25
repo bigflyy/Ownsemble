@@ -39,7 +39,7 @@ extern "C" {
 #endif
 
 /* Raised when the functions below change; the Dart side refuses another. */
-#define OW_BRIDGE_VERSION 2
+#define OW_BRIDGE_VERSION 3
 
 /* ow_transcribe's results besides whisper_full's own negative codes. */
 #define OW_OK 0
@@ -67,6 +67,11 @@ OW_API const char *ow_system_info(void);
 /* The registered ggml backends ("CPU", ...). */
 OW_API int ow_backend_count(void);
 OW_API const char *ow_backend_name(int index);
+
+/* Loads the ggml backends in dir as well (the GPU bundle's
+ * ggml-vulkan.dll, plan 10 I2i), once per process: the same folder again
+ * is 0, another one an error. 0 on success. */
+OW_API int ow_load_backends(const char *dir);
 
 /* The GPUs of the loaded backends (ggml-vulkan.dll in the folder, plan 10
  * I2i), numbered as whisper.cpp's gpu_device: count, description, and 1

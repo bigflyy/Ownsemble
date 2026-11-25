@@ -7,7 +7,8 @@
 //   dart run tool/check_whisper.dart --vocals DIR --models DIR --out DIR
 //       --bridge DLL [--threads 8] [--language CODE] [--tag dart] [--gpu N]
 // --gpu N hears on whisper.cpp's GPU N (plan 10 I2i: --libs a folder with
-// ggml-vulkan.dll).
+// ggml-vulkan.dll); --gpu-backends DIR loads ggml-vulkan.dll from DIR as the
+// app does and picks the GPU itself (pickWhisperGpu).
 //       [--model FILE] [--libs DIR] [--cancel-in-chunk N] NAMES...
 //
 // For each NAME (DIR/NAME.vocals16.f32): OUT/NAME.TAG.json (chunks with
@@ -92,6 +93,7 @@ Future<void> main(List<String> args) async {
   final tag = values['--tag'] ?? 'dart';
   final cancelIn = int.tryParse(values['--cancel-in-chunk'] ?? '');
   final gpu = int.tryParse(values['--gpu'] ?? '');
+  final gpuBackends = values['--gpu-backends'];
   final sileroPath = bundleFile(
     root,
     hearWordsBundle,
@@ -114,6 +116,7 @@ Future<void> main(List<String> args) async {
           threads: threads,
           language: language,
           gpu: gpu,
+          gpuBackends: gpuBackends == null ? null : p.absolute(gpuBackends),
         ),
       );
       final clock = Stopwatch()..start();
@@ -147,6 +150,7 @@ Future<void> main(List<String> args) async {
         'threads': threads,
         'language': language ?? 'auto',
         'gpu': gpu,
+        'gpu_name': job.gpuName,
         'libs': libs,
         'peak_ws_mb': memory.peakWorkingSet ~/ (1 << 20),
         'peak_private_mb': memory.peakPrivate ~/ (1 << 20),

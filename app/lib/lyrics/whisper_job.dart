@@ -26,9 +26,13 @@ class WhisperJobResult {
     required this.openMs,
     required this.transcribeMs,
     required this.chunkMs,
+    this.gpuName,
   });
 
   final WhisperResult result;
+
+  /// The GPU the model ran on, null for the CPU (or no model opened).
+  final String? gpuName;
 
   /// Reading the vocals; Silero over the song (0 when the chunks were
   /// given); loading whisper.cpp and the model; whisper.cpp's calls.
@@ -54,6 +58,7 @@ class WhisperJob extends WorkerJob<WhisperJobResult> {
     this.speechSeconds = 0,
     this.language,
     this.gpu,
+    this.gpuBackends,
   }) : assert(sileroPath != null || ranges != null);
 
   final String vocalsPath;
@@ -71,8 +76,13 @@ class WhisperJob extends WorkerJob<WhisperJobResult> {
   final int threads;
 
   /// The GPU to hear on (an index into WhisperLibrary.gpus), or null for
-  /// the CPU (plan 10 I2i).
+  /// the CPU or the one [gpuBackends] picks (plan 10 I2i).
   final int? gpu;
+
+  /// The GPU bundle's folder with ggml-vulkan.dll: loaded as well, and the
+  /// model opened on [gpu] or else on [pickWhisperGpu]'s choice; no GPU
+  /// there is a [WhisperError] (the app then hears on the CPU).
+  final String? gpuBackends;
 
   /// silero_vad_scan.onnx, when [ranges] are not given.
   final String? sileroPath;
@@ -146,7 +156,15 @@ class WhisperJob extends WorkerJob<WhisperJobResult> {
     }
     final opening = clock.elapsedMilliseconds;
     final library = WhisperLibrary.load(bridgePath, libraryFolder);
-    final model = library.open(modelPath, gpu: gpu);
+    var onGpu = gpu;
+    final backends = gpuBackends;
+    if (backends != null) {
+      library.loadBackends(backends);
+      onGpu ??= pickWhisperGpu(library.gpus);
+      if (onGpu == null) throw const WhisperError('no GPU for whisper.cpp');
+    }
+    final gpuName = onGpu == null ? null : library.gpus[onGpu].name;
+    final model = library.open(modelPath, gpu: onGpu);
     final openMs = clock.elapsedMilliseconds - opening;
     final chunkMs = <int>[];
     try {
@@ -180,9 +198,20 @@ class WhisperJob extends WorkerJob<WhisperJobResult> {
         openMs: openMs,
         transcribeMs: chunkMs.fold(0, (sum, ms) => sum + ms),
         chunkMs: chunkMs,
+        gpuName: gpuName,
       );
     } finally {
       model.close();
     }
   }
+}
+
+/// The GPU whisper.cpp should hear on among [gpus] (WhisperLibrary.gpus):
+/// the first discrete one, else the first built-in one; null when there
+/// is none (plan 10 I2i, the user's "Auto": the discrete GPU first).
+int? pickWhisperGpu(List<({String name, bool integrated})> gpus) {
+  for (final (index, gpu) in gpus.indexed) {
+    if (!gpu.integrated) return index;
+  }
+  return gpus.isEmpty ? null : 0;
 }
