@@ -17,6 +17,7 @@ import 'package:ownsemble/lyrics/heard_lyrics.dart';
 import 'package:ownsemble/lyrics/lyrics.dart';
 import 'package:ownsemble/lyrics/lyrics_controller.dart';
 import 'package:ownsemble/lyrics/lyrics_sources.dart';
+import 'package:ownsemble/lyrics/onnx_runtime.dart';
 import 'package:ownsemble/lyrics/stt_worker.dart';
 import 'package:ownsemble/lyrics/vocals_job.dart';
 import 'package:ownsemble/lyrics/whisper.dart';
@@ -467,10 +468,10 @@ void main() {
       gigaam.finish(normal().answer(gigaam.job));
       await run.result;
       expect(seen, [
-        (step: 'separate', stage: 'start', done: 0, total: 0),
-        (step: 'gigaam', stage: 'start', done: 0, total: 0),
-        (step: 'gigaam', stage: 'hear', done: 1, total: 2),
-        (step: 'whisper', stage: 'start', done: 0, total: 0),
+        (step: 'separate', stage: 'start', done: 0, total: 0, gpu: false),
+        (step: 'gigaam', stage: 'start', done: 0, total: 0, gpu: false),
+        (step: 'gigaam', stage: 'hear', done: 1, total: 2, gpu: false),
+        (step: 'whisper', stage: 'start', done: 0, total: 0, gpu: false),
       ]);
     });
 
@@ -564,6 +565,144 @@ void main() {
         await expectLater(run.result, throwsA(isA<WorkerCancelled>()));
         expect(fake.names, ['separate', 'gigaam']);
       });
+    });
+  });
+
+  group('on the GPU (plan 10 I2i)', () {
+    HearWords onGpu(
+      FakeRunner runner, {
+      void Function()? failed,
+      List<String>? log,
+    }) => HearWords(
+      runner: runner,
+      paths: const HearWordsPaths(
+        separatorModel: 'kim.onnx',
+        silero: 'silero.onnx',
+        gigaamFolder: 'gigaam',
+        mpv: 'mpv.dll',
+        tempDir: 'temp',
+        whisperBridge: 'bridge.dll',
+        whisperLibraries: 'whisper.cpp',
+        whisperModel: 'turbo.bin',
+        gpu: true,
+        gpuBackends: 'hear-gpu-1/vulkan',
+      ),
+      save: (ref, heard) => saved[ref] = heard,
+      onGpuFailed: failed,
+      log: log?.add,
+    );
+
+    Object unsure(WorkerJob<Object?> job) => switch (job) {
+      VocalsJob() => separated,
+      GigaamJob() => gigaamHeard([(1, 20)], said(words(25, 'zz'), 1, 0.5)),
+      WhisperJob(:final ranges) => whisperHeard(ranges!, [
+        (language: 'en', words: said(words(25, 'there'), 1, 0.95)),
+      ]),
+      _ => throw StateError('unexpected ${job.name}'),
+    };
+
+    test('every model stage asks for the GPU', () async {
+      final runner = FakeRunner(unsure);
+      final seen = <HearProgress>[];
+      final log = <String>[];
+      final run = onGpu(
+        runner,
+        log: log,
+      ).start(ref: '1_1', audioPath: 'song.mp3', vocalsPath: vocals);
+      run.progress.listen(seen.add);
+      await run.result;
+      expect(runner.names, ['separate', 'gigaam', 'whisper']);
+      final [separate, gigaam, whisper] = [
+        for (final job in runner.jobs) job.job,
+      ];
+      expect((separate as VocalsJob).directMlDevice, directMlBestGpu);
+      expect((gigaam as GigaamJob).directMlDevice, directMlBestGpu);
+      expect((whisper as WhisperJob).gpuBackends, 'hear-gpu-1/vulkan');
+      expect(seen.every((unit) => unit.gpu), isTrue);
+      expect(log.last, endsWith('GPU separate gigaam whisper'));
+    });
+
+    test('a stage that fails on the GPU runs again on the CPU, and so do '
+        'the later stages', () async {
+      var failures = 0;
+      final log = <String>[];
+      final runner = FakeRunner((job) {
+        if (job is GigaamJob && job.directMlDevice != null) {
+          throw const WorkerJobError('OnnxError: device removed');
+        }
+        return unsure(job);
+      });
+      final heard = await onGpu(
+        runner,
+        failed: () => failures++,
+        log: log,
+      ).start(ref: '1_1', audioPath: 'song.mp3', vocalsPath: vocals).result;
+      expect(runner.names, ['separate', 'gigaam', 'gigaam', 'whisper']);
+      final jobs = [for (final job in runner.jobs) job.job];
+      expect((jobs[0] as VocalsJob).directMlDevice, directMlBestGpu);
+      expect((jobs[1] as GigaamJob).directMlDevice, directMlBestGpu);
+      expect((jobs[2] as GigaamJob).directMlDevice, isNull);
+      expect((jobs[3] as WhisperJob).gpuBackends, isNull);
+      expect(failures, 1);
+      expect(heard.model, HeardModel.whisper);
+      expect(saved.keys, ['1_1']);
+      expect(log.first, contains('gigaam failed on the GPU (WorkerJobError)'));
+      // The line names no error text (paths may be in it).
+      expect(log.first, isNot(contains('device removed')));
+      expect(log.last, endsWith('GPU separate'));
+    });
+
+    test('a Whisper GPU failure is heard again on the CPU', () async {
+      final runner = FakeRunner((job) {
+        if (job is WhisperJob && job.gpuBackends != null) {
+          throw const WorkerJobError('WhisperError: no GPU for whisper.cpp');
+        }
+        return unsure(job);
+      });
+      final heard = await onGpu(runner)
+          .start(ref: '1_1', audioPath: 'song.mp3', vocalsPath: vocals)
+          .result;
+      expect(runner.names, ['separate', 'gigaam', 'whisper', 'whisper']);
+      expect(heard.language, 'en');
+    });
+
+    test('a cancel during a GPU stage stops, with no CPU try', () async {
+      final runner = FakeRunner(unsure)..hold = (job) => job is GigaamJob;
+      var failures = 0;
+      final run = onGpu(
+        runner,
+        failed: () => failures++,
+      ).start(ref: '1_1', audioPath: 'song.mp3', vocalsPath: vocals);
+      while (runner.jobs.length < 2) {
+        await Future<void>.delayed(Duration.zero);
+      }
+      run.cancel();
+      runner.jobs.last.fail(const WorkerCancelled());
+      await expectLater(run.result, throwsA(isA<WorkerCancelled>()));
+      expect(runner.names, ['separate', 'gigaam']);
+      expect(failures, 0);
+      expect(saved, isEmpty);
+    });
+  });
+
+  group('pickWhisperGpu', () {
+    test('the discrete GPU first, else the built-in one, else none', () {
+      expect(pickWhisperGpu(const []), isNull);
+      expect(pickWhisperGpu(const [(name: 'Radeon', integrated: true)]), 0);
+      expect(
+        pickWhisperGpu(const [
+          (name: 'Radeon', integrated: true),
+          (name: 'RTX', integrated: false),
+        ]),
+        1,
+      );
+      expect(
+        pickWhisperGpu(const [
+          (name: 'RTX', integrated: false),
+          (name: 'Radeon', integrated: true),
+        ]),
+        0,
+      );
     });
   });
 

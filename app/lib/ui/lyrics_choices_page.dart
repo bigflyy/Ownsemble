@@ -25,6 +25,7 @@ import '../lyrics/lyrics_fitter.dart';
 import '../lyrics/lyrics_hearer.dart';
 import 'hear_words_ui.dart';
 import 'lyrics_page.dart';
+import 'shell_settings.dart';
 import 'theme.dart';
 import 'version_marks.dart' show lengthText;
 
@@ -40,9 +41,14 @@ class LyricsChoicesPage extends StatefulWidget {
     required this.onUsed,
     this.fitter,
     this.hearer,
+    this.settings,
   });
 
   final LyricsController lyrics;
+
+  /// Where "Hear the words" runs (the GPU when it works, or the CPU only,
+  /// plan 10 I2i): its control ends the list while [hearer] is given.
+  final ShellSettings? settings;
 
   /// "Hear the words" (I2f): the heard version's row offers Hear again and
   /// Forget; null hides them.
@@ -290,6 +296,8 @@ class _LyricsChoicesPageState extends State<LyricsChoicesPage> {
                     widget.hearer?.stageOf(widget.lyrics.shownKey) != null,
                 onRetry: () => unawaited(widget.lyrics.askAll()),
               ),
+            if (widget.hearer != null && widget.settings != null)
+              _HearDeviceRow(settings: widget.settings!, narrow: narrow),
           ],
         );
       },
@@ -733,6 +741,57 @@ class _Tag extends StatelessWidget {
           label,
           maxLines: 1,
           style: TextStyle(fontSize: 11, color: colors.dim),
+        ),
+      ),
+    );
+  }
+}
+
+/// "Hear the words on: GPU when it works / CPU only" (plan 10 I2i; the
+/// user, 2026-11-26: "Auto + CPU switch"). The app falls back to the CPU by
+/// itself when the GPU fails, so the CPU choice is for a PC whose GPU is
+/// busy or troublesome.
+class _HearDeviceRow extends StatelessWidget {
+  const _HearDeviceRow({required this.settings, required this.narrow});
+
+  final ShellSettings settings;
+  final bool narrow;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = OwnColors.of(context);
+    return ListenableBuilder(
+      listenable: settings,
+      builder: (context, _) => Padding(
+        key: const ValueKey('hear-device-row'),
+        padding: EdgeInsets.fromLTRB(narrow ? 16 : 24, 16, 24, 8),
+        child: Wrap(
+          spacing: 12,
+          runSpacing: 6,
+          crossAxisAlignment: WrapCrossAlignment.center,
+          children: [
+            Text(
+              'Hear the words on',
+              style: TextStyle(color: colors.dim, fontSize: 13),
+            ),
+            SegmentedButton<bool>(
+              key: const ValueKey('hear-device'),
+              showSelectedIcon: false,
+              segments: const [
+                ButtonSegment(
+                  value: true,
+                  label: Text('GPU when it works'),
+                  tooltip:
+                      'Faster; the CPU takes over by itself if the GPU '
+                      'fails. Adds an 81 MB download.',
+                ),
+                ButtonSegment(value: false, label: Text('CPU only')),
+              ],
+              selected: {settings.hearOnGpu},
+              onSelectionChanged: (value) =>
+                  settings.setHearOnGpu(value.single),
+            ),
+          ],
         ),
       ),
     );

@@ -49,6 +49,8 @@ void main() {
   late bool intact;
   late int? free;
   late String? busy;
+  late bool gpuOn;
+  late Set<HearBundle> failDownload;
 
   setUp(() {
     temp = Directory.systemTemp.createTempSync('lyrics_hearer_test');
@@ -89,6 +91,8 @@ void main() {
     intact = true;
     free = null;
     busy = null;
+    gpuOn = false;
+    failDownload = {};
     // Russian, sure: GigaAM only.
     runner = FakeRunner(
       (job) => switch (job) {
@@ -109,9 +113,16 @@ void main() {
   LyricsHearer hearer() => LyricsHearer(
     lyrics: lyrics,
     bundleReady: ready.contains,
-    bundleMegabytes: (bundle) => bundle == HearBundle.hearWords ? 395 : 585,
+    bundleMegabytes: (bundle) => switch (bundle) {
+      HearBundle.hearWords => 395,
+      HearBundle.whisper => 585,
+      HearBundle.gpu => 81,
+    },
     download: (bundle, onProgress, stop) async {
       downloads.add(bundle);
+      if (failDownload.contains(bundle)) {
+        throw const ModelDownloadError('offline');
+      }
       onProgress(10, 100);
       final gate = downloadGate;
       if (gate != null) {
@@ -171,6 +182,7 @@ void main() {
     },
     busyElsewhere: () => busy,
     log: log.add,
+    useGpu: () => gpuOn,
   );
 
   Future<void> until(bool Function() condition) async {
@@ -202,6 +214,80 @@ void main() {
     expect(seen, contains('separating the voice from the music'));
     // The vocals went after the save.
     expect(File('${temp.path}/vocals/1_0.vocals16.f32').existsSync(), isFalse);
+  });
+
+  group('the GPU files (plan 10 I2i)', () {
+    test('come with the models while the GPU is on, and are named', () {
+      ready.clear();
+      gpuOn = true;
+      final hear = hearer();
+      expect(hear.nowMegabytes, 395 + 81);
+      ready.add(HearBundle.gpu);
+      expect(hear.nowMegabytes, 395);
+      gpuOn = false;
+      ready.remove(HearBundle.gpu);
+      expect(hear.nowMegabytes, 395);
+    });
+
+    test('are downloaded after the models, before the song is saved', () async {
+      ready.clear();
+      gpuOn = true;
+      lyrics.show(tracks[0]);
+      final hear = hearer();
+      final seen = <String>[];
+      hear.addListener(() {
+        final stage = hear.stageOf('1_0');
+        if (stage != null) seen.add(hearStageText(stage));
+      });
+      final outcome = await hear.hearShown();
+      expect(outcome, isA<HearDone>());
+      expect(downloads, [HearBundle.hearWords, HearBundle.gpu]);
+      expect(seen, contains('downloading the GPU files, 10% of 0 MB'));
+    });
+
+    test('are never fetched with the CPU switch', () async {
+      lyrics.show(tracks[0]);
+      final outcome = await hearer().hearShown();
+      expect(outcome, isA<HearDone>());
+      expect(downloads, isEmpty);
+    });
+
+    test('that do not come leave the run on the CPU', () async {
+      gpuOn = true;
+      failDownload = {HearBundle.gpu};
+      lyrics.show(tracks[0]);
+      final outcome = await hearer().hearShown();
+      expect(outcome, isA<HearDone>());
+      expect(downloads, [HearBundle.gpu]);
+      expect(
+        log,
+        contains('hear words GPU files failed ModelDownloadError, CPU'),
+      );
+      expect(runner.names, ['separate', 'gigaam']);
+    });
+
+    test('a stop while they download is a stop', () async {
+      gpuOn = true;
+      downloadGate = Completer<void>();
+      lyrics.show(tracks[0]);
+      final hear = hearer();
+      final outcome = hear.hearShown();
+      await until(() => downloads.isNotEmpty);
+      hear.stop();
+      expect(await outcome, isA<HearStopped>());
+      expect(runner.jobs, isEmpty);
+    });
+
+    test('a step on the GPU says so', () {
+      expect(
+        hearStageText(const HearRunning('gigaam', 0.5, gpu: true)),
+        'hearing the words on the GPU, 50%',
+      );
+      expect(
+        hearStageText(const HearRunning('gigaam', null)),
+        'hearing the words',
+      );
+    });
   });
 
   test('first run: the base models only; Whisper when a song needs it', () {

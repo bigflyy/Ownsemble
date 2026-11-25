@@ -41,10 +41,18 @@ sealed class HearStage {
 /// A model bundle is being downloaded: [bytes] of [total]; [whisper] for
 /// the Whisper bundle, fetched in the middle of a run.
 class HearDownloading extends HearStage {
-  const HearDownloading(this.bytes, this.total, {this.whisper = false});
+  const HearDownloading(
+    this.bytes,
+    this.total, {
+    this.whisper = false,
+    this.gpu = false,
+  });
   final int bytes;
   final int total;
   final bool whisper;
+
+  /// The GPU files (plan 10 I2i).
+  final bool gpu;
 }
 
 /// The song is being saved, [share] of it (0 while it starts).
@@ -57,9 +65,12 @@ class HearSaving extends HearStage {
 /// 'separate', 'gigaam', 'whisper' or 'whisper-ru'; [share] of its main part is done (null while it
 /// starts or between parts).
 class HearRunning extends HearStage {
-  const HearRunning(this.step, this.share);
+  const HearRunning(this.step, this.share, {this.gpu = false});
   final String step;
   final double? share;
+
+  /// Whether the step runs on the GPU.
+  final bool gpu;
 }
 
 /// Stop was pressed; the worker has not returned yet.
@@ -102,8 +113,9 @@ class HearJob {
   HearStage stage;
 }
 
-/// The two bundles a run may need.
-enum HearBundle { hearWords, whisper }
+/// The bundles a run may need: the models, Whisper (only for a song GigaAM
+/// is not sure of) and the GPU files (while the GPU is on, plan 10 I2i).
+enum HearBundle { hearWords, whisper, gpu }
 
 /// Starts [HearWords] for one recording; the app's version opens a fresh
 /// worker and a scratch folder and drops both when the run ends.
@@ -137,9 +149,17 @@ class LyricsHearer extends ChangeNotifier {
     this.bundleIntact,
     this.busyElsewhere,
     this.log,
+    this.useGpu,
   });
 
   final LyricsController lyrics;
+
+  /// Whether runs use the GPU now (the user's switch, and no GPU failure
+  /// since the app started): the GPU files are then downloaded with the
+  /// models. Null: never.
+  final bool Function()? useGpu;
+
+  bool get _gpu => useGpu?.call() ?? false;
 
   /// Whether a bundle is downloaded (model_bundle.bundleReady).
   final bool Function(HearBundle bundle) bundleReady;
@@ -210,7 +230,11 @@ class LyricsHearer extends ChangeNotifier {
 
   /// What the question names: the bundle fetched now and the one fetched
   /// later, in MB.
-  int get nowMegabytes => bundleMegabytes(HearBundle.hearWords);
+  int get nowMegabytes =>
+      bundleMegabytes(HearBundle.hearWords) +
+      (_gpu && !bundleReady(HearBundle.gpu)
+          ? bundleMegabytes(HearBundle.gpu)
+          : 0);
   int get laterMegabytes =>
       bundleReady(HearBundle.whisper) ? 0 : bundleMegabytes(HearBundle.whisper);
 
@@ -300,6 +324,18 @@ class LyricsHearer extends ChangeNotifier {
       if (!bundleReady(HearBundle.hearWords)) {
         await _download(job, HearBundle.hearWords);
       }
+      if (_gpu && !bundleReady(HearBundle.gpu)) {
+        // The GPU only makes hearing faster: when its files do not come,
+        // this run hears on the CPU (a stop is still a stop).
+        try {
+          await _download(job, HearBundle.gpu);
+        } on DownloadStopped {
+          rethrow;
+        } on Object catch (error) {
+          if (_stopping) rethrow;
+          _log('hear words GPU files failed ${error.runtimeType}, CPU');
+        }
+      }
       // Stop during the last file's hash: the bundle may have finished;
       // no song is saved for a stopped run (Codex review).
       if (_stopping) throw const DownloadStopped();
@@ -354,6 +390,7 @@ class LyricsHearer extends ChangeNotifier {
           HearRunning(
             unit.step,
             main && unit.total > 0 ? unit.done / unit.total : null,
+            gpu: unit.gpu,
           ),
         );
       });
@@ -405,12 +442,13 @@ class LyricsHearer extends ChangeNotifier {
 
   Future<void> _download(HearJob job, HearBundle bundle) async {
     final whisper = bundle == HearBundle.whisper;
+    final gpu = bundle == HearBundle.gpu;
     if (_stopping) throw const DownloadStopped();
-    _move(job, HearDownloading(0, 0, whisper: whisper));
+    _move(job, HearDownloading(0, 0, whisper: whisper, gpu: gpu));
     final stop = _stop = DownloadStop();
     try {
       await download(bundle, (bytes, total) {
-        _move(job, HearDownloading(bytes, total, whisper: whisper));
+        _move(job, HearDownloading(bytes, total, whisper: whisper, gpu: gpu));
       }, stop);
     } finally {
       _stop = null;
@@ -436,12 +474,16 @@ HearBundle? damagedBundleOf(String message) {
 /// What a stage shows, so listeners hear only changes that show (the
 /// download reports every few kilobytes).
 String hearStageText(HearStage stage) => switch (stage) {
-  HearDownloading(:final bytes, :final total, :final whisper) =>
-    'downloading ${whisper ? 'Whisper (GigaAM was not sure of this song)' : 'the models'}, '
+  HearDownloading(:final bytes, :final total, :final whisper, :final gpu) =>
+    'downloading ${whisper
+            ? 'Whisper (GigaAM was not sure of this song)'
+            : gpu
+            ? 'the GPU files'
+            : 'the models'}, '
         '${total == 0 ? 0 : bytes * 100 ~/ total}% of ${total ~/ 1000000} MB',
   HearSaving(:final share) => 'saving the song, ${(share * 100).floor()}%',
-  HearRunning(:final step, :final share) =>
-    '${hearStepText(step)}'
+  HearRunning(:final step, :final share, :final gpu) =>
+    '${hearStepText(step)}${gpu ? ' on the GPU' : ''}'
         '${share == null ? '' : ', ${(share * 100).floor()}%'}',
   HearStopping() => 'stopping after the part being heard (up to about 15 s)',
 };

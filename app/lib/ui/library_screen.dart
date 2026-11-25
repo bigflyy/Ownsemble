@@ -1440,6 +1440,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
                             onUsed: library.goBack,
                             fitter: widget.lyricsFitter,
                             hearer: widget.lyricsHearer,
+                            settings: _settings,
                           )
                         : statsFilters != null
                         ? NowPlayingScope(

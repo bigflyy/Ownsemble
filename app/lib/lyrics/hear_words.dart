@@ -38,6 +38,7 @@ import 'dart:io';
 import 'gigaam.dart';
 import 'gigaam_job.dart';
 import 'heard_lyrics.dart';
+import 'onnx_runtime.dart';
 import 'stt_worker.dart';
 import 'vocals_job.dart';
 import 'whisper.dart';
@@ -56,6 +57,8 @@ class HearWordsPaths {
     required this.whisperModel,
     this.threads = 8,
     this.bundles = '',
+    this.gpu = false,
+    this.gpuBackends,
   });
 
   /// Kim_Vocal_2.onnx, silero_vad_scan.onnx, the GigaAM folder.
@@ -78,12 +81,28 @@ class HearWordsPaths {
 
   /// The bundles' "name-version" list, kept with the result.
   final String bundles;
+
+  /// Whether the models run on the GPU (plan 10 I2i): the separator and
+  /// GigaAM's encoder on DirectML (the runner's worker has the DirectML
+  /// runtime), Whisper on whisper.cpp's Vulkan backend in [gpuBackends].
+  /// A stage that fails there runs again on the CPU.
+  final bool gpu;
+
+  /// The GPU bundle's folder with ggml-vulkan.dll.
+  final String? gpuBackends;
 }
 
 /// Where a run is: [step] is 'separate', 'gigaam', 'whisper' or
 /// 'whisper-ru' (Whisper again on chunks heard as another language), and
-/// [stage], [done] of [total] the worker's units inside it.
-typedef HearProgress = ({String step, String stage, int done, int total});
+/// [stage], [done] of [total] the worker's units inside it; [gpu] whether
+/// the step runs on the GPU.
+typedef HearProgress = ({
+  String step,
+  String stage,
+  int done,
+  int total,
+  bool gpu,
+});
 
 /// One run of "Hear the words" for one recording.
 class HearRun {
@@ -118,18 +137,24 @@ class HearRun {
     _job?.cancel();
   }
 
-  Future<R> _stage<R>(String step, JobRunner runner, WorkerJob<R> job) {
+  Future<R> _stage<R>(
+    String step,
+    JobRunner runner,
+    WorkerJob<R> job, {
+    bool gpu = false,
+  }) {
     if (_cancelled) throw const WorkerCancelled();
     final running = runner.run(job);
     _job = running;
     // The step shows from its start, before its first unit ends.
-    _progress.add((step: step, stage: 'start', done: 0, total: 0));
+    _progress.add((step: step, stage: 'start', done: 0, total: 0, gpu: gpu));
     final listening = running.progress.listen(
       (unit) => _progress.add((
         step: step,
         stage: unit.stage,
         done: unit.done,
         total: unit.total,
+        gpu: gpu,
       )),
     );
     return running.result.whenComplete(() {
@@ -149,6 +174,7 @@ class HearWords {
     this.log,
     this.russianAt = russianConfidence,
     this.beforeWhisper,
+    this.onGpuFailed,
   }) : _now = now ?? (() => DateTime.now().millisecondsSinceEpoch);
 
   final JobRunner runner;
@@ -173,6 +199,48 @@ class HearWords {
   /// time one is needed (Codex review of I2f). Its error fails the run;
   /// the vocals stay for the next try.
   final Future<void> Function(HearRun run)? beforeWhisper;
+
+  /// Told once when a stage failed on the GPU and ran again on the CPU:
+  /// the app then hears on the CPU until it restarts (plan 10 I2i).
+  final void Function()? onGpuFailed;
+
+  /// Set by the first GPU failure: later stages of this hearer use the CPU.
+  var _gpuFailed = false;
+
+  /// The steps that ran on the GPU in the current run, for the log.
+  final _onGpu = <String>[];
+
+  /// Runs [step] on the GPU when the paths ask for it and it has not
+  /// failed yet, else (and after a GPU failure that is not a cancel) on the
+  /// CPU. [job] makes the step's job for the GPU (true) or the CPU.
+  Future<R> _stageOn<R>(
+    HearRun run,
+    String step,
+    WorkerJob<R> Function(bool gpu) job,
+  ) async {
+    if (paths.gpu && !_gpuFailed) {
+      try {
+        final result = await run._stage(step, runner, job(true), gpu: true);
+        _onGpu.add(step);
+        return result;
+      } on WorkerCancelled {
+        rethrow;
+      } on Object catch (error) {
+        if (run._cancelled) throw const WorkerCancelled();
+        _gpuFailed = true;
+        try {
+          log?.call(
+            'hear words: $step failed on the GPU (${error.runtimeType}), '
+            'again on the CPU',
+          );
+        } on Object {
+          // A lost line does not stop the CPU try.
+        }
+        onGpuFailed?.call();
+      }
+    }
+    return run._stage(step, runner, job(false));
+  }
 
   /// Hears [audioPath], the file of the recording [ref], into the heard
   /// version saved for [ref]. [vocalsPath] is where the vocals go between
@@ -211,6 +279,7 @@ class HearWords {
     int? audioBytes,
   ) async {
     final clock = Stopwatch()..start();
+    _onGpu.clear();
     final marker = File(vocalsMarkerOf(vocalsPath));
     final from = vocalsMarkerText(
       audioPath: audioPath,
@@ -231,16 +300,17 @@ class HearWords {
       final old = File(vocalsPath);
       if (old.existsSync()) old.deleteSync();
       try {
-        await run._stage(
+        await _stageOn(
+          run,
           'separate',
-          runner,
-          VocalsJob(
+          (gpu) => VocalsJob(
             audioPath: audioPath,
             outPath: vocalsPath,
             modelPath: paths.separatorModel,
             mpvPath: paths.mpv,
             tempDir: paths.tempDir,
             threads: paths.threads,
+            directMlDevice: gpu ? directMlBestGpu : null,
           ),
         );
       } on WorkerCancelled {
@@ -255,14 +325,15 @@ class HearWords {
     }
     final separateMs = clock.elapsedMilliseconds;
 
-    final gigaam = await run._stage(
+    final gigaam = await _stageOn(
+      run,
       'gigaam',
-      runner,
-      GigaamJob(
+      (gpu) => GigaamJob(
         vocalsPath: vocalsPath,
         modelFolder: paths.gigaamFolder,
         sileroPath: paths.silero,
         threads: paths.threads,
+        directMlDevice: gpu ? directMlBestGpu : null,
       ),
     );
     final heardRu = gigaam.result;
@@ -293,19 +364,20 @@ class HearWords {
         if (run._cancelled) throw const WorkerCancelled();
         await beforeWhisper!(run);
       }
-      final first = await run._stage(
+      final first = await _stageOn(
+        run,
         'whisper',
-        runner,
-        _whisperJob(vocalsPath, ranges, heardRu.speechSeconds, null),
+        (gpu) =>
+            _whisperJob(vocalsPath, ranges, heardRu.speechSeconds, null, gpu),
       );
       var heard = first.result;
       whisperChunks = heard.chunks.length;
       final again = chunksToHearAsRussian(heard);
       if (again.isNotEmpty) {
-        final forced = await run._stage(
+        final forced = await _stageOn(
+          run,
           'whisper-ru',
-          runner,
-          _whisperJob(
+          (gpu) => _whisperJob(
             vocalsPath,
             [
               for (final index in again)
@@ -316,6 +388,7 @@ class HearWords {
             ],
             heardRu.speechSeconds,
             'ru',
+            gpu,
           ),
         );
         final merged = withChunksHeardAgain(heard, again, forced.result);
@@ -360,7 +433,8 @@ class HearWords {
         'Whisper chunks $whisperChunks ($reheard heard again as ru); '
         '${kept ? 'vocals kept' : 'separate $separateMs ms'}, '
         'GigaAM $gigaamMs ms, '
-        'total ${clock.elapsedMilliseconds} ms',
+        'total ${clock.elapsedMilliseconds} ms, '
+        'GPU ${_onGpu.isEmpty ? 'none' : _onGpu.join(' ')}',
       );
     } on Object {
       // A log that cannot be written does not undo the saved result.
@@ -373,6 +447,7 @@ class HearWords {
     List<(int, int)> ranges,
     double speechSeconds,
     String? language,
+    bool gpu,
   ) => WhisperJob(
     vocalsPath: vocalsPath,
     bridgePath: paths.whisperBridge,
@@ -382,6 +457,7 @@ class HearWords {
     ranges: ranges,
     speechSeconds: speechSeconds,
     language: language,
+    gpuBackends: gpu ? paths.gpuBackends : null,
   );
 }
 

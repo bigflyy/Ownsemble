@@ -545,6 +545,13 @@ Future<void> main(List<String> args) async {
   // song GigaAM doubts first needs it; the worker runs on its own isolate,
   // a new one per run, closed after it so its memory goes back.
   final modelsRoot = Directory(p.join(options.dataDir, 'models'));
+  // The GPU for "Hear the words" (plan 10 I2i): the user's switch, its
+  // files there, and no GPU failure since the app started.
+  var gpuFailed = false;
+  bool hearOnGpuNow() =>
+      settings.hearOnGpu &&
+      !gpuFailed &&
+      bundleReady(modelsRoot, hearGpuBundle);
   final vocalsDir = Directory(p.join(options.dataDir, 'hear-vocals'));
   // Fixed once per PC: the heard words depend on the thread count (I2c).
   var sttThreads = int.tryParse(store.readSetting(sttThreadsSetting) ?? '');
@@ -586,11 +593,20 @@ Future<void> main(List<String> args) async {
       'ggml-large-v3-turbo-q5_0.bin',
     ).path,
     threads: sttThreads!,
-    bundles: '${hearWordsBundle.folderName} ${whisperBundle.folderName}',
+    bundles:
+        '${hearWordsBundle.folderName} ${whisperBundle.folderName}'
+        '${hearOnGpuNow() ? ' ${hearGpuBundle.folderName}' : ''}',
+    gpu: hearOnGpuNow(),
+    gpuBackends: bundleFile(
+      modelsRoot,
+      hearGpuBundle,
+      'vulkan/ggml-vulkan.dll',
+    ).parent.path,
   );
   ModelBundle bundleOf(HearBundle bundle) => switch (bundle) {
     HearBundle.hearWords => hearWordsBundle,
     HearBundle.whisper => whisperBundle,
+    HearBundle.gpu => hearGpuBundle,
   };
   final hearer = LyricsHearer(
     lyrics: lyrics,
@@ -619,8 +635,16 @@ Future<void> main(List<String> args) async {
               '${DateTime.now().millisecondsSinceEpoch}',
             ),
           )..createSync(recursive: true);
+          final gpu = hearOnGpuNow();
           final worker = SttWorker(
             onnxRuntimePath: p.join(appDir, 'onnxruntime.dll'),
+            gpuOnnxRuntimePath: gpu
+                ? bundleFile(
+                    modelsRoot,
+                    hearGpuBundle,
+                    'directml/onnxruntime.dll',
+                  ).path
+                : null,
             log: logPerf,
           );
           final run =
@@ -633,6 +657,17 @@ Future<void> main(List<String> args) async {
                 },
                 log: logPerf,
                 beforeWhisper: beforeWhisper,
+                onGpuFailed: () {
+                  // CPU until the app restarts; a damaged GPU file is
+                  // found and deleted, so the next start downloads it.
+                  gpuFailed = true;
+                  unawaited(
+                    bundleIntact(
+                      modelsRoot,
+                      hearGpuBundle,
+                    ).then<void>((_) {}, onError: (Object _) {}),
+                  );
+                },
               ).start(
                 ref: ref,
                 audioPath: audioPath,
@@ -658,6 +693,7 @@ Future<void> main(List<String> args) async {
     forgetHeard: (ref) => store.saveHeardLyrics(ref, null),
     freeBytes: () => freeBytesAt(options.dataDir),
     bundleIntact: (bundle) => bundleIntact(modelsRoot, bundleOf(bundle)),
+    useGpu: () => settings.hearOnGpu && !gpuFailed,
     // One heavy lyrics job at a time (Codex review): a fit or a fit check
     // keeps hearing from starting, and hearing keeps them.
     busyElsewhere: () => fitter.job == null

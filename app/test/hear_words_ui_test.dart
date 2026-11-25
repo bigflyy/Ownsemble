@@ -23,6 +23,7 @@ import 'package:ownsemble/lyrics/vocals_job.dart';
 import 'package:ownsemble/ui/hear_words_ui.dart';
 import 'package:ownsemble/ui/lyrics_choices_page.dart';
 import 'package:ownsemble/ui/lyrics_page.dart';
+import 'package:ownsemble/ui/shell_settings.dart';
 import 'package:ownsemble/ui/theme.dart';
 
 import 'stt_fakes.dart';
@@ -391,6 +392,83 @@ void main() {
     await openPlace(tester, hearer(), width: 360);
     expect(tester.takeException(), isNull);
     expect(find.byKey(const ValueKey('hear-words')), findsOneWidget);
+  });
+
+  for (final width in [900.0, 360.0]) {
+    testWidgets('the chooser ends with Hear the words on GPU or CPU, kept '
+        '(${width.toInt()} wide)', (tester) async {
+      final stored = <String, String?>{};
+      final settings = ShellSettings(
+        read: (key) => stored[key],
+        write: (key, value) => stored[key] = value,
+      );
+      expect(settings.hearOnGpu, isTrue);
+      lyrics.show(tracks[0]);
+      tester.view.physicalSize = Size(width, 700);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      Future<void> show() async {
+        await tester.pumpWidget(
+          MaterialApp(
+            theme: buildTheme(OwnColors.dark),
+            home: Scaffold(
+              body: LyricsChoicesPage(
+                lyrics: lyrics,
+                current: () => playing,
+                currentStream: songs.stream,
+                position: () => Duration.zero,
+                positions: () => null,
+                seek: (_) async {},
+                onUsed: () {},
+                hearer: hearer(),
+                settings: settings,
+              ),
+            ),
+          ),
+        );
+        await settle(tester);
+      }
+
+      await show();
+      expect(tester.takeException(), isNull);
+      expect(find.byKey(const ValueKey('hear-device-row')), findsOneWidget);
+      expect(find.text('Hear the words on'), findsOneWidget);
+      await tester.tap(find.text('CPU only'));
+      await settle(tester);
+      expect(settings.hearOnGpu, isFalse);
+      expect(stored['hear.device'], 'cpu');
+      // A restart reads it back.
+      expect(
+        ShellSettings(read: (key) => stored[key], write: (_, _) {}).hearOnGpu,
+        isFalse,
+      );
+      await tester.tap(find.text('GPU when it works'));
+      await settle(tester);
+      expect(stored['hear.device'], 'gpu');
+    });
+  }
+
+  testWidgets('the chooser has no device row without a hearer', (tester) async {
+    lyrics.show(tracks[0]);
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: buildTheme(OwnColors.dark),
+        home: Scaffold(
+          body: LyricsChoicesPage(
+            lyrics: lyrics,
+            current: () => playing,
+            currentStream: songs.stream,
+            position: () => Duration.zero,
+            positions: () => null,
+            seek: (_) async {},
+            onUsed: () {},
+            settings: ShellSettings.inMemory(),
+          ),
+        ),
+      ),
+    );
+    await settle(tester);
+    expect(find.byKey(const ValueKey('hear-device-row')), findsNothing);
   });
 
   testWidgets('the chooser lists the heard version; Forget removes it', (
