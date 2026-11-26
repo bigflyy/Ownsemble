@@ -14,6 +14,7 @@ import 'dart:io';
 
 import 'lrc.dart';
 import 'lyrics.dart';
+import 'lyricsfile.dart';
 import 'lyrics_match.dart';
 
 /// What a source is searched with: the song as the library knows it.
@@ -293,7 +294,16 @@ class LrclibSource implements OutsideLyricsSource {
         (row['duration'] as num?)?.round(),
       );
       if (!candidate.taken && !candidate.otherVersion) continue;
+      // Word-timed rows carry their words in the lyricsfile (J3b); its
+      // lines are the ones whose word times are known.
       final lyrics =
+          (row['hasWordSync'] == true
+              ? lyricsFromLyricsfile(
+                  id,
+                  row['lyricsfile'] as String?,
+                  songSeconds: candidate.lrcSeconds(),
+                )
+              : null) ??
           lyricsFromLrc(
             id,
             row['syncedLyrics'] as String?,
