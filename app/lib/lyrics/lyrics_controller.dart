@@ -87,6 +87,10 @@ const lyricsRefreshAfter = Duration(days: 30);
 /// VK adds lyrics to songs now and then, LRCLIB grows every day.
 const lyricsMissingRecheckAfter = Duration(days: 7);
 
+/// The fetch time schema 26 gives found outside lyrics kept before word
+/// times were read (plan 10 J4): they are asked once more when they show.
+const lyricsWordsDueAtMs = 0;
+
 /// The VK upload a song's lyrics are asked for: its key, its access key and
 /// the account to ask through (null when no account of it is logged in:
 /// stored lyrics still show). Outside sources store their answer under the
@@ -487,8 +491,9 @@ class LyricsController extends ChangeNotifier {
       // the song's own length by now (Codex review).
       final old = source == 'vk'
           ? age > lyricsRefreshAfter.inMilliseconds
-          : _isOtherVersion(stored.meta) &&
-                age > lyricsMissingRecheckAfter.inMilliseconds;
+          : stored.fetchedAtMs == lyricsWordsDueAtMs ||
+                _isOtherVersion(stored.meta) &&
+                    age > lyricsMissingRecheckAfter.inMilliseconds;
       return (lyrics: lyrics, meta: stored.meta, ask: old);
     }
     return (
@@ -536,13 +541,26 @@ class LyricsController extends ChangeNotifier {
     Future<void> walk(String source) async {
       final stored = _storedOf(source, route.key);
       final storedLyrics = stored.lyrics;
-      if (storedLyrics != null) pick.consider(storedLyrics, stored.meta);
-      if (!stored.ask) return;
+      if (!stored.ask) {
+        if (storedLyrics != null) pick.consider(storedLyrics, stored.meta);
+        return;
+      }
+      // Asked again: the answer takes the stored lyrics' place (an answer
+      // of the same rank must not lose to the copy it refreshes); they
+      // count only when the ask fails.
       final clock = Stopwatch()..start();
       try {
         final (lyrics, meta) = source == 'vk'
             ? await _askVk(route)
-            : await _askOutside(source, route.key, names);
+            : await _askOutside(
+                source,
+                route.key,
+                names,
+                // Found lyrics asked again for their word times (schema
+                // 26) are kept when the source now says none.
+                keepFound:
+                    load(source, route.key)?.fetchedAtMs == lyricsWordsDueAtMs,
+              );
         log?.call(
           'lyrics $source ${lyrics == null ? 'none' : _kind(lyrics)} '
           '${clock.elapsedMilliseconds} ms',
@@ -555,6 +573,7 @@ class LyricsController extends ChangeNotifier {
           '${clock.elapsedMilliseconds} ms',
         );
         failures.add((source, error));
+        if (storedLyrics != null) pick.consider(storedLyrics, stored.meta);
       }
     }
 
@@ -924,13 +943,16 @@ class LyricsController extends ChangeNotifier {
     if (state is! LyricsShown || key == null) return const [];
     final lyrics = state.lyrics;
     final offset = offsetOf(lyrics.source);
-    int? moved(int? start) =>
-        start == null ? null : (start + offset).clamp(0, 1 << 31);
     if (lyrics.source == editedSource) {
       final own = _editEntry(key).edit;
       if (own != null) {
         return [
-          for (final line in own.lines) line.movedTo(moved(line.startMs)),
+          for (final line in own.lines)
+            LyricLine(
+              line.text,
+              startMs: line.startMs,
+              words: line.words,
+            ).shiftedBy(offset),
         ];
       }
     }
@@ -940,9 +962,9 @@ class LyricsController extends ChangeNotifier {
         if (shown.timed && !line.label)
           LyricLine(
             line.text,
-            startMs: moved(line.startMs),
-            words: line.movedTo(moved(line.startMs)).words,
-          )
+            startMs: line.startMs,
+            words: line.words,
+          ).shiftedBy(offset)
         else
           LyricLine(line.text),
     ];
@@ -1207,6 +1229,7 @@ class LyricsController extends ChangeNotifier {
       starts,
       labelUnsung: !lyrics.timed,
       words: fit.words,
+      ownWords: otherVersionOf(lyrics) == null,
     );
     _lastTimed = (lyrics, starts, words, fitted);
     return fitted;
@@ -1218,7 +1241,12 @@ class LyricsController extends ChangeNotifier {
   /// Keeps [fit] of [source]'s lines for the upload [key] (null forgets
   /// it). A new fit starts with no hand offset of its own; the offset of
   /// the source's own timing is left as it is.
-  void keepFit(String key, String source, StoredFit? fit) {
+  void keepFit(
+    String key,
+    String source,
+    StoredFit? fit, {
+    bool keepOffset = false,
+  }) {
     if (saveFit == null) {
       if (fit == null) {
         _fits.remove('$key|$source');
@@ -1228,7 +1256,7 @@ class LyricsController extends ChangeNotifier {
     } else {
       saveFit!(key, source, fit);
     }
-    _keepOffset(key, _fitted(source), 0);
+    if (!keepOffset) _keepOffset(key, _fitted(source), 0);
     log?.call(
       fit == null
           ? 'lyrics fit $source forgotten'

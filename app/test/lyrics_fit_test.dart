@@ -485,6 +485,17 @@ void main() {
         },
       );
 
+      test('fitting again keeps the hand offset of the fit (review)', () async {
+        final lyrics = controllerOf()..show(playing);
+        final fitter = fitterOf(lyrics, modelThere: true, result: fitted);
+        expect(await fitter.fitShown(), isA<FitDone>());
+        lyrics.shiftShown(lyricsOffsetStepMs);
+        final moved = lyrics.shownOffset;
+        expect(moved, isNot(0));
+        expect(await fitter.fitShown(), isA<FitDone>());
+        expect(lyrics.shownOffset, moved);
+      });
+
       test('lyrics that do not fit are kept as such, nothing moves', () async {
         final lyrics = controllerOf()..show(playing);
         final fitter = fitterOf(

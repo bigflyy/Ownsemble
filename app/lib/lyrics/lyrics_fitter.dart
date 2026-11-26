@@ -378,6 +378,9 @@ class LyricsFitter extends ChangeNotifier {
         (done, total) => _move(job, FitRunning(total == 0 ? 0 : done / total)),
       );
       final fits = result.fits;
+      // A fit made again (to time the words) keeps the hand offset the
+      // user gave the fit it replaces.
+      final replaced = lyrics.fitFor(shown)?.fits ?? false;
       lyrics.keepFit(
         key,
         shown.source,
@@ -406,6 +409,7 @@ class LyricsFitter extends ChangeNotifier {
                     result.lines[i]?.words,
                 ],
         ),
+        keepOffset: replaced && fits,
       );
       log?.call(
         'lyrics fit ${shown.source}${result.plain ? ' words' : ''} '

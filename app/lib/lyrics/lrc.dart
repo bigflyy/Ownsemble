@@ -105,10 +105,7 @@ Lyrics? lyricsFromLrc(
   }
   if (sawTimeTag) {
     // LRC's offset: a positive one makes the lines come sooner.
-    var lines = [
-      for (final line in timed)
-        line.movedTo((line.startMs! - offsetMs).clamp(0, 1 << 31)),
-    ];
+    var lines = [for (final line in timed) line.shiftedBy(-offsetMs)];
     lines = sortLinesByStart(lines);
     lines = _endLastWords(lines);
     lines = _dropLeadingCredits(lines, title: title, artist: artist);

@@ -210,12 +210,15 @@ List<int> plainLineStarts(
 /// line, as before.
 ///
 /// [words] (a fit's, by line index) replace a line's own word times where
-/// the fit has them: they are where this recording sings the words.
+/// the fit has them: they are where this recording sings the words. Where
+/// the fit has none, a line keeps its own (moved with its start) only with
+/// [ownWords]: another version's word times are another recording's pace.
 Lyrics withStarts(
   Lyrics lyrics,
   List<int> starts, {
   bool labelUnsung = false,
   List<List<WordTime?>?>? words,
+  bool ownWords = true,
 }) => Lyrics(
   source: lyrics.source,
   lines: [
@@ -226,11 +229,16 @@ Lyrics withStarts(
           label: labelUnsung && isUnsungLine(lyrics.lines[i].text),
         ),
         words != null && i < words.length ? words[i] : null,
+        keepOwn: ownWords,
       ),
   ],
 );
 
-LyricLine _withWords(LyricLine line, List<WordTime?>? words) => words == null
+LyricLine _withWords(
+  LyricLine line,
+  List<WordTime?>? words, {
+  required bool keepOwn,
+}) => words == null && keepOwn
     ? line
     : LyricLine(
         line.text,

@@ -93,6 +93,23 @@ class LyricLine {
   /// Whether the line has no words: a verse break or an instrumental gap.
   bool get isGap => text.trim().isEmpty;
 
+  /// This line moved by [deltaMs]: start, end and word times all by the
+  /// same amount, each kept at or after the song's start (an offset that
+  /// takes the start below 0 still moves the words by all of it).
+  LyricLine shiftedBy(int deltaMs) {
+    int? move(int? ms) => ms == null ? null : (ms + deltaMs).clamp(0, 1 << 31);
+    return LyricLine(
+      text,
+      startMs: move(startMs),
+      endMs: move(endMs),
+      label: label,
+      passed: passed,
+      words: words == null
+          ? null
+          : [for (final word in words!) word?.shifted(deltaMs)],
+    );
+  }
+
   /// This line with its start at [startMs]: the end and the word times move
   /// as far as the start did (none move when the line had no start).
   LyricLine movedTo(int? startMs, {bool? label}) {

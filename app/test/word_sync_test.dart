@@ -5,11 +5,16 @@
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ownsemble/library/library_store.dart';
+import 'package:ownsemble/library/track.dart';
 import 'package:ownsemble/lyrics/fitted_lines.dart';
 import 'package:ownsemble/lyrics/line_fit.dart';
+import 'package:ownsemble/lyrics/lrc.dart';
 import 'package:ownsemble/lyrics/lyrics.dart';
+import 'package:ownsemble/lyrics/lyrics_controller.dart';
 import 'package:ownsemble/lyrics/lyrics_edit.dart';
 import 'package:ownsemble/lyrics/lyrics_editor.dart';
+import 'package:ownsemble/lyrics/lyrics_match.dart';
+import 'package:ownsemble/lyrics/lyrics_sources.dart';
 
 void main() {
   group('wordTimesOnText', () {
@@ -236,4 +241,179 @@ void main() {
       expect(shown.lines[3].words, isNull, reason: 'lit with the line above');
     });
   });
+
+  group('Codex review fixes', () {
+    test('an offset past the song start moves words by all of it', () {
+      // The line clamps at 0; its words still move the full 1000 ms.
+      final lyrics = lyricsFromLrc(
+        'lrclib',
+        '[offset:+1000]\n[00:00.50]<00:01.20>a <00:01.40>b<00:01.60>\n'
+            '[00:05.00]c\n[00:06.00]d',
+      )!;
+      expect(lyrics.lines[0].startMs, 0);
+      expect(lyrics.lines[0].words, const [
+        WordTime(200, 400),
+        WordTime(400, 600),
+      ]);
+      const line = LyricLine(
+        'a b',
+        startMs: 500,
+        words: [WordTime(1200, 1400), WordTime(1400, 1600)],
+      );
+      final shifted = line.shiftedBy(-1000);
+      expect(shifted.startMs, 0);
+      expect(shifted.words, const [WordTime(200, 400), WordTime(400, 600)]);
+    });
+
+    test('another version keeps only the fit\'s own word times', () {
+      const own = Lyrics(
+        source: 'lrclib',
+        lines: [
+          LyricLine(
+            'a b',
+            startMs: 1000,
+            words: [WordTime(1000, 1300), WordTime(1400, 1800)],
+          ),
+          LyricLine(
+            'c d',
+            startMs: 3000,
+            words: [WordTime(3000, 3300), WordTime(3400, 3800)],
+          ),
+        ],
+      );
+      final shown = withStarts(
+        own,
+        const [1500, 3600],
+        words: const [
+          [WordTime(1500, 1700), WordTime(1800, 2100)],
+          null,
+        ],
+        ownWords: false,
+      );
+      expect(shown.lines[0].words, const [
+        WordTime(1500, 1700),
+        WordTime(1800, 2100),
+      ]);
+      expect(shown.lines[1].words, isNull);
+      expect(shown.lines[1].startMs, 3600);
+    });
+
+    group('found outside lyrics kept before word times', () {
+      late LibraryStore store;
+      late Track track;
+      setUp(() {
+        store = LibraryStore.open(':memory:');
+        final vk = store.ensureSource(TrackSource.vk, account: '1', name: 'A');
+        store.upsertAll(vk, [
+          const NewTrack(
+            sourceKey: '1_1',
+            artist: 'Артист',
+            title: 'Песня',
+            durationSec: 200,
+            addedAt: 1,
+          ),
+        ]);
+        track = store.loadAll().single;
+        // As schema 26 leaves them: found, fetch time 0.
+        store.saveLyrics('lrclib', '1_1', bare, atMs: lyricsWordsDueAtMs);
+      });
+      tearDown(() => store.close());
+
+      LyricsController controllerWith(OutsideLyricsSource source) =>
+          LyricsController(
+            load: store.lyricsOf,
+            save: store.saveLyrics,
+            routeOf: lyricsRouteBySource((_) => null),
+            sources: [source],
+            now: () => 1000000,
+          );
+
+      Future<void> settled(LyricsController lyrics) async {
+        for (var i = 0; i < 50; i++) {
+          await Future<void>.delayed(const Duration(milliseconds: 5));
+          final state = lyrics.state;
+          if (state is LyricsShown && !state.refreshing) return;
+        }
+      }
+
+      test('are asked again once and the word-timed answer shows', () async {
+        final source = _AnswerSource(stamped);
+        final lyrics = controllerWith(source)..show(track);
+        await settled(lyrics);
+        expect(source.asked, 1);
+        final shown = (lyrics.state as LyricsShown).lyrics;
+        expect(shown.hasWordTimes, isTrue);
+        expect(
+          store.lyricsOf('lrclib', '1_1')!.fetchedAtMs,
+          isNot(lyricsWordsDueAtMs),
+        );
+        // Asked once: the next show takes the kept answer.
+        controllerWith(source).show(track);
+        await Future<void>.delayed(const Duration(milliseconds: 50));
+        expect(source.asked, 1);
+      });
+
+      test('a "none" now keeps the lyrics found before', () async {
+        final source = _AnswerSource(null);
+        final lyrics = controllerWith(source)..show(track);
+        await settled(lyrics);
+        expect(source.asked, 1);
+        expect((lyrics.state as LyricsShown).lyrics, bare);
+        expect(store.lyricsOf('lrclib', '1_1')!.lyrics, bare);
+        expect(
+          store.lyricsOf('lrclib', '1_1')!.fetchedAtMs,
+          isNot(lyricsWordsDueAtMs),
+        );
+      });
+    });
+  });
+}
+
+const bare = Lyrics(
+  source: 'lrclib',
+  lines: [
+    LyricLine('one two', startMs: 1000),
+    LyricLine('three four', startMs: 3000),
+    LyricLine('five six', startMs: 5000),
+  ],
+);
+
+const stamped = Lyrics(
+  source: 'lrclib',
+  lines: [
+    LyricLine(
+      'one two',
+      startMs: 1000,
+      words: [WordTime(1000, 1400), WordTime(1500, 2000)],
+    ),
+    LyricLine('three four', startMs: 3000),
+    LyricLine('five six', startMs: 5000),
+  ],
+);
+
+/// An outside source that answers [lyrics] (or none) for any song.
+class _AnswerSource implements OutsideLyricsSource {
+  _AnswerSource(this.lyrics);
+
+  final Lyrics? lyrics;
+  int asked = 0;
+
+  @override
+  String get id => 'lrclib';
+
+  @override
+  Future<LyricsCandidate?> find(SongNames song) async {
+    asked++;
+    final answer = lyrics;
+    if (answer == null) return null;
+    return LyricsCandidate(
+      lyrics: answer,
+      id: '1',
+      artist: song.artist,
+      title: song.title,
+      seconds: song.seconds,
+      names: NameMatch.exact,
+      lengthDiff: 0,
+    );
+  }
 }
