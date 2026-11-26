@@ -132,17 +132,7 @@ bool _startsWithCapital(String text) {
 /// of the song when [songMs] is given and the singing stops that long
 /// before it.
 List<LyricLine> cutHeardLines(List<HeardWord> words, {int? songMs}) {
-  // In time order; words starting together keep the models' order (the
-  // research's Python sort is stable, Dart's is not promised to be).
-  final indexed =
-      [
-        for (final (i, word) in words.indexed)
-          if (word.text.trim().isNotEmpty) (i, word),
-      ]..sort((a, b) {
-        final byStart = a.$2.start.compareTo(b.$2.start);
-        return byStart != 0 ? byStart : a.$1.compareTo(b.$1);
-      });
-  final spoken = [for (final (_, word) in indexed) word];
+  final spoken = _spokenInOrder(words);
   if (spoken.isEmpty) return const [];
   final pieces = <List<HeardWord>>[];
   var current = <HeardWord>[spoken.first];
@@ -197,6 +187,7 @@ List<LyricLine> cutHeardLines(List<HeardWord> words, {int? songMs}) {
         line.map((word) => word.text.trim()).join(' '),
         startMs: startMs,
         endMs: endMs,
+        words: _wordTimesOf(line),
       ),
     );
   }
@@ -208,6 +199,75 @@ List<LyricLine> cutHeardLines(List<HeardWord> words, {int? songMs}) {
 }
 
 int _ms(double seconds) => (seconds * 1000).round();
+
+/// The words with text, in time order; words starting together keep the
+/// models' order (the research's Python sort is stable, Dart's is not
+/// promised to be).
+List<HeardWord> _spokenInOrder(List<HeardWord> words) {
+  final indexed =
+      [
+        for (final (i, word) in words.indexed)
+          if (word.text.trim().isNotEmpty) (i, word),
+      ]..sort((a, b) {
+        final byStart = a.$2.start.compareTo(b.$2.start);
+        return byStart != 0 ? byStart : a.$1.compareTo(b.$1);
+      });
+  return [for (final (_, word) in indexed) word];
+}
+
+/// The word times of a line made of [words] (plan 10 J2): every
+/// space-separated piece of a model word gets that word's time.
+List<WordTime?> _wordTimesOf(List<HeardWord> words) => [
+  for (final word in words)
+    for (final _ in lineWords(word.text))
+      WordTime(_ms(word.start), math.max(_ms(word.start), _ms(word.end))),
+];
+
+/// [lines] made by [cutHeardLines] from [words] with the word times of
+/// every line that has none (heard lyrics kept before word times were):
+/// each line takes the next words of [words] in time order whose pieces
+/// match its own. When the words and the lines do not match, [lines] come
+/// back as they were.
+List<LyricLine> withHeardWordTimes(
+  List<LyricLine> lines,
+  List<HeardWord> words,
+) {
+  if (lines.every((line) => line.isGap || line.hasWordTimes)) return lines;
+  final spoken = _spokenInOrder(words);
+  var next = 0;
+  final out = <LyricLine>[];
+  for (final line in lines) {
+    if (line.isGap) {
+      out.add(line);
+      continue;
+    }
+    final want = lineWords(line.text);
+    final taken = <HeardWord>[];
+    final pieces = <String>[];
+    while (pieces.length < want.length && next < spoken.length) {
+      taken.add(spoken[next]);
+      pieces.addAll(lineWords(spoken[next].text));
+      next++;
+    }
+    if (pieces.length != want.length) return lines;
+    for (var i = 0; i < want.length; i++) {
+      if (pieces[i] != want[i]) return lines;
+    }
+    out.add(
+      line.hasWordTimes
+          ? line
+          : LyricLine(
+              line.text,
+              startMs: line.startMs,
+              endMs: line.endMs,
+              label: line.label,
+              passed: line.passed,
+              words: _wordTimesOf(taken),
+            ),
+    );
+  }
+  return out;
+}
 
 /// What hearing a song gave.
 enum HeardOutcome {
@@ -285,8 +345,10 @@ class HeardLyrics {
   final String? askedLanguage;
 
   /// The lines as lyrics to show, or null when there are no words.
+  /// Lines kept before word times were (plan 10 J2) get them from
+  /// [words].
   late final Lyrics? lyrics = outcome == HeardOutcome.words
-      ? Lyrics(source: heardSource, lines: lines)
+      ? Lyrics(source: heardSource, lines: withHeardWordTimes(lines, words))
       : null;
 
   /// [words] as stored: `[{"t": text, "s": start ms, "e": end ms, "c":

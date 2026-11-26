@@ -210,6 +210,71 @@ void main() {
     });
   });
 
+  group('heard word times (plan 10 J2)', () {
+    test('every line carries the times of its own words', () {
+      final lines = cutHeardLines(said('one two. Three', start: 10));
+      expect(lines[0].words, const [
+        WordTime(10000, 10300),
+        WordTime(10500, 10800),
+      ]);
+      expect(lines[1].words, const [WordTime(11000, 11300)]);
+    });
+
+    test('a model word with a space inside gives each piece its time', () {
+      final lines = cutHeardLines([
+        HeardWord(1, 1.4, 'New York', 0.9),
+        HeardWord(1.5, 2, 'nights', 0.9),
+      ]);
+      expect(lines.single.text, 'New York nights');
+      expect(lines.single.words, const [
+        WordTime(1000, 1400),
+        WordTime(1000, 1400),
+        WordTime(1500, 2000),
+      ]);
+    });
+
+    test('lines kept without word times get them from the words', () {
+      final words = said('Ночь улица. Фонарь аптека', start: 2);
+      final bare = [
+        for (final line in cutHeardLines(words, songMs: 60000))
+          LyricLine(line.text, startMs: line.startMs, endMs: line.endMs),
+      ];
+      expect(bare.any((line) => line.hasWordTimes), isFalse);
+      final timed = withHeardWordTimes(bare, words);
+      expect(timed, cutHeardLines(words, songMs: 60000));
+      expect(timed.last.isGap, isTrue);
+    });
+
+    test('words that do not match the lines leave the lines as they were', () {
+      final words = said('Ночь улица. Фонарь аптека');
+      final bare = [LyricLine('Ночь другая.', startMs: 0)];
+      expect(identical(withHeardWordTimes(bare, words), bare), isTrue);
+    });
+
+    test('a kept heard row without word times shows them', () {
+      final words = said('Привет ёлка. Как дела', start: 1);
+      final heard = judged(words);
+      final old = HeardLyrics(
+        outcome: heard.outcome,
+        lines: [
+          for (final line in heard.lines)
+            LyricLine(line.text, startMs: line.startMs, endMs: line.endMs),
+        ],
+        words: heard.words,
+        model: heard.model,
+        language: heard.language,
+        confidence: heard.confidence,
+        russianConfidence: heard.russianConfidence,
+        rough: heard.rough,
+        wordCount: heard.wordCount,
+        loudSeconds: heard.loudSeconds,
+        heardAtMs: heard.heardAtMs,
+      );
+      expect(old.lyrics!.lines, heard.lyrics!.lines);
+      expect(old.lyrics!.hasWordTimes, isTrue);
+    });
+  });
+
   group('judgeHeard', () {
     final many = said(List.filled(25, 'слово').join(' '));
     final few = said('один два три');
