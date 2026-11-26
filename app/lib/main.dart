@@ -648,6 +648,7 @@ Future<void> main(List<String> args) async {
           required vocalsPath,
           required audioBytes,
           required beforeWhisper,
+          required language,
         }) {
           final scratch = Directory(
             p.join(
@@ -711,6 +712,7 @@ Future<void> main(List<String> args) async {
                 audioPath: audioPath,
                 vocalsPath: vocalsPath,
                 audioBytes: audioBytes,
+                language: language,
               );
           unawaited(
             run.result.then<void>((_) {}, onError: (Object _) {}).whenComplete(
@@ -732,6 +734,8 @@ Future<void> main(List<String> args) async {
     freeBytes: () => freeBytesAt(options.dataDir),
     bundleIntact: (bundle) => bundleIntact(modelsRoot, bundleOf(bundle)),
     useGpu: () => settings.hearOnGpu && !gpuFailed,
+    languageOf: store.hearLanguageOf,
+    saveLanguage: store.saveHearLanguage,
     // One heavy lyrics job at a time (Codex review): a fit or a fit check
     // keeps hearing from starting, and hearing keeps them.
     busyElsewhere: () => fitter.job == null

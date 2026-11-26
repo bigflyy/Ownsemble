@@ -149,6 +149,7 @@ void main() {
           required vocalsPath,
           required audioBytes,
           required beforeWhisper,
+          required language,
         }) =>
             HearWords(
               runner: runner,
@@ -172,6 +173,7 @@ void main() {
               audioPath: audioPath,
               vocalsPath: vocalsPath,
               audioBytes: audioBytes,
+              language: language,
             ),
     vocalsPathOf: (key) => '${temp.path}/vocals/$key.vocals16.f32',
     forgetHeard: (ref) => store.saveHeardLyrics(ref, null),
@@ -183,6 +185,8 @@ void main() {
     busyElsewhere: () => busy,
     log: log.add,
     useGpu: () => gpuOn,
+    languageOf: store.hearLanguageOf,
+    saveLanguage: store.saveHearLanguage,
   );
 
   Future<void> until(bool Function() condition) async {
@@ -191,6 +195,106 @@ void main() {
     }
     expect(condition(), isTrue, reason: 'timed out');
   }
+
+  group('a language picked for the song (plan 10 I2j)', () {
+    test('a pick is kept, heard in, and kept for the next Hear again; '
+        'Automatic clears it', () async {
+      lyrics.show(tracks[0]);
+      final hear = hearer();
+      expect(hear.languageFor('1_0'), isNull);
+      final asked = await hear.hearShownAs('en');
+      expect(asked, isA<HearDone>());
+      expect(runner.names, ['separate', 'gigaam', 'whisper']);
+      expect((runner.jobs.last.job as WhisperJob).language, 'en');
+      expect(store.hearLanguageOf('1_0'), 'en');
+      expect(hear.languageFor('1_0'), 'en');
+      expect(store.heardLyricsOf('1_0')!.askedLanguage, 'en');
+      expect(log, contains('hear words asked en'));
+
+      // Hear again: the pick stays.
+      final again = await hear.hearShown();
+      expect(again, isA<HearDone>());
+      expect((runner.jobs.last.job as WhisperJob).language, 'en');
+
+      // Back to Automatic: GigaAM is sure, so its words.
+      runner.jobs.clear();
+      final auto = await hear.hearShownAs(null);
+      expect(auto, isA<HearDone>());
+      expect(runner.names, ['separate', 'gigaam']);
+      expect(store.hearLanguageOf('1_0'), isNull);
+      expect(store.heardLyricsOf('1_0')!.askedLanguage, isNull);
+    });
+
+    test('a code this build does not know is refused, and one stored by '
+        'a newer build counts as Automatic', () async {
+      lyrics.show(tracks[0]);
+      final hear = hearer();
+      final refused = await hear.hearShownAs('english');
+      expect(refused, isA<HearFailed>());
+      expect(store.hearLanguageOf('1_0'), isNull);
+      expect(runner.jobs, isEmpty);
+      store.saveHearLanguage('1_0', 'xx');
+      expect(hear.languageFor('1_0'), isNull);
+      final heard = await hear.hearShown();
+      expect(heard, isA<HearDone>());
+      expect(runner.names, ['separate', 'gigaam']);
+      expect(store.heardLyricsOf('1_0')!.askedLanguage, isNull);
+    });
+
+    test('no pick is kept for a song outside the library', () async {
+      final found = Track(
+        id: -7,
+        sourceId: tracks[0].sourceId,
+        source: tracks[0].source,
+        artist: 'Found',
+        title: 'Song',
+        durationSec: 200,
+        sourceKey: '9_9',
+      );
+      routeKeys[found.id] = '9_9';
+      lyrics.show(found);
+      final hear = hearer();
+      final refused = await hear.hearShownAs('en');
+      expect(refused, isA<HearFailed>());
+      expect(store.hearLanguageOf('9_9'), isNull);
+    });
+
+    test('the run and the download say a language was picked', () {
+      expect(
+        hearStepText('whisper-asked'),
+        'hearing the words with Whisper, in the language you picked',
+      );
+      expect(
+        hearStageText(
+          const HearDownloading(5, 10, whisper: true, picked: true),
+        ),
+        startsWith('downloading Whisper (for the language you picked)'),
+      );
+      expect(
+        hearStageText(const HearDownloading(5, 10, whisper: true)),
+        startsWith('downloading Whisper (GigaAM was not sure'),
+      );
+    });
+
+    test('nothing is kept while another song is heard or the song moved '
+        'on', () async {
+      lyrics.show(tracks[0]);
+      final hear = hearer();
+      saveGate = Completer<String>();
+      final first = hear.hearShown();
+      await until(() => hear.job != null);
+      final refused = await hear.hearShownAs('ru');
+      expect(refused, isA<HearFailed>());
+      expect(store.hearLanguageOf('1_0'), isNull);
+      saveGate!.complete('${temp.path}/1_0.mp3');
+      File('${temp.path}/1_0.mp3').writeAsBytesSync([1, 2, 3]);
+      await first;
+      saveGate = null;
+      final moved = await hear.hearShownAs('ru', forKey: 'other');
+      expect(moved, isA<HearFailed>());
+      expect(store.hearLanguageOf('1_0'), isNull);
+    });
+  });
 
   test('a Russian song: saved, run, heard words shown, no Whisper', () async {
     lyrics.show(tracks[0]);
@@ -399,6 +503,7 @@ void main() {
           required vocalsPath,
           required audioBytes,
           required beforeWhisper,
+          required language,
         }) => throw StateError('no run'),
         vocalsPathOf: (key) => key,
         forgetHeard: (_) {},
@@ -431,6 +536,7 @@ void main() {
             required vocalsPath,
             required audioBytes,
             required beforeWhisper,
+            required language,
           }) =>
               HearWords(
                 runner: runner,
@@ -614,6 +720,7 @@ void main() {
         required vocalsPath,
         required audioBytes,
         required beforeWhisper,
+        required language,
       }) => throw StateError('no run'),
       vocalsPathOf: (key) => key,
       forgetHeard: (_) {},

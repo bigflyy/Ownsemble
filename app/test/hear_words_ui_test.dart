@@ -20,6 +20,7 @@ import 'package:ownsemble/lyrics/lyrics.dart';
 import 'package:ownsemble/lyrics/lyrics_controller.dart';
 import 'package:ownsemble/lyrics/lyrics_hearer.dart';
 import 'package:ownsemble/lyrics/vocals_job.dart';
+import 'package:ownsemble/lyrics/whisper_job.dart';
 import 'package:ownsemble/ui/hear_words_ui.dart';
 import 'package:ownsemble/ui/lyrics_choices_page.dart';
 import 'package:ownsemble/ui/lyrics_page.dart';
@@ -83,6 +84,9 @@ void main() {
         GigaamJob() => gigaamHeard([
           (1, 20),
         ], said('come home. ${words(25, 'again')}', 1, confidence)),
+        WhisperJob(:final ranges) => whisperHeard(ranges!, [
+          (language: 'en', words: said(words(25, 'there'), 1, 0.95)),
+        ]),
         _ => throw StateError('unexpected'),
       },
     );
@@ -112,6 +116,7 @@ void main() {
           required vocalsPath,
           required audioBytes,
           required beforeWhisper,
+          required language,
         }) =>
             HearWords(
               runner: runner,
@@ -135,9 +140,12 @@ void main() {
               audioPath: audioPath,
               vocalsPath: vocalsPath,
               audioBytes: audioBytes,
+              language: language,
             ),
     vocalsPathOf: (key) => '${temp.path}/vocals/$key.vocals16.f32',
     forgetHeard: (ref) => store.saveHeardLyrics(ref, null),
+    languageOf: store.hearLanguageOf,
+    saveLanguage: store.saveHearLanguage,
   );
 
   Future<void> settle(WidgetTester tester) async {
@@ -184,7 +192,7 @@ void main() {
     final hear = hearer();
     await openPlace(tester, hear);
     expect(text(tester, 'lyrics-message'), 'No lyrics found for this song.');
-    expect(text(tester, 'lyrics-note'), contains('2 to 5 minutes'));
+    expect(text(tester, 'lyrics-note'), contains('1 to 6 minutes'));
     expect(find.byKey(const ValueKey('lyrics-choose')), findsOneWidget);
     runner.hold = (job) => job is GigaamJob;
     await tester.runAsync(() async {
@@ -388,6 +396,147 @@ void main() {
     expect(text(tester, 'lyrics-note'), startsWith('Add the song'));
   });
 
+  group('the language for one song (plan 10 I2j)', () {
+    Future<void> runTo(WidgetTester tester, int jobs) async {
+      await tester.runAsync(() async {
+        for (var i = 0; i < 200 && runner.jobs.length < jobs; i++) {
+          await Future<void>.delayed(const Duration(milliseconds: 5));
+        }
+        await Future<void>.delayed(const Duration(milliseconds: 20));
+      });
+      await settle(tester);
+    }
+
+    testWidgets('the arrow lists Automatic, Russian, English and another '
+        'language; English is kept, heard in and named', (tester) async {
+      await openPlace(tester, hearer());
+      await tester.tap(find.byKey(const ValueKey('hear-language-arrow')));
+      await settle(tester);
+      for (final id in ['auto', 'ru', 'en', 'other']) {
+        expect(find.byKey(ValueKey('hear-language-$id')), findsOneWidget);
+      }
+      // Automatic is the song's choice now: its row has the check.
+      expect(
+        find.descendant(
+          of: find.byKey(const ValueKey('hear-language-auto')),
+          matching: find.byIcon(Icons.check),
+        ),
+        findsOneWidget,
+      );
+      await tester.tap(find.byKey(const ValueKey('hear-language-en')));
+      await runTo(tester, 3);
+      expect(runner.names, ['separate', 'gigaam', 'whisper']);
+      expect((runner.jobs.last.job as WhisperJob).language, 'en');
+      expect(store.hearLanguageOf('1_0'), 'en');
+      expect(
+        text(tester, 'lyrics-credit'),
+        startsWith(
+          'Heard by the app from this recording, in English as you asked',
+        ),
+      );
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('another language: the list searches by name, the pick is '
+        'kept and checked next time', (tester) async {
+      final hear = hearer();
+      await openPlace(tester, hear);
+      await tester.tap(find.byKey(const ValueKey('hear-language-arrow')));
+      await settle(tester);
+      await tester.tap(find.byKey(const ValueKey('hear-language-other')));
+      await settle(tester);
+      expect(find.byKey(const ValueKey('hear-language-dialog')), findsOne);
+      expect(find.byKey(const ValueKey('hear-pick-auto')), findsOneWidget);
+      await tester.enterText(
+        find.byKey(const ValueKey('hear-language-search')),
+        'ukr',
+      );
+      await settle(tester);
+      expect(find.byKey(const ValueKey('hear-pick-uk')), findsOneWidget);
+      expect(find.byKey(const ValueKey('hear-pick-de')), findsNothing);
+      expect(find.byKey(const ValueKey('hear-pick-auto')), findsNothing);
+      await tester.enterText(
+        find.byKey(const ValueKey('hear-language-search')),
+        'zzz',
+      );
+      await settle(tester);
+      expect(find.text('No language by that name'), findsOneWidget);
+      await tester.enterText(
+        find.byKey(const ValueKey('hear-language-search')),
+        'ukr',
+      );
+      await settle(tester);
+      await tester.tap(find.byKey(const ValueKey('hear-pick-uk')));
+      await runTo(tester, 3);
+      expect(store.hearLanguageOf('1_0'), 'uk');
+      expect((runner.jobs.last.job as WhisperJob).language, 'uk');
+      // The heading's button (the main screen's) names the pick and checks
+      // it in its arrow.
+      final heading = hear;
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: buildTheme(OwnColors.dark),
+          home: Scaffold(
+            body: Center(
+              child: HearHeadingButton(hearer: heading, compact: false),
+            ),
+          ),
+        ),
+      );
+      await settle(tester);
+      expect(find.text('Hear again in Ukrainian'), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey('hear-language-arrow')));
+      await settle(tester);
+      expect(find.text('Another language: Ukrainian...'), findsOneWidget);
+      expect(
+        find.descendant(
+          of: find.byKey(const ValueKey('hear-language-other')),
+          matching: find.byIcon(Icons.check),
+        ),
+        findsOneWidget,
+      );
+    });
+
+    testWidgets('closing the list without a pick hears nothing; Enter '
+        'takes the first match', (tester) async {
+      await openPlace(tester, hearer());
+      await tester.tap(find.byKey(const ValueKey('hear-language-arrow')));
+      await settle(tester);
+      await tester.tap(find.byKey(const ValueKey('hear-language-other')));
+      await settle(tester);
+      await tester.tap(find.byKey(const ValueKey('hear-language-cancel')));
+      await settle(tester);
+      expect(runner.jobs, isEmpty);
+      expect(store.hearLanguageOf('1_0'), isNull);
+      // Enter takes the first match.
+      await tester.tap(find.byKey(const ValueKey('hear-language-arrow')));
+      await settle(tester);
+      await tester.tap(find.byKey(const ValueKey('hear-language-other')));
+      await settle(tester);
+      await tester.enterText(
+        find.byKey(const ValueKey('hear-language-search')),
+        'germ',
+      );
+      await settle(tester);
+      await tester.testTextInput.receiveAction(TextInputAction.done);
+      await tester.runAsync(() async {
+        for (var i = 0; i < 200 && runner.jobs.length < 3; i++) {
+          await Future<void>.delayed(const Duration(milliseconds: 5));
+        }
+        await Future<void>.delayed(const Duration(milliseconds: 20));
+      });
+      await settle(tester);
+      expect(store.hearLanguageOf('1_0'), 'de');
+    });
+
+    testWidgets('narrow: the button and its arrow fit', (tester) async {
+      store.saveHearLanguage('1_0', 'yue');
+      await openPlace(tester, hearer(), width: 360);
+      expect(tester.takeException(), isNull);
+      expect(find.byKey(const ValueKey('hear-language-arrow')), findsOne);
+    });
+  });
+
   testWidgets('narrow: the message, buttons and note fit', (tester) async {
     await openPlace(tester, hearer(), width: 360);
     expect(tester.takeException(), isNull);
@@ -519,6 +668,67 @@ void main() {
     await settle(tester);
     expect(store.heardLyricsOf('1_0'), isNull);
     expect(find.byKey(const ValueKey('lyrics-choice-heard')), findsNothing);
+  });
+
+  testWidgets('the chooser: Hear again as... picks a language from the list, '
+      'hears in it, and the heard row names it (plan 10 I2j)', (tester) async {
+    confidence = 0.88;
+    final hear = hearer();
+    lyrics.show(tracks[0]);
+    await tester.runAsync(hear.hearShown);
+    tester.view.physicalSize = const Size(900, 700);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: buildTheme(OwnColors.dark),
+        home: Scaffold(
+          body: LyricsChoicesPage(
+            lyrics: lyrics,
+            current: () => playing,
+            currentStream: songs.stream,
+            position: () => Duration.zero,
+            positions: () => null,
+            seek: (_) async {},
+            onUsed: () {},
+            hearer: hear,
+          ),
+        ),
+      ),
+    );
+    await settle(tester);
+    final row = find.byKey(const ValueKey('lyrics-choice-heard'));
+    await tester.tapAt(
+      tester.getCenter(row),
+      buttons: kSecondaryButton,
+      kind: PointerDeviceKind.mouse,
+    );
+    await settle(tester);
+    expect(find.text('Hear again'), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('menu-hear-again-as')));
+    await settle(tester);
+    expect(find.byKey(const ValueKey('hear-language-dialog')), findsOne);
+    await tester.tap(find.byKey(const ValueKey('hear-pick-ru')));
+    await tester.runAsync(() async {
+      for (var i = 0; i < 200 && hear.job == null; i++) {
+        await Future<void>.delayed(const Duration(milliseconds: 5));
+      }
+      for (var i = 0; i < 400 && hear.job != null; i++) {
+        await Future<void>.delayed(const Duration(milliseconds: 5));
+      }
+    });
+    await settle(tester);
+    expect(store.hearLanguageOf('1_0'), 'ru');
+    expect(store.heardLyricsOf('1_0')!.askedLanguage, 'ru');
+    expect(find.textContaining('in Russian as you asked'), findsOneWidget);
+    // The menu's Hear again now says the kept language.
+    await tester.tapAt(
+      tester.getCenter(row),
+      buttons: kSecondaryButton,
+      kind: PointerDeviceKind.mouse,
+    );
+    await settle(tester);
+    expect(find.text('Hear again in Russian'), findsOneWidget);
   });
 
   testWidgets('the heading button hears a song with found lyrics; they stay '

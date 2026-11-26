@@ -17,6 +17,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../library/track.dart';
+import '../lyrics/hear_languages.dart';
 import '../lyrics/heard_lyrics.dart';
 import '../lyrics/lyrics_edit.dart';
 import '../lyrics/lyrics.dart';
@@ -130,6 +131,7 @@ class _LyricsChoicesPageState extends State<LyricsChoicesPage> {
   Future<void> _menu(LyricsChoice choice, Offset at) async {
     final chosen = widget.lyrics.chosen;
     final heard = choice.source == heardSource;
+    final heardNow = widget.lyrics.heard;
     final hearer = widget.hearer;
     // The upload the menu is for, even if the song moves on meanwhile.
     final key = widget.lyrics.shownKey;
@@ -166,7 +168,14 @@ class _LyricsChoicesPageState extends State<LyricsChoicesPage> {
             key: const ValueKey('menu-hear-again'),
             value: 'hear',
             enabled: hearer.job == null,
-            child: const Text('Hear again'),
+            child: Text(hearButtonLabel(heardNow, hearer.languageFor(key))),
+          ),
+          // A language picked by hand (plan 10 I2j).
+          PopupMenuItem(
+            key: const ValueKey('menu-hear-again-as'),
+            value: 'hear-as',
+            enabled: hearer.job == null,
+            child: const Text('Hear again as...'),
           ),
           PopupMenuItem(
             key: const ValueKey('menu-forget-heard'),
@@ -190,6 +199,22 @@ class _LyricsChoicesPageState extends State<LyricsChoicesPage> {
         setState(() => _preview = choice.source);
       case 'hear':
         unawaited(hearShownWords(context, hearer!, forKey: key));
+      case 'hear-as':
+        final picked = await pickHearLanguage(
+          context,
+          current: hearer!.languageFor(key),
+        );
+        if (picked == null || !mounted) return;
+        if (widget.lyrics.shownKey != key) return;
+        unawaited(
+          hearShownWords(
+            context,
+            hearer,
+            forKey: key,
+            pick: true,
+            language: picked.language,
+          ),
+        );
       case 'forget':
         if (key != null) hearer!.forget(key);
       case 'forget-edit':
@@ -286,6 +311,9 @@ class _LyricsChoicesPageState extends State<LyricsChoicesPage> {
                     (widget.lyrics.heard?.rough ?? false),
                 heardOutcome: choice.source == heardSource
                     ? widget.lyrics.heard?.outcome
+                    : null,
+                heardAsked: choice.source == heardSource
+                    ? widget.lyrics.heard?.askedLanguage
                     : null,
                 yours: choice.source == chosen,
                 narrow: narrow,
@@ -399,6 +427,7 @@ class _LyricsChoicesPageState extends State<LyricsChoicesPage> {
                   Text(
                     choice.source == heardSource
                         ? 'Heard by the app from this recording'
+                              '${heardLanguageNote(widget.lyrics.heard)}'
                               '${widget.lyrics.heard?.rough ?? false ? ', rough' : ''}'
                               '${_offsetNote(widget.lyrics.offsetOf(choice.source))}'
                         : '${choice.label}, ${widget.lyrics.timedOf(lyrics).timed
@@ -490,6 +519,7 @@ class _ChoiceRow extends StatelessWidget {
     required this.onRetry,
     this.rough = false,
     this.heardOutcome,
+    this.heardAsked,
     this.hearing = false,
   });
 
@@ -499,6 +529,10 @@ class _ChoiceRow extends StatelessWidget {
   /// to, and whether it is being heard again now.
   final bool rough;
   final HeardOutcome? heardOutcome;
+
+  /// The language the heard words were asked for (plan 10 I2j), null when
+  /// the app chose.
+  final String? heardAsked;
   final bool hearing;
 
   /// The share of the lyrics' lines found in this recording (G3); null
@@ -582,16 +616,20 @@ class _ChoiceRow extends StatelessWidget {
         ),
     ];
     final heard = choice.source == heardSource;
+    final asked = heardAsked;
+    final askedNote = asked == null
+        ? ''
+        : ' · in ${hearLanguageName(asked)} as you asked';
     final detail = switch (choice.status) {
       _ when heard && hearing => 'Being heard again...',
       LyricsChoiceStatus.found when heard =>
-        'From this recording, on this PC · ${_wordLines(lyrics!)} lines',
+        'From this recording, on this PC$askedNote · '
+            '${_wordLines(lyrics!)} lines',
       LyricsChoiceStatus.found when choice.source == editedSource =>
         'Edited by you, on this PC · ${_wordLines(lyrics!)} lines',
       LyricsChoiceStatus.none when heard =>
-        heardOutcome == HeardOutcome.noSinging
-            ? 'No singing found in this recording'
-            : 'A voice, but no words made out',
+        '${heardOutcome == HeardOutcome.noSinging ? 'No singing found in this recording' : 'A voice, but no words made out'}'
+            '$askedNote',
       LyricsChoiceStatus.found =>
         choice.source == 'vk'
             ? "This upload's own lyrics · ${_wordLines(lyrics!)} lines"

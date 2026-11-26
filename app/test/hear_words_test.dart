@@ -55,9 +55,14 @@ void main() {
     now: () => 99,
   );
 
-  HearRun start(FakeRunner runner, {String ref = '1_1'}) => pipeline(
-    runner,
-  ).start(ref: ref, audioPath: 'song.mp3', vocalsPath: vocals, audioBytes: 7);
+  HearRun start(FakeRunner runner, {String ref = '1_1', String? language}) =>
+      pipeline(runner).start(
+        ref: ref,
+        audioPath: 'song.mp3',
+        vocalsPath: vocals,
+        audioBytes: 7,
+        language: language,
+      );
 
   const separated = VocalsResult(
     samples: 0,
@@ -150,6 +155,75 @@ void main() {
 
       expect(await route(0.7996), ['separate', 'gigaam', 'whisper']);
       expect(await route(0.80), ['separate', 'gigaam']);
+    });
+  });
+
+  group('a language the user asked for (plan 10 I2j)', () {
+    Object answer(WorkerJob<Object?> job, {double ru = 0.5, int chunks = 1}) =>
+        switch (job) {
+          VocalsJob() => separated,
+          GigaamJob() => gigaamHeard(
+            [for (var i = 0; i < chunks; i++) (1.0 + 20 * i, 19.0 + 20 * i)],
+            chunks == 0 ? const [] : said(words(25, 'слово'), 1, ru),
+            loud: chunks == 0 ? 0.4 : 100,
+          ),
+          WhisperJob(:final ranges) => whisperHeard(ranges!, [
+            // Whisper's own guess is English, over Russian singing.
+            for (var i = 0; i < ranges.length; i++)
+              (
+                language: 'en',
+                words: said(words(25, 'word'), 1.0 + 20 * i, 0.95),
+              ),
+          ]),
+          _ => throw StateError('unexpected ${job.name}'),
+        };
+
+    test('Russian takes the GigaAM words though it is unsure', () async {
+      final runner = FakeRunner((job) => answer(job, ru: 0.6));
+      final heard = await start(runner, language: 'ru').result;
+      expect(runner.names, ['separate', 'gigaam']);
+      expect(heard.model, HeardModel.gigaam);
+      expect(heard.language, 'ru');
+      expect(heard.askedLanguage, 'ru');
+      expect(heard.words.first.text, 'слово');
+      expect(saved['1_1']!.askedLanguage, 'ru');
+    });
+
+    test('English has Whisper hear English though GigaAM is sure; no chunk '
+        'is heard again as Russian', () async {
+      final runner = FakeRunner((job) => answer(job, ru: 0.97));
+      final heard = await start(runner, language: 'en').result;
+      expect(runner.names, ['separate', 'gigaam', 'whisper']);
+      final whisper = runner.jobs.last.job as WhisperJob;
+      expect(whisper.language, 'en');
+      expect(whisper.ranges, [(16000, 304000)]);
+      expect(heard.model, HeardModel.whisper);
+      expect(heard.language, 'en');
+      expect(heard.askedLanguage, 'en');
+    });
+
+    test('another language is given to Whisper and kept, whatever chunk '
+        'languages come back', () async {
+      final runner = FakeRunner((job) => answer(job, chunks: 2));
+      final heard = await start(runner, language: 'uk').result;
+      expect(runner.names, ['separate', 'gigaam', 'whisper']);
+      expect((runner.jobs.last.job as WhisperJob).language, 'uk');
+      expect(heard.language, 'uk');
+    });
+
+    test('no singing is still found, the asked language kept', () async {
+      final runner = FakeRunner((job) => answer(job, chunks: 0));
+      final heard = await start(runner, language: 'en').result;
+      expect(runner.names, ['separate', 'gigaam']);
+      expect(heard.outcome, HeardOutcome.noSinging);
+      expect(heard.askedLanguage, 'en');
+    });
+
+    test('Automatic routes as always and asks for nothing', () async {
+      final runner = FakeRunner((job) => answer(job, ru: 0.97));
+      final heard = await start(runner).result;
+      expect(runner.names, ['separate', 'gigaam']);
+      expect(heard.askedLanguage, isNull);
     });
   });
 
@@ -620,7 +694,10 @@ void main() {
       expect((gigaam as GigaamJob).directMlDevice, directMlBestGpu);
       expect((whisper as WhisperJob).gpuBackends, 'hear-gpu-1/vulkan');
       expect(seen.every((unit) => unit.gpu), isTrue);
-      expect(log.last, contains('GPU separate gigaam whisper; inside (ms): separate decode'));
+      expect(
+        log.last,
+        contains('GPU separate gigaam whisper; inside (ms): separate decode'),
+      );
     });
 
     test('a stage that fails on the GPU runs again on the CPU, and so do '

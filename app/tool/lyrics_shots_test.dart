@@ -21,6 +21,7 @@ import 'dart:async';
 import 'dart:io';
 import 'dart:ui' as ui;
 
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
@@ -256,9 +257,15 @@ void main() {
       'nosinging',
       'hearother',
       'heardrow',
+      'hearlang',
+      'hearlist',
+      'hearsearch',
+      'heardrowlang',
     };
     Future<Object?> fakeVk(String method, Map<String, String> params) async {
-      if (hearSteps.contains(step) && step != 'heardrow') {
+      if (hearSteps.contains(step) &&
+          step != 'heardrow' &&
+          step != 'heardrowlang') {
         throw VkException('audio.getLyrics error 104', code: 104);
       }
       switch (step) {
@@ -274,7 +281,8 @@ void main() {
             'chosen' ||
             'ranked' ||
             'checkrow' ||
-            'heardrow':
+            'heardrow' ||
+            'heardrowlang':
           return _plainReply();
         case 'long':
           return _timedReply(_longWords);
@@ -314,7 +322,15 @@ void main() {
     }
     // I2f: heard words, timed from the made-up lines, sure enough to show
     // but marked rough (GigaAM under 0.93).
-    if (step == 'heard' || step == 'heardrow') {
+    // I2j: heard in English because the user asked (the language steps).
+    final asked = const [
+      'hearlang',
+      'hearlist',
+      'hearsearch',
+      'heardrowlang',
+    ].contains(step);
+    if (asked) store.saveHearLanguage('1_1', 'en');
+    if (step == 'heard' || step == 'heardrow' || asked) {
       final heardWords = <HeardWord>[];
       for (final (i, line) in _timedWords.indexed) {
         for (final (k, word) in line.split(' ').indexed) {
@@ -334,6 +350,7 @@ void main() {
           loud: 120,
           songMs: 204000,
           heardAtMs: 1,
+          askedLanguage: asked ? 'en' : null,
         ),
       );
     }
@@ -427,6 +444,7 @@ void main() {
             required vocalsPath,
             required audioBytes,
             required beforeWhisper,
+            required language,
           }) =>
               HearWords(
                 runner: runner,
@@ -446,9 +464,12 @@ void main() {
                 audioPath: audioPath,
                 vocalsPath: p.join(modelDir.path, 'vocals.f32'),
                 audioBytes: audioBytes,
+                language: language,
               ),
       vocalsPathOf: (key) => p.join(modelDir.path, 'vocals.f32'),
       forgetHeard: (_) {},
+      languageOf: store.hearLanguageOf,
+      saveLanguage: store.saveHearLanguage,
     );
     final settings = ShellSettings.inMemory();
     if (!dark) settings.toggleTheme();
@@ -562,6 +583,34 @@ void main() {
       }
       if (step == 'heardrow') {
         await tester.tap(find.byKey(const ValueKey('lyrics-choose')));
+        await settle();
+      }
+      // I2j: the arrow's menu, the list of every language, a search, and
+      // the chooser's heard row with its menu.
+      if (step == 'hearlang' || step == 'hearlist' || step == 'hearsearch') {
+        await tester.tap(find.byKey(const ValueKey('hear-language-arrow')));
+        await settle();
+      }
+      if (step == 'hearlist' || step == 'hearsearch') {
+        await tester.tap(find.byKey(const ValueKey('hear-language-other')));
+        await settle();
+      }
+      if (step == 'hearsearch') {
+        await tester.enterText(
+          find.byKey(const ValueKey('hear-language-search')),
+          'ukr',
+        );
+        await settle();
+      }
+      if (step == 'heardrowlang') {
+        await tester.tap(find.byKey(const ValueKey('lyrics-choose')));
+        await settle();
+        final row = find.byKey(const ValueKey('lyrics-choice-heard'));
+        await tester.tapAt(
+          tester.getCenter(row),
+          buttons: kSecondaryButton,
+          kind: PointerDeviceKind.mouse,
+        );
         await settle();
       }
       if (step == 'hearfound') {
@@ -739,6 +788,15 @@ void main() {
     ('hearother', false, const Size(480, 800)),
     ('heardrow', true, const Size(1440, 900)),
     ('heardrow', false, const Size(480, 800)),
+    // I2j: the language of one song.
+    ('hearlang', true, const Size(1440, 900)),
+    ('hearlang', false, const Size(760, 900)),
+    ('hearlang', true, const Size(480, 800)),
+    ('hearlist', true, const Size(1440, 900)),
+    ('hearlist', false, const Size(480, 800)),
+    ('hearsearch', true, const Size(1440, 900)),
+    ('heardrowlang', true, const Size(1440, 900)),
+    ('heardrowlang', false, const Size(480, 800)),
     // I2g: the heading's rule around its width, then editing.
     ('timed', true, const Size(1280, 900)),
     ('timed', false, const Size(1180, 900)),

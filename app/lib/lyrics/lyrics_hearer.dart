@@ -27,6 +27,7 @@ import 'package:path/path.dart' as p;
 import '../library/track.dart';
 import 'audio_decode.dart' show DecodeError;
 import 'fit_model.dart';
+import 'hear_languages.dart';
 import 'hear_words.dart';
 import 'heard_lyrics.dart';
 import 'lyrics_controller.dart';
@@ -46,10 +47,15 @@ class HearDownloading extends HearStage {
     this.total, {
     this.whisper = false,
     this.gpu = false,
+    this.picked = false,
   });
   final int bytes;
   final int total;
   final bool whisper;
+
+  /// Whisper is needed for a language the user picked (plan 10 I2j), not
+  /// because GigaAM was unsure.
+  final bool picked;
 
   /// The GPU files (plan 10 I2i).
   final bool gpu;
@@ -119,13 +125,15 @@ enum HearBundle { hearWords, whisper, gpu }
 
 /// Starts [HearWords] for one recording; the app's version opens a fresh
 /// worker and a scratch folder and drops both when the run ends.
-/// [beforeWhisper] goes to [HearWords.beforeWhisper].
+/// [beforeWhisper] goes to [HearWords.beforeWhisper], [language] (the
+/// song's picked language, null for Automatic) to [HearWords.start].
 typedef HearStart = HearRun Function({
   required String ref,
   required String audioPath,
   required String vocalsPath,
   required int audioBytes,
   required Future<void> Function(HearRun run) beforeWhisper,
+  required String? language,
 });
 
 /// Room a run needs on the data drive for a song of [seconds], besides the
@@ -150,9 +158,26 @@ class LyricsHearer extends ChangeNotifier {
     this.busyElsewhere,
     this.log,
     this.useGpu,
+    this.languageOf,
+    this.saveLanguage,
   });
 
   final LyricsController lyrics;
+
+  /// The language picked for hearing a song (LibraryStore.hearLanguageOf,
+  /// plan 10 I2j): 'ru' or a Whisper language code; null for Automatic.
+  final String? Function(String ref)? languageOf;
+
+  /// Keeps a song's pick (LibraryStore.saveHearLanguage); null: Automatic.
+  final void Function(String ref, String? language)? saveLanguage;
+
+  /// The language picked for the upload [key], null for Automatic.
+  /// A code this build does not know (a newer build's) counts as
+  /// Automatic.
+  String? languageFor(String? key) {
+    final code = key == null ? null : languageOf?.call(key);
+    return code != null && hearLanguageNames.containsKey(code) ? code : null;
+  }
 
   /// Whether runs use the GPU now (the user's switch, and no GPU failure
   /// since the app started): the GPU files are then downloaded with the
@@ -160,6 +185,9 @@ class LyricsHearer extends ChangeNotifier {
   final bool Function()? useGpu;
 
   bool get _gpu => useGpu?.call() ?? false;
+
+  /// Whether a run would hear on the GPU now (for the time it takes).
+  bool get onGpu => _gpu;
 
   /// Whether a bundle is downloaded (model_bundle.bundleReady).
   final bool Function(HearBundle bundle) bundleReady;
@@ -284,6 +312,28 @@ class LyricsHearer extends ChangeNotifier {
     return Future.any([future, stopped]);
   }
 
+  /// Keeps [language] as the shown song's pick (null: Automatic) and hears
+  /// it in that language (plan 10 I2j). Nothing is kept when the song
+  /// cannot be heard now: another run, or [forKey] no longer shown.
+  Future<HearOutcome> hearShownAs(String? language, {String? forKey}) {
+    if (language != null && !hearLanguageNames.containsKey(language)) {
+      return Future.value(
+        HearFailed('No language "$language" to hear in.', retry: false),
+      );
+    }
+    final key = lyrics.shownKey;
+    if (_job == null &&
+        key != null &&
+        (lyrics.track?.inLibrary ?? false) &&
+        (forKey == null || forKey == key) &&
+        busyElsewhere?.call() == null) {
+      saveLanguage?.call(key, language);
+      _log('hear words asked ${language ?? 'auto'}');
+      notifyListeners();
+    }
+    return hearShown(forKey: forKey);
+  }
+
   /// Hears the recording of the song the place shows. Returns at once with
   /// [HearFailed] when a run or another heavy job goes on already, or when
   /// [forKey] is given and the place shows another upload now (a question
@@ -373,6 +423,7 @@ class LyricsHearer extends ChangeNotifier {
         audioPath: path,
         vocalsPath: vocalsPath,
         audioBytes: audioBytes,
+        language: languageFor(key),
         beforeWhisper: (_) async {
           if (!bundleReady(HearBundle.whisper)) {
             phase = 'download whisper';
@@ -444,11 +495,24 @@ class LyricsHearer extends ChangeNotifier {
     final whisper = bundle == HearBundle.whisper;
     final gpu = bundle == HearBundle.gpu;
     if (_stopping) throw const DownloadStopped();
-    _move(job, HearDownloading(0, 0, whisper: whisper, gpu: gpu));
+    final picked = whisper && languageFor(job.key) != null;
+    _move(
+      job,
+      HearDownloading(0, 0, whisper: whisper, gpu: gpu, picked: picked),
+    );
     final stop = _stop = DownloadStop();
     try {
       await download(bundle, (bytes, total) {
-        _move(job, HearDownloading(bytes, total, whisper: whisper, gpu: gpu));
+        _move(
+          job,
+          HearDownloading(
+            bytes,
+            total,
+            whisper: whisper,
+            gpu: gpu,
+            picked: picked,
+          ),
+        );
       }, stop);
     } finally {
       _stop = null;
@@ -474,8 +538,16 @@ HearBundle? damagedBundleOf(String message) {
 /// What a stage shows, so listeners hear only changes that show (the
 /// download reports every few kilobytes).
 String hearStageText(HearStage stage) => switch (stage) {
-  HearDownloading(:final bytes, :final total, :final whisper, :final gpu) =>
-    'downloading ${whisper
+  HearDownloading(
+    :final bytes,
+    :final total,
+    :final whisper,
+    :final gpu,
+    :final picked,
+  ) =>
+    'downloading ${whisper && picked
+            ? 'Whisper (for the language you picked)'
+            : whisper
             ? 'Whisper (GigaAM was not sure of this song)'
             : gpu
             ? 'the GPU files'
@@ -494,6 +566,8 @@ String hearStepText(String step) => switch (step) {
   'separate' => 'separating the voice from the music',
   'gigaam' => 'hearing the words',
   'whisper' => 'hearing the words with Whisper (GigaAM was not sure)',
+  'whisper-asked' =>
+    'hearing the words with Whisper, in the language you picked',
   'whisper-ru' => 'hearing some parts again as Russian',
   _ => 'hearing the words',
 };

@@ -7,7 +7,8 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
-import '../lyrics/heard_lyrics.dart' show HeardOutcome;
+import '../lyrics/hear_languages.dart';
+import '../lyrics/heard_lyrics.dart' show HeardLyrics, HeardOutcome;
 import '../lyrics/lyrics_hearer.dart';
 import 'theme.dart';
 
@@ -62,10 +63,15 @@ Future<bool> askToDownloadHearModels(
 /// came of it when the place does not show it by itself. [forKey]: the
 /// upload a menu or message was opened for; nothing starts when the place
 /// shows another by now (Codex review).
+///
+/// With [pick] the song is heard in [language] (null: Automatic), which is
+/// kept for the song (plan 10 I2j); without it, in the song's kept pick.
 Future<void> hearShownWords(
   BuildContext context,
   LyricsHearer hearer, {
   String? forKey,
+  bool pick = false,
+  String? language,
 }) async {
   final messenger = ScaffoldMessenger.of(context);
   final key = forKey ?? hearer.lyrics.shownKey;
@@ -79,7 +85,9 @@ Future<void> hearShownWords(
     );
     if (!agreed || !context.mounted) return;
   }
-  final outcome = await hearer.hearShown(forKey: key);
+  final outcome = pick
+      ? await hearer.hearShownAs(language, forKey: key)
+      : await hearer.hearShown(forKey: key);
   final SnackBar? bar = switch (outcome) {
     // The place shows the result; a song moved away from hears of it here.
     HearDone() when hearer.lyrics.shownKey == key => null,
@@ -292,7 +300,7 @@ class HearHeadingButton extends StatelessWidget {
       final heard = lyrics.heard;
       final noSinging = heard?.outcome == HeardOutcome.noSinging;
       final other = hearer.job != null;
-      final label = heard == null ? 'Hear the words' : 'Hear again';
+      final label = hearButtonLabel(heard, hearer.languageFor(key));
       final tooltip = !track.inLibrary
           ? 'Add the song to your library to hear its words'
           : other
@@ -303,14 +311,25 @@ class HearHeadingButton extends StatelessWidget {
       final onPressed = track.inLibrary && !other && !noSinging
           ? () => unawaited(hearShownWords(context, hearer))
           : null;
-      return compact
-          ? IconButton(
+      // The language arrow beside it (plan 10 I2j): also for a song with
+      // no singing found, which may have been heard in the wrong language.
+      final arrow = HearLanguageArrow(
+        hearer: hearer,
+        enabled: track.inLibrary && !other,
+        compact: compact,
+      );
+      return Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (compact)
+            IconButton(
               key: const ValueKey('lyrics-hear'),
               tooltip: '$label: $tooltip',
               onPressed: onPressed,
               icon: const Icon(Icons.hearing),
             )
-          : Tooltip(
+          else
+            Tooltip(
               message: tooltip,
               child: TextButton.icon(
                 key: const ValueKey('lyrics-hear'),
@@ -318,7 +337,10 @@ class HearHeadingButton extends StatelessWidget {
                 icon: const Icon(Icons.hearing, size: 20),
                 label: Text(label),
               ),
-            );
+            ),
+          arrow,
+        ],
+      );
     },
   );
 
@@ -359,6 +381,242 @@ class HearHeadingButton extends StatelessWidget {
           style: const TextStyle(fontFeatures: [FontFeature.tabularFigures()]),
         ),
       ),
+    );
+  }
+}
+
+/// The Hear button's words: "Hear the words" or "Hear again", with the
+/// song's picked language when it has one ("Hear again in English").
+String hearButtonLabel(HeardLyrics? heard, String? language) =>
+    '${heard == null ? 'Hear the words' : 'Hear again'}'
+    '${language == null ? '' : ' in ${hearLanguageName(language)}'}';
+
+/// What the heard words were asked to be heard as, for their credit line:
+/// ", in English as you asked"; empty when the app chose.
+String heardLanguageNote(HeardLyrics? heard) {
+  final asked = heard?.askedLanguage;
+  return asked == null ? '' : ', in ${hearLanguageName(asked)} as you asked';
+}
+
+/// The arrow beside a Hear button (plan 10 I2j): Automatic, Russian,
+/// English and Another language..., the song's pick checked; choosing one
+/// keeps it for the song and hears the song in it.
+class HearLanguageArrow extends StatelessWidget {
+  const HearLanguageArrow({
+    super.key,
+    required this.hearer,
+    required this.enabled,
+    this.compact = false,
+  });
+
+  final LyricsHearer hearer;
+  final bool enabled;
+  final bool compact;
+
+  @override
+  Widget build(BuildContext context) {
+    final key = hearer.lyrics.shownKey;
+    final current = hearer.languageFor(key);
+    // Outlives this arrow: the place can swap arrows while the list is open
+    // (lyrics found meanwhile), and the pick must still be heard.
+    final stable = Navigator.of(context).context;
+    final other =
+        current != null && current != hearRussian && current != hearEnglish;
+    void hearIn(String? language) => unawaited(
+      hearShownWords(
+        context,
+        hearer,
+        forKey: key,
+        pick: true,
+        language: language,
+      ),
+    );
+    Widget item(String id, String text, bool checked, VoidCallback onTap) =>
+        MenuItemButton(
+          key: ValueKey('hear-language-$id'),
+          leadingIcon: SizedBox(
+            width: 18,
+            child: checked ? const Icon(Icons.check, size: 18) : null,
+          ),
+          onPressed: onTap,
+          child: Text(text),
+        );
+    return MenuAnchor(
+      menuChildren: [
+        item('auto', 'Automatic', current == null, () => hearIn(null)),
+        item(
+          hearRussian,
+          'Russian',
+          current == hearRussian,
+          () => hearIn(hearRussian),
+        ),
+        item(
+          hearEnglish,
+          'English',
+          current == hearEnglish,
+          () => hearIn(hearEnglish),
+        ),
+        const Divider(height: 8),
+        item(
+          'other',
+          other
+              ? 'Another language: ${hearLanguageName(current)}...'
+              : 'Another language...',
+          other,
+          () async {
+            final picked = await pickHearLanguage(context, current: current);
+            if (picked == null || !stable.mounted) return;
+            unawaited(
+              hearShownWords(
+                stable,
+                hearer,
+                forKey: key,
+                pick: true,
+                language: picked.language,
+              ),
+            );
+          },
+        ),
+      ],
+      builder: (context, menu, _) => IconButton(
+        key: const ValueKey('hear-language-arrow'),
+        tooltip: current == null
+            ? 'Hear in a language you pick'
+            : 'Heard in ${hearLanguageName(current)}, as you picked. Change it',
+        // Narrow: hugs the ear button, so the heading keeps room for its
+        // title.
+        padding: compact ? EdgeInsets.zero : null,
+        constraints: compact
+            ? const BoxConstraints(minWidth: 22, minHeight: 40)
+            : null,
+        style: compact
+            ? IconButton.styleFrom(
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              )
+            : null,
+        onPressed: enabled
+            ? () => menu.isOpen ? menu.close() : menu.open()
+            : null,
+        icon: const Icon(Icons.arrow_drop_down),
+      ),
+    );
+  }
+}
+
+/// The searchable list of every language Hear the words knows (plan 10
+/// I2j): Automatic, Russian and English first, then the rest by name.
+/// Null when closed without a pick; else the pick (its language null for
+/// Automatic).
+Future<({String? language})?> pickHearLanguage(
+  BuildContext context, {
+  String? current,
+}) => showDialog<({String? language})>(
+  context: context,
+  builder: (context) => _HearLanguageDialog(current: current),
+);
+
+class _HearLanguageDialog extends StatefulWidget {
+  const _HearLanguageDialog({required this.current});
+  final String? current;
+
+  @override
+  State<_HearLanguageDialog> createState() => _HearLanguageDialogState();
+}
+
+class _HearLanguageDialogState extends State<_HearLanguageDialog> {
+  var _query = '';
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = OwnColors.of(context);
+    final query = _query.trim().toLowerCase();
+    final top = searchHearLanguages(query, const [hearRussian, hearEnglish]);
+    final rest = searchHearLanguages(query, otherHearLanguages);
+    final auto = query.isEmpty || 'automatic'.startsWith(query);
+    Widget row(String id, String? code, String text, {String? note}) =>
+        ListTile(
+          key: ValueKey('hear-pick-$id'),
+          dense: true,
+          leading: SizedBox(
+            width: 18,
+            child: widget.current == code
+                ? const Icon(Icons.check, size: 18)
+                : null,
+          ),
+          title: Text(text),
+          subtitle: note == null
+              ? null
+              : Text(note, style: TextStyle(color: colors.dim)),
+          onTap: () => Navigator.of(context).pop((language: code)),
+        );
+    final rows = [
+      if (auto)
+        row(
+          'auto',
+          null,
+          'Automatic',
+          note: 'The app decides: Russian or another language',
+        ),
+      for (final code in top)
+        row(
+          code,
+          code,
+          hearLanguageName(code),
+          note: code == hearRussian ? 'Heard by GigaAM' : null,
+        ),
+      if ((auto || top.isNotEmpty) && rest.isNotEmpty) const Divider(height: 8),
+      for (final code in rest) row(code, code, hearLanguageName(code)),
+    ];
+    return AlertDialog(
+      key: const ValueKey('hear-language-dialog'),
+      title: const Text('Hear the words in'),
+      contentPadding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+      content: SizedBox(
+        width: 360,
+        height: 420,
+        child: Column(
+          children: [
+            TextField(
+              key: const ValueKey('hear-language-search'),
+              autofocus: true,
+              decoration: const InputDecoration(
+                prefixIcon: Icon(Icons.search),
+                hintText: 'Search languages',
+                isDense: true,
+              ),
+              onChanged: (text) => setState(() => _query = text),
+              // Enter takes the first language the search shows.
+              onSubmitted: (_) {
+                if (auto) {
+                  Navigator.of(context).pop((language: null));
+                } else if (top.isNotEmpty) {
+                  Navigator.of(context).pop((language: top.first));
+                } else if (rest.isNotEmpty) {
+                  Navigator.of(context).pop((language: rest.first));
+                }
+              },
+            ),
+            const SizedBox(height: 8),
+            Expanded(
+              child: rows.isEmpty
+                  ? Center(
+                      child: Text(
+                        'No language by that name',
+                        style: TextStyle(color: colors.dim),
+                      ),
+                    )
+                  : ListView(children: rows),
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          key: const ValueKey('hear-language-cancel'),
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('Cancel'),
+        ),
+      ],
     );
   }
 }

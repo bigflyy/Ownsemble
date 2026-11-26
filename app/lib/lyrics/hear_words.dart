@@ -291,18 +291,31 @@ class HearWords {
   /// stages: when a whole file is there already, made from the same
   /// [audioPath] and [audioBytes] (its marker, [vocalsMarkerOf]), separation
   /// is skipped. One run at a time may use a [vocalsPath].
+  ///
+  /// [language] is the user's pick for the song (plan 10 I2j): 'ru' takes
+  /// GigaAM's words whatever its confidence, any other code has Whisper
+  /// hear that language (no chunk is heard again as Russian), null lets
+  /// the app choose as always. The GigaAM pass runs in every case: its
+  /// speech gate and loudness decide "no singing".
   HearRun start({
     required String ref,
     required String audioPath,
     required String vocalsPath,
     int? audioBytes,
+    String? language,
   }) {
     final run = HearRun._(ref);
     unawaited(() async {
       // A turn later, so the caller listens before the first step starts.
       await Future<void>.value();
       try {
-        final heard = await _hear(run, audioPath, vocalsPath, audioBytes);
+        final heard = await _hear(
+          run,
+          audioPath,
+          vocalsPath,
+          audioBytes,
+          language,
+        );
         run._result.complete(heard);
       } on Object catch (error, stack) {
         run._result.completeError(
@@ -321,6 +334,7 @@ class HearWords {
     String audioPath,
     String vocalsPath,
     int? audioBytes,
+    String? asked,
   ) async {
     final clock = Stopwatch()..start();
     _onGpu.clear();
@@ -409,7 +423,8 @@ class HearWords {
       // No singing for the speech gate: Whisper would get the same nothing.
       words = const [];
       confidence = 0;
-    } else if (heardRu.meanConfidence >= russianAt) {
+    } else if (asked == 'ru' ||
+        (asked == null && heardRu.meanConfidence >= russianAt)) {
       model = HeardModel.gigaam;
       words = heardRu.words;
       confidence = heardRu.meanConfidence;
@@ -425,9 +440,11 @@ class HearWords {
       }
       final first = await _stageOn(
         run,
-        'whisper',
+        // A picked language: Whisper by choice, not because GigaAM was
+        // unsure (the step's words differ).
+        asked == null ? 'whisper' : 'whisper-asked',
         (gpu) =>
-            _whisperJob(vocalsPath, ranges, heardRu.speechSeconds, null, gpu),
+            _whisperJob(vocalsPath, ranges, heardRu.speechSeconds, asked, gpu),
       );
       var heard = first.result;
       inside.add(
@@ -435,7 +452,10 @@ class HearWords {
         'transcribe ${first.transcribeMs}',
       );
       whisperChunks = heard.chunks.length;
-      final again = chunksToHearAsRussian(heard);
+      // Only when the app chose: a language the user asked for stays.
+      final again = asked == null
+          ? chunksToHearAsRussian(heard)
+          : const <int>[];
       if (again.isNotEmpty) {
         final forced = await _stageOn(
           run,
@@ -461,7 +481,7 @@ class HearWords {
       model = HeardModel.whisper;
       words = heard.words;
       confidence = heard.meanConfidence;
-      language = songLanguage(heard);
+      language = asked ?? songLanguage(heard);
     }
     if (run._cancelled) throw const WorkerCancelled();
     final heard = judgeHeard(
@@ -475,6 +495,7 @@ class HearWords {
       heardAtMs: _now(),
       audioBytes: audioBytes,
       bundles: paths.bundles,
+      askedLanguage: asked,
     );
     run._committed = true;
     save(run.ref, heard);
@@ -490,7 +511,8 @@ class HearWords {
       log?.call(
         'hear words: ${heard.outcome.name} by ${heard.model?.name ?? 'none'} '
         '${heard.language ?? '-'}, ${heard.wordCount} words, '
-        '${heard.lines.length} lines, rough ${heard.rough}, GigaAM '
+        '${heard.lines.length} lines, rough ${heard.rough}, '
+        'asked ${asked ?? 'auto'}, GigaAM '
         '${heardRu.meanConfidence.toStringAsFixed(3)}, '
         'loud ${heard.loudSeconds.toStringAsFixed(1)} s, '
         'Whisper chunks $whisperChunks ($reheard heard again as ru); '

@@ -206,13 +206,28 @@ class _LyricsPageState extends State<LyricsPage> {
         final canHear = hearer != null && track.inLibrary && other == null;
         final hear = hearer == null
             ? null
-            : FilledButton.tonalIcon(
-                key: const ValueKey('hear-words'),
-                onPressed: canHear
-                    ? () => unawaited(hearShownWords(context, hearer))
-                    : null,
-                icon: const Icon(Icons.hearing, size: 20),
-                label: Text(heard == null ? 'Hear the words' : 'Hear again'),
+            : Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Flexible(
+                    child: FilledButton.tonalIcon(
+                      key: const ValueKey('hear-words'),
+                      onPressed: canHear
+                          ? () => unawaited(hearShownWords(context, hearer))
+                          : null,
+                      icon: const Icon(Icons.hearing, size: 20),
+                      label: Text(
+                        hearButtonLabel(
+                          heard,
+                          hearer.languageFor(widget.lyrics.shownKey),
+                        ),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                  ),
+                  // The language for this song (plan 10 I2j).
+                  HearLanguageArrow(hearer: hearer, enabled: canHear),
+                ],
               );
         final note = hearer == null
             ? null
@@ -224,7 +239,9 @@ class _LyricsPageState extends State<LyricsPage> {
             ? 'Add the song to your library to hear its words.'
             : heard == null
             ? 'Hear the words listens to the recording on this PC and writes '
-                  'down what is sung, about 2 to 5 minutes a song.'
+                  'down what is sung, about '
+                  '${hearer.onGpu ? '15 to 40 seconds' : '1 to 6 minutes'} '
+                  'a song.'
             : null;
         return lyricsMessage(
           context,
@@ -355,6 +372,7 @@ String heardCredit(
   bool refreshing = false,
 }) =>
     'Heard by the app from this recording'
+    '${heardLanguageNote(heard)}'
     '${yours ? ' (your choice)' : ''}'
     '${heard?.rough ?? false ? '; rough: some words may be wrong' : ''}'
     '${refreshing ? '; asking the sources for lyrics...' : ''}';

@@ -120,6 +120,7 @@ class HearAcceptBench {
       'confidence': heard.confidence,
       'russianConfidence': heard.russianConfidence,
       'loudSeconds': heard.loudSeconds,
+      'askedLanguage': heard.askedLanguage,
     },
     HearStopped(:final download) => {
       'outcome': 'stopped',
@@ -143,8 +144,12 @@ class HearAcceptBench {
       peakPrivate = max(peakPrivate, now['privateMB']!);
     });
     try {
-      for (final key in keys) {
+      for (final given in keys) {
+        // "key:lang" hears the song in a language picked by hand (plan 10
+        // I2j; 'auto' clears a pick), "key" in the song's kept pick.
+        final [key, ...picked] = given.split(':');
         final row = <String, Object?>{'key': key};
+        if (picked.isNotEmpty) row['asked'] = picked.first;
         songs.add(row);
         final Track? song = library.all
             .where((t) => t.sourceKey == key && t.inLibrary)
@@ -236,7 +241,13 @@ class HearAcceptBench {
     final startPosition = player.player.state.position;
     final HearOutcome outcome;
     try {
-      outcome = await hearer.hearShown(forKey: key);
+      final asked = row['asked'] as String?;
+      outcome = asked == null
+          ? await hearer.hearShown(forKey: key)
+          : await hearer.hearShownAs(
+              asked == 'auto' ? null : asked,
+              forKey: key,
+            );
     } finally {
       hearer.removeListener(note);
     }
