@@ -6,7 +6,7 @@ import 'package:sqlite3/sqlite3.dart';
 /// Schema version this build reads and writes (`PRAGMA user_version`).
 ///
 /// 0 is the speed-gate build's single `tracks` table (or an empty file).
-const librarySchemaVersion = 24;
+const librarySchemaVersion = 25;
 
 /// How many colors sources can have; the theme has one per slot, from 1.
 const sourceColorCount = 6;
@@ -64,6 +64,7 @@ void migrateLibrary(Database db, {String? dataDir}) {
     if (version < 22) _forgetOutsideLyricsMisses(db);
     if (version < 23) _addHeardLyrics(db);
     if (version < 24) _addLyricsEdits(db);
+    if (version < 25) _addHearLanguages(db);
     db.execute('PRAGMA user_version = $librarySchemaVersion');
     db.execute('COMMIT');
   } catch (_) {
@@ -620,4 +621,21 @@ void _copyFromVersion0(Database db, String? dataDir) {
   db.execute('DROP TABLE tracks_v0');
   // Leftover from the first speed-gate build, which searched with FTS5.
   db.execute('DROP TABLE IF EXISTS tracks_fts');
+}
+
+/// Version 25 (plan 10, I2j): the language the user picked for a song's
+/// "Hear the words", by the upload's key (`ref`), kept until they go back to
+/// Automatic: 'ru' (GigaAM) or a Whisper language code. `heard_lyrics`
+/// keeps the language a heard version was asked for, null for Automatic.
+void _addHearLanguages(Database db) {
+  db.execute('''
+    CREATE TABLE IF NOT EXISTS hear_languages (
+      ref TEXT PRIMARY KEY,
+      language TEXT NOT NULL,
+      chosen_at_ms INTEGER NOT NULL
+    )
+  ''');
+  final columns = db.select('PRAGMA table_info(heard_lyrics)');
+  if (columns.any((column) => column['name'] == 'asked_language')) return;
+  db.execute('ALTER TABLE heard_lyrics ADD COLUMN asked_language TEXT');
 }

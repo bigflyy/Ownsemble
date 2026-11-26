@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ownsemble/library/file_print.dart';
 import 'package:ownsemble/library/library_schema.dart';
+import 'package:ownsemble/lyrics/heard_lyrics.dart';
 import 'package:ownsemble/library/library_store.dart';
 import 'package:ownsemble/lyrics/lyrics.dart';
 import 'package:ownsemble/library/song_version.dart';
@@ -701,6 +702,42 @@ void main() {
     expect(migrated.lyricsOf('vk', '1_1'), isNotNull, reason: 'VK keeps its');
     expect(migrated.lyricsOf('vk', '1_1')!.lyrics, isNull);
     expect(migrated.lyricsOf('lrclib', '2_2')!.lyrics, lyrics);
+  });
+
+  test('version 24 gains picked hear languages; heard rows stay', () {
+    final store = LibraryStore.open(dbPath);
+    store.saveHeardLyrics(
+      '1_1',
+      HeardLyrics(
+        outcome: HeardOutcome.noSinging,
+        lines: [],
+        words: [],
+        model: null,
+        language: null,
+        confidence: 0,
+        russianConfidence: 0.99,
+        rough: false,
+        wordCount: 0,
+        loudSeconds: 0.4,
+        heardAtMs: 7,
+      ),
+    );
+    store.close();
+    sqlite3.open(dbPath)
+      ..execute('DROP TABLE hear_languages')
+      ..execute('ALTER TABLE heard_lyrics DROP COLUMN asked_language')
+      ..execute('PRAGMA user_version = 24')
+      ..close();
+
+    final migrated = LibraryStore.open(dbPath);
+    addTearDown(migrated.close);
+    expect(versionOf(dbPath), librarySchemaVersion);
+    final heard = migrated.heardLyricsOf('1_1')!;
+    expect(heard.outcome, HeardOutcome.noSinging);
+    expect(heard.askedLanguage, isNull);
+    expect(migrated.hearLanguageOf('1_1'), isNull);
+    migrated.saveHearLanguage('1_1', 'en');
+    expect(migrated.hearLanguageOf('1_1'), 'en');
   });
 
   test('a library from a newer build is refused and left alone', () {

@@ -306,6 +306,7 @@ void main() {
         heardAtMs: 1234,
         audioBytes: 5555,
         bundles: 'hear-words-1 whisper-turbo-1',
+        askedLanguage: 'ru',
       );
       store.saveHeardLyrics('1_2', heard);
       final back = store.heardLyricsOf('1_2')!;
@@ -331,7 +332,29 @@ void main() {
       expect(back.audioBytes, 5555);
       expect(back.bundles, 'hear-words-1 whisper-turbo-1');
       expect(back.heardAtMs, 1234);
+      expect(back.askedLanguage, 'ru');
       expect(back.lyrics, heard.lyrics);
+      // Heard on the app's own choice: no language asked for.
+      store.saveHeardLyrics('1_5', judged(many()));
+      expect(store.heardLyricsOf('1_5')!.askedLanguage, isNull);
+    });
+
+    test('the language picked for a song is kept until Automatic '
+        '(plan 10 I2j)', () {
+      expect(store.hearLanguageOf('1_2'), isNull);
+      store.saveHearLanguage('1_2', 'ru');
+      store.saveHearLanguage('1_3', 'uk');
+      expect(store.hearLanguageOf('1_2'), 'ru');
+      store.saveHearLanguage('1_2', 'en');
+      expect(store.hearLanguageOf('1_2'), 'en');
+      expect(store.hearLanguageOf('1_3'), 'uk');
+      store.saveHearLanguage('1_2', null);
+      expect(store.hearLanguageOf('1_2'), isNull);
+      expect(store.hearLanguageOf('1_3'), 'uk');
+      // Forgetting the heard words keeps the pick.
+      store.saveHeardLyrics('1_3', judged(many()));
+      store.saveHeardLyrics('1_3', null);
+      expect(store.hearLanguageOf('1_3'), 'uk');
     });
 
     test('no singing found keeps no lines; null forgets', () {

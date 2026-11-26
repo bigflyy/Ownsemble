@@ -240,6 +240,7 @@ class HeardLyrics {
     required this.heardAtMs,
     this.audioBytes,
     this.bundles = '',
+    this.askedLanguage,
   });
 
   final HeardOutcome outcome;
@@ -278,6 +279,10 @@ class HeardLyrics {
 
   /// The model bundles used, as "name-version" separated by spaces.
   final String bundles;
+
+  /// The language the user asked for (plan 10 I2j): 'ru' (GigaAM) or a
+  /// Whisper language code; null when the app chose by itself.
+  final String? askedLanguage;
 
   /// The lines as lyrics to show, or null when there are no words.
   late final Lyrics? lyrics = outcome == HeardOutcome.words
@@ -341,6 +346,7 @@ HeardLyrics judgeHeard({
   required int heardAtMs,
   int? audioBytes,
   String bundles = '',
+  String? askedLanguage,
 }) {
   final count = countHeardWords(words);
   final quiet = loud < quietVocalsSeconds;
@@ -367,5 +373,6 @@ HeardLyrics judgeHeard({
     heardAtMs: heardAtMs,
     audioBytes: audioBytes,
     bundles: bundles,
+    askedLanguage: askedLanguage,
   );
 }

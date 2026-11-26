@@ -1139,6 +1139,7 @@ class LibraryStore implements PlayLog, PlayStatsSource, LyricsEditStore {
         audioBytes: row['audio_bytes'] as int?,
         bundles: row['bundles'] as String,
         heardAtMs: row['heard_at_ms'] as int,
+        askedLanguage: row['asked_language'] as String?,
       );
     } on Object {
       // A row a newer or broken build wrote: as if never heard.
@@ -1158,8 +1159,8 @@ class LibraryStore implements PlayLog, PlayStatsSource, LyricsEditStore {
       INSERT INTO heard_lyrics
         (ref, outcome, body, words, model, language, confidence,
          ru_confidence, rough, word_count, loud_s, audio_bytes, bundles,
-         heard_at_ms)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         heard_at_ms, asked_language)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT (ref) DO UPDATE SET
         outcome = excluded.outcome, body = excluded.body,
         words = excluded.words, model = excluded.model,
@@ -1167,7 +1168,8 @@ class LibraryStore implements PlayLog, PlayStatsSource, LyricsEditStore {
         ru_confidence = excluded.ru_confidence, rough = excluded.rough,
         word_count = excluded.word_count, loud_s = excluded.loud_s,
         audio_bytes = excluded.audio_bytes, bundles = excluded.bundles,
-        heard_at_ms = excluded.heard_at_ms
+        heard_at_ms = excluded.heard_at_ms,
+        asked_language = excluded.asked_language
     ''',
       [
         ref,
@@ -1184,7 +1186,33 @@ class LibraryStore implements PlayLog, PlayStatsSource, LyricsEditStore {
         heard.audioBytes,
         heard.bundles,
         heard.heardAtMs,
+        heard.askedLanguage,
       ],
+    );
+  }
+
+  /// The language the user picked for hearing the song [ref] (plan 10
+  /// I2j): 'ru' or a Whisper language code; null for Automatic.
+  String? hearLanguageOf(String ref) =>
+      _db.select('SELECT language FROM hear_languages WHERE ref = ?', [
+            ref,
+          ]).firstOrNull?['language']
+          as String?;
+
+  /// Keeps [language] for hearing the song [ref]; null goes back to
+  /// Automatic.
+  void saveHearLanguage(String ref, String? language) {
+    if (language == null) {
+      _db.execute('DELETE FROM hear_languages WHERE ref = ?', [ref]);
+      return;
+    }
+    _db.execute(
+      '''
+      INSERT INTO hear_languages (ref, language, chosen_at_ms) VALUES (?, ?, ?)
+      ON CONFLICT (ref) DO UPDATE SET
+        language = excluded.language, chosen_at_ms = excluded.chosen_at_ms
+    ''',
+      [ref, language, _now()],
     );
   }
 
