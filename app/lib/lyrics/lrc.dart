@@ -8,6 +8,8 @@
 /// characters as HTML entities. This file turns such text into [Lyrics].
 library;
 
+import 'dart:math' as math;
+
 import 'lyrics.dart';
 
 /// A time tag at the start of a line: minutes, seconds, an optional
@@ -15,7 +17,20 @@ import 'lyrics.dart';
 final _timeTag = RegExp(r'^\[(\d{1,3}):(\d{1,2})(?:[.:](\d{1,3}))?\]');
 
 /// Any time tag inside a line, with square or angle brackets (word timing).
-final _innerTimeTag = RegExp(r'[\[<]\d{1,3}:\d{1,2}(?:[.:]\d{1,3})?[\]>]');
+final _innerTimeTag = RegExp(
+  r'[\[<](\d{1,3}):(\d{1,2})(?:[.:](\d{1,3}))?[\]>]',
+);
+
+/// A word stamp may sit this far before its line's own start (rounding in
+/// the sources' tools) and still count as the line's.
+const _wordEarlyMs = 1000;
+
+/// A word stamp this far after its line's start is not the line's.
+const _wordLateMs = 60000;
+
+/// The end of a last word with no stamp after it: the next line's start,
+/// but at most this long after the word started.
+const _lastWordMaxMs = 1500;
 
 /// A metadata line such as `[ar:Artist]` or `[offset:+300]`.
 final _metaTag = RegExp(r'^\[([a-zA-Z#]+):([^\]]*)\]\s*$');
@@ -72,20 +87,30 @@ Lyrics? lyricsFromLrc(
       continue;
     }
     sawTimeTag = true;
+    final stamped = _wordStamps(rest, starts.first);
     for (final start in starts) {
-      timed.add(LyricLine(words, startMs: start));
+      // A line sung at several moments: its word stamps belong to the
+      // first, and move with the line to the others.
+      final delta = start - starts.first;
+      timed.add(
+        LyricLine(
+          words,
+          startMs: start,
+          words: stamped == null
+              ? null
+              : [for (final word in stamped) word?.shifted(delta)],
+        ),
+      );
     }
   }
   if (sawTimeTag) {
     // LRC's offset: a positive one makes the lines come sooner.
     var lines = [
       for (final line in timed)
-        LyricLine(
-          line.text,
-          startMs: (line.startMs! - offsetMs).clamp(0, 1 << 31),
-        ),
+        line.movedTo((line.startMs! - offsetMs).clamp(0, 1 << 31)),
     ];
     lines = sortLinesByStart(lines);
+    lines = _endLastWords(lines);
     lines = _dropLeadingCredits(lines, title: title, artist: artist);
     lines = tidyLyricGaps(lines);
     if (_looksRight(lines, songSeconds)) {
@@ -119,6 +144,114 @@ Lyrics? _plainOrNull(String source, List<LyricLine> lines) {
   if (tidy.every((line) => line.isGap)) return null;
   return Lyrics(source: source, lines: tidy);
 }
+
+/// The word times of one LRC line's text after its leading time tags
+/// ([rest], still holding its `<mm:ss.xx>` word stamps), by
+/// space-separated word of the text without the stamps (plan 10 J3).
+///
+/// A word starts at the last stamp before its first letter (the line's own
+/// [lineStartMs] before any stamp: some sources stamp only the words after
+/// the first) and ends at the first stamp after its last letter. A word
+/// with no stamp after it gets its end later ([_endLastWords]; its end is
+/// its start here). Null when the line has no word stamps, or when they do not fit
+/// the line: going back in time, or far from the line's own start.
+List<WordTime?>? _wordStamps(String rest, int lineStartMs) {
+  final tags = _innerTimeTag.allMatches(rest).toList();
+  if (tags.isEmpty) return null;
+  // Every letter of the text without stamps, with the stamp before it;
+  // and the stamps that came after each letter.
+  final text = StringBuffer();
+  final startOf = <int>[]; // per character of [text]
+  final stampAfter = <int?>[]; // per character: the first stamp after it
+  var stamp = lineStartMs;
+  var at = 0;
+  final pendingAfter = <int>[]; // characters still waiting for a stamp
+  for (final tag in tags) {
+    for (final char in rest.substring(at, tag.start).split('')) {
+      text.write(char);
+      startOf.add(stamp);
+      stampAfter.add(null);
+      pendingAfter.add(startOf.length - 1);
+    }
+    stamp = _tagMs(tag);
+    for (final i in pendingAfter) {
+      stampAfter[i] = stamp;
+    }
+    pendingAfter.clear();
+    at = tag.end;
+  }
+  for (final char in rest.substring(at).split('')) {
+    text.write(char);
+    startOf.add(stamp);
+    stampAfter.add(null);
+  }
+  // The words of the trimmed text, found in the untrimmed one.
+  final full = text.toString();
+  final times = <WordTime?>[];
+  var previous = -1;
+  for (final match in RegExp(r'\S+').allMatches(full)) {
+    final start = startOf[match.start];
+    final end = stampAfter[match.end - 1];
+    if (start < previous ||
+        start < lineStartMs - _wordEarlyMs ||
+        start > lineStartMs + _wordLateMs) {
+      return null;
+    }
+    previous = start;
+    // No stamp after it, or one before its start: its end is not known,
+    // and stays at its start until [_endLastWords].
+    times.add(WordTime(start, end == null || end < start ? start : end));
+  }
+  return times.isEmpty ? null : times;
+}
+
+/// Gives a word whose end is not known (its end is its start, from
+/// [_wordStamps]) the next word's start, or for the last word the next
+/// line's start, as its end, at most
+/// [_lastWordMaxMs] after it began; drops the word times of a line whose
+/// words start after the next line does.
+List<LyricLine> _endLastWords(List<LyricLine> lines) => [
+  for (var i = 0; i < lines.length; i++)
+    _endWords(lines[i], i + 1 < lines.length ? lines[i + 1].startMs : null),
+];
+
+LyricLine _endWords(LyricLine line, int? nextStartMs) {
+  final words = line.words;
+  if (words == null) return line;
+  final lastStart = words.lastWhere((word) => word != null)!.startMs;
+  if (nextStartMs != null && lastStart > nextStartMs + _wordEarlyMs) {
+    return LyricLine(line.text, startMs: line.startMs, endMs: line.endMs);
+  }
+  return LyricLine(
+    line.text,
+    startMs: line.startMs,
+    endMs: line.endMs,
+    words: [
+      for (var i = 0; i < words.length; i++)
+        if (words[i] case final word? when word.endMs <= word.startMs)
+          WordTime(
+            word.startMs,
+            _endAfter(word.startMs, _nextStart(words, i) ?? nextStartMs),
+          )
+        else
+          words[i],
+    ],
+  );
+}
+
+/// The start of the first timed word after [words][i], if any.
+int? _nextStart(List<WordTime?> words, int i) {
+  for (var j = i + 1; j < words.length; j++) {
+    if (words[j] case final word?) return word.startMs;
+  }
+  return null;
+}
+
+/// An end for a word starting at [startMs]: [nextMs] when it comes later,
+/// at most [_lastWordMaxMs] after the start.
+int _endAfter(int startMs, int? nextMs) => nextMs != null && nextMs > startMs
+    ? math.min(nextMs, startMs + _lastWordMaxMs)
+    : startMs + _lastWordMaxMs;
 
 int _tagMs(RegExpMatch tag) {
   final minutes = int.parse(tag.group(1)!);

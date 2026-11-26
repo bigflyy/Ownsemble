@@ -72,7 +72,7 @@ void main() {
       ]);
     });
 
-    test('drops word tags, credits, a line naming the song, entities', () {
+    test('keeps word tags as word times, drops credits and entities', () {
       final lyrics = lyricsFromLrc(
         'qq',
         '[00:00.00]Город спит - Ночные Тени\n'
@@ -86,11 +86,132 @@ void main() {
         artist: 'Ночные Тени',
       )!;
       expect(lyrics.lines, const [
-        LyricLine('One two', startMs: 5000),
+        LyricLine(
+          'One two',
+          startMs: 5000,
+          words: [WordTime(5000, 5500), WordTime(5500, 7000)],
+        ),
         LyricLine("Don't & Ж", startMs: 8000),
         LyricLine('', startMs: 12000),
         LyricLine('Last', startMs: 15000),
       ]);
+    });
+
+    group('word stamps (plan 10 J3)', () {
+      List<WordTime?>? wordsOf(String lrc, {int line = 0}) =>
+          lyricsFromLrc('lrclib', lrc)!.lines[line].words;
+
+      test('a stamp before each word and one after the last', () {
+        expect(
+          wordsOf(
+            '[00:01.00]<00:01.00>Ночь <00:01.40>улица <00:02.10>фонарь<00:03.00>\n'
+            '[00:05.00]b\n[00:06.00]c',
+          ),
+          const [
+            WordTime(1000, 1400),
+            WordTime(1400, 2100),
+            WordTime(2100, 3000),
+          ],
+        );
+      });
+
+      test('the first word unstamped starts with its line', () {
+        expect(
+          wordsOf('[00:01.00]one <00:01.50>two\n[00:05.00]b\n[00:06.00]c'),
+          const [WordTime(1000, 1500), WordTime(1500, 3000)],
+        );
+      });
+
+      test('a last word ends at the next line, at most 1.5 s later', () {
+        expect(
+          wordsOf('[00:01.00]<00:01.00>a <00:01.20>b\n[00:01.90]x\n[00:09]y'),
+          const [WordTime(1000, 1200), WordTime(1200, 1900)],
+        );
+      });
+
+      test('stamps inside a word (syllables) time the whole word', () {
+        expect(
+          wordsOf(
+            '[00:01.00]<00:01.00>Hel<00:01.30>lo <00:01.60>you<00:02.00>\n'
+            '[00:05.00]b\n[00:06.00]c',
+          ),
+          const [WordTime(1000, 1600), WordTime(1600, 2000)],
+        );
+      });
+
+      test('a chorus written once moves its words to each time', () {
+        final lyrics = lyricsFromLrc(
+          'lrclib',
+          '[00:10.00][00:30.00]<00:10.00>la <00:10.50>la<00:11.00>\n'
+              '[00:20.00]b\n[00:40.00]c',
+        )!;
+        expect(lyrics.lines[0].words, const [
+          WordTime(10000, 10500),
+          WordTime(10500, 11000),
+        ]);
+        expect(lyrics.lines[2].words, const [
+          WordTime(30000, 30500),
+          WordTime(30500, 31000),
+        ]);
+      });
+
+      test('the offset moves the words with the lines', () {
+        expect(
+          wordsOf(
+            '[offset:+500]\n[00:01.00]<00:01.00>a <00:01.40>b<00:02.00>\n'
+            '[00:05.00]b\n[00:06.00]c',
+          ),
+          const [WordTime(500, 900), WordTime(900, 1500)],
+        );
+      });
+
+      test('stamps that go back or stray from the line are dropped', () {
+        const rest = '\n[00:30.00]b\n[00:40.00]c';
+        expect(
+          wordsOf('[00:01.00]<00:01.50>a <00:01.20>b$rest'),
+          isNull,
+          reason: 'back in time',
+        );
+        expect(
+          wordsOf('[00:10.00]<00:02.00>a <00:02.50>b$rest'),
+          isNull,
+          reason: 'long before the line',
+        );
+        expect(
+          wordsOf('[00:01.00]<00:01.00>a <00:35.00>b$rest'),
+          isNull,
+          reason: 'after the next line',
+        );
+        // The lines themselves stay, without the stamps in their text.
+        expect(
+          lyricsFromLrc(
+            'lrclib',
+            '[00:01.00]<00:01.50>a <00:01.20>b$rest',
+          )!.lines.first.text,
+          'a b',
+        );
+      });
+
+      test('lines with stamps beside lines without', () {
+        final lyrics = lyricsFromLrc(
+          'lrclib',
+          '[00:01.00]plain line\n[00:03.00]<00:03.00>x <00:03.50>y<00:04.00>\n'
+              '[00:06.00]c',
+        )!;
+        expect(lyrics.lines[0].words, isNull);
+        expect(lyrics.lines[1].words, hasLength(2));
+        expect(lyrics.hasWordTimes, isTrue);
+      });
+
+      test('times that do not fit the song drop the words too', () {
+        final lyrics = lyricsFromLrc(
+          'lrclib',
+          '[00:01.00]<00:01.00>a <00:01.20>b\n[00:02.00]c\n[09:00.00]d',
+          songSeconds: 100,
+        )!;
+        expect(lyrics.timed, isFalse);
+        expect(lyrics.hasWordTimes, isFalse);
+      });
     });
 
     test('times that do not fit the song become words only', () {
