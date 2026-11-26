@@ -11,6 +11,7 @@
 import 'dart:math' as math;
 
 import 'ctc_align.dart';
+import 'lyrics.dart';
 
 /// MMS_FA's letters in the order of the model's output columns; column 0
 /// is the CTC blank.
@@ -136,6 +137,52 @@ class PlacedWord {
   final int letters;
 }
 
+/// [placed] words in seconds: start and end.
+List<(double, double)> _spansOf(
+  List<PlacedWord> placed,
+  double secondsPerFrame,
+) => [
+  for (final word in placed)
+    (word.start * secondsPerFrame, word.end * secondsPerFrame),
+];
+
+/// The word times of a line shown as [text], from the aligner's [spans]
+/// (seconds) of the words of [fitted] (the text the fit read: the line's
+/// own, or plain words without a trailing repeat mark) (plan 10 J4).
+///
+/// [romanize] splits only inside a space-separated word, so each word on
+/// screen holds the aligner words of romanize(word) in turn: it starts
+/// with the first and ends with the last. A word the aligner has none of
+/// (digits, a dash, a repeat mark the fit left out) gets no time. Null
+/// when the words do not line up with [spans].
+List<WordTime?>? wordTimesOnText(
+  String text,
+  String fitted,
+  List<(double, double)> spans,
+) {
+  final aligned = romanize(fitted).words;
+  if (aligned.length != spans.length || aligned.isEmpty) return null;
+  int ms(double seconds) => (seconds * 1000).round();
+  final times = <WordTime?>[];
+  var k = 0;
+  for (final word in lineWords(text)) {
+    final own = romanize(word).words;
+    var same = own.isNotEmpty && k + own.length <= aligned.length;
+    for (var j = 0; same && j < own.length; j++) {
+      same = aligned[k + j] == own[j];
+    }
+    if (!same) {
+      times.add(null);
+      continue;
+    }
+    final start = ms(spans[k].$1);
+    final end = ms(spans[k + own.length - 1].$2);
+    times.add(WordTime(start, end < start ? start : end));
+    k += own.length;
+  }
+  return k == aligned.length ? times : null;
+}
+
 /// Aligns every line's words; returns, per line, its placed words (null for
 /// a line without words). With [star], a "*" token sits before every line
 /// and after the last one (G0b: log probability 0).
@@ -210,6 +257,7 @@ class FittedLine {
     required this.start,
     required this.score,
     required this.starAgree,
+    this.wordSpans = const [],
   });
 
   /// The line's place in the [sungLines] list.
@@ -227,6 +275,10 @@ class FittedLine {
   /// How far the start moves (s) when the "*" token may absorb the audio
   /// between lines.
   final double starAgree;
+
+  /// Where the aligner placed each of the line's words ([romanize] of its
+  /// text), seconds: start and end (plan 10 J4).
+  final List<(double, double)> wordSpans;
 
   /// The line's shift against the median shift of the 3 lines before and
   /// the 3 after.
@@ -280,6 +332,7 @@ List<FittedLine> fitLines(
         start: start,
         score: sum / count,
         starAgree: (starStart - start).abs(),
+        wordSpans: _spansOf(placed, secondsPerFrame),
       ),
     );
   }
@@ -361,6 +414,7 @@ class PlainFittedLine {
     required this.at,
     required this.score,
     required this.starAgree,
+    this.wordSpans = const [],
   });
 
   /// The line's place in the list of texts fitted.
@@ -381,6 +435,10 @@ class PlainFittedLine {
   /// How far the start moves (s) when the "*" token may absorb the audio
   /// between lines.
   final double starAgree;
+
+  /// Where the aligner placed each of the line's words ([romanize] of its
+  /// text), seconds: start and end (plan 10 J4).
+  final List<(double, double)> wordSpans;
 
   /// |ln(the line's letters per second / the placed lines' median)|.
   double rateDev = 0;
@@ -436,6 +494,7 @@ List<PlainFittedLine> fitPlainLines(
         at: at,
         score: sum / count,
         starAgree: (starred[i]!.first.start * secondsPerFrame - start).abs(),
+        wordSpans: _spansOf(placed, secondsPerFrame),
       ),
     );
     at += count;

@@ -399,6 +399,12 @@ class LyricsFitter extends ChangeNotifier {
                 ),
           sureShare: result.sureShare,
           fittedAtMs: _now(),
+          words: !fits
+              ? null
+              : [
+                  for (var i = 0; i < shown.lines.length; i++)
+                    result.lines[i]?.words,
+                ],
         ),
       );
       log?.call(

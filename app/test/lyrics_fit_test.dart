@@ -448,6 +448,43 @@ void main() {
         },
       );
 
+      test(
+        'the fit keeps its word times and the lines show them (J4)',
+        () async {
+          final lyrics = controllerOf()..show(playing);
+          final fitter = fitterOf(
+            lyrics,
+            modelThere: true,
+            result: (lines) => const RecordingFit(
+              lines: {
+                0: FitLine(
+                  22000,
+                  sure: true,
+                  words: [WordTime(22000, 22600), WordTime(22700, 23400)],
+                ),
+                2: FitLine(23000, sure: true),
+                3: FitLine(34000, sure: false),
+              },
+              sureShare: 0.67,
+              audioSeconds: 200,
+              elapsedMs: 10,
+            ),
+          );
+          expect(await fitter.fitShown(), isA<FitDone>());
+          final kept = store.lyricsFitOf('1_1', 'lrclib')!;
+          expect(kept.hasWords, isTrue);
+          expect(kept.words![0], const [
+            WordTime(22000, 22600),
+            WordTime(22700, 23400),
+          ]);
+          expect(kept.words![2], isNull);
+          final shown = lyrics.timedOf(lrclib);
+          expect(shown.lines[0].words, kept.words![0]);
+          expect(shown.lines[2].hasWordTimes, isFalse);
+          expect(shown.hasWordTimes, isTrue);
+        },
+      );
+
       test('lyrics that do not fit are kept as such, nothing moves', () async {
         final lyrics = controllerOf()..show(playing);
         final fitter = fitterOf(

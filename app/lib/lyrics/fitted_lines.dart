@@ -23,6 +23,7 @@ class StoredFit {
     required this.starts,
     required this.sureShare,
     required this.fittedAtMs,
+    this.words,
   });
 
   /// [lyricsHashOf] of the lyrics that were fitted.
@@ -41,6 +42,45 @@ class StoredFit {
   final double sureShare;
   final int fittedAtMs;
 
+  /// Where each word of every line is sung, by line index as [starts]
+  /// (plan 10 J4): null for a line the aligner was not sure of; null as a
+  /// whole for a fit kept before word times were, or one that did not fit.
+  final List<List<WordTime?>?>? words;
+
+  /// Whether the fit gave word times to at least one line.
+  bool get hasWords => words?.any((line) => line != null) ?? false;
+
+  /// [words] as stored: a list by line of null or `[[start, end] or null
+  /// per word]`; null when there are none.
+  String? wordsToJson() => !hasWords
+      ? null
+      : jsonEncode([
+          for (final line in words!)
+            line == null
+                ? null
+                : [
+                    for (final word in line)
+                      word == null ? null : [word.startMs, word.endMs],
+                  ],
+        ]);
+
+  /// Reads words written by [wordsToJson].
+  static List<List<WordTime?>?>? wordsFromJson(String? json) {
+    if (json == null) return null;
+    return [
+      for (final line in jsonDecode(json) as List)
+        line is List
+            ? [
+                for (final word in line)
+                  if (word case [final num start, final num end])
+                    WordTime(start.round(), end.round())
+                  else
+                    null,
+              ]
+            : null,
+    ];
+  }
+
   /// Whether the lyrics fit the recording and their lines were moved.
   bool get fits => starts != null;
 
@@ -58,9 +98,10 @@ class StoredFit {
       : [for (final start in jsonDecode(json) as List) (start as num).toInt()];
 }
 
-/// A short, stable fingerprint of [lyrics]' words and times.
+/// A short, stable fingerprint of [lyrics]' words and line times (word
+/// times left out: lyrics that gain them are still the lyrics fitted).
 String lyricsHashOf(Lyrics lyrics) => sha256
-    .convert(utf8.encode(lyrics.linesToJson()))
+    .convert(utf8.encode(lyrics.linesToJson(words: false)))
     .toString()
     .substring(0, 16);
 
@@ -162,30 +203,58 @@ List<int> plainLineStarts(
   return starts;
 }
 
-/// [lyrics] with their lines at [starts]; each line's end moves as far as
-/// its start did. With [labelUnsung] (plain words timed by a fit, H5) the
+/// [lyrics] with their lines at [starts]; each line's end and word times
+/// move as far as its start did. With [labelUnsung] (plain words timed by a fit, H5) the
 /// rows that are not sung ([isUnsungLine]: headers, repeat marks) become
 /// label rows, never lit; lyrics timed by their source keep every row a
 /// line, as before.
+///
+/// [words] (a fit's, by line index) replace a line's own word times where
+/// the fit has them: they are where this recording sings the words.
 Lyrics withStarts(
   Lyrics lyrics,
   List<int> starts, {
   bool labelUnsung = false,
+  List<List<WordTime?>?>? words,
 }) => Lyrics(
   source: lyrics.source,
   lines: [
     for (var i = 0; i < lyrics.lines.length; i++)
-      LyricLine(
-        lyrics.lines[i].text,
-        label: labelUnsung && isUnsungLine(lyrics.lines[i].text),
-        startMs: starts[i],
-        endMs: switch ((lyrics.lines[i].endMs, lyrics.lines[i].startMs)) {
-          (final int end, final int start) =>
-            end + starts[i] - start < starts[i]
-                ? starts[i]
-                : end + starts[i] - start,
-          _ => null,
-        },
+      _withWords(
+        lyrics.lines[i].movedTo(
+          starts[i],
+          label: labelUnsung && isUnsungLine(lyrics.lines[i].text),
+        ),
+        words != null && i < words.length ? words[i] : null,
       ),
   ],
 );
+
+LyricLine _withWords(LyricLine line, List<WordTime?>? words) => words == null
+    ? line
+    : LyricLine(
+        line.text,
+        startMs: line.startMs,
+        endMs: line.endMs,
+        label: line.label,
+        passed: line.passed,
+        words: words,
+      );
+
+/// Whether two fits' [StoredFit.words] are the same.
+bool sameFitWords(List<List<WordTime?>?>? a, List<List<WordTime?>?>? b) {
+  if (a == null || b == null) return a == b;
+  if (a.length != b.length) return false;
+  for (var i = 0; i < a.length; i++) {
+    final x = a[i], y = b[i];
+    if (x == null || y == null) {
+      if (x != y) return false;
+      continue;
+    }
+    if (x.length != y.length) return false;
+    for (var j = 0; j < x.length; j++) {
+      if (x[j] != y[j]) return false;
+    }
+  }
+  return true;
+}

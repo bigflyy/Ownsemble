@@ -45,7 +45,7 @@ class FitTools {
 
 /// A line's new start, as the fit found it.
 class FitLine {
-  const FitLine(this.startMs, {required this.sure, this.endMs});
+  const FitLine(this.startMs, {required this.sure, this.endMs, this.words});
 
   final int startMs;
 
@@ -56,6 +56,11 @@ class FitLine {
   /// Whether the aligner's own placement was trusted; otherwise the start
   /// is the lyrics' moved by the shift of the sure lines around it.
   final bool sure;
+
+  /// Where each space-separated word of the line is sung, as the aligner
+  /// placed it (plan 10 J4); null for a line that is not [sure] (its words
+  /// were placed wrong) or whose words did not line up.
+  final List<WordTime?>? words;
 }
 
 /// What fitting gave for one song and one set of lyrics.
@@ -251,7 +256,13 @@ RecordingFit fitNow(
   }
   final (:emission, :seconds) = cached;
   if (plain) {
-    return _fitPlain(plainTexts, emission, seconds, clock);
+    return _fitPlain(
+      plainTexts,
+      emission,
+      seconds,
+      clock,
+      lineTexts: {for (final i in plainTexts.keys) i: lines[i].text},
+    );
   }
   final List<FittedLine> fitted;
   try {
@@ -266,9 +277,13 @@ RecordingFit fitNow(
   for (var k = 0; k < fitted.length; k++) {
     final isSure = fitted[k].sure >= sureAt;
     if (isSure) sure++;
-    result[sung[fitted[k].index].lineIndex] = FitLine(
+    final line = sung[fitted[k].index];
+    result[line.lineIndex] = FitLine(
       (starts[k] * 1000).round(),
       sure: isSure,
+      words: isSure
+          ? wordTimesOnText(line.text, line.text, fitted[k].wordSpans)
+          : null,
     );
   }
   return RecordingFit(
@@ -286,8 +301,9 @@ RecordingFit _fitPlain(
   Map<int, String> texts,
   Emission emission,
   double seconds,
-  Stopwatch clock,
-) {
+  Stopwatch clock, {
+  Map<int, String> lineTexts = const {},
+}) {
   final indexes = texts.keys.toList();
   final words = texts.values.toList();
   final List<PlainFittedLine> fitted;
@@ -304,10 +320,18 @@ RecordingFit _fitPlain(
   for (final line in fitted) {
     final isSure = line.sure >= sureAt;
     if (isSure) sure++;
-    result[indexes[line.index]] = FitLine(
+    final index = indexes[line.index];
+    result[index] = FitLine(
       (line.start * 1000).round(),
       endMs: (line.end * 1000).round(),
       sure: isSure,
+      words: isSure
+          ? wordTimesOnText(
+              lineTexts[index] ?? words[line.index],
+              words[line.index],
+              line.wordSpans,
+            )
+          : null,
     );
   }
   return RecordingFit(

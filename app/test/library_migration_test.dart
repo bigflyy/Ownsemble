@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ownsemble/library/file_print.dart';
 import 'package:ownsemble/library/library_schema.dart';
+import 'package:ownsemble/lyrics/fitted_lines.dart';
 import 'package:ownsemble/lyrics/heard_lyrics.dart';
 import 'package:ownsemble/library/library_store.dart';
 import 'package:ownsemble/lyrics/lyrics.dart';
@@ -738,6 +739,43 @@ void main() {
     expect(migrated.hearLanguageOf('1_1'), isNull);
     migrated.saveHearLanguage('1_1', 'en');
     expect(migrated.hearLanguageOf('1_1'), 'en');
+  });
+
+  test('version 25 gains fit word times; outside lyrics are asked again', () {
+    final store = LibraryStore.open(dbPath);
+    const lyrics = Lyrics(source: 'lrclib', lines: [LyricLine('Строка')]);
+    store
+      ..saveLyrics('lrclib', '1_1', lyrics, atMs: 7)
+      ..saveLyrics('vk', '1_1', lyrics, atMs: 7)
+      ..saveLyrics('netease', '2_2', null, atMs: 7)
+      ..saveLyricsFit(
+        '1_1',
+        'lrclib',
+        const StoredFit(
+          lyricsHash: 'x',
+          audioBytes: 5,
+          starts: [10],
+          sureShare: 1,
+          fittedAtMs: 7,
+        ),
+      )
+      ..close();
+    sqlite3.open(dbPath)
+      ..execute('ALTER TABLE lyrics_fits DROP COLUMN words')
+      ..execute('PRAGMA user_version = 25')
+      ..close();
+
+    final migrated = LibraryStore.open(dbPath);
+    addTearDown(migrated.close);
+    expect(versionOf(dbPath), librarySchemaVersion);
+    final fit = migrated.lyricsFitOf('1_1', 'lrclib')!;
+    expect(fit.starts, [10]);
+    expect(fit.words, isNull);
+    // Found outside lyrics show as before but count as due for a refresh.
+    expect(migrated.lyricsOf('lrclib', '1_1')!.lyrics, lyrics);
+    expect(migrated.lyricsOf('lrclib', '1_1')!.fetchedAtMs, 0);
+    expect(migrated.lyricsOf('vk', '1_1')!.fetchedAtMs, 7, reason: 'VK');
+    expect(migrated.lyricsOf('netease', '2_2')!.fetchedAtMs, 7, reason: 'none');
   });
 
   test('a library from a newer build is refused and left alone', () {

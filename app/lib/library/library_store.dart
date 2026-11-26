@@ -999,8 +999,8 @@ class LibraryStore implements PlayLog, PlayStatsSource, LyricsEditStore {
   /// G2), or null when never fitted.
   StoredFit? lyricsFitOf(String ref, String source) {
     final row = _db.select(
-      'SELECT lyrics_hash, audio_bytes, starts, sure_share, fitted_at_ms '
-      'FROM lyrics_fits '
+      'SELECT lyrics_hash, audio_bytes, starts, sure_share, fitted_at_ms, '
+      'words FROM lyrics_fits '
       'WHERE ref = ? AND source = ?',
       [ref, source],
     ).firstOrNull;
@@ -1012,6 +1012,7 @@ class LibraryStore implements PlayLog, PlayStatsSource, LyricsEditStore {
         starts: StoredFit.startsFromJson(row['starts'] as String?),
         sureShare: (row['sure_share'] as num).toDouble(),
         fittedAtMs: row['fitted_at_ms'] as int,
+        words: StoredFit.wordsFromJson(row['words'] as String?),
       );
     } on FormatException {
       return null; // Unreadable starts: as if never fitted.
@@ -1031,12 +1032,13 @@ class LibraryStore implements PlayLog, PlayStatsSource, LyricsEditStore {
       '''
       INSERT INTO lyrics_fits
         (ref, source, lyrics_hash, audio_bytes, starts, sure_share,
-         fitted_at_ms)
-      VALUES (?, ?, ?, ?, ?, ?, ?)
+         fitted_at_ms, words)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT (ref, source) DO UPDATE SET
         lyrics_hash = excluded.lyrics_hash,
         audio_bytes = excluded.audio_bytes, starts = excluded.starts,
-        sure_share = excluded.sure_share, fitted_at_ms = excluded.fitted_at_ms
+        sure_share = excluded.sure_share, fitted_at_ms = excluded.fitted_at_ms,
+        words = excluded.words
     ''',
       [
         ref,
@@ -1046,6 +1048,7 @@ class LibraryStore implements PlayLog, PlayStatsSource, LyricsEditStore {
         fit.startsToJson(),
         fit.sureShare,
         fit.fittedAtMs,
+        fit.wordsToJson(),
       ],
     );
   }

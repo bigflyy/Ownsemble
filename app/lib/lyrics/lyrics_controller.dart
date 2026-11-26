@@ -930,18 +930,21 @@ class LyricsController extends ChangeNotifier {
       final own = _editEntry(key).edit;
       if (own != null) {
         return [
-          for (final line in own.lines)
-            LyricLine(line.text, startMs: moved(line.startMs)),
+          for (final line in own.lines) line.movedTo(moved(line.startMs)),
         ];
       }
     }
     final shown = timedOf(lyrics);
     return [
       for (final line in shown.lines)
-        LyricLine(
-          line.text,
-          startMs: shown.timed && !line.label ? moved(line.startMs) : null,
-        ),
+        if (shown.timed && !line.label)
+          LyricLine(
+            line.text,
+            startMs: moved(line.startMs),
+            words: line.movedTo(moved(line.startMs)).words,
+          )
+        else
+          LyricLine(line.text),
     ];
   }
 
@@ -1177,7 +1180,8 @@ class LyricsController extends ChangeNotifier {
   /// fit is kept for them, else as the source timed them; another
   /// version's lyrics (G4c) show their words only until a fit places them.
   Lyrics timedOf(Lyrics lyrics) {
-    final starts = fitFor(lyrics)?.starts;
+    final fit = fitFor(lyrics);
+    final starts = fit?.starts;
     if (starts == null) {
       if (!lyrics.timed || otherVersionOf(lyrics) == null) return lyrics;
       final words = _lastWords;
@@ -1189,19 +1193,26 @@ class LyricsController extends ChangeNotifier {
       _lastWords = (lyrics, plain);
       return plain;
     }
+    final words = fit!.words;
     final last = _lastTimed;
     if (last != null &&
         identical(last.$1, lyrics) &&
-        listEquals(last.$2, starts)) {
-      return last.$3;
+        listEquals(last.$2, starts) &&
+        sameFitWords(last.$3, words)) {
+      return last.$4;
     }
     // Plain words timed by the fit show their headers as labels (H5).
-    final fitted = withStarts(lyrics, starts, labelUnsung: !lyrics.timed);
-    _lastTimed = (lyrics, starts, fitted);
+    final fitted = withStarts(
+      lyrics,
+      starts,
+      labelUnsung: !lyrics.timed,
+      words: fit.words,
+    );
+    _lastTimed = (lyrics, starts, words, fitted);
     return fitted;
   }
 
-  (Lyrics, List<int>, Lyrics)? _lastTimed;
+  (Lyrics, List<int>, List<List<WordTime?>?>?, Lyrics)? _lastTimed;
   (Lyrics, Lyrics)? _lastWords;
 
   /// Keeps [fit] of [source]'s lines for the upload [key] (null forgets

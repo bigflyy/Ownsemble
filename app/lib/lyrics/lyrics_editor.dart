@@ -17,7 +17,7 @@ import 'lyrics.dart';
 /// page keeps each row's text field.
 @immutable
 class EditLine {
-  const EditLine(this.id, this.text, this.startMs);
+  const EditLine(this.id, this.text, this.startMs, [this.words]);
 
   final int id;
   final String text;
@@ -25,10 +25,21 @@ class EditLine {
   /// When the line starts, milliseconds; null when it has no time yet.
   final int? startMs;
 
+  /// The word times the line came with (plan 10 J5): kept while its words
+  /// stay as they were, moved with its start; gone once its text changes
+  /// or its time is cleared.
+  final List<WordTime?>? words;
+
   bool get isBreak => text.trim().isEmpty;
 
-  EditLine withText(String value) => EditLine(id, value, startMs);
-  EditLine withStart(int? value) => EditLine(id, text, value);
+  EditLine withText(String value) =>
+      EditLine(id, value, startMs, value == text ? words : null);
+  EditLine withStart(int? value) => EditLine(
+    id,
+    text,
+    value,
+    LyricLine(text, startMs: startMs, words: words).movedTo(value).words,
+  );
 }
 
 /// What one row's time says about it, for the row's note.
@@ -59,7 +70,8 @@ typedef TextLines = ({
 class LyricsEditor extends ChangeNotifier {
   LyricsEditor(List<LyricLine> start)
     : _lines = [
-        for (final line in start) EditLine(_nextId++, line.text, line.startMs),
+        for (final line in start)
+          EditLine(_nextId++, line.text, line.startMs, line.words),
       ] {
     _saved = _lines;
   }
@@ -85,7 +97,8 @@ class LyricsEditor extends ChangeNotifier {
 
   /// The edit as lines to keep (LyricsController.saveEdit).
   List<LyricLine> get result => [
-    for (final line in _lines) LyricLine(line.text, startMs: line.startMs),
+    for (final line in _lines)
+      LyricLine(line.text, startMs: line.startMs, words: line.words),
   ];
 
   static bool _same(List<EditLine> a, List<EditLine> b) {
@@ -292,14 +305,14 @@ class LyricsEditor extends ChangeNotifier {
     final made = linesFromText(result, text);
     _apply([
       for (final line in made.lines)
-        EditLine(_nextId++, line.text, line.startMs),
+        EditLine(_nextId++, line.text, line.startMs, line.words),
     ]);
     return made;
   }
 }
 
 /// [text] as lines with the times of [old] kept: a line left as it was
-/// keeps its time; inside a run of changed lines, lines are paired in order
+/// keeps its time and word times; inside a run of changed lines, lines are paired in order
 /// and a corrected one (at least half its letters the same) keeps the old
 /// time; other new lines have none. Trailing spaces and \r are dropped.
 TextLines linesFromText(List<LyricLine> old, String text) {
@@ -349,7 +362,9 @@ TextLines linesFromText(List<LyricLine> old, String text) {
     if (i < n && j < m && before[i] == typed[j]) {
       flush();
       if (old[i].startMs != null && typed[j].isNotEmpty) kept++;
-      lines.add(LyricLine(typed[j], startMs: old[i].startMs));
+      lines.add(
+        LyricLine(typed[j], startMs: old[i].startMs, words: old[i].words),
+      );
       i++;
       j++;
     } else if (j < m && (i >= n || common[i][j + 1] >= common[i + 1][j])) {

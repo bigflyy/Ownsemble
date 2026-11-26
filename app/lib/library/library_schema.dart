@@ -6,7 +6,7 @@ import 'package:sqlite3/sqlite3.dart';
 /// Schema version this build reads and writes (`PRAGMA user_version`).
 ///
 /// 0 is the speed-gate build's single `tracks` table (or an empty file).
-const librarySchemaVersion = 25;
+const librarySchemaVersion = 26;
 
 /// How many colors sources can have; the theme has one per slot, from 1.
 const sourceColorCount = 6;
@@ -65,6 +65,7 @@ void migrateLibrary(Database db, {String? dataDir}) {
     if (version < 23) _addHeardLyrics(db);
     if (version < 24) _addLyricsEdits(db);
     if (version < 25) _addHearLanguages(db);
+    if (version < 26) _addWordTimes(db);
     db.execute('PRAGMA user_version = $librarySchemaVersion');
     db.execute('COMMIT');
   } catch (_) {
@@ -638,4 +639,20 @@ void _addHearLanguages(Database db) {
   final columns = db.select('PRAGMA table_info(heard_lyrics)');
   if (columns.any((column) => column['name'] == 'asked_language')) return;
   db.execute('ALTER TABLE heard_lyrics ADD COLUMN asked_language TEXT');
+}
+
+/// Version 26 (plan 10, J4): word sync. `lyrics_fits.words` keeps where the
+/// fit placed each word of every line (StoredFit.wordsToJson), null for a
+/// fit kept before. The outside sources' lyrics kept so far lost the word
+/// stamps some LRC carries (lrc.dart dropped them), so they are asked again
+/// the next time they show: their fetch time goes back to 0 (the lyrics
+/// still show from the library meanwhile, as in any refresh).
+void _addWordTimes(Database db) {
+  final columns = db.select('PRAGMA table_info(lyrics_fits)');
+  if (!columns.any((column) => column['name'] == 'words')) {
+    db.execute('ALTER TABLE lyrics_fits ADD COLUMN words TEXT');
+  }
+  db.execute(
+    "UPDATE lyrics SET fetched_at_ms = 0 WHERE found = 1 AND source != 'vk'",
+  );
 }

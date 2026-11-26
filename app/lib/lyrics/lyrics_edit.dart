@@ -70,10 +70,12 @@ abstract interface class LyricsEditStore {
   void forgetEdit(String ref);
 }
 
-/// The lines an edit is stored as: text and start only. Show-only flags
-/// and ends are left out (a line ends where the next one starts).
+/// The lines an edit is stored as: text, start and word times (plan 10
+/// J5). Show-only flags and ends are left out (a line ends where the next
+/// one starts).
 List<LyricLine> storableEditLines(List<LyricLine> lines) => [
-  for (final line in lines) LyricLine(line.text, startMs: line.startMs),
+  for (final line in lines)
+    LyricLine(line.text, startMs: line.startMs, words: line.words),
 ];
 
 /// [lines] of an edit as they show: when at least one sung line has a
@@ -114,6 +116,9 @@ Lyrics editForShow(List<LyricLine> lines) {
         startMs: start,
         label: header,
         passed: !usable && !header,
+        // A line lit on its own time keeps its words; a passed one is lit
+        // with the line above, so its words are not sung when it shows.
+        words: usable ? line.words : null,
       ),
     );
     above = start;
