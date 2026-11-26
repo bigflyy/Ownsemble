@@ -1438,6 +1438,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
                             onWrite: _openEditor,
                             hearer: widget.lyricsHearer,
                             byWord: _settings.lyricsByWord,
+                            isPlaying: () => widget.player.playing.value,
                           )
                         : view.kind == ViewKind.lyricsChoices &&
                               widget.lyrics != null

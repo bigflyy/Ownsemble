@@ -471,6 +471,7 @@ class _LyricsChoicesPageState extends State<LyricsChoicesPage> {
                 position: widget.position,
                 positions: widget.positions,
                 seek: widget.seek,
+                byWord: widget.settings?.lyricsByWord ?? true,
               ),
             ),
           ],

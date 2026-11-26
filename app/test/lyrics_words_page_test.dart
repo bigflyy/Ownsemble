@@ -64,6 +64,7 @@ void main() {
       WidgetTester tester, {
       bool byWord = true,
       Lyrics lyrics = worded,
+      bool Function()? isPlaying,
     }) async {
       tester.view.physicalSize = const Size(900, 700);
       tester.view.devicePixelRatio = 1;
@@ -79,6 +80,7 @@ void main() {
               positions: () => positions.stream,
               seek: (_) async {},
               byWord: byWord,
+              isPlaying: isPlaying,
             ),
           ),
         ),
@@ -86,15 +88,16 @@ void main() {
       await tester.pump(const Duration(milliseconds: 400));
     }
 
+    /// The color the line's (lower) Text gives itself; null inherits.
     Color? ownColorOf(WidgetTester tester, String text) =>
-        tester.widget<Text>(find.text(text)).style?.color;
+        tester.widgetList<Text>(find.text(text)).first.style?.color;
 
     Finder sungPaintIn(String text) => find.ancestor(
       of: find.text(text),
       matching: find.byWidgetPredicate(
         (widget) =>
-            widget is CustomPaint &&
-            '${widget.foregroundPainter.runtimeType}' == '_SungWordsPainter',
+            widget is ClipPath &&
+            '${widget.clipper.runtimeType}' == '_SungClip',
       ),
     );
 
@@ -137,6 +140,30 @@ void main() {
       expect(tester.binding.hasScheduledFrame, isFalse);
     });
 
+    testWidgets('a paused song neither glides nor asks for frames', (
+      tester,
+    ) async {
+      await open(tester, isPlaying: () => false);
+      // A seek while paused reports one position: the words show it, and
+      // no clock starts.
+      positions.add(const Duration(milliseconds: 1300));
+      await tester.pump(const Duration(milliseconds: 16));
+      for (var i = 0; i < 30; i++) {
+        await tester.pump(const Duration(milliseconds: 16));
+      }
+      expect(tester.binding.hasScheduledFrame, isFalse);
+      expect(sungPaintIn('Ночь улица фонарь'), findsOneWidget);
+    });
+
+    testWidgets('the sung words sit on the same layout as the line', (
+      tester,
+    ) async {
+      await open(tester);
+      final texts = find.text('Ночь улица фонарь');
+      expect(texts, findsNWidgets(2));
+      expect(tester.getRect(texts.first), tester.getRect(texts.last));
+    });
+
     testWidgets('a click on a word-lit line still seeks to its start', (
       tester,
     ) async {
@@ -159,7 +186,7 @@ void main() {
         ),
       );
       await tester.pump(const Duration(milliseconds: 400));
-      await tester.tap(find.text('Ночь улица фонарь'));
+      await tester.tap(find.text('Ночь улица фонарь').first);
       await tester.pump(const Duration(milliseconds: 400));
       expect(seeks, [const Duration(milliseconds: 1000)]);
     });

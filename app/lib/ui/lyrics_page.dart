@@ -9,6 +9,7 @@ import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart' show RenderParagraph;
 import 'package:flutter/scheduler.dart' show Ticker;
 
 import '../library/track.dart';
@@ -38,10 +39,11 @@ const lyricsHandScrollPause = Duration(seconds: 4);
 /// moment to show it, and singers come in a little early.
 const lyricsLeadMs = 120;
 
-/// A word is lit this much before its start time (plan 10 J6): less than a
-/// line's lead, as word times come from the recording itself and a word lit
-/// early reads as out of step.
-const lyricsWordLeadMs = 60;
+/// A word is lit this much before its start time (plan 10 J6): the same
+/// lead as a line's, so the line sung changes when its first word starts
+/// (with a shorter lead the last word of a line lost the end of its fill
+/// and the next line began with none lit: Codex review).
+const lyricsWordLeadMs = lyricsLeadMs;
 
 /// Between two position reports the lit words move on by the clock, for at
 /// most this long: a paused song stops reporting, and its words stop soon.
@@ -60,9 +62,14 @@ class LyricsPage extends StatefulWidget {
     this.onWrite,
     this.hearer,
     this.byWord = true,
+    this.isPlaying,
   });
 
   final LyricsController lyrics;
+
+  /// Whether the song plays now; the lit words move on between position
+  /// reports only while it does. Null counts as playing.
+  final bool Function()? isPlaying;
 
   /// Lyrics with word times light each word as it is sung (plan 10 J6);
   /// false follows by whole lines.
@@ -301,6 +308,7 @@ class _LyricsPageState extends State<LyricsPage> {
           positions: widget.positions,
           seek: widget.seek,
           byWord: widget.byWord,
+          isPlaying: widget.isPlaying,
           header: Text(
             heardCredit(heard, yours: yours, refreshing: refreshing),
             key: const ValueKey('lyrics-credit'),
@@ -316,6 +324,7 @@ class _LyricsPageState extends State<LyricsPage> {
           positions: widget.positions,
           seek: widget.seek,
           byWord: widget.byWord,
+          isPlaying: widget.isPlaying,
           header: Text(
             '${editCredit(widget.lyrics.edit?.basedOn)}'
             '${fitted
@@ -375,6 +384,7 @@ class _LyricsPageState extends State<LyricsPage> {
           positions: widget.positions,
           seek: widget.seek,
           byWord: widget.byWord,
+          isPlaying: widget.isPlaying,
           header: Text(
             credit,
             key: const ValueKey('lyrics-credit'),
@@ -584,6 +594,7 @@ class LyricsLines extends StatefulWidget {
     required this.seek,
     this.offsetMs = 0,
     this.byWord = true,
+    this.isPlaying,
   });
 
   final Lyrics lyrics;
@@ -592,6 +603,10 @@ class LyricsLines extends StatefulWidget {
   /// The current line's words light as they are sung where it has word
   /// times (plan 10 J6).
   final bool byWord;
+
+  /// Whether the song plays now (null: playing): a paused song's words do
+  /// not move on by the clock (Codex review).
+  final bool Function()? isPlaying;
 
   /// How far the user moved the lines (F1), milliseconds: > 0 lights each
   /// line later than its start time, and a click on it jumps later too.
@@ -685,19 +700,23 @@ class _LyricsLinesState extends State<LyricsLines> {
   /// user's offset.
   int _wordNowMs() {
     final reported = _reportedMs;
+    final playing = widget.isPlaying?.call() ?? true;
     final at = reported == null
         ? widget.position().inMilliseconds
         : reported +
-              math.min<int>(
-                _sinceReport.elapsedMilliseconds,
-                lyricsWordGlideMs,
-              );
+              (playing
+                  ? math.min<int>(
+                      _sinceReport.elapsedMilliseconds,
+                      lyricsWordGlideMs,
+                    )
+                  : 0);
     return at + lyricsWordLeadMs - widget.offsetMs;
   }
 
   /// Whether the clock still moves the words: a report came lately.
   bool _wordsMoving() =>
       _reportedMs != null &&
+      (widget.isPlaying?.call() ?? true) &&
       _sinceReport.elapsedMilliseconds <= lyricsWordGlideMs;
 
   /// New lyrics get new line keys and start at the line sung now.
@@ -996,10 +1015,12 @@ typedef _WordClock = ({
 /// The line sung now with its words lit as they are sung (plan 10 J6, user
 /// 2026-11-26: try the smooth fill first): the words sung are in the line's
 /// own color, the word being sung fills from its left to its right, the
-/// rest are lighter. The text itself is drawn by a [Text] in the color of
-/// words not sung yet (its layout, selection and semantics as any line);
-/// the sung part is painted over it, clipped to the sung words. A clock
-/// repaints only this line, and only while the song moves.
+/// rest are in the color of lines not sung yet. Two [Text]s of the same
+/// words and style lie on each other, so they lay out alike (bold text and
+/// spacing overrides of the system included: Codex review); the lower one
+/// is in the unsung color and carries the line's semantics, the upper one
+/// in the sung color is clipped to the sung words. A clock re-clips only
+/// this line (its own repaint layer), and only while the song moves.
 class _WordLitLine extends StatefulWidget {
   const _WordLitLine({
     required this.line,
@@ -1019,6 +1040,7 @@ class _WordLitLineState extends State<_WordLitLine>
     with SingleTickerProviderStateMixin {
   late final Ticker _ticker = createTicker(_tick);
   late final ValueNotifier<int> _now = ValueNotifier(widget.clock.nowMs());
+  final _sungText = GlobalKey();
 
   @override
   void initState() {
@@ -1065,84 +1087,75 @@ class _WordLitLineState extends State<_WordLitLine>
   void _tick(Duration elapsed) {
     _tickAt = elapsed;
     _now.value = widget.clock.nowMs();
-    // No report for longer than the glide: the song stopped; so does the
-    // clock, and a paused song asks for no frames.
-    if (elapsed - _reportAt >
-        const Duration(milliseconds: lyricsWordGlideMs + 100)) {
+    // No report for longer than the glide, or paused: the clock stops, and
+    // a paused song asks for no frames.
+    if (!widget.clock.moving() ||
+        elapsed - _reportAt >
+            const Duration(milliseconds: lyricsWordGlideMs + 100)) {
       _ticker.stop();
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    final style = DefaultTextStyle.of(context).style;
     final text = widget.line.text;
-    return LayoutBuilder(
-      builder: (context, constraints) => CustomPaint(
-        foregroundPainter: _SungWordsPainter(
-          text: text,
-          words: widget.line.words!,
-          style: style.copyWith(color: widget.sung),
-          textScaler: MediaQuery.textScalerOf(context),
-          textDirection: Directionality.of(context),
-          maxWidth: constraints.maxWidth,
-          now: _now,
-        ),
-        child: Text(text, style: style.copyWith(color: widget.clock.unsung)),
+    return RepaintBoundary(
+      child: Stack(
+        children: [
+          Text(text, style: TextStyle(color: widget.clock.unsung)),
+          Positioned.fill(
+            child: ExcludeSemantics(
+              child: ClipPath(
+                clipper: _SungClip(
+                  paragraph: _sungText,
+                  text: text,
+                  words: widget.line.words!,
+                  now: _now,
+                ),
+                child: Text(
+                  text,
+                  key: _sungText,
+                  style: TextStyle(color: widget.sung),
+                ),
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
 }
 
-/// Paints [text] in the sung color over the words sung by [now]: whole
-/// words that ended, and the word being sung up to the share of its time
-/// gone. A word without a time of its own (a dash, digits) lights when the
-/// timed word before it has ended (or the one after it starts).
-class _SungWordsPainter extends CustomPainter {
-  _SungWordsPainter({
+/// The part of the sung [Text] ([paragraph]) to show at [now]: whole words
+/// that ended, and the word being sung up to the share of its time gone
+/// ([sungWordShares]), measured on that Text's own layout.
+class _SungClip extends CustomClipper<Path> {
+  _SungClip({
+    required this.paragraph,
     required this.text,
     required this.words,
-    required this.style,
-    required this.textScaler,
-    required this.textDirection,
-    required this.maxWidth,
     required this.now,
-  }) : super(repaint: now);
+  }) : super(reclip: now);
 
+  final GlobalKey paragraph;
   final String text;
   final List<WordTime?> words;
-  final TextStyle style;
-  final TextScaler textScaler;
-  final TextDirection textDirection;
-  final double maxWidth;
   final ValueListenable<int> now;
 
-  late final TextPainter _painter = TextPainter(
-    text: TextSpan(text: text, style: style),
-    textDirection: textDirection,
-    textScaler: textScaler,
-  )..layout(maxWidth: maxWidth);
-
-  /// Each word's boxes on screen, in [lineWords] order.
-  late final List<List<TextBox>> _boxes = [
-    for (final match in RegExp(r'\S+').allMatches(text))
-      _painter.getBoxesForSelection(
-        TextSelection(baseOffset: match.start, extentOffset: match.end),
-      ),
-  ];
-
-  List<double> _sungShares(int ms) => sungWordShares(words, ms);
-
   @override
-  void paint(Canvas canvas, Size size) {
-    if (_boxes.length != words.length) return;
-    final shares = _sungShares(now.value);
+  Path getClip(Size size) {
     final clip = Path();
-    var any = false;
+    final render = paragraph.currentContext?.findRenderObject();
+    if (render is! RenderParagraph || !render.hasSize) return clip;
+    final spans = RegExp(r'\S+').allMatches(text).toList();
+    if (spans.length != words.length) return clip;
+    final shares = sungWordShares(words, now.value);
     for (var i = 0; i < words.length; i++) {
       final share = shares[i];
       if (share <= 0) continue;
-      final boxes = _boxes[i];
+      final boxes = render.getBoxesForSelection(
+        TextSelection(baseOffset: spans[i].start, extentOffset: spans[i].end),
+      );
       final width = boxes.fold<double>(
         0,
         (sum, box) => sum + box.right - box.left,
@@ -1155,24 +1168,14 @@ class _SungWordsPainter extends CustomPainter {
           Rect.fromLTRB(box.left, box.top, box.left + take, box.bottom),
         );
         left -= take;
-        any = true;
       }
     }
-    if (!any) return;
-    canvas
-      ..save()
-      ..clipPath(clip);
-    _painter.paint(canvas, Offset.zero);
-    canvas.restore();
+    return clip;
   }
 
   @override
-  bool shouldRepaint(_SungWordsPainter old) =>
-      old.text != text ||
-      old.words != words ||
-      old.style != style ||
-      old.maxWidth != maxWidth ||
-      old.textScaler != textScaler;
+  bool shouldReclip(_SungClip old) =>
+      old.text != text || old.words != words || old.paragraph != paragraph;
 }
 
 /// How much of each word of a line is sung at [ms], 0..1 (plan 10 J6): a
