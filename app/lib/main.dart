@@ -75,6 +75,7 @@ class AppOptions {
     this.benchFitKeys = const [],
     this.benchHearKeys = const [],
     this.benchEditKeys = const [],
+    this.benchWordsKeys = const [],
     this.mpvOptions = const {},
     this.mpvLog = false,
     this.cacheWhileStreaming = true,
@@ -107,6 +108,7 @@ class AppOptions {
       benchFitKeys: valueOf('--bench-fit-keys')?.split(',') ?? const [],
       benchHearKeys: valueOf('--bench-hear-keys')?.split(',') ?? const [],
       benchEditKeys: valueOf('--bench-edit-keys')?.split(',') ?? const [],
+      benchWordsKeys: valueOf('--bench-words-keys')?.split(',') ?? const [],
       mpvLog: args.contains('--mpv-log'),
       cacheWhileStreaming: !args.contains('--no-stream-cache'),
       mpvOptions: {
@@ -153,6 +155,9 @@ class AppOptions {
 
   /// The editLive parts' songs (plan 10 I2g4): found lyrics, heard words.
   final List<String> benchEditKeys;
+
+  /// The wordsLive part's songs (plan 10 J8): "kind=key".
+  final List<String> benchWordsKeys;
 
   /// mpv option overrides, for tuning playback start.
   final Map<String, String> mpvOptions;
@@ -948,6 +953,7 @@ Future<void> _afterFirstFrame({
       hearKeys: options.benchHearKeys,
       hearThreads: hearThreads,
       editKeys: options.benchEditKeys,
+      wordsKeys: options.benchWordsKeys,
     ).run(parts: options.benchParts);
     File(options.benchFile!)
         .writeAsStringSync(const JsonEncoder.withIndent('  ').convert(result));

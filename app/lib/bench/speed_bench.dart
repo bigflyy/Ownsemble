@@ -39,6 +39,7 @@ import '../vk/vk_client.dart';
 import 'edit_live.dart';
 import 'hear_accept.dart';
 import 'key_state.dart';
+import 'words_live.dart';
 
 /// Measures the speed targets inside the running release app, driving the
 /// same controller and player the UI uses. Playback must be muted.
@@ -66,6 +67,7 @@ class SpeedBench {
     this.hearKeys = const [],
     this.hearThreads = 0,
     this.editKeys = const [],
+    this.wordsKeys = const [],
   });
 
   /// Where the speed gate seeks to before it closes the window.
@@ -111,6 +113,10 @@ class SpeedBench {
   /// The editLive parts' songs (plan 10 I2g4): one with found timed lyrics,
   /// one with heard words; see [EditLiveBench].
   final List<String> editKeys;
+
+  /// The wordsLive part's songs (plan 10 J8): "kind=key", see
+  /// [WordsLiveBench].
+  final List<String> wordsKeys;
 
   /// The result file; the restart check writes it while the app stays open.
   final String? resultFile;
@@ -227,6 +233,16 @@ class SpeedBench {
       result[part] = part == 'editLive'
           ? await bench.before()
           : await bench.after();
+    }
+    if (parts?.contains('wordsLive') ?? false) {
+      result['wordsLive'] = await WordsLiveBench(
+        library: library,
+        player: player,
+        playback: playback,
+        lyrics: lyrics!,
+        fitter: fitter,
+        keys: wordsKeys,
+      ).run();
     }
     await player.setVolume(volume);
     result['volume'] = volume;
