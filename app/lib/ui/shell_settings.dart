@@ -23,6 +23,7 @@ class ShellSettings extends ChangeNotifier {
         CalendarListening.values.asNameMap()[read(_calendarKey)] ??
         CalendarListening.line;
     _hearOnGpu = read(_hearDeviceKey) != 'cpu';
+    _lyricsByWord = read(_lyricsFollowKey) != 'lines';
   }
 
   /// Settings that are not stored anywhere (tests).
@@ -34,6 +35,7 @@ class ShellSettings extends ChangeNotifier {
   static const _dockKey = 'ui.dock';
   static const _calendarKey = 'ui.calendar_listening';
   static const _hearDeviceKey = 'hear.device';
+  static const _lyricsFollowKey = 'lyrics.follow';
 
   final void Function(String key, String? value) _write;
   late bool _dark;
@@ -42,6 +44,18 @@ class ShellSettings extends ChangeNotifier {
   late PlayerDock _dock;
   late CalendarListening _calendar;
   late bool _hearOnGpu;
+  late bool _lyricsByWord;
+
+  /// Lyrics with word times light each word as it is sung (the default,
+  /// plan 10 J6), or follow by whole lines like other lyrics.
+  bool get lyricsByWord => _lyricsByWord;
+
+  void setLyricsByWord(bool value) {
+    if (value == _lyricsByWord) return;
+    _lyricsByWord = value;
+    _write(_lyricsFollowKey, value ? 'words' : 'lines');
+    notifyListeners();
+  }
 
   /// "Hear the words" on the GPU when it works (the default; the user,
   /// 2026-11-26: "Auto + CPU switch") or on the CPU only.

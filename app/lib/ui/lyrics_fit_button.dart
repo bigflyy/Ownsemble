@@ -163,10 +163,21 @@ class LyricsFitButton extends StatelessWidget {
   Widget _fitted(BuildContext context, Lyrics shown) {
     final label = lyricsSourceLabel(shown.source);
     final upload = _lyrics.shownKey;
+    // A fit kept before word times (plan 10 J4) times the words when made
+    // again; the saved song's sound is kept, so it is quick.
+    final wordsMissing =
+        !(_lyrics.fitFor(shown)?.hasWords ?? true) && !shown.hasWordTimes;
     return PopupMenuButton<void>(
       key: const ValueKey('lyrics-fitted'),
       tooltip: 'Lines fitted to this recording',
       itemBuilder: (context) => [
+        if (wordsMissing)
+          PopupMenuItem<void>(
+            key: const ValueKey('lyrics-fit-words'),
+            enabled: fitter.job == null,
+            onTap: () => _fit(context),
+            child: const Text('Fit again to time the words'),
+          ),
         PopupMenuItem<void>(
           key: const ValueKey('lyrics-unfit'),
           // The upload the menu was opened for, even if the song moves on.

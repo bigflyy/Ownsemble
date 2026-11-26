@@ -53,8 +53,8 @@ class LyricLine {
     this.endMs,
     this.label = false,
     this.passed = false,
-    List<WordTime?>? words,
-  }) : _words = words;
+    this._words,
+  });
 
   final String text;
 

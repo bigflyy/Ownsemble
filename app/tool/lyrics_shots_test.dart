@@ -11,7 +11,10 @@
 // heading with every button's words or icons only, an edit with its
 // Edited menu, the editor's rows with a line without a time and one too
 // early, Tap to time, Edit as text, the chooser's "Your edit" row, and a
-// song heard while found lyrics show. The words are made up.
+// song heard while found lyrics show; word sync (J6): words lit as they
+// are sung (the smooth fill), the same lyrics followed by line, long lines
+// that wrap with their words lit, and a fit kept before word times with
+// its "Fit again to time the words" item. The words are made up.
 //
 // Run from app/:
 //   flutter test tool/lyrics_shots_test.dart \
@@ -263,9 +266,10 @@ void main() {
       'heardrowlang',
     };
     Future<Object?> fakeVk(String method, Map<String, String> params) async {
-      if (hearSteps.contains(step) &&
-          step != 'heardrow' &&
-          step != 'heardrowlang') {
+      if ((hearSteps.contains(step) &&
+              step != 'heardrow' &&
+              step != 'heardrowlang') ||
+          step.startsWith('words')) {
         throw VkException('audio.getLyrics error 104', code: 104);
       }
       switch (step) {
@@ -330,9 +334,14 @@ void main() {
       'heardrowlang',
     ].contains(step);
     if (asked) store.saveHearLanguage('1_1', 'en');
-    if (step == 'heard' || step == 'heardrow' || asked) {
+    const wordSteps = {'words', 'wordslines', 'wordslong'};
+    if (step == 'heard' ||
+        step == 'heardrow' ||
+        asked ||
+        wordSteps.contains(step)) {
       final heardWords = <HeardWord>[];
-      for (final (i, line) in _timedWords.indexed) {
+      final heardLines = step == 'wordslong' ? _longWords : _timedWords;
+      for (final (i, line) in heardLines.indexed) {
         for (final (k, word) in line.split(' ').indexed) {
           if (word.isEmpty) continue;
           final at = 10 + i * 6 + k * 0.45;
@@ -473,6 +482,7 @@ void main() {
     );
     final settings = ShellSettings.inMemory();
     if (!dark) settings.toggleTheme();
+    if (step == 'wordslines') settings.setLyricsByWord(false);
     settings.dockTo(PlayerDock.side);
 
     tester.view.physicalSize = size;
@@ -518,8 +528,18 @@ void main() {
         await tester.tap(find.byKey(const ValueKey('lyrics')));
       }
       await settle();
-      // The song moves on to the 7th line (or the 2nd of the long ones).
-      player.moveTo(Duration(milliseconds: step == 'long' ? 16500 : 46500));
+      // The song moves on to the 7th line (or the 2nd of the long ones);
+      // J6: into "almost" on the 7th, or the 8th word of the 2nd long one.
+      player.moveTo(
+        Duration(
+          milliseconds: switch (step) {
+            'long' => 16500,
+            'words' || 'wordslines' => 47500,
+            'wordslong' => 19400,
+            _ => 46500,
+          },
+        ),
+      );
       await settle();
       await tester.pump(const Duration(milliseconds: 600));
       await settle();
@@ -530,6 +550,25 @@ void main() {
           await settle();
         }
         await tester.pump(const Duration(milliseconds: 600));
+        await settle();
+      }
+      if (step == 'fitwords') {
+        // J4: a fit kept before word times; its menu offers to fit again.
+        final shown = (lyrics.state as LyricsShown).lyrics;
+        lyrics.keepFit(
+          lyrics.shownKey!,
+          shown.source,
+          StoredFit(
+            lyricsHash: lyricsHashOf(shown),
+            audioBytes: 1,
+            starts: [for (final line in shown.lines) line.startMs! + 2500],
+            sureShare: 0.86,
+            fittedAtMs: 1,
+          ),
+        );
+        await tester.pump(const Duration(milliseconds: 600));
+        await settle();
+        await tester.tap(find.byKey(const ValueKey('lyrics-fitted')));
         await settle();
       }
       if (step == 'fitted' || step == 'nomatch') {
@@ -823,6 +862,19 @@ void main() {
     ('editkeys', true, const Size(1440, 900)),
     ('editkeys', false, const Size(480, 800)),
     ('none', false, const Size(760, 900)),
+    ('words', true, const Size(1440, 900)),
+    ('words', false, const Size(1440, 900)),
+    ('words', true, const Size(760, 900)),
+    ('words', false, const Size(480, 800)),
+    ('words', true, const Size(1100, 800)),
+    ('words', true, const Size(1920, 1000)),
+    ('words', false, const Size(1560, 900)),
+    ('wordslines', true, const Size(1440, 900)),
+    ('wordslines', false, const Size(480, 800)),
+    ('wordslong', true, const Size(480, 800)),
+    ('wordslong', false, const Size(760, 900)),
+    ('fitwords', true, const Size(1440, 900)),
+    ('fitwords', false, const Size(480, 800)),
   ]) {
     final width = size.width < 600
         ? 'smallest'

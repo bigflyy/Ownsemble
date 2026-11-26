@@ -1293,6 +1293,18 @@ class _LibraryScreenState extends State<LibraryScreen> {
                             lyrics: widget.lyrics!,
                             compact: listWidth < lyricsHeadingWordsWidth,
                           ),
+                        // Lines / Words, for lyrics with word times (J6).
+                        if (view.kind == ViewKind.lyrics &&
+                            switch (widget.lyrics?.state) {
+                              LyricsShown(:final lyrics) =>
+                                widget.lyrics!.timedOf(lyrics).hasWordTimes,
+                              _ => false,
+                            })
+                          LyricsFollowButton(
+                            byWord: _settings.lyricsByWord,
+                            onChanged: _settings.setLyricsByWord,
+                            compact: listWidth < lyricsHeadingWordsWidth,
+                          ),
                         // The heading's rule (user, 2026-11-25): every
                         // button has its words while all of them fit, else
                         // all are icons with their words in the tooltip.
@@ -1425,6 +1437,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
                             onChoose: library.openLyricsChoices,
                             onWrite: _openEditor,
                             hearer: widget.lyricsHearer,
+                            byWord: _settings.lyricsByWord,
                           )
                         : view.kind == ViewKind.lyricsChoices &&
                               widget.lyrics != null

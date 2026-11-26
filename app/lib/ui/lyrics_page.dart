@@ -5,8 +5,11 @@
 library;
 
 import 'dart:async';
+import 'dart:math' as math;
 
+import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter/material.dart';
+import 'package:flutter/scheduler.dart' show Ticker;
 
 import '../library/track.dart';
 import '../lyrics/heard_lyrics.dart';
@@ -24,8 +27,9 @@ const lyricsNarrowWidth = 640.0;
 /// Below this width of the place every Lyrics heading button is an icon
 /// (the heading's rule, user 2026-11-25: words for all buttons or none):
 /// with words, Timing, Fit to recording, Hear the words, Edit and Choose
-/// lyrics need about 700 px beside the title (measured in the shots).
-const lyricsHeadingWordsWidth = 900.0;
+/// lyrics need about 700 px beside the title (measured in the shots), and
+/// Words / Lines (plan 10 J6) about 100 more.
+const lyricsHeadingWordsWidth = 1000.0;
 
 /// How long a hand scroll stops the lines from following the song.
 const lyricsHandScrollPause = Duration(seconds: 4);
@@ -33,6 +37,15 @@ const lyricsHandScrollPause = Duration(seconds: 4);
 /// A line is lit this much before its start time: the screen takes a
 /// moment to show it, and singers come in a little early.
 const lyricsLeadMs = 120;
+
+/// A word is lit this much before its start time (plan 10 J6): less than a
+/// line's lead, as word times come from the recording itself and a word lit
+/// early reads as out of step.
+const lyricsWordLeadMs = 60;
+
+/// Between two position reports the lit words move on by the clock, for at
+/// most this long: a paused song stops reporting, and its words stop soon.
+const lyricsWordGlideMs = 300;
 
 class LyricsPage extends StatefulWidget {
   const LyricsPage({
@@ -46,9 +59,14 @@ class LyricsPage extends StatefulWidget {
     this.onChoose,
     this.onWrite,
     this.hearer,
+    this.byWord = true,
   });
 
   final LyricsController lyrics;
+
+  /// Lyrics with word times light each word as it is sung (plan 10 J6);
+  /// false follows by whole lines.
+  final bool byWord;
 
   /// "Hear the words" for songs no source has lyrics for (I2f); no button
   /// when null.
@@ -282,6 +300,7 @@ class _LyricsPageState extends State<LyricsPage> {
           position: widget.position,
           positions: widget.positions,
           seek: widget.seek,
+          byWord: widget.byWord,
           header: Text(
             heardCredit(heard, yours: yours, refreshing: refreshing),
             key: const ValueKey('lyrics-credit'),
@@ -296,6 +315,7 @@ class _LyricsPageState extends State<LyricsPage> {
           position: widget.position,
           positions: widget.positions,
           seek: widget.seek,
+          byWord: widget.byWord,
           header: Text(
             '${editCredit(widget.lyrics.edit?.basedOn)}'
             '${fitted
@@ -354,6 +374,7 @@ class _LyricsPageState extends State<LyricsPage> {
           position: widget.position,
           positions: widget.positions,
           seek: widget.seek,
+          byWord: widget.byWord,
           header: Text(
             credit,
             key: const ValueKey('lyrics-credit'),
@@ -460,6 +481,49 @@ class LyricsTimingControl extends StatelessWidget {
   }
 }
 
+/// The Lyrics heading's Lines / Words button (plan 10 J6, user 2026-11-26:
+/// "In the Lyrics heading"): shown only for lyrics with word times; its
+/// label says how the lyrics follow the song now, a click switches.
+class LyricsFollowButton extends StatelessWidget {
+  const LyricsFollowButton({
+    super.key,
+    required this.byWord,
+    required this.onChanged,
+    this.compact = false,
+  });
+
+  final bool byWord;
+  final ValueChanged<bool> onChanged;
+
+  /// An icon alone (the heading's rule), its words in the tooltip.
+  final bool compact;
+
+  @override
+  Widget build(BuildContext context) {
+    final label = byWord ? 'Words' : 'Lines';
+    final tip = byWord
+        ? 'Each word lights as it is sung. Click to light whole lines'
+        : 'Whole lines light as they are sung. Click to light each word';
+    final icon = byWord ? Icons.short_text : Icons.view_headline;
+    return compact
+        ? IconButton(
+            key: const ValueKey('lyrics-follow'),
+            tooltip: '$label. $tip',
+            onPressed: () => onChanged(!byWord),
+            icon: Icon(icon),
+          )
+        : Tooltip(
+            message: tip,
+            child: TextButton.icon(
+              key: const ValueKey('lyrics-follow'),
+              onPressed: () => onChanged(!byWord),
+              icon: Icon(icon, size: 20),
+              label: Text(label),
+            ),
+          );
+  }
+}
+
 /// A message in the lyrics places' style (no song, none, a failure), with
 /// an optional button under it. It scrolls in a window too short for the
 /// text and its button (the smallest window over For You left 132 px: B25's
@@ -519,10 +583,15 @@ class LyricsLines extends StatefulWidget {
     required this.positions,
     required this.seek,
     this.offsetMs = 0,
+    this.byWord = true,
   });
 
   final Lyrics lyrics;
   final Widget header;
+
+  /// The current line's words light as they are sung where it has word
+  /// times (plan 10 J6).
+  final bool byWord;
 
   /// How far the user moved the lines (F1), milliseconds: > 0 lights each
   /// line later than its start time, and a click on it jumps later too.
@@ -552,6 +621,14 @@ class _LyricsLinesState extends State<LyricsLines> {
   /// on a restored song while the player still starts: Codex review).
   Timer? _positionsTimer;
   StreamSubscription<Duration>? _positions;
+
+  /// The last position the player reported, and the clock since: the lit
+  /// words move on between reports (plan 10 J6).
+  int? _reportedMs;
+  final _sinceReport = Stopwatch();
+
+  /// Counts the reports, so a word-lit line wakes its clock on each.
+  final _reports = ValueNotifier<int>(0);
 
   @override
   void initState() {
@@ -599,8 +676,29 @@ class _LyricsLinesState extends State<LyricsLines> {
     _positionsTimer?.cancel();
     _handScrollTimer?.cancel();
     _scroll.dispose();
+    _reports.dispose();
     super.dispose();
   }
+
+  /// The song's time now for lighting words: the last report moved on by
+  /// the clock (at most [lyricsWordGlideMs]), with the word lead and the
+  /// user's offset.
+  int _wordNowMs() {
+    final reported = _reportedMs;
+    final at = reported == null
+        ? widget.position().inMilliseconds
+        : reported +
+              math.min<int>(
+                _sinceReport.elapsedMilliseconds,
+                lyricsWordGlideMs,
+              );
+    return at + lyricsWordLeadMs - widget.offsetMs;
+  }
+
+  /// Whether the clock still moves the words: a report came lately.
+  bool _wordsMoving() =>
+      _reportedMs != null &&
+      _sinceReport.elapsedMilliseconds <= lyricsWordGlideMs;
 
   /// New lyrics get new line keys and start at the line sung now.
   void _takeLyrics() {
@@ -612,6 +710,11 @@ class _LyricsLinesState extends State<LyricsLines> {
   }
 
   void _follow(Duration at) {
+    _reportedMs = at.inMilliseconds;
+    _sinceReport
+      ..reset()
+      ..start();
+    _reports.value++;
     final lyrics = widget.lyrics;
     if (!lyrics.timed) return;
     final line = _lineAt(at);
@@ -738,6 +841,17 @@ class _LyricsLinesState extends State<LyricsLines> {
                           : colors.dim,
                       current: i == _line,
                       onTap: () => _seekTo(i),
+                      words:
+                          i == _line &&
+                              widget.byWord &&
+                              lyrics.lines[i].hasWordTimes
+                          ? (
+                              nowMs: _wordNowMs,
+                              moving: _wordsMoving,
+                              reports: _reports,
+                              unsung: colors.dim,
+                            )
+                          : null,
                     ),
                 ],
               ),
@@ -800,6 +914,7 @@ class _TimedLine extends StatelessWidget {
     required this.color,
     required this.current,
     required this.onTap,
+    this.words,
   });
 
   final int index;
@@ -808,6 +923,11 @@ class _TimedLine extends StatelessWidget {
   final Color color;
   final bool current;
   final VoidCallback onTap;
+
+  /// For the line sung now with word times (plan 10 J6): the song's time
+  /// for its words, whether that time still moves, the position reports,
+  /// and the color of the words not sung yet. Null lights the whole line.
+  final _WordClock? words;
 
   @override
   Widget build(BuildContext context) {
@@ -832,7 +952,9 @@ class _TimedLine extends StatelessWidget {
               fontWeight: current ? FontWeight.w700 : FontWeight.w600,
               letterSpacing: -0.2,
             ),
-            child: Text(line.isGap ? '...' : line.text),
+            child: words == null || line.isGap
+                ? Text(line.isGap ? '...' : line.text)
+                : _WordLitLine(line: line, clock: words!, sung: color),
           ),
         ),
       ),
@@ -861,4 +983,236 @@ class _TimedLine extends StatelessWidget {
       ),
     );
   }
+}
+
+/// What a word-lit line needs from the lines' state (plan 10 J6).
+typedef _WordClock = ({
+  int Function() nowMs,
+  bool Function() moving,
+  ValueListenable<int> reports,
+  Color unsung,
+});
+
+/// The line sung now with its words lit as they are sung (plan 10 J6, user
+/// 2026-11-26: try the smooth fill first): the words sung are in the line's
+/// own color, the word being sung fills from its left to its right, the
+/// rest are lighter. The text itself is drawn by a [Text] in the color of
+/// words not sung yet (its layout, selection and semantics as any line);
+/// the sung part is painted over it, clipped to the sung words. A clock
+/// repaints only this line, and only while the song moves.
+class _WordLitLine extends StatefulWidget {
+  const _WordLitLine({
+    required this.line,
+    required this.clock,
+    required this.sung,
+  });
+
+  final LyricLine line;
+  final _WordClock clock;
+  final Color sung;
+
+  @override
+  State<_WordLitLine> createState() => _WordLitLineState();
+}
+
+class _WordLitLineState extends State<_WordLitLine>
+    with SingleTickerProviderStateMixin {
+  late final Ticker _ticker = createTicker(_tick);
+  late final ValueNotifier<int> _now = ValueNotifier(widget.clock.nowMs());
+
+  @override
+  void initState() {
+    super.initState();
+    widget.clock.reports.addListener(_wake);
+    _wake();
+  }
+
+  @override
+  void didUpdateWidget(_WordLitLine old) {
+    super.didUpdateWidget(old);
+    if (old.clock.reports != widget.clock.reports) {
+      old.clock.reports.removeListener(_wake);
+      widget.clock.reports.addListener(_wake);
+    }
+    _now.value = widget.clock.nowMs();
+  }
+
+  @override
+  void dispose() {
+    widget.clock.reports.removeListener(_wake);
+    _ticker.dispose();
+    _now.dispose();
+    super.dispose();
+  }
+
+  /// The clock's time at the last report, and its time now: frame times,
+  /// so the stop below follows the frames (and a test's fake time).
+  Duration _reportAt = Duration.zero;
+  Duration _tickAt = Duration.zero;
+
+  /// A report came: the clock runs until the reports stop. The first one
+  /// may have come just before this line became the one sung.
+  void _wake() {
+    _now.value = widget.clock.nowMs();
+    if (_ticker.isActive) {
+      _reportAt = _tickAt;
+    } else if (widget.clock.moving()) {
+      _reportAt = _tickAt = Duration.zero;
+      _ticker.start();
+    }
+  }
+
+  void _tick(Duration elapsed) {
+    _tickAt = elapsed;
+    _now.value = widget.clock.nowMs();
+    // No report for longer than the glide: the song stopped; so does the
+    // clock, and a paused song asks for no frames.
+    if (elapsed - _reportAt >
+        const Duration(milliseconds: lyricsWordGlideMs + 100)) {
+      _ticker.stop();
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final style = DefaultTextStyle.of(context).style;
+    final text = widget.line.text;
+    return LayoutBuilder(
+      builder: (context, constraints) => CustomPaint(
+        foregroundPainter: _SungWordsPainter(
+          text: text,
+          words: widget.line.words!,
+          style: style.copyWith(color: widget.sung),
+          textScaler: MediaQuery.textScalerOf(context),
+          textDirection: Directionality.of(context),
+          maxWidth: constraints.maxWidth,
+          now: _now,
+        ),
+        child: Text(text, style: style.copyWith(color: widget.clock.unsung)),
+      ),
+    );
+  }
+}
+
+/// Paints [text] in the sung color over the words sung by [now]: whole
+/// words that ended, and the word being sung up to the share of its time
+/// gone. A word without a time of its own (a dash, digits) lights when the
+/// timed word before it has ended (or the one after it starts).
+class _SungWordsPainter extends CustomPainter {
+  _SungWordsPainter({
+    required this.text,
+    required this.words,
+    required this.style,
+    required this.textScaler,
+    required this.textDirection,
+    required this.maxWidth,
+    required this.now,
+  }) : super(repaint: now);
+
+  final String text;
+  final List<WordTime?> words;
+  final TextStyle style;
+  final TextScaler textScaler;
+  final TextDirection textDirection;
+  final double maxWidth;
+  final ValueListenable<int> now;
+
+  late final TextPainter _painter = TextPainter(
+    text: TextSpan(text: text, style: style),
+    textDirection: textDirection,
+    textScaler: textScaler,
+  )..layout(maxWidth: maxWidth);
+
+  /// Each word's boxes on screen, in [lineWords] order.
+  late final List<List<TextBox>> _boxes = [
+    for (final match in RegExp(r'\S+').allMatches(text))
+      _painter.getBoxesForSelection(
+        TextSelection(baseOffset: match.start, extentOffset: match.end),
+      ),
+  ];
+
+  List<double> _sungShares(int ms) => sungWordShares(words, ms);
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    if (_boxes.length != words.length) return;
+    final shares = _sungShares(now.value);
+    final clip = Path();
+    var any = false;
+    for (var i = 0; i < words.length; i++) {
+      final share = shares[i];
+      if (share <= 0) continue;
+      final boxes = _boxes[i];
+      final width = boxes.fold<double>(
+        0,
+        (sum, box) => sum + box.right - box.left,
+      );
+      var left = width * share;
+      for (final box in boxes) {
+        if (left <= 0) break;
+        final take = math.min(left, box.right - box.left);
+        clip.addRect(
+          Rect.fromLTRB(box.left, box.top, box.left + take, box.bottom),
+        );
+        left -= take;
+        any = true;
+      }
+    }
+    if (!any) return;
+    canvas
+      ..save()
+      ..clipPath(clip);
+    _painter.paint(canvas, Offset.zero);
+    canvas.restore();
+  }
+
+  @override
+  bool shouldRepaint(_SungWordsPainter old) =>
+      old.text != text ||
+      old.words != words ||
+      old.style != style ||
+      old.maxWidth != maxWidth ||
+      old.textScaler != textScaler;
+}
+
+/// How much of each word of a line is sung at [ms], 0..1 (plan 10 J6): a
+/// timed word fills over its own time; a word without a time (a dash,
+/// digits) lights once the timed word before it has ended, or (none
+/// before) once the next timed word starts.
+List<double> sungWordShares(List<WordTime?> words, int ms) {
+  final shares = List<double>.filled(words.length, 0);
+  for (var i = 0; i < words.length; i++) {
+    final word = words[i];
+    if (word == null) continue;
+    final length = word.endMs - word.startMs;
+    shares[i] = ms >= word.endMs
+        ? 1
+        : ms <= word.startMs
+        ? 0
+        : length <= 0
+        ? 1
+        : (ms - word.startMs) / length;
+  }
+  // Untimed words: lit once the timed word before has ended, or (none
+  // before) once the next timed word starts.
+  int? lastEnd;
+  for (var i = 0; i < words.length; i++) {
+    final word = words[i];
+    if (word != null) {
+      lastEnd = word.endMs;
+      continue;
+    }
+    var lit = lastEnd != null && ms >= lastEnd;
+    if (lastEnd == null) {
+      for (var j = i + 1; j < words.length; j++) {
+        final next = words[j];
+        if (next != null) {
+          lit = ms >= next.startMs;
+          break;
+        }
+      }
+    }
+    shares[i] = lit ? 1 : 0;
+  }
+  return shares;
 }
