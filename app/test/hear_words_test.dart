@@ -620,7 +620,7 @@ void main() {
       expect((gigaam as GigaamJob).directMlDevice, directMlBestGpu);
       expect((whisper as WhisperJob).gpuBackends, 'hear-gpu-1/vulkan');
       expect(seen.every((unit) => unit.gpu), isTrue);
-      expect(log.last, endsWith('GPU separate gigaam whisper'));
+      expect(log.last, contains('GPU separate gigaam whisper; inside (ms): separate decode'));
     });
 
     test('a stage that fails on the GPU runs again on the CPU, and so do '
@@ -650,7 +650,7 @@ void main() {
       expect(log.first, contains('gigaam failed on the GPU (WorkerJobError)'));
       // The line names no error text (paths may be in it).
       expect(log.first, isNot(contains('device removed')));
-      expect(log.last, endsWith('GPU separate'));
+      expect(log.last, contains('GPU separate; inside'));
     });
 
     test('a Whisper GPU failure is heard again on the CPU', () async {

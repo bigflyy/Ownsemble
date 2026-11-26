@@ -324,6 +324,8 @@ class HearWords {
   ) async {
     final clock = Stopwatch()..start();
     _onGpu.clear();
+    // Times inside the stages, for perf.log (plan 10 I2i5).
+    final inside = <String>[];
     final marker = File(vocalsMarkerOf(vocalsPath));
     final from = vocalsMarkerText(
       audioPath: audioPath,
@@ -344,7 +346,7 @@ class HearWords {
       final old = File(vocalsPath);
       if (old.existsSync()) old.deleteSync();
       try {
-        await _stageOn(
+        final vocals = await _stageOn(
           run,
           'separate',
           (gpu) => VocalsJob(
@@ -357,6 +359,10 @@ class HearWords {
             directMlDevice: gpu ? directMlBestGpu : null,
           ),
           cleanUp: () => _removeSeparatorLeftovers(vocalsPath),
+        );
+        inside.add(
+          'separate decode ${vocals.decodeMs} model ${vocals.modelMs} '
+          'spectrum ${vocals.spectrumMs}',
         );
       } on WorkerCancelled {
         _removeSeparatorLeftovers(vocalsPath);
@@ -386,6 +392,10 @@ class HearWords {
       ),
     );
     final heardRu = gigaam.result;
+    inside.add(
+      'gigaam load ${gigaam.loadMs} vad ${gigaam.vadMs} open '
+      '${gigaam.openMs} encode ${gigaam.encodeMs} decode ${gigaam.decodeMs}',
+    );
     final songMs = (heardRu.samples / 16).round();
     final gigaamMs = clock.elapsedMilliseconds - separateMs;
 
@@ -420,6 +430,10 @@ class HearWords {
             _whisperJob(vocalsPath, ranges, heardRu.speechSeconds, null, gpu),
       );
       var heard = first.result;
+      inside.add(
+        'whisper load ${first.loadMs} open ${first.openMs} '
+        'transcribe ${first.transcribeMs}',
+      );
       whisperChunks = heard.chunks.length;
       final again = chunksToHearAsRussian(heard);
       if (again.isNotEmpty) {
@@ -483,7 +497,8 @@ class HearWords {
         '${kept ? 'vocals kept' : 'separate $separateMs ms'}, '
         'GigaAM $gigaamMs ms, '
         'total ${clock.elapsedMilliseconds} ms, '
-        'GPU ${_onGpu.isEmpty ? 'none' : _onGpu.join(' ')}',
+        'GPU ${_onGpu.isEmpty ? 'none' : _onGpu.join(' ')}; inside (ms): '
+        '${inside.join(', ')}',
       );
     } on Object {
       // A log that cannot be written does not undo the saved result.
