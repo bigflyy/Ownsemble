@@ -23,6 +23,7 @@ import 'dart:io';
 import 'dart:math';
 
 import '../library/track.dart';
+import '../lyrics/hear_helper.dart';
 import '../lyrics/heard_lyrics.dart' show heardSource;
 import '../lyrics/lyrics_controller.dart';
 import '../lyrics/lyrics_hearer.dart';
@@ -172,6 +173,8 @@ class HearAcceptBench {
     await player.stop();
     await Future<void>.delayed(const Duration(seconds: 5));
     result['memoryAfter'] = _memoryNow();
+    // Helpers still running (plan 10 I2i5): none may be left after a run.
+    result['helpersLeft'] = ProcessJobRunner.runningPids.length;
     return result;
   }
 

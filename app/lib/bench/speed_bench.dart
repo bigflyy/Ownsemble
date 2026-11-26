@@ -1,7 +1,7 @@
 import 'dart:async';
 import 'dart:convert' show jsonEncode;
 import 'dart:developer' show Timeline;
-import 'dart:io' show File, ProcessInfo;
+import 'dart:io' show File, Process, ProcessInfo, ProcessSignal;
 import 'dart:math';
 import 'dart:ui' show FramePhase, FrameTiming;
 
@@ -16,6 +16,7 @@ import '../library/play_period.dart';
 import '../library/search_text.dart';
 import '../library/song_filter.dart';
 import '../library/track.dart';
+import '../lyrics/hear_helper.dart';
 import '../lyrics/lyrics_controller.dart';
 import '../lyrics/lyrics_fitter.dart';
 import '../lyrics/lyrics_hearer.dart';
@@ -1262,7 +1263,33 @@ class SpeedBench {
       );
       w['whisperDownloadSeen'] = steps.contains('download-whisper');
       w['msToWhisper'] = clock.elapsedMilliseconds;
-      if (reachedWhisper && hearer.job != null) {
+      final whisperOnGpu = switch (stageOf(other)) {
+        HearRunning(:final gpu) => gpu,
+        _ => false,
+      };
+      if (reachedWhisper && hearer.job != null && whisperOnGpu) {
+        // On the GPU Whisper takes about 5 s (plan 10 I2i4): Stop while it
+        // works, no scrolling first.
+        await Future<void>.delayed(const Duration(milliseconds: 1500));
+        final stageAtStop = stageOf(other);
+        final stopWhisper = Stopwatch()..start();
+        hearer.stop();
+        outcome = await running;
+        w['stopDuringWhisper'] = {
+          ...outcomeOf(outcome),
+          'stopMs': stopWhisper.elapsedMilliseconds,
+          'stageAtStop': stageAtStop == null
+              ? null
+              : hearStageText(stageAtStop),
+          'gpu': true,
+          'peakWorkingSetMB': peakWorking,
+          'peakPrivateMB': peakPrivate,
+          'steps': steps,
+          'vocalsLeft': File(hearer.vocalsPathOf(lyrics.routeKeyOf(other)!))
+              .existsSync(),
+          'heardKept': lyrics.heard != null,
+        };
+      } else if (reachedWhisper && hearer.job != null) {
         // A few seconds into the first chunk's encoder pass.
         await Future<void>.delayed(const Duration(seconds: 5));
         final scrollWhisper = {
@@ -1337,6 +1364,46 @@ class SpeedBench {
             : null,
       };
       i['stillPlaying'] = player.player.state.playing;
+
+      // 6. A helper killed during a GPU separation (plan 10 I2i5): the run
+      // goes on on the CPU in a fresh helper and finishes; the app then
+      // hears on the CPU until it restarts, so this comes last.
+      final helpers = ProcessJobRunner.runningPids;
+      final k = <String, Object?>{'helpersBefore': helpers.length};
+      result['killedHelper'] = k;
+      final key = lyrics.routeKeyOf(russian)!;
+      hearer.forget(key);
+      lyrics.show(russian);
+      await until(
+        () => lyrics.state is LyricsMissing,
+        const Duration(seconds: 40),
+      );
+      steps = [];
+      stepsOf(hearer, steps);
+      clock = Stopwatch()..start();
+      running = hearer.hearShown();
+      final gpuSeparating = await until(
+        () =>
+            inStep(russian, 'separate', started: true) &&
+            (stageOf(russian) as HearRunning).gpu,
+        const Duration(minutes: 3),
+      );
+      k['gpuSeparating'] = gpuSeparating;
+      final victims = [...helpers];
+      k['helpersWhileRunning'] = victims.length;
+      if (gpuSeparating && victims.length == 1) {
+        k['killed'] = Process.killPid(victims.single, ProcessSignal.sigkill);
+      }
+      outcome = await running;
+      k['run'] = {
+        ...outcomeOf(outcome),
+        'ms': clock.elapsedMilliseconds,
+        'steps': steps,
+        'freshHelper': helpers.isEmpty || !helpers.contains(victims.single),
+        'shownSource': lyrics.state is LyricsShown
+            ? (lyrics.state as LyricsShown).lyrics.source
+            : null,
+      };
     } on Object catch (error) {
       result['error'] = '$error';
     } finally {
@@ -1344,6 +1411,7 @@ class SpeedBench {
     }
     await Future<void>.delayed(const Duration(seconds: 5));
     result['memoryAfter'] = memoryNow();
+    result['helpersLeft'] = ProcessJobRunner.runningPids.length;
     return result;
   }
 
