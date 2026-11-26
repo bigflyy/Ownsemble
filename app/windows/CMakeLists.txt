@@ -102,6 +102,9 @@ install(FILES "${WHISPER_BRIDGE_DIR}/whisper.cpp-1.9.5/LICENSE"
   DESTINATION "${INSTALL_BUNDLE_LIB_DIR}" RENAME "whisper.cpp-LICENSE.txt"
   COMPONENT Runtime)
 
+# ownsemble_hear.exe, the helper that runs "Hear the words" (plan 10 I2i5).
+include(hear_helper.cmake)
+
 # Copy the native assets provided by the build.dart from all packages.
 set(NATIVE_ASSETS_DIR "${PROJECT_BUILD_DIR}native_assets/windows/")
 install(DIRECTORY "${NATIVE_ASSETS_DIR}"

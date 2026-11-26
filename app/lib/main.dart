@@ -13,6 +13,7 @@ import 'library/search_index.dart';
 import 'library/similar_seeds.dart';
 import 'library/track.dart';
 import 'lyrics/fit_model.dart';
+import 'lyrics/hear_helper.dart';
 import 'lyrics/hear_words.dart';
 import 'lyrics/lyrics_hearer.dart';
 import 'lyrics/model_bundle.dart';
@@ -548,7 +549,26 @@ Future<void> main(List<String> args) async {
   // The GPU for "Hear the words" (plan 10 I2i): the user's switch, its
   // files there, and no GPU failure since the app started.
   var gpuFailed = false;
+  // Hearing runs in ownsemble_hear.exe beside the app (plan 10 I2i5), so
+  // the GPU drivers' memory goes back when a song is done. Without it (a
+  // build that lacks it) the app hears in its own process, on the CPU only:
+  // the GPU drivers would stay loaded in the player.
+  final hearHelperPath = p.join(appDir, hearHelperName);
+  // For measurements only: OWNSEMBLE_HEAR_IN_APP=1 hears in the app's own
+  // process, the GPU included, as before the helper (an A/B of its cost).
+  final hearInAppForChecks =
+      Platform.environment['OWNSEMBLE_HEAR_IN_APP'] == '1';
+  final hearInHelper =
+      Platform.isWindows &&
+      !hearInAppForChecks &&
+      File(hearHelperPath).existsSync();
+  if (hearInAppForChecks) {
+    logPerf('hear words: OWNSEMBLE_HEAR_IN_APP=1, hearing in the app');
+  } else if (!hearInHelper) {
+    logPerf('hear words: no $hearHelperName, hearing in the app, CPU only');
+  }
   bool hearOnGpuNow() =>
+      (hearInHelper || hearInAppForChecks) &&
       settings.hearOnGpu &&
       !gpuFailed &&
       bundleReady(modelsRoot, hearGpuBundle);
@@ -636,17 +656,35 @@ Future<void> main(List<String> args) async {
             ),
           )..createSync(recursive: true);
           final gpu = hearOnGpuNow();
-          final worker = SttWorker(
-            onnxRuntimePath: p.join(appDir, 'onnxruntime.dll'),
-            gpuOnnxRuntimePath: gpu
-                ? bundleFile(
-                    modelsRoot,
-                    hearGpuBundle,
-                    'directml/onnxruntime.dll',
-                  ).path
-                : null,
-            log: logPerf,
-          );
+          final onnx = p.join(appDir, 'onnxruntime.dll');
+          final gpuOnnx = gpu
+              ? bundleFile(
+                  modelsRoot,
+                  hearGpuBundle,
+                  'directml/onnxruntime.dll',
+                ).path
+              : null;
+          // One helper (or worker isolate) per run, ended after it.
+          final JobRunner worker;
+          final Future<void> Function() closeWorker;
+          if (hearInHelper) {
+            final helper = ProcessJobRunner(
+              helperPath: hearHelperPath,
+              onnxRuntimePath: onnx,
+              gpuOnnxRuntimePath: gpuOnnx,
+              log: logPerf,
+            );
+            worker = helper;
+            closeWorker = helper.close;
+          } else {
+            final inApp = SttWorker(
+              onnxRuntimePath: onnx,
+              gpuOnnxRuntimePath: gpuOnnx,
+              log: logPerf,
+            );
+            worker = inApp;
+            closeWorker = inApp.close;
+          }
           final run =
               HearWords(
                 runner: worker,
@@ -677,7 +715,7 @@ Future<void> main(List<String> args) async {
           unawaited(
             run.result.then<void>((_) {}, onError: (Object _) {}).whenComplete(
               () async {
-                await worker.close();
+                await closeWorker();
                 try {
                   scratch.deleteSync(recursive: true);
                 } on FileSystemException {

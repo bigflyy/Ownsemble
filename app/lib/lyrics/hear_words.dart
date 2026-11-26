@@ -35,6 +35,8 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:path/path.dart' as p;
+
 import 'gigaam.dart';
 import 'gigaam_job.dart';
 import 'heard_lyrics.dart';
@@ -213,11 +215,14 @@ class HearWords {
   /// Runs [step] on the GPU when the paths ask for it and it has not
   /// failed yet, else (and after a GPU failure that is not a cancel) on the
   /// CPU. [job] makes the step's job for the GPU (true) or the CPU.
+  /// [cleanUp] runs after a GPU failure, before the CPU try: what the
+  /// failed try left (a helper that was ended leaves its files).
   Future<R> _stageOn<R>(
     HearRun run,
     String step,
-    WorkerJob<R> Function(bool gpu) job,
-  ) async {
+    WorkerJob<R> Function(bool gpu) job, {
+    void Function()? cleanUp,
+  }) async {
     if (paths.gpu && !_gpuFailed) {
       try {
         final result = await run._stage(step, runner, job(true), gpu: true);
@@ -225,9 +230,14 @@ class HearWords {
         return result;
       } on WorkerCancelled {
         rethrow;
+      } on WorkerUnavailable {
+        // No helper to run anything in (plan 10 I2i5): not the GPU's
+        // fault, and the CPU would not run either.
+        rethrow;
       } on Object catch (error) {
         if (run._cancelled) throw const WorkerCancelled();
         _gpuFailed = true;
+        cleanUp?.call();
         try {
           log?.call(
             'hear words: $step failed on the GPU (${error.runtimeType}), '
@@ -240,6 +250,40 @@ class HearWords {
       }
     }
     return run._stage(step, runner, job(false));
+  }
+
+  /// What a separation that did not end well can leave: the half-written
+  /// vocals (`.part`, beside the vocals, outside the run's folder) and the
+  /// decoded song in [HearWordsPaths.tempDir]. The job deletes them itself
+  /// unless its process was ended (plan 10 I2i5); the job has ended when
+  /// this runs (a helper only after it exited), so nothing holds them.
+  void _removeSeparatorLeftovers(String vocalsPath) {
+    void remove(File file) {
+      try {
+        if (file.existsSync()) file.deleteSync();
+      } on FileSystemException {
+        // Still held; the next run's start or the age rule removes it.
+      }
+    }
+
+    remove(File('$vocalsPath.part'));
+    // Only the decoder's own files (audio_decode.dart: fit-<time>-<pid>.f32,
+    // and the separator's .vocals beside it), only in a real folder.
+    if (paths.tempDir.isEmpty || !p.isAbsolute(paths.tempDir)) return;
+    try {
+      final temp = Directory(paths.tempDir);
+      if (!temp.existsSync()) return;
+      for (final entry in temp.listSync(followLinks: false)) {
+        final name = p.basename(entry.path);
+        if (entry is File &&
+            name.startsWith('fit-') &&
+            (name.endsWith('.f32') || name.endsWith('.f32.vocals'))) {
+          remove(entry);
+        }
+      }
+    } on FileSystemException {
+      // Unreadable: the run's folder goes when the run ends.
+    }
   }
 
   /// Hears [audioPath], the file of the recording [ref], into the heard
@@ -312,13 +356,18 @@ class HearWords {
             threads: paths.threads,
             directMlDevice: gpu ? directMlBestGpu : null,
           ),
+          cleanUp: () => _removeSeparatorLeftovers(vocalsPath),
         );
       } on WorkerCancelled {
+        _removeSeparatorLeftovers(vocalsPath);
         // Stopped after the separator wrote the whole file but before its
         // result came: the vocals are kept for the next run (Codex review).
         if (File(vocalsPath).existsSync()) {
           marker.writeAsStringSync(from, flush: true);
         }
+        rethrow;
+      } on Object {
+        _removeSeparatorLeftovers(vocalsPath);
         rethrow;
       }
       marker.writeAsStringSync(from, flush: true);

@@ -38,6 +38,16 @@ class WorkerJobError implements Exception {
   String toString() => 'WorkerJobError: $message';
 }
 
+/// The job could not reach a worker at all: the helper process would not
+/// start, said another version or ended before it was ready (plan 10 I2i5).
+/// Not a fault of the GPU, so the pipeline does not try the CPU for it.
+class WorkerUnavailable extends WorkerJobError {
+  const WorkerUnavailable(super.message);
+
+  @override
+  String toString() => 'WorkerUnavailable: $message';
+}
+
 /// Work the worker runs. It is sent to the worker isolate, so it must hold
 /// only plain data (paths, numbers), and so must its result.
 abstract class WorkerJob<R> {

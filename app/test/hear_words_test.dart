@@ -573,14 +573,15 @@ void main() {
       FakeRunner runner, {
       void Function()? failed,
       List<String>? log,
+      String tempDir = 'temp',
     }) => HearWords(
       runner: runner,
-      paths: const HearWordsPaths(
+      paths: HearWordsPaths(
         separatorModel: 'kim.onnx',
         silero: 'silero.onnx',
         gigaamFolder: 'gigaam',
         mpv: 'mpv.dll',
-        tempDir: 'temp',
+        tempDir: tempDir,
         whisperBridge: 'bridge.dll',
         whisperLibraries: 'whisper.cpp',
         whisperModel: 'turbo.bin',
@@ -665,6 +666,78 @@ void main() {
       expect(runner.names, ['separate', 'gigaam', 'whisper', 'whisper']);
       expect(heard.language, 'en');
     });
+
+    test('no helper to hear in (plan 10 I2i5): the run fails, no CPU try, '
+        'the GPU stays on', () async {
+      var failures = 0;
+      final runner = FakeRunner(
+        (job) => throw const WorkerUnavailable('the helper would not start'),
+      );
+      final run = onGpu(
+        runner,
+        failed: () => failures++,
+      ).start(ref: '1_1', audioPath: 'song.mp3', vocalsPath: vocals);
+      await expectLater(run.result, throwsA(isA<WorkerUnavailable>()));
+      expect(runner.names, ['separate']);
+      expect(failures, 0);
+      expect(saved, isEmpty);
+    });
+
+    test('a separation ended on the GPU leaves no half vocals or decoded '
+        'song for the CPU try (a killed helper cannot clean up)', () async {
+      final scratch = Directory('${temp.path}/run')..createSync();
+      final decoded = File('${scratch.path}/fit-123-9.f32');
+      final stereo = File('${scratch.path}/fit-123-9.f32.vocals');
+      final other = File('${scratch.path}/notes.txt')..writeAsStringSync('x');
+      final half = File('$vocals.part');
+      var seenAtCpuTry = <bool>[];
+      final runner = FakeRunner((job) {
+        if (job is VocalsJob && job.directMlDevice != null) {
+          decoded.writeAsBytesSync([1]);
+          stereo.writeAsBytesSync([2]);
+          half.writeAsBytesSync([3]);
+          throw const WorkerJobError('the helper ended (exit code -1)');
+        }
+        if (job is VocalsJob) {
+          seenAtCpuTry = [
+            decoded.existsSync(),
+            stereo.existsSync(),
+            half.existsSync(),
+          ];
+        }
+        return unsure(job);
+      });
+      await onGpu(
+        runner,
+        tempDir: scratch.path,
+      ).start(ref: '1_1', audioPath: 'song.mp3', vocalsPath: vocals).result;
+      expect(runner.names, ['separate', 'separate', 'gigaam', 'whisper']);
+      expect(seenAtCpuTry, [false, false, false]);
+      expect(other.existsSync(), isTrue, reason: 'only the decoder files go');
+      expect(saved.keys, ['1_1']);
+    });
+
+    test(
+      'a separation that fails on the CPU too leaves no half vocals',
+      () async {
+        final half = File('$vocals.part');
+        final runner = FakeRunner((job) {
+          if (job is VocalsJob) {
+            half.writeAsBytesSync([3]);
+            throw const WorkerJobError('the helper ended (exit code 1)');
+          }
+          return unsure(job);
+        });
+        await expectLater(
+          onGpu(runner)
+              .start(ref: '1_1', audioPath: 'song.mp3', vocalsPath: vocals)
+              .result,
+          throwsA(isA<WorkerJobError>()),
+        );
+        expect(runner.names, ['separate', 'separate']);
+        expect(half.existsSync(), isFalse);
+      },
+    );
 
     test('a cancel during a GPU stage stops, with no CPU try', () async {
       final runner = FakeRunner(unsure)..hold = (job) => job is GigaamJob;
