@@ -166,6 +166,119 @@ void main() {
     expect(Lyrics.linesFromJson(lyrics.linesToJson()), lines);
   });
 
+  group('word times (plan 10 J2)', () {
+    test('lineWords splits at spaces only, punctuation kept', () {
+      expect(lineWords('  Ночь,  улица -  фонарь '), [
+        'Ночь,',
+        'улица',
+        '-',
+        'фонарь',
+      ]);
+      expect(lineWords(''), isEmpty);
+    });
+
+    test('word times survive the JSON, a word without a time kept', () {
+      const lines = [
+        LyricLine(
+          'Ночь, улица - фонарь',
+          startMs: 1000,
+          endMs: 4000,
+          words: [
+            WordTime(1000, 1400),
+            WordTime(1500, 2100),
+            null,
+            WordTime(2600, 3900),
+          ],
+        ),
+        LyricLine('plain line', startMs: 5000),
+      ];
+      const lyrics = Lyrics(source: 'lrclib', lines: lines);
+      final back = Lyrics.linesFromJson(lyrics.linesToJson());
+      expect(back, lines);
+      expect(back[0].words![2], isNull);
+      expect(back[1].words, isNull);
+      expect(lyrics.hasWordTimes, isTrue);
+    });
+
+    test('old rows without "w" read as line times only', () {
+      final back = Lyrics.linesFromJson('[{"t":"a b","s":10,"e":20}]');
+      expect(back.single.words, isNull);
+      expect(back.single.hasWordTimes, isFalse);
+    });
+
+    test('word times that count other words than the text are not used', () {
+      const line = LyricLine(
+        'three words here',
+        startMs: 0,
+        words: [WordTime(0, 100), WordTime(100, 200)],
+      );
+      expect(line.words, isNull);
+      const allNull = LyricLine('a b', startMs: 0, words: [null, null]);
+      expect(allNull.words, isNull);
+    });
+
+    test('linesToJson(words: false) leaves word times out', () {
+      const timed = Lyrics(
+        source: 'lrclib',
+        lines: [
+          LyricLine('a b', startMs: 0, words: [WordTime(0, 1), WordTime(1, 2)]),
+        ],
+      );
+      const bare = Lyrics(
+        source: 'lrclib',
+        lines: [LyricLine('a b', startMs: 0)],
+      );
+      expect(timed.linesToJson(words: false), bare.linesToJson());
+      expect(timed.linesToJson(), isNot(bare.linesToJson()));
+    });
+
+    test('wordAt: the last word started, untimed words passed over', () {
+      const lyrics = Lyrics(
+        source: 'heard',
+        lines: [
+          LyricLine(
+            'one two - four',
+            startMs: 1000,
+            words: [
+              WordTime(1000, 1200),
+              WordTime(1300, 1500),
+              null,
+              WordTime(1800, 2000),
+            ],
+          ),
+          LyricLine('no words', startMs: 3000),
+        ],
+      );
+      expect(lyrics.wordAt(0, 999), -1);
+      expect(lyrics.wordAt(0, 1000), 0);
+      expect(lyrics.wordAt(0, 1299), 0);
+      expect(lyrics.wordAt(0, 1700), 1);
+      expect(lyrics.wordAt(0, 1800), 3);
+      expect(lyrics.wordAt(0, 9000), 3);
+      expect(lyrics.wordAt(1, 3500), -1);
+      expect(lyrics.wordAt(-1, 0), -1);
+      expect(lyrics.wordAt(5, 0), -1);
+    });
+
+    test('movedTo moves the end and the words with the start', () {
+      const line = LyricLine(
+        'a b',
+        startMs: 1000,
+        endMs: 2000,
+        words: [WordTime(1000, 1400), WordTime(1500, 1900)],
+      );
+      final moved = line.movedTo(1600);
+      expect(moved.startMs, 1600);
+      expect(moved.endMs, 2600);
+      expect(moved.words, const [WordTime(1600, 2000), WordTime(2100, 2500)]);
+      final earlier = line.movedTo(0);
+      expect(earlier.words, const [WordTime(0, 400), WordTime(500, 900)]);
+      // A line with no start of its own cannot move its words.
+      const plain = LyricLine('a b', words: [WordTime(0, 1), WordTime(1, 2)]);
+      expect(plain.movedTo(500).words, isNull);
+    });
+  });
+
   group('store', () {
     late LibraryStore store;
     setUp(() => store = LibraryStore.open(':memory:'));
