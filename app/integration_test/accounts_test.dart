@@ -18,13 +18,16 @@
 import 'dart:io';
 import 'dart:math';
 
+import 'package:flutter/gestures.dart' show kSecondaryMouseButton;
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
 import 'package:ownsemble/library/track.dart';
 import 'package:ownsemble/main.dart' as app;
+import 'package:ownsemble/ui/library_controller.dart';
 import 'package:ownsemble/ui/library_screen.dart';
 import 'package:ownsemble/ui/sync_status_bar.dart';
+import 'package:ownsemble/vk/vk_catalog.dart';
 import 'package:ownsemble/vk/vk_client.dart';
 import 'package:ownsemble/vk/vk_session.dart';
 import 'package:ownsemble/vk/vk_sync.dart';
@@ -410,6 +413,174 @@ void main() {
       expect(result.newlyGone, 0);
     }
     expect(rows(), rowsBefore);
+
+    // Plan 06, E3: a song only the second account has is added to the
+    // first (test) account's own VK songs from its menu, stays one row with
+    // both accounts, plays muted, survives Sync now, and is removed from the
+    // first account again. Only the first account changes on VK: the add
+    // and the remove are its calls; the second account is only read.
+    final firstVk = VkClient(
+      ProtectedSessionFolder(data.path)
+          .load()
+          .firstWhere((s) => s.account == sources.first.account)
+          .cookies,
+    );
+    await firstVk.ensureToken();
+    Future<Set<String>> firstKeys() async {
+      final reply = await firstVk.call('audio.get', {
+        'owner_id': '${firstVk.userId}',
+        'count': '1000',
+      }) as Map<String, dynamic>;
+      return {
+        for (final item in reply['items'] as List)
+          vkSourceKey(item as Map<String, dynamic>),
+      };
+    }
+
+    final firstKeysBefore = await firstKeys();
+    // Whatever this step leaves on the test account is removed, even on a
+    // failure.
+    addTearDown(() async {
+      for (final key in (await firstKeys()).difference(firstKeysBefore)) {
+        say(
+          'cleanup: removed a copy left behind: '
+          '${await deleteVkSong(firstVk.call, key)}',
+        );
+      }
+      firstVk.close();
+    });
+    final secondSongsBefore = sources.last.songCount;
+    final menuItem = find.byKey(ValueKey('menu-add-to-$firstId'));
+
+    /// Right-clicks the listed row of [track] and waits for its menu.
+    Future<void> openRowMenu(Track track) async {
+      library.showView(LibraryView.songs);
+      library.goToSong(track);
+      await tester.pump();
+      await tester.pump();
+      final row = find.byKey(ValueKey('song-${track.id}'));
+      expect(row, findsOneWidget, reason: 'row ${track.id} on screen');
+      await tester.tap(row, buttons: kSecondaryMouseButton);
+      await tester.pump();
+      await waitUntil(
+        tester,
+        () =>
+            find.byKey(const ValueKey('menu-play-next')).evaluate().isNotEmpty,
+        timeout: const Duration(seconds: 5),
+        what: 'the row menu',
+      );
+      await tester.pump(const Duration(milliseconds: 300));
+    }
+
+    Track? copied;
+    String? newKey;
+    var addsRefused = 0;
+    for (final candidate in onlyIn(
+      secondId,
+    ).where((t) => t != toKeep).take(4)) {
+      await openRowMenu(candidate);
+      expect(menuItem, findsOneWidget, reason: 'Add to the first account');
+      expect(
+        find.byKey(ValueKey('menu-add-to-$secondId')),
+        findsNothing,
+        reason: 'the second account has it',
+      );
+      ScaffoldMessenger.of(tester.element(find.byType(LibraryScreen)))
+          .clearSnackBars();
+      await tester.pump();
+      List<String> addedKeys() => [
+        for (final c
+            in library.all.firstWhere((t) => t.id == candidate.id).allCopies)
+          if (c.sourceId == firstId) ?c.sourceKey,
+      ];
+      final refusal = find.textContaining(' not added');
+      final addClock = Stopwatch()..start();
+      await tester.tap(menuItem);
+      await tester.pump();
+      await waitUntil(
+        tester,
+        () => addedKeys().isNotEmpty || refusal.evaluate().isNotEmpty,
+        timeout: const Duration(seconds: 30),
+        what: 'VK to add the song',
+      );
+      await tester.pump();
+      final added = addedKeys();
+      if (added.isEmpty) {
+        addsRefused++;
+        say(
+          'add of row ${candidate.id} refused in ${addClock.elapsedMilliseconds} ms',
+        );
+        continue;
+      }
+      newKey = added.single;
+      copied = library.all.firstWhere((t) => t.id == candidate.id);
+      say(
+        'added row ${candidate.id} to the first account in '
+        '${addClock.elapsedMilliseconds} ms (refused before: $addsRefused)',
+      );
+      break;
+    }
+    expect(copied, isNotNull, reason: 'VK added one of 4 songs');
+    final copy = copied!;
+    expect(rows(), rowsBefore, reason: 'still one row, not a second one');
+    expect([for (final c in copy.allCopies) c.sourceId], [secondId, firstId]);
+    expect((await firstKeys()).difference(firstKeysBefore), {
+      newKey,
+    }, reason: 'the first account has the new copy on VK');
+    expect(
+      find.byKey(ValueKey('song-${copy.id}')),
+      findsOneWidget,
+      reason: 'the row is still listed',
+    );
+    // It plays (muted, decoded) through the account of the listed row.
+    final timing = await player.play(copy);
+    expect(timing.ok, isTrue, reason: '${timing.error}');
+    expect(timing.sampleRate, greaterThan(0), reason: 'audio decoded');
+    say(
+      'added song plays: sound ${timing.toSoundMs} ms, source '
+      '${timing.sourceId}, routes '
+      '${player.routesFor(copy).map((r) => r.sourceId).toList()}',
+    );
+    await player.stop();
+    // Sync now reads the copy back as the same row: nothing added or gone,
+    // and the second account's VK songs are as they were.
+    await tester.tap(find.byKey(const ValueKey('sync-now')));
+    await tester.pump();
+    await waitUntil(tester, () => sync.running, what: 'Sync now to start');
+    await syncSettled();
+    expect(sync.lastOutcome!.errors, isEmpty);
+    for (final result in sync.lastOutcome!.results) {
+      expect((result.added, result.newlyGone), (0, 0));
+    }
+    expect(rows(), rowsBefore);
+    final synced = library.all.firstWhere((t) => t.id == copy.id);
+    expect(
+      [for (final c in synced.allCopies) c.sourceKey],
+      [copy.sourceKey, newKey],
+    );
+    expect(sync.syncedSources.last.songCount, secondSongsBefore);
+    expect(sync.syncedSources.first.songCount, sources.first.songCount + 1);
+    say('after Sync now: one row, both accounts; second account unchanged');
+    // The menu now offers no add, and removes from the first account alone.
+    await openRowMenu(synced);
+    expect(menuItem, findsNothing);
+    final removeFirst = find.byKey(ValueKey('menu-remove-from-$firstId'));
+    expect(removeFirst, findsOneWidget);
+    await tester.tap(removeFirst);
+    await tester.pump();
+    await waitUntil(
+      tester,
+      () => library.all
+          .firstWhere((t) => t.id == copy.id)
+          .allCopies
+          .every((c) => c.sourceId != firstId),
+      timeout: const Duration(seconds: 30),
+      what: 'VK to remove the copy from the first account',
+    );
+    expect((await firstKeys()).contains(newKey), isFalse, reason: 'off VK');
+    expect(rows(), rowsBefore, reason: 'the second account keeps it listed');
+    say('removed from the first account only; the row stays');
+    await tester.pump(const Duration(seconds: 7));
 
     // E4: the chips filter the lists to one account, merged songs in both.
     await tester.pump(const Duration(milliseconds: 300));
