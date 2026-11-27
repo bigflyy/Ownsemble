@@ -24,6 +24,7 @@ import 'package:integration_test/integration_test.dart';
 import 'package:ownsemble/library/track.dart';
 import 'package:ownsemble/main.dart' as app;
 import 'package:ownsemble/ui/library_screen.dart';
+import 'package:ownsemble/ui/sync_status_bar.dart';
 import 'package:ownsemble/vk/vk_client.dart';
 import 'package:ownsemble/vk/vk_session.dart';
 import 'package:ownsemble/vk/vk_sync.dart';
@@ -164,7 +165,15 @@ void main() {
     // First account, the way the user logs in.
     await logInWith(firstSession, 'vk-log-in');
     await waitUntil(tester, () => sync.running, what: 'a sync to start');
-    await syncSettled();
+    // The second account logs in while the file check after this sync
+    // runs, which must stop for it (user 2026-11-27: a new account must
+    // show at once, not after minutes of nothing).
+    await waitUntil(
+      tester,
+      () => sync.checking != null || !sync.running,
+      timeout: const Duration(minutes: 12),
+      what: 'the first sync',
+    );
     expect(sync.lastOutcome?.error, isNull);
     final alone = sync.syncedSources.single;
     say('first account: ${alone.songCount} songs, ${rows()} rows');
@@ -177,17 +186,103 @@ void main() {
 
     // Second account, added from the accounts list.
     await tapKey(tester, 'vk-accounts');
+    // Whether the file check still ran when the login ended: the app's own
+    // listener came first and asked it to stop, so it has not ended yet.
+    var checkRan = false;
+    final loginsBefore = accounts.logins;
+    void atLogin() {
+      if (accounts.logins != loginsBefore) checkRan |= sync.checking != null;
+    }
+
+    accounts.addListener(atLogin);
     await logInWith(secondSession, 'vk-add-account');
+    accounts.removeListener(atLogin);
+    say('file check running at the login: $checkRan');
     final clock = Stopwatch()..start();
+    await tester.pump();
+    final newRow = find.text('$newAccountName, logged in');
+    expect(newRow, findsOneWidget, reason: 'the new account shows at once');
+    expect(
+      find.byKey(ValueKey('sync-new-account-${accounts.lastLogin}')),
+      findsOneWidget,
+      reason: 'and in the status bar',
+    );
+    say('new account row shown ${clock.elapsedMilliseconds} ms after login');
+    if (checkRan) {
+      await waitUntil(
+        tester,
+        () => sync.checking == null,
+        timeout: const Duration(seconds: 40),
+        what: 'the file check to stop for the new account',
+      );
+      say('file check stopped ${clock.elapsedMilliseconds} ms after login');
+    }
+    var lastState = '';
     await waitUntil(
       tester,
-      () => sync.syncedSources.length == 2 && !sync.running,
+      () {
+        final state = sync.newAccounts.firstOrNull?.state ?? '';
+        if (state.split(',').first != lastState.split(',').first) {
+          say('  ${clock.elapsed.inSeconds} s: $state');
+        }
+        lastState = state;
+        return sync.syncedSources.length == 2;
+      },
+      timeout: const Duration(minutes: 12),
+      what: "the new account's songs",
+    );
+    await tester.pump();
+    expect(newRow, findsNothing);
+    final secondRows = library.all
+        .where((t) => t.sourceId == sync.syncedSources.last.id)
+        .length;
+    say(
+      'its songs in the library ${clock.elapsed.inSeconds} s after login: '
+      '${sync.syncedSources.last.songCount} songs, $secondRows rows listed '
+      'under it',
+    );
+    expect(sync.syncedSources.last.songCount, greaterThan(0));
+    expect(secondRows, greaterThan(0), reason: 'its songs are in the list');
+    // Then all accounts sync (merge, album titles), then the file check
+    // reads a print of every new file: timed apart, since the check of
+    // thousands of files is the long part and runs in the background.
+    await waitUntil(
+      tester,
+      () => sync.checking != null || !sync.running,
       timeout: const Duration(minutes: 12),
       what: 'both accounts synced',
     );
     say(
       'second account synced in ${clock.elapsed.inSeconds} s, '
       'errors: ${sync.lastOutcome?.errors.length}',
+    );
+    final checkClock = Stopwatch()..start();
+    var lastTenth = -1;
+    await waitUntil(
+      tester,
+      () {
+        final checking = sync.checking;
+        if (checking != null && checking.total > 0) {
+          final tenth = checking.done * 10 ~/ checking.total;
+          if (tenth != lastTenth) {
+            lastTenth = tenth;
+            say(
+              '  file check ${checking.searching ? 'search' : 'read'} '
+              '${checking.done} of ${checking.total} at '
+              '${checkClock.elapsed.inSeconds} s',
+            );
+          }
+        }
+        return !sync.running;
+      },
+      timeout: const Duration(minutes: 30),
+      what: 'the file check after both accounts synced',
+    );
+    final check = sync.lastCheck;
+    say(
+      'file check: ${check?.checked} files read in ${check?.readMs} ms, '
+      '${check?.swapped} swapped, ${check?.failed} failed; '
+      '${checkClock.elapsed.inSeconds} s',
     );
     expect(sync.lastOutcome?.errors, isEmpty);
     await tester.pump(const Duration(milliseconds: 300));
@@ -373,7 +468,16 @@ void main() {
     final playedRow = library.visible.firstWhere(streams);
     final playedIndex = library.visible.indexOf(playedRow);
     say('playing row ${playedRow.id} from the filtered list, by a tap');
-    await tester.tap(find.byKey(ValueKey('song-${playedRow.id}')));
+    // On the title: the row's middle can be its album's name, which opens
+    // the album instead (as in the acceptance test).
+    await tester.tap(
+      find
+          .descendant(
+            of: find.byKey(ValueKey('song-${playedRow.id}')),
+            matching: find.text(playedRow.title),
+          )
+          .first,
+    );
     await waitUntil(
       tester,
       () => player.current?.id == playedRow.id,
