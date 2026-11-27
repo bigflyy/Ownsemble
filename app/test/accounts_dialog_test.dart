@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ownsemble/library/file_print.dart';
@@ -16,6 +18,7 @@ import 'package:ownsemble/ui/vk_accounts.dart';
 import 'package:ownsemble/vk/vk_client.dart';
 import 'package:ownsemble/vk/vk_login_window.dart';
 import 'package:ownsemble/vk/vk_session.dart';
+import 'package:ownsemble/vk/vk_sync.dart';
 
 import 'merge_support.dart';
 
@@ -124,6 +127,46 @@ void main() {
     await tester.tap(find.byKey(ValueKey(key)));
     await tester.pumpAndSettle();
   }
+
+  testWidgets('a new login shows as a row at once, with its progress', (
+    tester,
+  ) async {
+    sync.runner = (_) async => SyncOutcome(sources: store.sources());
+    await openDialog(tester);
+    final report = Completer<void Function(SyncProgress)>();
+    final alone = Completer<SyncOutcome>();
+    unawaited(
+      sync.addAccount('3', (onProgress) {
+        report.complete(onProgress);
+        return alone.future;
+      }),
+    );
+    await tester.pump();
+    expect(find.byKey(const ValueKey('account-new-3')), findsOneWidget);
+    expect(find.text('$newAccountName, logged in'), findsOneWidget);
+
+    (await report.future)(
+      const SyncProgress(SyncStage.reading, done: 1, total: 4),
+    );
+    await tester.pump();
+    expect(
+      find.descendant(
+        of: find.byKey(const ValueKey('account-new-3')),
+        matching: find.textContaining('adding: reading its songs, 24%'),
+      ),
+      findsOneWidget,
+    );
+
+    final third = store.ensureSource(
+      TrackSource.vk,
+      account: '3',
+      name: 'Вера',
+    );
+    alone.complete(SyncOutcome(sources: store.sources()));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('account-new-3')), findsNothing);
+    expect(find.byKey(ValueKey('account-$third')), findsOneWidget);
+  });
 
   testWidgets('every account shows with its color and state', (tester) async {
     await openDialog(tester);

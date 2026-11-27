@@ -88,9 +88,12 @@ class FileCheckOutcome {
   bool get changedChoices => decided > 0 || forgotten > 0;
 }
 
-/// Runs one check and reports progress; how the app starts it.
+/// Runs one check and reports progress; how the app starts it. When [stop]
+/// completes the check ends early and keeps what it read: the files it did
+/// not reach wait for the next check.
 typedef FileCheckRunner = Future<FileCheckOutcome> Function(
   void Function(FileCheckProgress) onProgress,
+  Future<void> stop,
 );
 
 /// Reads the prints of [rows] of account [sourceId], by row id. A row left
@@ -106,7 +109,8 @@ typedef FindSongVersions = Future<List<SongVersion>> Function(SwappedSong song);
 
 /// The check itself, without the network: reads the prints of the songs
 /// [LibraryStore.filesToCheck] names whose account is [reachable], forgets
-/// choices VK fixed, then decides a version for each swapped song.
+/// choices VK fixed, then decides a version for each swapped song. Once
+/// [stopped] says true it reads and searches no more.
 Future<FileCheckOutcome> checkFiles({
   required LibraryStore store,
   required Set<int> reachable,
@@ -115,7 +119,9 @@ Future<FileCheckOutcome> checkFiles({
   void Function(FileCheckProgress)? onProgress,
   Duration searchGap = fileCheckSearchGap,
   int Function()? now,
+  bool Function()? stopped,
 }) async {
+  final stop = stopped ?? () => false;
   final clock = now ?? () => DateTime.now().millisecondsSinceEpoch;
   final reading = Stopwatch()..start();
   final wanted = [
@@ -125,6 +131,7 @@ Future<FileCheckOutcome> checkFiles({
   var checked = 0;
   onProgress?.call(FileCheckProgress(done: 0, total: wanted.length));
   for (var start = 0; start < wanted.length; start += _printBatch) {
+    if (stop()) break;
     final batch = wanted.skip(start).take(_printBatch).toList();
     final bySource = <int, List<PrintRequest>>{};
     for (final row in batch) {
@@ -154,6 +161,10 @@ Future<FileCheckOutcome> checkFiles({
   );
   for (final (index, song) in swapped.indexed) {
     if (index > 0) await Future<void>.delayed(searchGap);
+    if (stop()) {
+      failed += swapped.length - index;
+      break;
+    }
     try {
       final found = await findVersions(song);
       // Kept, so the song's versions open at once (plan 03).
@@ -202,14 +213,32 @@ Future<FileCheckOutcome> checkFiles({
 /// Checks the files of the library at [dbPath] through the VK accounts of
 /// [sessions], in a background isolate with its own database connection,
 /// so neither the list nor playback ever waits for it. An account that
-/// does not connect leaves its songs for the next sync.
+/// does not connect leaves its songs for the next sync. When [stop]
+/// completes the isolate is told, and ends after the files it is reading.
 Future<FileCheckOutcome> checkVkFilesInBackground({
   required String dbPath,
   required List<VkSyncSession> sessions,
   required void Function(FileCheckProgress) onProgress,
+  Future<void>? stop,
 }) async {
   final progress = ReceivePort();
-  progress.listen((message) => onProgress(message as FileCheckProgress));
+  SendPort? control;
+  var stopAsked = false;
+  // The isolate's first message is where a stop is sent.
+  progress.listen((message) {
+    if (message is SendPort) {
+      control = message;
+      if (stopAsked) message.send(true);
+    } else {
+      onProgress(message as FileCheckProgress);
+    }
+  });
+  unawaited(
+    stop?.then((_) {
+      stopAsked = true;
+      control?.send(true);
+    }),
+  );
   try {
     return await _runInIsolate(dbPath, sessions, progress.sendPort);
   } finally {
@@ -229,21 +258,38 @@ Future<FileCheckOutcome> _checkAll(
   List<VkSyncSession> sessions,
   SendPort progress,
 ) async {
+  final control = ReceivePort();
+  var stopped = false;
+  final stopSignal = Completer<void>();
+  control.listen((_) {
+    stopped = true;
+    if (!stopSignal.isCompleted) stopSignal.complete();
+  });
+  // Waits for [work] or a stop, whichever comes first; null on a stop. The
+  // request a stop leaves behind ends with the isolate.
+  Future<T?> unlessStopped<T>(Future<T> work) =>
+      Future.any<T?>([work, stopSignal.future.then((_) => null)]);
+  progress.send(control.sendPort);
   final store = LibraryStore.open(dbPath);
   final clients = <int, VkClient>{};
   final http = HttpClient()..connectionTimeout = const Duration(seconds: 8);
   try {
     for (final session in sessions) {
+      if (stopped) break;
       final client = VkClient(
         session.cookies,
         requestTimeout: const Duration(minutes: 1),
         silenceTimeout: const Duration(seconds: 30),
       );
       try {
-        await retryTransient(client.ensureToken);
+        await unlessStopped(retryTransient(client.ensureToken));
       } on Object {
         client.close();
         continue;
+      }
+      if (stopped) {
+        client.close();
+        break;
       }
       final source = store
           .sources()
@@ -261,10 +307,15 @@ Future<FileCheckOutcome> _checkAll(
       store: store,
       reachable: clients.keys.toSet(),
       readPrints: (sourceId, rows) async {
-        final byKey = await printVkFiles(clients[sourceId]!, [
-          for (final row in rows)
-            (key: row.sourceKey, accessKey: row.accessKey),
-        ], http: http);
+        // A stop does not wait for the batch: its prints are read again by
+        // the next check.
+        final byKey = await unlessStopped(
+          printVkFiles(clients[sourceId]!, [
+            for (final row in rows)
+              (key: row.sourceKey, accessKey: row.accessKey),
+          ], http: http),
+        );
+        if (byKey == null) return const {};
         return {for (final row in rows) row.trackId: ?byKey[row.sourceKey]};
       },
       findVersions: (song) => findVkVersions(
@@ -278,8 +329,10 @@ Future<FileCheckOutcome> _checkAll(
         http: http,
       ),
       onProgress: progress.send,
+      stopped: () => stopped,
     );
   } finally {
+    control.close();
     http.close(force: true);
     for (final client in clients.values) {
       client.close();

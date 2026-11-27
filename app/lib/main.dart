@@ -295,10 +295,12 @@ Future<void> main(List<String> args) async {
     },
   );
   // The sync reads the sessions each time: logging in or out changes them.
-  SyncRunner? syncRunner() {
+  // With [only], it syncs that account alone: a new login's first sync.
+  SyncRunner? syncRunner({String? only}) {
     final sessions = [
       for (final session in account.sessions)
-        VkSyncSession(session.account, session.cookies),
+        if (only == null || session.account == only)
+          VkSyncSession(session.account, session.cookies),
     ];
     if (sessions.isEmpty) return null;
     return (onProgress) => syncVkInBackground(
@@ -316,10 +318,11 @@ Future<void> main(List<String> args) async {
         VkSyncSession(session.account, session.cookies),
     ];
     if (sessions.isEmpty) return null;
-    return (onProgress) => checkVkFilesInBackground(
+    return (onProgress, stop) => checkVkFilesInBackground(
       dbPath: dbPath,
       sessions: sessions,
       onProgress: onProgress,
+      stop: stop,
     );
   }
 
@@ -801,12 +804,25 @@ Future<void> main(List<String> args) async {
     },
     log: logPerf,
   );
-  // A new login is synced at once, so the library fills without another step.
+  // A new login is synced at once, so the library fills without another
+  // step: a new account alone and first, so it shows at once and its songs
+  // soon after.
   var logins = account.logins;
   account.addListener(() {
     sync.runner = syncRunner();
     sync.checker = fileChecker();
-    if (account.logins != logins) unawaited(sync.syncAfterRunning());
+    sync.keepNewAccounts({
+      for (final session in account.sessions) ?session.account,
+    });
+    final login = account.lastLogin;
+    final alone = login == null ? null : syncRunner(only: login);
+    if (account.logins != logins) {
+      unawaited(
+        login != null && alone != null
+            ? sync.addAccount(login, alone)
+            : sync.syncAfterRunning(),
+      );
+    }
     logins = account.logins;
   });
 
@@ -832,6 +848,7 @@ Future<void> main(List<String> args) async {
         playback: playback,
         account: account,
         sync: sync,
+        aloneRunner: (id) => syncRunner(only: id),
         covers: covers,
         collections: collections,
         storage: storage,
@@ -880,6 +897,7 @@ Future<void> _afterFirstFrame({
   required PlaybackController playback,
   required VkAccounts account,
   required SyncController sync,
+  required SyncRunner? Function(String account) aloneRunner,
   required CoverStore covers,
   required CollectionsController collections,
   required AudioStorage storage,
@@ -906,7 +924,19 @@ Future<void> _afterFirstFrame({
   }
 
   await player.init(volume: playback.volume, mute: playback.mutedByUser);
-  // The library syncs itself on every start, in the background.
+  // The library syncs itself on every start, in the background. A login
+  // whose first sync never ended (the app closed during it) is still a new
+  // account: it shows as one and syncs first.
+  sync.keepNewAccounts({
+    for (final session in account.sessions) ?session.account,
+  });
+  for (final session in account.sessions) {
+    final id = session.account;
+    final alone = id == null ? null : aloneRunner(id);
+    if (id == null || alone == null) continue;
+    if (sync.syncedSources.any((source) => source.account == id)) continue;
+    unawaited(sync.addAccount(id, alone));
+  }
   final startSync = sync.syncNow();
   // The sync's own part: the file check after it runs on in the background.
   final startSynced = sync.synced;

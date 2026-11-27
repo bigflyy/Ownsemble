@@ -40,7 +40,8 @@ class SyncStatusBar extends StatelessWidget {
       now: DateTime.now(),
     );
     final loggedOut = account != null && !account.hasSession(source.account);
-    final state = sync.syncing
+    // A new account's first sync leaves the others as they are.
+    final state = sync.syncing && !sync.addingAccount
         ? 'syncing...'
         : !compact
         ? full
@@ -76,7 +77,11 @@ class SyncStatusBar extends StatelessWidget {
             account != null && (!account.loggedIn || sync.loginExpired);
         final progress = sync.progress;
         final checking = sync.checking;
-        final sources = sync.syncedSources;
+        final sources = [
+          for (final source in sync.syncedSources)
+            if (!sync.isBeingAdded(source.account)) source,
+        ];
+        final adding = sync.newAccounts;
         final percent = progress == null
             ? 0
             : (progress.fraction * 100).round();
@@ -94,7 +99,7 @@ class SyncStatusBar extends StatelessWidget {
               child: Row(
                 children: [
                   Expanded(
-                    child: sources.length > 1
+                    child: sources.length + adding.length > 1
                         ? Row(
                             children: [
                               for (final source in sources)
@@ -104,13 +109,28 @@ class SyncStatusBar extends StatelessWidget {
                                     child: _state(source, style, compact: true),
                                   ),
                                 ),
+                              for (final added in adding)
+                                Flexible(
+                                  child: Padding(
+                                    padding: const EdgeInsets.only(right: 18),
+                                    child: Tooltip(
+                                      message: added.state,
+                                      child: _NewAccountState(
+                                        added: added,
+                                        style: style,
+                                      ),
+                                    ),
+                                  ),
+                                ),
                             ],
                           )
                         : Wrap(
                             spacing: 18,
                             runSpacing: 4,
                             children: [
-                              if (sources.isEmpty)
+                              for (final added in adding)
+                                _NewAccountState(added: added, style: style),
+                              if (sources.isEmpty && adding.isEmpty)
                                 _SourceState(
                                   name: 'VK',
                                   state: sync.canSync
@@ -250,6 +270,27 @@ class LogInButton extends StatelessWidget {
     );
   }
 }
+
+/// A new account in the status bar while its first sync runs.
+class _NewAccountState extends StatelessWidget {
+  const _NewAccountState({required this.added, required this.style});
+
+  final NewAccount added;
+  final TextStyle? style;
+
+  @override
+  Widget build(BuildContext context) => _SourceState(
+    key: ValueKey('sync-new-account-${added.account}'),
+    name: newAccountName,
+    state: added.state,
+    color: OwnColors.of(context).dim,
+    failed: added.error != null,
+    style: style,
+  );
+}
+
+/// What a new account is called until its first sync names it.
+const newAccountName = 'New account';
 
 /// One source in the status bar: a dot, its name and its state.
 class _SourceState extends StatelessWidget {

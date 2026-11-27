@@ -499,6 +499,223 @@ void main() {
     });
   });
 
+  group('a new account shows at once (user 2026-11-27)', () {
+    final old = vkSource(syncedAtMs: 1000, name: 'Анна');
+    final added = vkSource(id: 2, syncedAtMs: 2000, name: 'Борис');
+    // vkSource gives account '${41 + id}': the new one is '43'.
+    const newAccount = '43';
+
+    late List<String> calls;
+    late Completer<SyncOutcome> alone;
+    late void Function(SyncProgress) aloneReport;
+    late SyncController sync;
+
+    SyncRunner aloneRunner() => (onProgress) {
+      calls.add('alone');
+      aloneReport = onProgress;
+      alone = Completer();
+      return alone.future;
+    };
+
+    setUp(() {
+      calls = [];
+      sync = SyncController(
+        sources: [old],
+        // The new account is a source once its own first sync ran.
+        runner: (_) async {
+          calls.add('all');
+          return SyncOutcome(
+            sources: calls.contains('alone') ? [old, added] : [old],
+          );
+        },
+        onLibraryChanged: (_) {},
+      );
+    });
+
+    test('it syncs alone first, then all accounts sync', () async {
+      final whole = sync.addAccount(newAccount, aloneRunner());
+      expect(sync.newAccounts.single.account, newAccount);
+      expect(sync.newAccounts.single.state, 'adding: connecting to VK');
+      expect(sync.addingAccount, isTrue);
+      await pumpEventQueue();
+      expect(calls, ['alone']);
+
+      aloneReport(const SyncProgress(SyncStage.reading, done: 1, total: 2));
+      expect(sync.newAccounts.single.state, 'adding: reading its songs, 43%');
+
+      alone.complete(SyncOutcome(sources: [old, added]));
+      await whole;
+      expect(calls, ['alone', 'all']);
+      expect(sync.newAccounts, isEmpty);
+      expect(sync.syncedSources, hasLength(2));
+    });
+
+    test('a running file check stops for it', () async {
+      var stopped = false;
+      final check = Completer<FileCheckOutcome>();
+      sync.checker = (onProgress, stop) {
+        calls.add('check');
+        stop.then((_) {
+          stopped = true;
+          check.complete(const FileCheckOutcome());
+        });
+        return check.future;
+      };
+      final whole = sync.syncNow();
+      await sync.synced;
+      await pumpEventQueue();
+      expect(calls, ['all', 'check']);
+
+      unawaited(sync.addAccount(newAccount, aloneRunner()));
+      expect(sync.newAccounts.single.waiting, isTrue);
+      await pumpEventQueue();
+      expect(stopped, isTrue);
+      expect(calls, ['all', 'check', 'alone']);
+      // The check is not started again until the new account is in.
+      sync.checker = (onProgress, stop) async {
+        calls.add('check');
+        return const FileCheckOutcome();
+      };
+      alone.complete(SyncOutcome(sources: [old, added]));
+      await whole;
+      expect(calls, ['all', 'check', 'alone', 'all', 'check']);
+    });
+
+    test('during a sync of the others it waits, and says so', () async {
+      final others = Completer<SyncOutcome>();
+      var runs = 0;
+      sync.runner = (_) {
+        calls.add('all');
+        runs++;
+        return runs == 1
+            ? others.future
+            : Future.value(SyncOutcome(sources: [old, added]));
+      };
+      final whole = sync.syncNow();
+      unawaited(sync.addAccount(newAccount, aloneRunner()));
+      expect(sync.newAccounts.single.state, 'adding, after the sync that runs');
+      others.complete(SyncOutcome(sources: [old]));
+      await pumpEventQueue();
+      expect(calls, ['all', 'alone']);
+      alone.complete(SyncOutcome(sources: [old, added]));
+      await whole;
+      expect(calls, ['all', 'alone', 'all']);
+      expect(sync.newAccounts, isEmpty);
+    });
+
+    test('a failed first sync says why until the account is in', () async {
+      final whole = sync.addAccount(newAccount, aloneRunner());
+      await pumpEventQueue();
+      sync.runner = (_) async {
+        calls.add('all');
+        return SyncOutcome(sources: [old], errors: const ['no network']);
+      };
+      alone.complete(SyncOutcome(sources: [old], errors: const ['no network']));
+      await whole;
+      expect(sync.newAccounts.single.error, 'no network');
+      expect(sync.newAccounts.single.state, 'first sync failed: no network');
+
+      sync.keepNewAccounts({'42'});
+      expect(sync.newAccounts, isEmpty, reason: 'it logged out');
+    });
+
+    test('a sync that throws leaves no new account waiting', () async {
+      final others = Completer<SyncOutcome>();
+      sync.runner = (_) {
+        calls.add('all');
+        return others.future;
+      };
+      final whole = sync.syncNow();
+      unawaited(sync.addAccount(newAccount, aloneRunner()));
+      others.completeError(StateError('database is locked'));
+      await whole;
+      expect(sync.running, isFalse);
+      expect(calls, ['all']);
+      expect(sync.newAccounts.single.error, contains('database is locked'));
+    });
+
+    test('synced waits for a new account that came during the check', () async {
+      final check = Completer<FileCheckOutcome>();
+      sync.checker = (onProgress, stop) {
+        stop.then((_) {
+          if (!check.isCompleted) check.complete(const FileCheckOutcome());
+        });
+        return check.future;
+      };
+      unawaited(sync.syncNow());
+      await sync.synced;
+      await pumpEventQueue();
+      unawaited(sync.addAccount(newAccount, aloneRunner()));
+      await pumpEventQueue();
+      var handedOver = false;
+      unawaited(sync.synced.then((_) => handedOver = true));
+      await pumpEventQueue();
+      expect(handedOver, isFalse, reason: 'its first sync still runs');
+      alone.complete(SyncOutcome(sources: [old, added]));
+      await pumpEventQueue();
+      expect(handedOver, isTrue);
+    });
+
+    test('a logout during its first sync leaves no row behind', () async {
+      final whole = sync.addAccount(newAccount, aloneRunner());
+      await pumpEventQueue();
+      sync.keepNewAccounts({'42'});
+      expect(sync.newAccounts, isEmpty);
+      alone.complete(SyncOutcome(sources: [old], errors: const ['expired']));
+      await whole;
+      expect(sync.newAccounts, isEmpty);
+    });
+
+    test('its source made before the songs still shows as new', () async {
+      unawaited(sync.addAccount(newAccount, aloneRunner()));
+      await pumpEventQueue();
+      // A rename of another account reloads the sources meanwhile.
+      sync.updateSources([old, vkSource(id: 2, songs: 0)]);
+      expect(sync.newAccounts.single.account, newAccount);
+      expect(sync.isBeingAdded(newAccount), isTrue);
+      alone.complete(SyncOutcome(sources: [old, added]));
+      await pumpEventQueue();
+      expect(sync.newAccounts, isEmpty);
+      expect(sync.isBeingAdded(newAccount), isFalse);
+    });
+
+    test('a login again of a known account syncs as before', () async {
+      await sync.addAccount('42', aloneRunner());
+      expect(calls, ['all']);
+      expect(sync.newAccounts, isEmpty);
+    });
+
+    testWidgets('the bar shows it beside the others, not them syncing', (
+      tester,
+    ) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(body: SyncStatusBar(sync: sync)),
+        ),
+      );
+      unawaited(sync.addAccount(newAccount, aloneRunner()));
+      await tester.pump();
+      expect(
+        find.byKey(const ValueKey('sync-new-account-$newAccount')),
+        findsOneWidget,
+      );
+      expect(find.text(newAccountName), findsOneWidget);
+      expect(find.textContaining('syncing...'), findsNothing);
+      aloneReport(const SyncProgress(SyncStage.reading, done: 1, total: 2));
+      await tester.pump();
+      expect(find.text('Syncing 43%'), findsOneWidget);
+
+      alone.complete(SyncOutcome(sources: [old, added]));
+      await tester.pump();
+      await tester.pump();
+      expect(
+        find.byKey(const ValueKey('sync-new-account-$newAccount')),
+        findsNothing,
+      );
+      expect(find.text('Борис'), findsOneWidget);
+    });
+  });
+
   group('the file check after a sync (Stage M2)', () {
     late Completer<FileCheckOutcome> check;
     late void Function(FileCheckProgress) checkReport;
@@ -515,7 +732,7 @@ void main() {
           calls.add('sync');
           return SyncOutcome(sources: [vkSource(syncedAtMs: 1)]);
         },
-        checker: (onProgress) {
+        checker: (onProgress, stop) {
           calls.add('check');
           checkReport = onProgress;
           check = Completer();

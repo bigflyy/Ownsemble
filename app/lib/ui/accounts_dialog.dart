@@ -42,7 +42,11 @@ class _AccountList extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = OwnColors.of(context);
-    final known = sync.syncedSources;
+    final known = [
+      for (final source in sync.syncedSources)
+        if (!sync.isBeingAdded(source.account)) source,
+    ];
+    final adding = sync.newAccounts;
     return Padding(
       padding: const EdgeInsets.fromLTRB(20, 18, 20, 16),
       child: Column(
@@ -60,7 +64,7 @@ class _AccountList extends StatelessWidget {
             style: TextStyle(fontSize: 13, color: colors.dim),
           ),
           const SizedBox(height: 12),
-          if (known.isEmpty)
+          if (known.isEmpty && adding.isEmpty)
             Padding(
               padding: const EdgeInsets.symmetric(vertical: 12),
               child: Text(
@@ -82,6 +86,12 @@ class _AccountList extends StatelessWidget {
                       accounts: accounts,
                       sync: sync,
                       sources: sources,
+                    ),
+                  for (final added in adding)
+                    _NewAccountRow(
+                      key: ValueKey('account-new-${added.account}'),
+                      added: added,
+                      accounts: accounts,
                     ),
                 ],
               ),
@@ -277,6 +287,98 @@ class _AccountRow extends StatelessWidget {
                 key: ValueKey('account-remove'),
                 value: _AccountAction.remove,
                 child: Text('Remove from the library...'),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// A new account while its first sync runs: shown at once after the login,
+/// with how far the sync is, until its songs are in the library.
+class _NewAccountRow extends StatelessWidget {
+  const _NewAccountRow({
+    super.key,
+    required this.added,
+    required this.accounts,
+  });
+
+  final NewAccount added;
+
+  /// To log out of it: a login made by mistake, or one that cannot sync.
+  final VkAccounts accounts;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = OwnColors.of(context);
+    final failed = added.error != null;
+    final progress = added.progress;
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 6),
+      child: Row(
+        children: [
+          Padding(
+            padding: const EdgeInsets.all(8),
+            child: failed
+                ? Icon(
+                    Icons.error_outline,
+                    size: 14,
+                    color: Theme.of(context).colorScheme.error,
+                  )
+                : const SizedBox(
+                    width: 14,
+                    height: 14,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  ),
+          ),
+          const SizedBox(width: 6),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  '$newAccountName, logged in',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(fontSize: 14, fontWeight: FontWeight.w500),
+                ),
+                Text(
+                  failed
+                      ? '${added.state}. Sync now tries again.'
+                      : '${added.state}. Its songs appear when VK has '
+                            'listed them.',
+                  key: ValueKey('account-new-state-${added.account}'),
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: failed
+                        ? Theme.of(context).colorScheme.error
+                        : colors.dim,
+                  ),
+                ),
+                if (!failed) ...[
+                  const SizedBox(height: 6),
+                  LinearProgressIndicator(
+                    value: progress?.fraction,
+                    minHeight: 2,
+                  ),
+                ],
+              ],
+            ),
+          ),
+          PopupMenuButton<_AccountAction>(
+            key: ValueKey('account-new-menu-${added.account}'),
+            tooltip: 'Account',
+            icon: Icon(Icons.more_vert, size: 18, color: colors.dim),
+            onSelected: (_) => accounts.logOut(added.account),
+            itemBuilder: (context) => [
+              const PopupMenuItem(
+                key: ValueKey('vk-log-out-new'),
+                value: _AccountAction.logOut,
+                child: Text('Log out'),
               ),
             ],
           ),

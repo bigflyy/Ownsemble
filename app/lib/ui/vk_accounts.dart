@@ -98,6 +98,10 @@ class VkAccounts extends ChangeNotifier {
   /// How many logins finished in this run; a change means a new session.
   int get logins => _logins;
 
+  /// VK user id of the last finished login; null before the first.
+  String? get lastLogin => _lastLogin;
+  String? _lastLogin;
+
   /// Asks VK for a token for every session, and so learns whose each one is. A
   /// session that cannot get one (offline, expired) stays as it is; a session
   /// that turns out to be an account's second one is dropped.
@@ -170,6 +174,7 @@ class VkAccounts extends ChangeNotifier {
         return;
       }
       _add('${candidate.userId}', cookies, candidate);
+      _lastLogin = '${candidate.userId}';
       _logins++;
       _finishLogin(true);
       await window.close();

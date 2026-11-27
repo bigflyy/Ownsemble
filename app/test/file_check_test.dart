@@ -366,6 +366,42 @@ void main() {
       );
     });
 
+    test('a stop asked during the searches leaves the rest', () async {
+      var stop = false;
+      final outcome = await checkFiles(
+        store: store,
+        reachable: {vk},
+        readPrints: (sourceId, rows) async => {
+          for (final row in rows) row.trackId: printOf(row.sourceKey),
+        },
+        findVersions: (song) async {
+          searched.add(song.title);
+          // A new account logs in while the first song is searched.
+          stop = true;
+          return uploads[song.title] ?? const [];
+        },
+        searchGap: Duration.zero,
+        now: () => now,
+        stopped: () => stop,
+      );
+      expect(searched, hasLength(1));
+      expect(outcome.decided, 1);
+      expect(outcome.failed, 1);
+    });
+
+    test('a stop asked before the check reads nothing', () async {
+      final outcome = await checkFiles(
+        store: store,
+        reachable: {vk},
+        readPrints: (sourceId, rows) async => fail('read after a stop'),
+        findVersions: (song) async => fail('searched after a stop'),
+        now: () => now,
+        stopped: () => true,
+      );
+      expect(outcome.checked, 0);
+      expect(outcome.decided, 0);
+    });
+
     test('a captcha stops the searches until the next sync', () async {
       searchFails = VkException(
         'audio.search error 14: Captcha needed',
