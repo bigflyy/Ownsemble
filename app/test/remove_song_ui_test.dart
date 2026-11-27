@@ -238,6 +238,46 @@ void main() {
     );
     await tester.pumpAndSettle(const Duration(seconds: 1));
   });
+
+  // Plan 06, E2: a song only another account has is added to your own.
+  testWidgets('a song only another account has offers Add to your account '
+      'on VK; after it the row has both accounts', (tester) async {
+    final other = store.ensureSource(
+      TrackSource.vk,
+      account: '43',
+      name: 'Рабочий',
+    );
+    final theirs = store.upsertAll(other, [
+      vkItemToTrack(vkAudio(43, 7, artist: 'Сплин', title: 'Выхода нет')),
+    ]).single;
+    reload();
+    await pumpScreen(tester);
+    await openMenu(tester, 'song-$theirs');
+    expect(find.text('Add to Мой VK on VK'), findsOneWidget);
+    // Рабочий is not logged in here, so its own songs offer no add to it.
+    expect(find.textContaining('Add to Рабочий'), findsNothing);
+    await tester.tap(find.byKey(ValueKey('menu-add-to-$source')));
+    await tester.pump();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(vk.adds, ['43_7 key7']);
+    expect(find.text('Added "Выхода нет" to Мой VK'), findsOneWidget);
+    final row = library.all.firstWhere((t) => t.title == 'Выхода нет');
+    expect(row.id, theirs);
+    expect([for (final c in row.allCopies) c.sourceId], [other, source]);
+    await tester.pumpAndSettle(const Duration(seconds: 5));
+    await openMenu(tester, 'song-$theirs');
+    expect(find.byKey(ValueKey('menu-add-to-$source')), findsNothing);
+    expect(find.text('Remove from Мой VK only'), findsOneWidget);
+    await tester.tapAt(const Offset(5, 5));
+    await tester.pumpAndSettle();
+    // Your own songs offer no add: the logged-in account has them.
+    await openMenu(tester, 'song-$romance');
+    expect(find.byKey(ValueKey('menu-add-to-$source')), findsNothing);
+    expect(find.byKey(ValueKey('menu-add-to-$other')), findsNothing);
+    await tester.tapAt(const Offset(5, 5));
+    await tester.pumpAndSettle(const Duration(seconds: 1));
+  });
 }
 
 /// The row of the listed song [id].

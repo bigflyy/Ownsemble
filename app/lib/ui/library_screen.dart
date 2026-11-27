@@ -890,13 +890,15 @@ class _LibraryScreenState extends State<LibraryScreen> {
           const PopupMenuDivider(),
           ...stackMenuItems(collections),
         ],
-        ..._removeMenuItems(track),
+        ..._accountMenuItems(track),
       ],
     );
     if (!mounted || choice == null) return;
     switch (choice) {
       case _RemoveFrom(:final sourceId):
         await _removeSong(track, onlySource: sourceId);
+      case _AddTo(:final sourceId):
+        await _addToAccount(track, sourceId);
       case 'open-album':
         library.openAlbum(track);
       case 'versions':
@@ -3104,19 +3106,30 @@ class _LibraryScreenState extends State<LibraryScreen> {
       ..showSnackBar(SnackBar(content: Text(note)));
   }
 
-  /// Remove from library at the end of a song's menu: from every account
-  /// that has it, and for a song in several accounts also from each one
-  /// alone (plan 06, C5). None for a song Remove does not apply to.
-  List<PopupMenuEntry<Object>> _removeMenuItems(Track track) {
-    final accounts = widget.remover?.accountsOf(track) ?? const [];
-    if (accounts.isEmpty) return const [];
+  /// The accounts part at the end of a song's menu: "Add to (account) on VK"
+  /// for each logged-in account that lacks the song (plan 06, E2), then
+  /// Remove from library from every account that has it, and for a song in
+  /// several accounts also from each one alone (plan 06, C5). None for a
+  /// song neither applies to.
+  List<PopupMenuEntry<Object>> _accountMenuItems(Track track) {
+    final remover = widget.remover;
+    final accounts = remover?.accountsOf(track) ?? const [];
+    final addable = remover?.addableAccountsOf(track) ?? const [];
+    if (accounts.isEmpty && addable.isEmpty) return const [];
     return [
       const PopupMenuDivider(),
-      const PopupMenuItem(
-        key: ValueKey('menu-remove-from-library'),
-        value: _RemoveFrom(null),
-        child: Text('Remove from library'),
-      ),
+      for (final source in addable)
+        PopupMenuItem(
+          key: ValueKey('menu-add-to-${source.id}'),
+          value: _AddTo(source.id),
+          child: Text('Add to ${source.name} on VK'),
+        ),
+      if (accounts.isNotEmpty)
+        const PopupMenuItem(
+          key: ValueKey('menu-remove-from-library'),
+          value: _RemoveFrom(null),
+          child: Text('Remove from library'),
+        ),
       if (accounts.length > 1)
         for (final source in accounts)
           PopupMenuItem(
@@ -3125,6 +3138,30 @@ class _LibraryScreenState extends State<LibraryScreen> {
             child: Text('Remove from ${source.name} only'),
           ),
     ];
+  }
+
+  /// Adds [track] to the VK songs of the account [sourceId]: a note says so
+  /// at once, and then where it went or why not.
+  Future<void> _addToAccount(Track track, int sourceId) async {
+    final remover = widget.remover;
+    if (remover == null) return;
+    final messenger = ScaffoldMessenger.of(context);
+    final name = [
+      for (final source in remover.addableAccountsOf(track))
+        if (source.id == sourceId) source.name,
+    ].firstOrNull;
+    if (name != null) {
+      messenger
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+          SnackBar(content: Text('Adding "${track.title}" to $name...')),
+        );
+    }
+    final note = await remover.addTo(track, sourceId);
+    if (!mounted || note.isEmpty) return;
+    messenger
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(content: Text(note)));
   }
 
   /// Removes [track] (from [onlySource] alone when given): the row slides
@@ -3203,13 +3240,15 @@ class _LibraryScreenState extends State<LibraryScreen> {
             value: 'view-cover',
             child: Text('View cover'),
           ),
-        if (copy != null) ..._removeMenuItems(copy),
+        if (copy != null) ..._accountMenuItems(copy),
       ],
     );
     if (!mounted || action == null) return;
     switch (action) {
       case _RemoveFrom(:final sourceId):
         await _removeSong(copy!, onlySource: sourceId);
+      case _AddTo(:final sourceId):
+        await _addToAccount(copy!, sourceId);
       case 'play-next':
         await widget.playback.playNext(track);
       case 'add-to-queue':
@@ -4473,6 +4512,12 @@ const removeUndoTime = Duration(seconds: 6);
 class _RemoveFrom {
   const _RemoveFrom(this.sourceId);
   final int? sourceId;
+}
+
+/// "Add to (account) on VK" in a song's menu (plan 06, E2).
+class _AddTo {
+  const _AddTo(this.sourceId);
+  final int sourceId;
 }
 
 /// A song row that slides out to the side while it is being removed

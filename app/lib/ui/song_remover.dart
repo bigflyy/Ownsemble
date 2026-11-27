@@ -1,6 +1,8 @@
 // Remove from library (plan 06, C5): a song leaves the library and each
 // account's VK library, its row slides out, and a note offers Undo for a few
 // seconds, which puts it back on VK and in the library under the same row.
+// Also the other way (plan 06, E2): a song another account has is added to an
+// account's own VK songs, and stays one row with both accounts' dots.
 
 import 'dart:async';
 
@@ -31,15 +33,16 @@ class RemoveResult {
 }
 
 /// Removes songs from the library and from the accounts' VK libraries, and
-/// puts them back on Undo. The song list reads [leaving] (rows sliding out)
-/// and [flashing] (the row Undo just brought back).
+/// puts them back on Undo; adds a song one account has to another account
+/// ([addTo]). The song list reads [leaving] (rows sliding out) and
+/// [flashing] (the row Undo just brought back).
 class SongRemover extends ChangeNotifier {
   SongRemover({
     required this.store,
     required this._sources,
     required this.apiOfSource,
     required this.onLibraryChanged,
-    this.onRestored,
+    this.onPutOnVk,
     this.slideTime = const Duration(milliseconds: 250),
     this.flashTime = const Duration(milliseconds: 900),
     this.log,
@@ -55,10 +58,10 @@ class SongRemover extends ChangeNotifier {
   /// the sources' counts).
   final void Function() onLibraryChanged;
 
-  /// After an Undo put songs back on VK (main.dart: a sync after the
-  /// running one, which may have read VK while the song was removed and
-  /// would mark it gone).
-  final void Function()? onRestored;
+  /// After an Undo put songs back on VK, or [addTo] added one (main.dart: a
+  /// sync after the running one, which may have read VK before the song was
+  /// there and would mark it gone).
+  final void Function()? onPutOnVk;
 
   /// How long a removed row takes to slide out: the list reloads (and the
   /// row is gone) no sooner than this after the click.
@@ -204,7 +207,7 @@ class SongRemover extends ChangeNotifier {
     if (_disposed) return null;
     if (back > 0) {
       onLibraryChanged();
-      onRestored?.call();
+      onPutOnVk?.call();
       _flashing = result.track.id;
       _flashTimer?.cancel();
       _flashTimer = Timer(flashTime, () {
@@ -222,6 +225,103 @@ class SongRemover extends ChangeNotifier {
     return back == 0
         ? 'Could not bring back $title: ${failed.join('; ')}'
         : 'Brought back $title. Not brought back: ${failed.join('; ')}';
+  }
+
+  // ---- Add to another account (plan 06, E2) ----
+
+  /// Library ids of the songs that VK is adding to an account now.
+  final adding = <int>{};
+
+  /// The logged-in VK accounts that do not have [track], in the sources'
+  /// order: its menu offers "Add to (account) on VK" for each. Empty for a
+  /// song outside the library, a generated one, or one that no account has
+  /// on VK any more (every copy gone), as there is nothing to add from.
+  List<SourceInfo> addableAccountsOf(Track track) {
+    if (!track.inLibrary || track.source != TrackSource.vk) return const [];
+    final holders = store.holdersOf(track.id);
+    if (!holders.any((holder) => !holder.gone)) return const [];
+    // A copy VK dropped (gone) does not count: the add brings it back.
+    final has = {
+      for (final holder in holders)
+        if (!holder.gone) holder.sourceId,
+    };
+    return [
+      for (final source in _sources.value)
+        if (source.kind == TrackSource.vk &&
+            !has.contains(source.id) &&
+            apiOfSource(source.id) != null)
+          source,
+    ];
+  }
+
+  /// Adds [track] to the VK songs of the account [sourceId], made from a copy
+  /// another account has (not gone), and puts the new copy into the song's
+  /// row at once ([LibraryStore.addCopyOf]). Returns the note at the bottom:
+  /// where it went, or why not; empty when nothing is to be said (a second
+  /// click while VK works).
+  Future<String> addTo(Track track, int sourceId) async {
+    final title = '"${track.title}"';
+    final name = _nameOf(sourceId);
+    final holders = store.holdersOf(track.id);
+    if (holders.any((h) => h.sourceId == sourceId && !h.gone)) {
+      return '$title is already in $name';
+    }
+    final from = holders.where((holder) => !holder.gone).firstOrNull;
+    if (from == null) {
+      return '$title not added: no account has it on VK any more';
+    }
+    final call = apiOfSource(sourceId);
+    if (call == null) return '$title not added: $name is not logged in';
+    if (!adding.add(track.id)) return '';
+    notifyListeners();
+    final clock = Stopwatch()..start();
+    try {
+      final result = await addVkSong(
+        call,
+        from.sourceKey,
+        accessKey: _accessKeyOf(track, from.sourceKey),
+      );
+      final newKey = result.newKey;
+      log?.call(
+        'add to account: ${newKey == null ? 'refused' : 'added'}, VK '
+        '${clock.elapsedMilliseconds} ms',
+      );
+      if (newKey == null) {
+        final why = result.noAccess
+            ? 'VK gives no access to this song'
+            : result.errorText ?? 'VK refused';
+        return '$title not added to $name: $why';
+      }
+      // The list may have changed while VK worked (a sync, a remove): the
+      // copy is then left to the next sync, which lists it.
+      store.addCopyOf(
+        listedId: track.id,
+        fromSource: from.sourceId,
+        fromKey: from.sourceKey,
+        sourceId: sourceId,
+        newKey: newKey,
+        addedAt: DateTime.now().millisecondsSinceEpoch ~/ 1000,
+      );
+      if (!_disposed) {
+        onLibraryChanged();
+        onPutOnVk?.call();
+      }
+      return 'Added $title to $name';
+    } catch (error) {
+      return '$title not added to $name: ${searchFailure(error)}';
+    } finally {
+      adding.remove(track.id);
+      if (!_disposed) notifyListeners();
+    }
+  }
+
+  /// The access key of [track]'s copy [sourceKey], as the last sync read it;
+  /// VK may need it to add another person's song.
+  static String? _accessKeyOf(Track track, String sourceKey) {
+    for (final copy in track.allCopies) {
+      if (copy.sourceKey == sourceKey) return copy.accessKey;
+    }
+    return null;
   }
 
   @override

@@ -33,6 +33,15 @@ class FakeVkRemoves {
   /// The next call throws this.
   Object? failNext;
 
+  /// The next audio.add answers "no access to audio", as real VK does.
+  var refuseAddNext = false;
+
+  /// The access key the last audio.add sent.
+  String? addedWithKey;
+
+  /// The audio id the next copy audio.add makes gets.
+  var nextId = 900;
+
   Future<Object?> call(String method, Map<String, String> params) async {
     final key = '${params['owner_id']}_${params['audio_id']}';
     asked.add('$method $key');
@@ -49,6 +58,25 @@ class FakeVkRemoves {
         }
         return {
           'audio_ids': [key],
+        };
+      case 'audio.add':
+        addedWithKey = params['access_key'];
+        if (refuseAddNext) {
+          refuseAddNext = false;
+          return {
+            'items': <Object>[],
+            'errors': [
+              {
+                'error_code': '15;Access denied',
+                'error_msg': 'no access to audio',
+              },
+            ],
+          };
+        }
+        return {
+          'items': [
+            {'new_owner_id': userId, 'new_audio_id': nextId++},
+          ],
         };
       case 'audio.restore':
         return {
@@ -220,7 +248,7 @@ void main() {
         sources: sources,
         apiOfSource: (_) => vk1.call,
         onLibraryChanged: () {},
-        onRestored: () => asked++,
+        onPutOnVk: () => asked++,
         slideTime: Duration.zero,
       );
       final result = await withSync.remove(romance);
@@ -361,6 +389,143 @@ void main() {
         'Removed "Романс" from Мой VK. Not removed: Рабочий: not logged in',
       );
       expect(result.removed, hasLength(1));
+    });
+  });
+
+  group('add a song another account has (plan 06, E2)', () {
+    late Track romance;
+    setUp(() {
+      // The first account has a song of its own; the second alone has
+      // "Романс", with the access key its sync read.
+      store.upsertAll(first, [song(42, 5, title: 'Своё')]);
+      store.upsertAll(second, [
+        vkItemToTrack({
+          'owner_id': 43,
+          'id': 1,
+          'artist': 'Сплин',
+          'title': 'Романс',
+          'duration': 211,
+          'date': 1762600000,
+          'access_key': 'theirs',
+          'url': 'https://audio.invalid/1.mp3',
+        }),
+      ]);
+      sources.value = store.sources();
+      romance = listed('Романс');
+    });
+
+    test('only the account that lacks the song is offered', () {
+      expect(
+        [for (final s in remover.addableAccountsOf(romance)) s.name],
+        ['Мой VK'],
+      );
+      expect(remover.addableAccountsOf(listed('Своё')).single.name, 'Рабочий');
+    });
+
+    test('an account that is not logged in is not offered', () {
+      secondLoggedIn = false;
+      expect(remover.addableAccountsOf(listed('Своё')), isEmpty);
+    });
+
+    test('VK adds it to the account, from the other account\'s copy with its '
+        'key, and the song stays one row with both accounts', () async {
+      final pending = remover.addTo(romance, first);
+      expect(remover.adding, {romance.id});
+      final note = await pending;
+      expect(note, 'Added "Романс" to Мой VK');
+      expect(remover.adding, isEmpty);
+      expect(vk1.asked, ['audio.add 43_1']);
+      expect(vk1.addedWithKey, 'theirs');
+      expect(vk2.asked, isEmpty);
+      expect(reloads, 1);
+      expect(listedTitles(), unorderedEquals(['Своё', 'Романс']));
+      final row = listed('Романс');
+      expect(row.id, romance.id);
+      expect([for (final c in row.allCopies) c.sourceKey], ['43_1', '42_900']);
+      expect(row.isFrom(first), isTrue);
+      expect(remover.addableAccountsOf(row), isEmpty);
+      // Now in both: Remove offers each account alone.
+      expect(
+        [for (final s in remover.accountsOf(row)) s.name],
+        ['Рабочий', 'Мой VK'],
+      );
+      expect(perf.single, startsWith('add to account: added, VK '));
+    });
+
+    test('it asks for a sync after the running one', () async {
+      var asked = 0;
+      final adder = SongRemover(
+        store: store,
+        sources: sources,
+        apiOfSource: (id) => id == first ? vk1.call : null,
+        onLibraryChanged: () {},
+        onPutOnVk: () => asked++,
+      );
+      await adder.addTo(romance, first);
+      expect(asked, 1);
+      adder.dispose();
+    });
+
+    test('VK refusing changes nothing and says why', () async {
+      vk1.refuseAddNext = true;
+      final note = await remover.addTo(romance, first);
+      expect(
+        note,
+        '"Романс" not added to Мой VK: VK gives no access to this song',
+      );
+      expect(reloads, 0);
+      expect(listed('Романс').copies, isEmpty);
+      expect(remover.adding, isEmpty);
+    });
+
+    test('no connection changes nothing and says so', () async {
+      vk1.failNext = const SocketException('no route');
+      final note = await remover.addTo(romance, first);
+      expect(note, startsWith('"Романс" not added to Мой VK: '));
+      expect(listed('Романс').copies, isEmpty);
+    });
+
+    test('a second click while VK works adds it once', () async {
+      final firstClick = remover.addTo(romance, first);
+      expect(await remover.addTo(romance, first), '');
+      await firstClick;
+      expect(vk1.asked, ['audio.add 43_1']);
+    });
+
+    test(
+      'an account that already has it, or one logged out, is told so',
+      () async {
+        await remover.addTo(romance, first);
+        expect(
+          await remover.addTo(listed('Романс'), first),
+          '"Романс" is already in Мой VK',
+        );
+        secondLoggedIn = false;
+        expect(
+          await remover.addTo(listed('Своё'), second),
+          '"Своё" not added: Рабочий is not logged in',
+        );
+        expect(vk1.asked, ['audio.add 43_1']);
+      },
+    );
+
+    // Review 2026-11-27: VK dropped the first account's copy; it can be
+    // added again from the second account's.
+    test('an account whose copy VK dropped is offered the add again', () async {
+      await remover.addTo(romance, first);
+      store.markGone(first, ['42_900']);
+      final row = listed('Романс');
+      expect(remover.addableAccountsOf(row).single.name, 'Мой VK');
+      expect(await remover.addTo(row, first), 'Added "Романс" to Мой VK');
+      expect(vk1.asked, ['audio.add 43_1', 'audio.add 43_1']);
+      final copy = listed('Романс').copies.single;
+      expect(copy.sourceKey, '42_901');
+      expect(copy.goneAtMs, isNull);
+    });
+
+    test('a song no account has on VK any more offers no add', () {
+      store.markGone(second, ['43_1']);
+      expect(remover.addableAccountsOf(listed('Романс')), isEmpty);
     });
   });
 

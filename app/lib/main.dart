@@ -799,7 +799,7 @@ Future<void> main(List<String> args) async {
     sources: sync.sourceList,
     apiOfSource: (sourceId) => clientOfSource(sourceId)?.call,
     onLibraryChanged: reloadLibrary,
-    onRestored: () {
+    onPutOnVk: () {
       if (sync.running) unawaited(sync.syncAfterRunning());
     },
     log: logPerf,
