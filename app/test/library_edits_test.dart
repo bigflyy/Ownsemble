@@ -3,6 +3,7 @@
 // removed mark, Undo, and which found songs count as in the library.
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:ownsemble/library/artist_credit.dart';
 import 'package:ownsemble/library/found_match.dart';
 import 'package:ownsemble/library/library_store.dart';
 import 'package:ownsemble/library/track.dart';
@@ -318,6 +319,200 @@ void main() {
         ..markRemoved(source, ['${me}_1'])
         ..markRemoved(other, ['43_1']);
       expect(store.loadAll(), isEmpty);
+    });
+  });
+
+  group('add another account\'s song to this one (plan 06, E1)', () {
+    late int other;
+    late int listed;
+    setUp(() {
+      other = store.ensureSource(TrackSource.vk, account: '43', name: 'VK 2');
+      // The test account has one song of its own, so there are two accounts
+      // to merge; the other account alone has "Романс".
+      vk.items.add(vkAudio(me, 1, artist: 'Ленинград', title: 'Своё'));
+      store.upsertAll(source, [vkItemToTrack(vk.items.single)]);
+      store.upsertAll(other, [
+        NewTrack(
+          artist: 'Сплин',
+          title: 'Романс',
+          album: 'Гранатовый альбом',
+          durationSec: 211,
+          addedAt: 100,
+          sourceKey: '43_7',
+          accessKey: 'theirs',
+          coverUrl: 'https://cover.invalid/s.jpg',
+          vkTrackId: 77,
+          vkAlbumKey: '-2_9',
+          artists: const [ArtistCredit(vkId: 'a1', name: 'Сплин')],
+        ),
+      ]);
+      mergeSameFiles(store);
+      listed = store.loadAll().firstWhere((t) => t.title == 'Романс').id;
+    });
+
+    int? addCopy({String newKey = '${me}_900'}) => store.addCopyOf(
+      listedId: listed,
+      fromSource: other,
+      fromKey: '43_7',
+      sourceId: source,
+      newKey: newKey,
+      addedAt: 500,
+    );
+
+    Track romance() => store.loadAll().firstWhere((t) => t.title == 'Романс');
+
+    test('the copy joins the listed row at once, with both accounts', () {
+      final id = addCopy();
+      expect(id, isNotNull);
+      expect(listedTitles(), unorderedEquals(['Своё', 'Романс']));
+      final row = romance();
+      expect(row.id, listed);
+      expect(
+        [for (final copy in row.allCopies) (copy.sourceId, copy.sourceKey)],
+        [(other, '43_7'), (source, '${me}_900')],
+      );
+      expect(row.isFrom(source), isTrue);
+      expect(
+        [for (final h in store.holdersOf(listed)) h.sourceKey],
+        ['43_7', '${me}_900'],
+      );
+    });
+
+    test('the copy has the source row\'s details and artists, Cyrillic '
+        'kept, and no access key of its own yet', () {
+      final id = addCopy()!;
+      final credits = store.artistCredits()[id]!;
+      expect([for (final c in credits) (c.vkId, c.name)], [('a1', 'Сплин')]);
+      final copy = romance().copies.single;
+      expect(copy.sourceKey, '${me}_900');
+      expect(copy.accessKey, isNull);
+      expect(store.vkAlbumOf(listed)?.key, '-2_9');
+    });
+
+    test('the copy takes the source row\'s file print, so the next merge '
+        'keeps one row and reads no file', () {
+      // The background file check has read the other account's file.
+      store.savePrints({listed: sameFile});
+      addCopy();
+      expect(store.printsToRead(), isEmpty);
+      store.mergeSameSongs();
+      expect(romance().copies.single.sourceKey, '${me}_900');
+    });
+
+    test('add -> sync of the account -> still one row, now with VK\'s '
+        'key and date', () async {
+      addCopy();
+      vk.items.insert(
+        0,
+        vkAudio(me, 900, title: 'Романс', trackId: 77, accessKey: 'own'),
+      );
+      final result = await sync();
+      expect(result.added, 0);
+      mergeSameFiles(store);
+      expect(listedTitles(), unorderedEquals(['Своё', 'Романс']));
+      final copy = romance().copies.single;
+      expect((copy.sourceKey, copy.accessKey), ('${me}_900', 'own'));
+    });
+
+    test('a copy the account had removed comes back under the new key, the '
+        'same row with its plays and favorite', () {
+      final first = addCopy(newKey: '${me}_900')!;
+      store
+        ..addPlay(first, atMs: 1000)
+        ..addFavorite(first, atMs: 2000);
+      store.markRemoved(source, ['${me}_900']);
+      expect(romance().copies, isEmpty);
+      final again = addCopy(newKey: '${me}_901');
+      expect(again, first);
+      final copy = romance().copies.single;
+      expect(copy.sourceKey, '${me}_901');
+      expect(copy.goneAtMs, isNull);
+      expect(store.holdersOf(listed), hasLength(2));
+      expect(store.songPlays()[first]?.plays, 1);
+      expect(store.favorites().single.trackId, first);
+    });
+
+    test('a removed listed row of the account comes back as the listed '
+        'row', () {
+      // The account's own copy is listed and the other account's is
+      // merged into it; the user removed the account's own copy.
+      store.upsertAll(source, [vkItemToTrack(vkAudio(me, 3, title: 'Ода'))]);
+      store.upsertAll(other, [vkItemToTrack(vkAudio(43, 3, title: 'Ода'))]);
+      mergeSameFiles(store);
+      final ode = store.loadAll().firstWhere((t) => t.title == 'Ода');
+      expect(ode.sourceKey, '${me}_3');
+      store.markRemoved(source, ['${me}_3']);
+      expect(
+        store.loadAll().firstWhere((t) => t.title == 'Ода').ownRemoved,
+        isTrue,
+      );
+      final id = store.addCopyOf(
+        listedId: ode.id,
+        fromSource: other,
+        fromKey: '43_3',
+        sourceId: source,
+        newKey: '${me}_902',
+        addedAt: 600,
+      );
+      expect(id, ode.id);
+      final row = store.loadAll().firstWhere((t) => t.title == 'Ода');
+      expect(
+        (row.sourceKey, row.ownRemoved, row.goneAtMs),
+        ('${me}_902', false, null),
+      );
+      expect(row.copies.single.sourceKey, '43_3');
+    });
+
+    // Review 2026-11-27: VK dropped the account's copy (gone, not removed).
+    test('a copy VK dropped from the account comes back under the new '
+        'key', () {
+      final first = addCopy(newKey: '${me}_900')!;
+      store.markGone(source, ['${me}_900']);
+      expect(romance().copies.single.goneAtMs, isNotNull);
+      expect(addCopy(newKey: '${me}_901'), first);
+      final copy = romance().copies.single;
+      expect(copy.sourceKey, '${me}_901');
+      expect(copy.goneAtMs, isNull);
+    });
+
+    // Review 2026-11-27: a sync read the new copy from VK before the add's
+    // answer was handled.
+    test('a new copy a sync already stored joins the song, no second '
+        'row', () {
+      final synced = store.upsertAll(source, [
+        vkItemToTrack(vkAudio(me, 900, title: 'Романс', trackId: 77)),
+      ]).single;
+      expect(addCopy(), synced);
+      expect(listedTitles(), unorderedEquals(['Своё', 'Романс']));
+      expect(romance().copies.single.sourceKey, '${me}_900');
+    });
+
+    test('nothing happens for a source copy that is not in the listed '
+        'song', () {
+      expect(
+        store.addCopyOf(
+          listedId: listed,
+          fromSource: other,
+          fromKey: '43_999',
+          sourceId: source,
+          newKey: '${me}_900',
+          addedAt: 500,
+        ),
+        isNull,
+      );
+      final own = store.loadAll().firstWhere((t) => t.title == 'Своё');
+      expect(
+        store.addCopyOf(
+          listedId: own.id,
+          fromSource: other,
+          fromKey: '43_7',
+          sourceId: source,
+          newKey: '${me}_900',
+          addedAt: 500,
+        ),
+        isNull,
+      );
+      expect(romance().copies, isEmpty);
     });
   });
 

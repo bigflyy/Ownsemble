@@ -1447,6 +1447,99 @@ class LibraryStore implements PlayLog, PlayStatsSource, LyricsEditStore {
     return id;
   }
 
+  /// Puts the copy that VK just made in the account [sourceId] (under
+  /// [newKey], added at [addedAt], Unix seconds) into the listed song
+  /// [listedId], made from the copy [fromKey] of the account [fromSource]
+  /// (plan 06, E1: "add another account's song to your own"). The new row
+  /// takes the source row's details, artists and file print, and joins the
+  /// listed row at once, so the song stays one row with both accounts' dots:
+  /// the add copies VK's upload, so the files are the same and the next
+  /// merge keeps them together. When the account still has a removed copy of
+  /// this song, or one VK dropped (gone), that row comes back under the new
+  /// key instead, with its plays and favorite. When a sync running meanwhile
+  /// already stored the new copy, that row joins the song. Its access key
+  /// stays empty until the next sync (see [NewTrack.asAddedCopy]). Returns
+  /// the account's row id, or null when the source copy is not in the
+  /// library.
+  int? addCopyOf({
+    required int listedId,
+    required int fromSource,
+    required String fromKey,
+    required int sourceId,
+    required String newKey,
+    required int addedAt,
+  }) => _transaction(() {
+    final from = _db.select(
+      'SELECT id, coalesce(same_as, id) AS home FROM tracks '
+      'WHERE source_id = ? AND source_key = ?',
+      [fromSource, fromKey],
+    );
+    if (from.isEmpty) return null;
+    final fromId = from.first['id'] as int;
+    final home = from.first['home'] as int;
+    if (home != listedId) return null;
+    // A copy this account had and the user removed (plan 06, C5), or that
+    // VK dropped from it.
+    final old = _db.select(
+      'SELECT id FROM tracks WHERE source_id = ? AND (id = ? OR same_as = ?) '
+      'AND (removed_at_ms IS NOT NULL OR gone_at_ms IS NOT NULL) '
+      'ORDER BY id LIMIT 1',
+      [sourceId, home, home],
+    );
+    // The new copy a sync read from VK while the add was being answered.
+    final synced = _db.select(
+      'SELECT id FROM tracks WHERE source_id = ? AND source_key = ?',
+      [sourceId, newKey],
+    );
+    final int id;
+    if (synced.isNotEmpty) {
+      id = synced.first['id'] as int;
+      if (id != home) {
+        _db.execute('UPDATE tracks SET same_as = ? WHERE id = ?', [home, id]);
+      }
+    } else if (old.isNotEmpty) {
+      id = old.first['id'] as int;
+      _db.execute(
+        'UPDATE tracks SET source_key = ?, access_key = NULL, added_at = ?, '
+        'gone_at_ms = NULL, removed_at_ms = NULL WHERE id = ?',
+        [newKey, addedAt, id],
+      );
+    } else {
+      _db.execute(
+        '''
+        INSERT INTO tracks (source_id, source_key, access_key, artist, title,
+                            album, duration_sec, added_at, cover_url,
+                            cover_large_url, cover_mid_url, cover_full_url,
+                            tint, vk_track_id, vk_album_key,
+                            vk_album_access_key, same_as)
+        SELECT ?, ?, NULL, artist, title, album, duration_sec, ?, cover_url,
+               cover_large_url, cover_mid_url, cover_full_url, tint,
+               vk_track_id, vk_album_key, vk_album_access_key, ?
+        FROM tracks WHERE id = ?
+        ''',
+        [sourceId, newKey, addedAt, home, fromId],
+      );
+      id = _db.lastInsertRowId;
+      _db.execute(
+        'INSERT INTO track_artists '
+        '(track_id, position, vk_artist_id, name, domain, featured) '
+        'SELECT ?, position, vk_artist_id, name, domain, featured '
+        'FROM track_artists WHERE track_id = ?',
+        [id, fromId],
+      );
+    }
+    _db.execute(
+      '''
+      INSERT OR REPLACE INTO vk_file_prints
+        (track_id, listed_sec, bytes, sample, seconds, checked_at_ms)
+      SELECT ?, listed_sec, bytes, sample, seconds, checked_at_ms
+      FROM vk_file_prints WHERE track_id = ?
+      ''',
+      [id, fromId],
+    );
+    return id;
+  });
+
   /// Undo of [markRemoved] for a song VK no longer had when it was removed
   /// (gone), so there is nothing to restore on VK: the row is listed again
   /// and keeps its gone mark. Returns whether a removed row came back.
