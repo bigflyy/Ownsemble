@@ -1,0 +1,36 @@
+Notices for ffmpeg.exe (Ownsemble video-tools-1)
+================================================
+
+Ownsemble runs this ffmpeg.exe as a separate program to turn a song, its lyrics and a
+background picture into a karaoke video. It is a trimmed, statically linked build that
+contains the parts below. The complete corresponding source, the build scripts and the
+build options are in ffmpeg-video-tools-1-sources.tar in the same release:
+https://github.com/bigflyy/Ownsemble/releases/tag/video-tools-1
+
+The binary as a whole is licensed under the GNU General Public License, version 2 or
+(at your option) any later version, because it includes libx264. There is NO WARRANTY,
+to the extent permitted by law.
+
+Parts inside ffmpeg.exe
+-----------------------
+- FFmpeg 9.1 (https://ffmpeg.org): LGPL 2.1 or later; this build is configured with
+  --enable-gpl, so GPL 2 or later.
+- x264, git commit b35605ace3ddf7c1a5d67a2eb553f034aef41d55
+  (https://code.videolan.org/videolan/x264): GPL 2 or later.
+- libass 0.17.5 (https://github.com/libass/libass): ISC licence.
+- FreeType 2.15.0 (https://freetype.org): used under the FreeType License (FTL).
+  Portions of this software are copyright (C) 2026 The FreeType Project
+  (www.freetype.org). All rights reserved.
+- GNU FriBidi 1.0.18 (https://github.com/fribidi/fribidi): LGPL 2.1 or later.
+- HarfBuzz 15.2.0 (https://harfbuzz.github.io): the "Old MIT" licence.
+- zlib 1.4 (https://zlib.net), as packaged by MSYS2: zlib licence.
+- MinGW-w64 runtime (C runtime start-up code and winpthreads): MinGW-w64 runtime
+  licence (ZPL 2.1 and public domain parts) and the MIT-style winpthreads licence.
+- GCC runtime libraries (libgcc, libstdc++) from GCC 16.2.0: GPL 3 with the GCC Runtime
+  Library Exception, which allows this use without further conditions.
+
+H.264 note: H.264 (AVC) is covered by patents in some countries. Ownsemble is a personal,
+non-commercial app; anyone distributing or selling videos or software with this encoder
+in a product should check the patent terms for their country.
+
+The full licence texts follow.
