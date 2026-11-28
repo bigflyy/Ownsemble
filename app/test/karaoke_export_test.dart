@@ -413,12 +413,15 @@ void main() {
     late List<String> calls;
     late String? routeKey;
     late bool toolThere;
+    late bool separatorThere;
 
     KaraokeExporter exporter({
       List<FfmpegPlay> plays = const [FfmpegPlay.succeed],
       Future<String> Function()? audio,
       int? free,
       Future<void> Function(String, String)? decode,
+      KaraokeSeparate? separate,
+      bool withSeparator = false,
     }) {
       starter = FfmpegStarter(plays);
       return KaraokeExporter(
@@ -449,6 +452,22 @@ void main() {
         outputFolder: () => out,
         startProcess: starter.call,
         freeBytes: () => free,
+        separatorReady: withSeparator ? () => separatorThere : null,
+        downloadSeparator: withSeparator
+            ? (onProgress, stop) async {
+                calls.add('download separator');
+                onProgress(1, 1);
+                separatorThere = true;
+              }
+            : null,
+        separate: withSeparator
+            ? separate ??
+                  (audioPath, outPath, onProgress, stop) async {
+                    calls.add('separate');
+                    onProgress(0.5);
+                    writeTone(outPath, 44100 * 2, peak: 1.4);
+                  }
+            : null,
       );
     }
 
@@ -471,6 +490,7 @@ void main() {
       calls = [];
       routeKey = '1_2';
       toolThere = true;
+      separatorThere = true;
     });
 
     test('makes both shapes, levelled, named, scratch removed', () async {
@@ -643,7 +663,89 @@ void main() {
       expect(calls, isEmpty);
     });
 
-    test('nothing to show, nothing chosen, no voice yet', () async {
+    test('both voices: four videos, each voice levelled on its own', () async {
+      final ex = exporter(plays: [FfmpegPlay.succeed], withSeparator: true);
+      final stages = <String>[];
+      ex.addListener(() {
+        final job = ex.job;
+        if (job != null) stages.add(karaokeStageText(job.stage));
+      });
+      final outcome = await ex.export(
+        request(shapes: KaraokeShape.values, voices: KaraokeVoice.values),
+      );
+      expect(outcome, isA<KaraokeDone>());
+      expect((outcome as KaraokeDone).files.map((f) => p.basename(f.path)), [
+        'Artist_ One - Song_ (karaoke).mp4',
+        'Artist_ One - Song_ (karaoke, vertical).mp4',
+        'Artist_ One - Song_ (karaoke, no voice).mp4',
+        'Artist_ One - Song_ (karaoke, no voice, vertical).mp4',
+      ]);
+      expect(calls, ['audio', 'decode', 'separate']);
+      expect(starter.started, hasLength(4));
+      for (final fake in starter.started) {
+        expect(fake.audioPeak, closeTo(karaokePeakLimit, 1e-5));
+      }
+      expect(stages, contains('taking the voice out'));
+      expect(stages, contains('taking the voice out, 50%'));
+      expect(stages, contains('making the video 4 of 4, 100%'));
+      expect(scratch.listSync(), isEmpty);
+    });
+
+    test('the voice remover is downloaded first when missing', () async {
+      separatorThere = false;
+      final outcome = await exporter(withSeparator: true)
+          .export(request(voices: const [KaraokeVoice.withoutVoice]));
+      expect(outcome, isA<KaraokeDone>());
+      expect(calls, ['download separator', 'audio', 'decode', 'separate']);
+      expect(
+        p.basename((outcome as KaraokeDone).files.single.path),
+        'Artist_ One - Song_ (karaoke, no voice).mp4',
+      );
+    });
+
+    test('stop while the voice is taken out waits for the helper', () async {
+      final helper = Completer<void>();
+      late KaraokeExporter ex;
+      ex = exporter(
+        withSeparator: true,
+        separate: (audioPath, outPath, onProgress, stop) async {
+          onProgress(0.2);
+          await stop.future;
+          // The helper ends its job at the next chunk.
+          await helper.future;
+          throw const KaraokeStopped();
+        },
+      );
+      final running = ex.export(
+        request(voices: const [KaraokeVoice.withoutVoice]),
+      );
+      while (ex.job?.stage is! KaraokeSeparating) {
+        await Future<void>.delayed(const Duration(milliseconds: 1));
+      }
+      ex.stop();
+      await Future<void>.delayed(const Duration(milliseconds: 10));
+      // Still waiting for the helper; the job folder is still there.
+      expect(ex.job, isNotNull);
+      expect(scratch.listSync(), hasLength(1));
+      helper.complete();
+      expect(await running, isA<KaraokeStoppedOutcome>());
+      expect(scratch.listSync(), isEmpty);
+      expect(starter.started, isEmpty);
+    });
+
+    test('a separation with no sound fails', () async {
+      final ex = exporter(
+        withSeparator: true,
+        separate: (audioPath, outPath, onProgress, stop) async =>
+            File(outPath).writeAsBytesSync([]),
+      );
+      final outcome = await ex.export(
+        request(voices: const [KaraokeVoice.withoutVoice]),
+      );
+      expect((outcome as KaraokeFailed).message, contains('gave no sound'));
+    });
+
+    test('nothing to show, nothing chosen, no voice remover', () async {
       final ex = exporter();
       expect(
         await ex.export(

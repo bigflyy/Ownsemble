@@ -11,6 +11,7 @@ library;
 import 'dart:convert';
 import 'dart:typed_data';
 
+import '../karaoke/instrumental_job.dart';
 import 'gigaam.dart';
 import 'gigaam_job.dart';
 import 'speech_chunks.dart';
@@ -112,6 +113,17 @@ Map<String, Object?> jobToJson(WorkerJob<Object?> job) => switch (job) {
     'directMlDevice': job.directMlDevice,
     'keepStereoAt': job.keepStereoAt,
   },
+  InstrumentalJob() => {
+    'job': 'instrumental',
+    'audioPath': job.audioPath,
+    'outPath': job.outPath,
+    'modelPath': job.modelPath,
+    'mpvPath': job.mpvPath,
+    'tempDir': job.tempDir,
+    'threads': job.threads,
+    'memoryArena': job.memoryArena,
+    'directMlDevice': job.directMlDevice,
+  },
   GigaamJob() => {
     'job': 'gigaam',
     'vocalsPath': job.vocalsPath,
@@ -157,6 +169,16 @@ WorkerJob<Object?> jobFromJson(Map<String, Object?> json) =>
         directMlDevice: json['directMlDevice'] as int?,
         keepStereoAt: json['keepStereoAt'] as String?,
       ),
+      'instrumental' => InstrumentalJob(
+        audioPath: json['audioPath'] as String,
+        outPath: json['outPath'] as String,
+        modelPath: json['modelPath'] as String,
+        mpvPath: json['mpvPath'] as String,
+        tempDir: json['tempDir'] as String,
+        threads: json['threads'] as int,
+        memoryArena: json['memoryArena'] as bool,
+        directMlDevice: json['directMlDevice'] as int?,
+      ),
       'gigaam' => GigaamJob(
         vocalsPath: json['vocalsPath'] as String,
         modelFolder: json['modelFolder'] as String,
@@ -189,7 +211,8 @@ WorkerJob<Object?> jobFromJson(Map<String, Object?> json) =>
 
 // --- Results ------------------------------------------------------------
 
-/// The result of the job named [jobName] ('separate', 'gigaam', 'whisper')
+/// The result of the job named [jobName] ('separate', 'instrumental',
+/// 'gigaam', 'whisper')
 /// as JSON.
 Object? resultToJson(String jobName, Object? result) => switch (result) {
   VocalsResult() => {
@@ -199,6 +222,15 @@ Object? resultToJson(String jobName, Object? result) => switch (result) {
     'separateMs': result.separateMs,
     'resampleMs': result.resampleMs,
     'scale': _double(result.scale),
+    'modelMs': result.modelMs,
+    'spectrumMs': result.spectrumMs,
+  },
+  InstrumentalResult() => {
+    'frames': result.frames,
+    'chunks': result.chunks,
+    'decodeMs': result.decodeMs,
+    'separateMs': result.separateMs,
+    'inputScale': _double(result.inputScale),
     'modelMs': result.modelMs,
     'spectrumMs': result.spectrumMs,
   },
@@ -236,6 +268,15 @@ Object? resultFromJson(String jobName, Object? json) {
       separateMs: map['separateMs'] as int,
       resampleMs: map['resampleMs'] as int,
       scale: _toDouble(map['scale']),
+      modelMs: map['modelMs'] as int,
+      spectrumMs: map['spectrumMs'] as int,
+    ),
+    'instrumental' => InstrumentalResult(
+      frames: map['frames'] as int,
+      chunks: map['chunks'] as int,
+      decodeMs: map['decodeMs'] as int,
+      separateMs: map['separateMs'] as int,
+      inputScale: _toDouble(map['inputScale']),
       modelMs: map['modelMs'] as int,
       spectrumMs: map['spectrumMs'] as int,
     ),

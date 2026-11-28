@@ -29,8 +29,9 @@ import 'hear_wire.dart';
 import 'stt_worker.dart';
 
 /// The version of the conversation; the app refuses a helper that says
-/// another one (a helper left from an older build).
-const hearHelperVersion = 1;
+/// another one (a helper left from an older build). 2: the karaoke
+/// instrumental job (plan 11 D1d).
+const hearHelperVersion = 2;
 
 /// The helper's file name beside ownsemble.exe.
 const hearHelperName = 'ownsemble_hear.exe';

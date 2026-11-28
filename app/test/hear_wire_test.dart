@@ -5,6 +5,7 @@ import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:ownsemble/karaoke/instrumental_job.dart';
 import 'package:ownsemble/lyrics/gigaam.dart';
 import 'package:ownsemble/lyrics/gigaam_job.dart';
 import 'package:ownsemble/lyrics/hear_wire.dart';
@@ -56,6 +57,58 @@ void main() {
     expect(back.directMlDevice, -1);
     expect(back.keepStereoAt, job.keepStereoAt);
     expect(back.name, 'separate');
+  });
+
+  test('a karaoke instrumental job comes back with every field', () {
+    const job = InstrumentalJob(
+      audioPath: r'C:\data\cache\песня.mp3',
+      outPath: r'C:\data\karaoke-tmp\1\inst.f32',
+      modelPath: r'C:\models\UVR-MDX-NET-Inst_HQ_4.onnx',
+      mpvPath: r'C:\app\libmpv-2.dll',
+      tempDir: r'C:\data\karaoke-tmp\1',
+      threads: 6,
+      memoryArena: true,
+      directMlDevice: 0,
+    );
+    final back = _jobTrip(job) as InstrumentalJob;
+    expect(back.audioPath, job.audioPath);
+    expect(back.outPath, job.outPath);
+    expect(back.modelPath, job.modelPath);
+    expect(back.mpvPath, job.mpvPath);
+    expect(back.tempDir, job.tempDir);
+    expect(back.threads, 6);
+    expect(back.memoryArena, isTrue);
+    expect(back.directMlDevice, 0);
+    expect(back.name, 'instrumental');
+    const cpu = InstrumentalJob(
+      audioPath: 'a',
+      outPath: 'b',
+      modelPath: 'c',
+      mpvPath: 'd',
+      tempDir: 'e',
+      threads: 1,
+    );
+    expect((_jobTrip(cpu) as InstrumentalJob).directMlDevice, isNull);
+  });
+
+  test('a karaoke instrumental result comes back exactly', () {
+    const result = InstrumentalResult(
+      frames: 7056000,
+      chunks: 37,
+      decodeMs: 812,
+      separateMs: 41234,
+      inputScale: 0.9 / 1.17,
+      modelMs: 30001,
+      spectrumMs: 9000,
+    );
+    final back = _resultTrip('instrumental', result) as InstrumentalResult;
+    expect(back.frames, result.frames);
+    expect(back.chunks, result.chunks);
+    expect(back.decodeMs, result.decodeMs);
+    expect(back.separateMs, result.separateMs);
+    expect(back.inputScale, result.inputScale);
+    expect(back.modelMs, result.modelMs);
+    expect(back.spectrumMs, result.spectrumMs);
   });
 
   test('a GigaAM job comes back with every field, nulls kept', () {

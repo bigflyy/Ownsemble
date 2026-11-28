@@ -25,6 +25,7 @@ import '../lyrics/audio_decode.dart' show DecodeError;
 import '../lyrics/fit_model.dart' show DownloadStop, DownloadStopped;
 import '../lyrics/lyrics.dart';
 import '../lyrics/lyrics_fitter.dart' show FitAudioError;
+import '../lyrics/stt_worker.dart' show WorkerJobError;
 import 'karaoke_audio.dart';
 import 'karaoke_files.dart';
 import 'karaoke_render.dart';
@@ -72,11 +73,13 @@ sealed class KaraokeStage {
   const KaraokeStage();
 }
 
-/// The video maker is being downloaded: [bytes] of [total].
+/// The video maker, or with [separator] the voice remover's model, is
+/// being downloaded: [bytes] of [total].
 class KaraokeDownloading extends KaraokeStage {
-  const KaraokeDownloading(this.bytes, this.total);
+  const KaraokeDownloading(this.bytes, this.total, {this.separator = false});
   final int bytes;
   final int total;
+  final bool separator;
 }
 
 /// The song is being saved, [share] of it.
@@ -88,6 +91,12 @@ class KaraokeSaving extends KaraokeStage {
 /// The song is being decoded.
 class KaraokeDecoding extends KaraokeStage {
   const KaraokeDecoding();
+}
+
+/// The voice is being taken out, [share] of it (null while it starts).
+class KaraokeSeparating extends KaraokeStage {
+  const KaraokeSeparating(this.share);
+  final double? share;
 }
 
 /// Video [index] (from 1) of [count] is being made, [share] of it.
@@ -148,6 +157,17 @@ class KaraokeJob {
 /// [outPath] (mpv on a background isolate in the app).
 typedef KaraokeDecode = Future<void> Function(String audioPath, String outPath);
 
+/// Writes the song at [audioPath] without its voice to [outPath] (44.1 kHz
+/// stereo raw floats at the song's level: InstrumentalJob in the hear
+/// helper in the app). [onProgress] hears the share done; after [stop] it
+/// throws [KaraokeStopped] as soon as the helper has let go of the files.
+typedef KaraokeSeparate = Future<void> Function(
+  String audioPath,
+  String outPath,
+  void Function(double share) onProgress,
+  KaraokeStop stop,
+);
+
 /// Room an export needs on the drive for a song of [seconds]: the decoded
 /// audio (44.1 kHz stereo floats, 353 KB a second) twice (one voice being
 /// made while the other waits), the videos (a few MB a minute), the song's
@@ -168,6 +188,9 @@ class KaraokeExporter extends ChangeNotifier {
     required this.scratchRoot,
     required this.outputFolder,
     this.threads = 2,
+    this.separatorReady,
+    this.downloadSeparator,
+    this.separate,
     this.startProcess,
     this.freeBytes,
     this.log,
@@ -214,6 +237,23 @@ class KaraokeExporter extends ChangeNotifier {
 
   /// ffmpeg's threads for decoding, filters and x264 each.
   final int threads;
+
+  /// Whether the voice remover's model is downloaded; null: exports
+  /// without the voice are not offered.
+  final bool Function()? separatorReady;
+
+  /// Downloads the voice remover's model (resumable).
+  final Future<void> Function(
+    void Function(int bytes, int total) onProgress,
+    DownloadStop stop,
+  )?
+  downloadSeparator;
+
+  final KaraokeSeparate? separate;
+
+  /// Whether exports without the voice can be made.
+  bool get canRemoveVoice =>
+      separate != null && separatorReady != null && downloadSeparator != null;
 
   /// Starts ffmpeg; null for Process.start (tests give a fake).
   final StartProcess? startProcess;
@@ -279,10 +319,10 @@ class KaraokeExporter extends ChangeNotifier {
     if (request.videos == 0) {
       return const KaraokeFailed('Choose a shape and a voice.', retry: false);
     }
-    if (request.voices.contains(KaraokeVoice.withoutVoice)) {
-      // Plan 11 D1d: the separation is not in the app yet.
+    final withoutVoice = request.voices.contains(KaraokeVoice.withoutVoice);
+    if (withoutVoice && !canRemoveVoice) {
       return const KaraokeFailed(
-        'Karaoke without the voice is not ready yet.',
+        'Karaoke without the voice cannot be made in this build.',
         retry: false,
       );
     }
@@ -322,6 +362,23 @@ class KaraokeExporter extends ChangeNotifier {
         }
         if (!toolReady()) {
           return const KaraokeFailed('The video maker did not download.');
+        }
+      }
+      if (withoutVoice && !separatorReady!()) {
+        if (stop.stopped) throw const KaraokeStopped();
+        _move(job, const KaraokeDownloading(0, 0, separator: true));
+        final downloadStop = _downloadStop = DownloadStop();
+        try {
+          await downloadSeparator!(
+            (bytes, total) =>
+                _move(job, KaraokeDownloading(bytes, total, separator: true)),
+            downloadStop,
+          );
+        } finally {
+          _downloadStop = null;
+        }
+        if (!separatorReady!()) {
+          return const KaraokeFailed('The voice remover did not download.');
         }
       }
       if (stop.stopped) throw const KaraokeStopped();
@@ -373,15 +430,46 @@ class KaraokeExporter extends ChangeNotifier {
         '$decodeMs ms',
       );
 
+      final inst = p.join(folder.path, 'inst.f32');
+      if (withoutVoice) {
+        phase = 'separate';
+        if (stop.stopped) throw const KaraokeStopped();
+        final separateClock = Stopwatch()..start();
+        _move(job, const KaraokeSeparating(null));
+        // Not cut short by a Stop: the helper must let go of the files in
+        // the job folder before it is removed; it stops at its next chunk.
+        await separate!(
+          audioPath,
+          inst,
+          (share) => _move(job, KaraokeSeparating(share)),
+          stop,
+        );
+        if (stop.stopped) throw const KaraokeStopped();
+        final instFile = File(inst);
+        if (!instFile.existsSync() || instFile.lengthSync() ~/ 8 == 0) {
+          return const KaraokeFailed('Taking the voice out gave no sound.');
+        }
+        final (instPeak, instGain) = await levelFloatFile(inst);
+        _log(
+          'karaoke voice removed ${separateClock.elapsedMilliseconds} ms, '
+          'peak ${instPeak.toStringAsFixed(2)}, '
+          'gain ${instGain.toStringAsFixed(2)}',
+        );
+      }
+
       phase = 'render';
       final durationMs = frames * 1000 ~/ renderSampleRate;
       final scripts = <KaraokeShape, String>{};
       final backgrounds = <KaraokeShape, Uint8List>{};
       final count = request.videos;
       var index = 0;
+      final audioFile = File(p.join(folder.path, renderAudioName));
       for (final voice in request.voices) {
-        // Only with the voice for now (D1d adds the separation here).
-        mixFile.renameSync(p.join(folder.path, renderAudioName));
+        // The duration and the lines are the mix's; the instrumental has
+        // the same length (the separator writes every frame of the mix).
+        if (audioFile.existsSync()) audioFile.deleteSync();
+        File(voice == KaraokeVoice.withVoice ? mix : inst)
+            .renameSync(audioFile.path);
         for (final shape in request.shapes) {
           if (stop.stopped) throw const KaraokeStopped();
           index++;
@@ -521,6 +609,11 @@ KaraokeFailed karaokeFailureOf(Object error, List<File> files) =>
         "Could not read the song's audio.",
         files: files,
       ),
+      WorkerJobError() => KaraokeFailed(
+        'Taking the voice out failed. Try again; if it fails again, the '
+        'voice remover file may be damaged.',
+        files: files,
+      ),
       FitAudioError(:final message) => KaraokeFailed(
         'Could not save the song: $message',
         files: files,
@@ -535,12 +628,14 @@ KaraokeFailed karaokeFailureOf(Object error, List<File> files) =>
 
 /// What a stage shows, so listeners hear only changes that show.
 String karaokeStageText(KaraokeStage stage) => switch (stage) {
-  KaraokeDownloading(:final bytes, :final total) =>
-    'downloading the video maker, '
+  KaraokeDownloading(:final bytes, :final total, :final separator) =>
+    'downloading ${separator ? 'the voice remover' : 'the video maker'}, '
         '${total == 0 ? 0 : bytes * 100 ~/ total}% of '
         '${(total / 1e6).toStringAsFixed(1)} MB',
   KaraokeSaving(:final share) => 'saving the song, ${(share * 100).floor()}%',
   KaraokeDecoding() => 'reading the song',
+  KaraokeSeparating(:final share) =>
+    'taking the voice out${share == null ? '' : ', ${(share * 100).floor()}%'}',
   KaraokeRendering(:final index, :final count, :final share) =>
     'making the video${count > 1 ? ' $index of $count' : ''}, '
         '${(share * 100).floor()}%',
