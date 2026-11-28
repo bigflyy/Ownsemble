@@ -1,0 +1,33 @@
+Built 2026-11-28T05:47Z in MSYS2 UCRT64, gcc.exe (Rev7, Built by MSYS2 project) 16.2.0
+ffmpeg 9.1 configure: --prefix=/c/MyProjects/Ownsemble/.local/v2-tools/video-build/prefix --pkg-config=pkgconf --pkg-config-flags=--static --enable-static --disable-shared --enable-gpl --disable-autodetect --disable-everything --disable-doc --disable-network --disable-debug --disable-ffplay --disable-ffprobe --disable-avdevice --enable-w32threads --enable-zlib --enable-libx264 --enable-libass --enable-protocol=file,pipe --enable-demuxer=pcm_f32le,image2 --enable-decoder=pcm_f32le,png --enable-encoder=libx264,aac --enable-muxer=mp4 --enable-filter=ass,format,scale,aresample,anull,trim,atrim --extra-cflags=-I/c/MyProjects/Ownsemble/.local/v2-tools/video-build/prefix/include --extra-ldflags=-L/c/MyProjects/Ownsemble/.local/v2-tools/video-build/prefix/lib -static -static-libgcc -static-libstdc++
+x264 commit b35605ace3ddf7c1a5d67a2eb553f034aef41d55: --enable-static --disable-cli --bit-depth=8 --chroma-format=420 --disable-opencl --disable-avs --disable-swscale --disable-lavf --disable-ffms --disable-gpac --disable-lsmash
+libass 0.17.5, freetype 2.15.0, fribidi 1.0.18, harfbuzz 15.2.0: meson static, options in build.sh
+zlib: MSYS2 package mingw-w64-ucrt-x86_64-zlib 1.4-2
+Sources: SOURCES.sha256
+1a4d394ae63d190a526cd052eb4415c156b5c5e2df37efab41a7de0b8fde2433 *ffmpeg-9.1.tar.xz
+93cd47eb719c325107f2d3cf087d06299e944c3b48a40b55537302304dea1dd5 *freetype-2.15.0.tar.xz
+1de5e8073d035388b71d0b2d452b1da1f8caeea8a7702997b401fe1b6250727f *fribidi-1.0.18.tar.xz
+e2ec49090744383cdbe7df808c1cedaafba06a97be8dc4211fe546ba585f12cb *harfbuzz-15.2.0.tar.xz
+2dca25c0e0c837ddf00b52011b3f82cac1e4ddd3ad018227806b0c2288864acc *libass-0.17.5.tar.xz
+6eeb82934e69fd51e043bd8c5b0d152839638d1ce7aa4eea65a3fedcf83ff224 *x264-b35605ace3ddf7c1a5d67a2eb553f034aef41d55.tar.bz2
+Size: 9703936 bytes
+sha256: 250aae36074993a1b164831030a1405f7612f5e4c99d3d41dc3e4e4a973707c5
+DLL imports:
+	DLL Name: bcrypt.dll
+	DLL Name: GDI32.dll
+	DLL Name: KERNEL32.dll
+	DLL Name: api-ms-win-crt-conio-l1-1-0.dll
+	DLL Name: api-ms-win-crt-convert-l1-1-0.dll
+	DLL Name: api-ms-win-crt-environment-l1-1-0.dll
+	DLL Name: api-ms-win-crt-filesystem-l1-1-0.dll
+	DLL Name: api-ms-win-crt-heap-l1-1-0.dll
+	DLL Name: api-ms-win-crt-locale-l1-1-0.dll
+	DLL Name: api-ms-win-crt-math-l1-1-0.dll
+	DLL Name: api-ms-win-crt-private-l1-1-0.dll
+	DLL Name: api-ms-win-crt-runtime-l1-1-0.dll
+	DLL Name: api-ms-win-crt-stdio-l1-1-0.dll
+	DLL Name: api-ms-win-crt-string-l1-1-0.dll
+	DLL Name: api-ms-win-crt-time-l1-1-0.dll
+	DLL Name: api-ms-win-crt-utility-l1-1-0.dll
+	DLL Name: SHELL32.dll
+	DLL Name: USER32.dll
