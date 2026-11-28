@@ -20,7 +20,7 @@ These would have to change, roughly worst first:
 | MMS_FA aligner (the Fit, plan 10) | CC BY-NC 4.0: non-commercial only; republished as int8 ONNX | Our release aligner-model-1 | Fine while free and non-commercial with credit; replace before any paid use |
 | Kim Vocal 2 (Hear the words, and karaoke without the voice) | No licence stated | Downloaded by the app from UVR's own repository (TRvlvr/model_repo), not republished by us | Ask the author (Kimberley Jensen) or replace before distributing |
 | UVR-MDX-NET Inst HQ 4 (planned: karaoke without the voice on the CPU, plan 11) | No licence stated (UVR model) | To be downloaded from UVR's own repository, like Kim Vocal 2 | As Kim Vocal 2 |
-| Trimmed ffmpeg with libx264 (planned: karaoke video export, plan 11) | GPL: whoever distributes the exe must offer its complete source; H.264 has patents (free encoders are usually tolerated for personal use) | Our release (planned) | Keep the source bundle beside the exe in the release; for a product, check the H.264 patent terms or use the encoder built into the OS |
+| Trimmed ffmpeg 9.1 with libx264, libass, FreeType, FriBidi, HarfBuzz, zlib (karaoke video export, plan 11) | GPL 2 or later as a whole: whoever distributes the exe must offer its complete source; H.264 has patents (free encoders are usually tolerated for personal use) | Our release video-tools-1, with NOTICES.txt (all licence texts) and ffmpeg-video-tools-1-sources.tar (complete source, made by experiments/karaoke/ffmpeg-build/make-bundle.sh) | Keep the source bundle beside the exe in the release; for a product, check the H.264 patent terms or use the encoder built into the OS |
 
 ## Clear licences (nothing to change)
 
