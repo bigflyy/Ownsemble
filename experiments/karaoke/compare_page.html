@@ -1,0 +1,221 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Voice removal compare</title>
+<style>
+:root { --bg:#0f1115; --card:#161920; --line:#262b36; --text:#eceef3; --dim:#a2a8b6;
+  --accent:#a594ff; }
+body { background:var(--bg); color:var(--text); font:15px/1.5 "Segoe UI",system-ui,sans-serif;
+  margin:0; padding:24px 16px; }
+main { max-width:900px; margin:0 auto; }
+h1 { font-size:22px; margin:0 0 4px; } p { color:var(--dim); margin:0 0 14px; }
+.song { background:var(--card); border:1px solid var(--line); border-radius:10px;
+  padding:14px 16px; margin:0 0 14px; }
+.song h2 { font-size:16px; margin:0 0 10px; }
+.row { display:flex; flex-wrap:wrap; gap:8px; align-items:center; }
+button { background:#1d212a; color:var(--text); border:1px solid var(--line);
+  border-radius:8px; padding:7px 12px; font:inherit; cursor:pointer; }
+button.on { background:var(--accent); color:#0f1115; border-color:var(--accent); }
+button:disabled { opacity:.5; cursor:default; }
+input[type=range] { width:100%; margin:10px 0 2px; accent-color:var(--accent); }
+.time { color:var(--dim); font-variant-numeric:tabular-nums; }
+.note { color:var(--dim); font-size:13px; margin-top:6px; }
+label { color:var(--dim); }
+</style></head><body><main>
+<h1>Without the voice: compare the ways</h1>
+<p>Press Play, then switch versions while it plays (keys 1 to 9). All versions play from one
+audio clock, so switching is instant and in step. Every no-voice version is set to the same
+loudness. Blind mode shuffles and hides the names until you press Reveal. The first Play of a
+song takes a few seconds (it loads every version).</p>
+<p><label><input type="checkbox" id="blind"> Blind mode</label>
+&nbsp;&nbsp;<label><input type="checkbox" id="boost"> Boost x4 (hear faint voice left
+behind; a limiter keeps loud parts from distorting; turn your volume down first)</label></p>
+<div id="songs"></div>
+</main>
+<script>
+const DATA = __DATA__;
+const ctx = new AudioContext();
+let active = null; // the song playing: {stop, select, keys}
+// Every version goes through one master gain (Boost) and a limiter that
+// only touches peaks near full scale.
+const master = ctx.createGain();
+const limiter = ctx.createDynamicsCompressor();
+limiter.threshold.value = -3; limiter.knee.value = 0; limiter.ratio.value = 20;
+limiter.attack.value = 0.002; limiter.release.value = 0.1;
+master.connect(limiter);
+limiter.connect(ctx.destination);
+document.getElementById('boost').onchange = e => {
+  master.gain.setTargetAtTime(e.target.checked ? 4 : 1, ctx.currentTime, 0.02);
+};
+
+function fmt(s) { return Math.floor(s / 60) + ':' + String(Math.floor(s % 60)).padStart(2, '0'); }
+
+function shuffle(list) {
+  const out = list.slice();
+  for (let i = out.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [out[i], out[j]] = [out[j], out[i]];
+  }
+  return out;
+}
+
+function buildSong(song, blind) {
+  const box = document.createElement('div');
+  box.className = 'song';
+  box.innerHTML = '<h2>Test song #' + song.id + '</h2>';
+  const original = DATA.versions[0];
+  const rest = DATA.versions.slice(1);
+  const order = [original, ...(blind ? shuffle(rest) : rest)];
+  const left = v => (song.residue && song.residue[v.tag] !== undefined) ? ' (voice ' + song.residue[v.tag] + ' dB)' : '';
+  const label = (v, i) => (blind && v !== original) ? 'Version ' + 'ABCDEFGH'[i - 1] : v.label + left(v);
+  const row = document.createElement('div');
+  row.className = 'row';
+  const play = document.createElement('button');
+  play.textContent = 'Play';
+  row.appendChild(play);
+  const buttons = {};
+  order.forEach((v, i) => {
+    const b = document.createElement('button');
+    b.textContent = (i + 1) + '. ' + label(v, i);
+    b.onclick = () => select(v.tag);
+    buttons[v.tag] = b;
+    row.appendChild(b);
+  });
+  if (blind) {
+    const reveal = document.createElement('button');
+    reveal.textContent = 'Reveal';
+    reveal.onclick = () => order.forEach((v, i) => {
+      buttons[v.tag].textContent = (i + 1) + '. ' + label(v, i) +
+        (v === original ? '' : ' = ' + v.label + left(v));
+    });
+    row.appendChild(reveal);
+  }
+  box.appendChild(row);
+  const seek = document.createElement('input');
+  seek.type = 'range'; seek.min = 0; seek.max = song.seconds; seek.step = 0.1; seek.value = 0;
+  box.appendChild(seek);
+  const time = document.createElement('div');
+  time.className = 'time';
+  time.textContent = '0:00 / ' + fmt(song.seconds);
+  box.appendChild(time);
+  const note = document.createElement('div');
+  note.className = 'note';
+  note.textContent = 'Loudness gains: ' + rest.map(v => (blind ? '?' : v.label) + ' x' +
+    song.gains[v.tag].toFixed(2)).join(', ') + '.';
+  if (blind) note.textContent = 'All no-voice versions matched to the same loudness.';
+  box.appendChild(note);
+
+  let buffers = null, sources = [], gains = {}, startedAt = 0, offset = 0, playing = false;
+  let selected = original.tag;
+
+  function select(tag) {
+    selected = tag;
+    for (const t in buttons) buttons[t].classList.toggle('on', t === tag);
+    const now = ctx.currentTime;
+    for (const t in gains) {
+      gains[t].gain.cancelScheduledValues(now);
+      gains[t].gain.setTargetAtTime(t === tag ? song.gains[t] : 0, now, 0.01);
+    }
+  }
+  select(original.tag);
+
+  async function load() {
+    play.disabled = true; play.textContent = 'Loading...';
+    buffers = {};
+    await Promise.all(DATA.versions.map(async v => {
+      const data = await (await fetch(v.tag + '/' + song.id + '.flac')).arrayBuffer();
+      buffers[v.tag] = await ctx.decodeAudioData(data);
+    }));
+    play.disabled = false;
+  }
+
+  function startAt(at) {
+    stopSources();
+    const when = ctx.currentTime + 0.05;
+    for (const v of DATA.versions) {
+      const gain = ctx.createGain();
+      gain.gain.value = v.tag === selected ? song.gains[v.tag] : 0;
+      gain.connect(master);
+      const source = ctx.createBufferSource();
+      source.buffer = buffers[v.tag];
+      source.connect(gain);
+      source.start(when, Math.min(at, buffers[v.tag].duration));
+      sources.push(source);
+      gains[v.tag] = gain;
+    }
+    startedAt = when; offset = at; playing = true;
+    play.textContent = 'Pause';
+  }
+
+  function stopSources() {
+    for (const s of sources) { try { s.stop(); } catch (e) {} s.disconnect(); }
+    sources = []; gains = {};
+  }
+
+  function position() { return playing ? offset + Math.max(0, ctx.currentTime - startedAt) : offset; }
+
+  function stop() {
+    offset = position(); playing = false; stopSources(); play.textContent = 'Play';
+  }
+
+  play.onclick = async () => {
+    if (playing) { stop(); return; }
+    if (active && active.stop !== stop) active.release();
+    await ctx.resume();
+    if (!buffers) await load();
+    active = {stop, select, release, keys: order.map(v => v.tag)};
+    startAt(offset);
+  };
+
+  // Frees this song's decoded audio when another song starts.
+  function release() { stop(); buffers = null; }
+
+  seek.oninput = () => {
+    offset = Number(seek.value);
+    if (playing) startAt(offset);
+  };
+  setInterval(() => {
+    const t = Math.min(position(), song.seconds);
+    if (playing && t >= song.seconds) stop();
+    if (document.activeElement !== seek) seek.value = t;
+    time.textContent = fmt(t) + ' / ' + fmt(song.seconds);
+  }, 200);
+  return box;
+}
+
+function build() {
+  if (active) { active.release(); active = null; }
+  const root = document.getElementById('songs');
+  root.innerHTML = '';
+  const blind = document.getElementById('blind').checked;
+  for (const song of DATA.songs) root.appendChild(buildSong(song, blind));
+}
+document.getElementById('blind').onchange = build;
+if (location.protocol === 'file:') {
+  // The browser refuses fetch() from a page opened from disk.
+  document.querySelector('main').insertAdjacentHTML('afterbegin',
+    '<p style="color:#ff8a5c">Open this page through the local server instead: ' +
+    'http://127.0.0.1:18093/compare.html</p>');
+}
+if (location.search.includes('selftest')) {
+  // For the agent's headless check: decode every version of the first song.
+  (async () => {
+    try {
+      const song = DATA.songs[0];
+      const lengths = await Promise.all(DATA.versions.map(async v => {
+        const data = await (await fetch(v.tag + '/' + song.id + '.flac')).arrayBuffer();
+        return (await ctx.decodeAudioData(data)).duration.toFixed(1);
+      }));
+      fetch('selftest-result?ok ' + lengths.join(' '));
+    } catch (e) {
+      fetch('selftest-result?fail ' + encodeURIComponent(String(e)));
+    }
+  })();
+}
+document.addEventListener('keydown', e => {
+  if (!active) return;
+  const i = Number(e.key) - 1;
+  if (i >= 0 && i < active.keys.length) active.select(active.keys[i]);
+});
+build();
+</script></body></html>
