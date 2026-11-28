@@ -48,13 +48,58 @@ const mdxPeakLimit = 0.9; // normalization_threshold
 /// The model input's element count: [1, 4, mdxBins, mdxFrames].
 const mdxInputLength = 4 * mdxBins * mdxFrames;
 
+/// The sizes of one MDX-Net model (UVR's mdx_model_data.json for its hash,
+/// with audio-separator's defaults: hop 1024, segment 256, overlap 0.25).
+/// The steps are the same for every model; only the FFT size and the bins
+/// kept differ. Both models here take `input` and give `output`, shaped
+/// [batch, 4, bins, frames].
+class MdxModelSpec {
+  const MdxModelSpec({
+    required this.fftSize,
+    required this.bins,
+    this.frames = 256,
+    this.hop = 1024,
+  });
+
+  final int fftSize;
+
+  /// dim_f: the bins kept of fftSize / 2 + 1.
+  final int bins;
+
+  /// dim_t, the segment size.
+  final int frames;
+  final int hop;
+
+  int get chunk => hop * (frames - 1);
+  int get trim => fftSize ~/ 2;
+  int get gen => chunk - 2 * trim;
+  int get step => ((1 - mdxOverlap) * chunk).toInt();
+
+  /// The model input's element count: [1, 4, bins, frames].
+  int get inputLength => 4 * bins * frames;
+
+  /// The model input's shape.
+  List<int> get inputShape => [1, 4, bins, frames];
+}
+
+/// Kim Vocal 2 (vocals): n_fft 7680, dim_f 3072.
+const kimVocal2Spec = MdxModelSpec(fftSize: mdxFftSize, bins: mdxBins);
+
+/// UVR-MDX-NET Inst HQ 4 (instrumental, plan 11 D1d): n_fft 5120, dim_f
+/// 2560 (mdx_model_data.json, hash 0f2a6bc5...; its compensate 1.019 is
+/// not applied: the karaoke export sets its own level).
+const instHq4Spec = MdxModelSpec(fftSize: 5120, bins: 2560);
+
 /// Where each chunk starts, in samples of the padded mix, for a mix of
 /// [samples] per channel; and the padded length.
-({List<int> starts, int padded}) mdxChunks(int samples) {
-  final pad = mdxGen + mdxTrim - samples % mdxGen;
-  final padded = mdxTrim + samples + pad;
+({List<int> starts, int padded}) mdxChunks(
+  int samples, [
+  MdxModelSpec spec = kimVocal2Spec,
+]) {
+  final pad = spec.gen + spec.trim - samples % spec.gen;
+  final padded = spec.trim + samples + pad;
   return (
-    starts: [for (var i = 0; i < padded; i += mdxStep) i],
+    starts: [for (var i = 0; i < padded; i += spec.step) i],
     padded: padded,
   );
 }
@@ -72,69 +117,86 @@ Float64List symmetricHann(int m) {
   return w;
 }
 
-/// torch.stft and torch.istft for one stereo chunk, with Kim Vocal 2's
-/// sizes. One per isolate (it keeps its buffers).
+/// torch.stft and torch.istft for one stereo chunk, with [spec]'s sizes
+/// (Kim Vocal 2's by default). One per isolate (it keeps its buffers).
 class MdxSpectrum {
-  MdxSpectrum() {
-    for (var i = 0; i < mdxFftSize; i++) {
+  MdxSpectrum([this.spec = kimVocal2Spec])
+    : _fftSize = spec.fftSize,
+      _bins = spec.bins,
+      _frames = spec.frames,
+      _hop = spec.hop,
+      _chunk = spec.chunk,
+      _fft = Fft(spec.fftSize),
+      _window = Float64List(spec.fftSize),
+      _buffer = Float64List(2 * spec.fftSize),
+      _padded = Float64List(2 * (spec.chunk + spec.fftSize)),
+      _envelope = Float64List(spec.fftSize + spec.hop * (spec.frames - 1)),
+      _sum = Float64List(2 * (spec.fftSize + spec.hop * (spec.frames - 1))) {
+    for (var i = 0; i < _fftSize; i++) {
       // torch.hann_window(periodic=True)
-      _window[i] = 0.5 - 0.5 * math.cos(2 * math.pi * i / mdxFftSize);
+      _window[i] = 0.5 - 0.5 * math.cos(2 * math.pi * i / _fftSize);
     }
     // The istft's window-square sum over the frames, as torch divides.
-    for (var t = 0; t < mdxFrames; t++) {
-      for (var i = 0; i < mdxFftSize; i++) {
-        _envelope[t * mdxHop + i] += _window[i] * _window[i];
+    for (var t = 0; t < _frames; t++) {
+      for (var i = 0; i < _fftSize; i++) {
+        _envelope[t * _hop + i] += _window[i] * _window[i];
       }
     }
   }
 
-  final _fft = Fft(mdxFftSize);
-  final _window = Float64List(mdxFftSize);
-  final _buffer = Float64List(2 * mdxFftSize);
-  final _padded = Float64List(2 * (mdxChunk + mdxFftSize));
-  final _envelope = Float64List(mdxFftSize + mdxHop * (mdxFrames - 1));
-  final _sum = Float64List(2 * (mdxFftSize + mdxHop * (mdxFrames - 1)));
+  final MdxModelSpec spec;
+  final int _fftSize;
+  final int _bins;
+  final int _frames;
+  final int _hop;
+  final int _chunk;
+  final Fft _fft;
+  final Float64List _window;
+  final Float64List _buffer;
+  final Float64List _padded;
+  final Float64List _envelope;
+  final Float64List _sum;
 
-  /// The model input for [left] and [right] ([mdxChunk] samples each):
-  /// [1, 4, mdxBins, mdxFrames], channels L re, L im, R re, R im, with the
+  /// The model input for [left] and [right] ([_chunk] samples each):
+  /// [1, 4, _bins, _frames], channels L re, L im, R re, R im, with the
   /// first 3 bins zero.
   Float32List forward(Float32List left, Float32List right) {
-    assert(left.length == mdxChunk && right.length == mdxChunk);
+    assert(left.length == _chunk && right.length == _chunk);
     // center=True, pad_mode='reflect': n_fft / 2 on each side, mirrored
     // without repeating the edge sample.
-    const half = mdxFftSize ~/ 2;
-    const length = mdxChunk + mdxFftSize;
+    final half = _fftSize ~/ 2;
+    final length = _chunk + _fftSize;
     final padded = _padded; // L at [0, length), R at [length, 2 length)
     for (var j = 0; j < length; j++) {
       final int source;
       if (j < half) {
         source = half - j;
-      } else if (j < half + mdxChunk) {
+      } else if (j < half + _chunk) {
         source = j - half;
       } else {
-        source = 2 * (mdxChunk - 1) - (j - half);
+        source = 2 * (_chunk - 1) - (j - half);
       }
       padded[j] = left[source];
       padded[length + j] = right[source];
     }
-    final out = Float32List(mdxInputLength);
-    const plane = mdxBins * mdxFrames;
+    final out = Float32List(spec.inputLength);
+    final plane = _bins * _frames;
     final z = _buffer;
-    for (var t = 0; t < mdxFrames; t++) {
+    for (var t = 0; t < _frames; t++) {
       // Both channels in one complex FFT: z = l + i r.
-      final from = t * mdxHop;
-      for (var i = 0; i < mdxFftSize; i++) {
+      final from = t * _hop;
+      for (var i = 0; i < _fftSize; i++) {
         final w = _window[i];
         z[2 * i] = padded[from + i] * w;
         z[2 * i + 1] = padded[length + from + i] * w;
       }
       _fft.transform(z);
-      for (var k = 3; k < mdxBins; k++) {
-        final m = mdxFftSize - k; // k >= 3, so never 0
+      for (var k = 3; k < _bins; k++) {
+        final m = _fftSize - k; // k >= 3, so never 0
         final zr = z[2 * k], zi = z[2 * k + 1];
         final cr = z[2 * m], ci = z[2 * m + 1];
         // L_k = (Z_k + conj Z_-k) / 2, R_k = (Z_k - conj Z_-k) / 2i
-        final at = k * mdxFrames + t;
+        final at = k * _frames + t;
         out[at] = 0.5 * (zr + cr);
         out[plane + at] = 0.5 * (zi - ci);
         out[2 * plane + at] = 0.5 * (zi + ci);
@@ -145,21 +207,21 @@ class MdxSpectrum {
   }
 
   /// torch.istft of the model output [spectrum] (laid out as [forward]
-  /// gives) into [left] and [right], [mdxChunk] samples each.
+  /// gives) into [left] and [right], [_chunk] samples each.
   void inverse(Float32List spectrum, Float32List left, Float32List right) {
-    assert(spectrum.length == mdxInputLength);
-    const plane = mdxBins * mdxFrames;
+    assert(spectrum.length == spec.inputLength);
+    final plane = _bins * _frames;
     final sum = _sum;
     final total = _envelope.length;
     sum.fillRange(0, sum.length, 0);
     final y = _buffer;
-    for (var t = 0; t < mdxFrames; t++) {
+    for (var t = 0; t < _frames; t++) {
       // Y_k = L_k + i R_k over the whole circle, L and R Hermitian; the
       // imaginary parts of the DC and Nyquist bins are dropped, as irfft
-      // drops them; bins from mdxBins up are zero.
+      // drops them; bins from _bins up are zero.
       y.fillRange(0, y.length, 0);
-      for (var k = 0; k < mdxBins; k++) {
-        final at = k * mdxFrames + t;
+      for (var k = 0; k < _bins; k++) {
+        final at = k * _frames + t;
         final lr = spectrum[at].toDouble();
         final li = k == 0 ? 0.0 : spectrum[plane + at].toDouble();
         final rr = spectrum[2 * plane + at].toDouble();
@@ -169,21 +231,21 @@ class MdxSpectrum {
         y[2 * k + 1] = li + rr;
         if (k > 0) {
           // Y_-k = conj L_k + i conj R_k = (lr + ri) + i (rr - li)
-          final m = mdxFftSize - k;
+          final m = _fftSize - k;
           y[2 * m] = lr + ri;
           y[2 * m + 1] = rr - li;
         }
       }
       _fft.transform(y, inverse: true);
-      final from = t * mdxHop;
-      for (var i = 0; i < mdxFftSize; i++) {
-        final w = _window[i] / mdxFftSize;
+      final from = t * _hop;
+      for (var i = 0; i < _fftSize; i++) {
+        final w = _window[i] / _fftSize;
         sum[2 * (from + i)] += y[2 * i] * w;
         sum[2 * (from + i) + 1] += y[2 * i + 1] * w;
       }
     }
-    const half = mdxFftSize ~/ 2;
-    for (var i = 0; i < mdxChunk; i++) {
+    final half = _fftSize ~/ 2;
+    for (var i = 0; i < _chunk; i++) {
       final at = half + i;
       assert(at < total);
       final e = _envelope[at];
@@ -260,9 +322,15 @@ class MdxResult {
     required this.frames,
     required this.chunks,
     required this.scale,
+    this.inputScale = 1,
     this.modelMs = 0,
     this.spectrumMs = 0,
   });
+
+  /// What the mix was multiplied by before the model (step 1: 0.9 / peak
+  /// for a mix louder than 0.9, else 1). The written samples divided by it
+  /// are at the song's own level (the karaoke instrumental, plan 11 D1d).
+  final double inputScale;
 
   /// Time inside the model, and in the STFT and its inverse.
   final int modelMs;
@@ -287,7 +355,10 @@ MdxResult separateVocals(
   String vocalsPath,
   MdxModel model, {
   void Function(int done, int total)? onChunk,
+  MdxModelSpec spec = kimVocal2Spec,
 }) {
+  final chunk = spec.chunk;
+  final trim = spec.trim;
   final mix = StereoFloatFile(mixPath);
   final sink = File(vocalsPath).openSync(mode: FileMode.writeOnly);
   try {
@@ -295,19 +366,19 @@ MdxResult separateVocals(
     final peak = mix.peak();
     if (n == 0 || peak == 0) {
       // Silence: no vocals (audio-separator gives zeros times peak 0).
-      return const MdxResult(frames: 0, chunks: 0, scale: 0);
+      return const MdxResult(frames: 0, chunks: 0, scale: 0, inputScale: 1);
     }
     final scaleIn = peak > mdxPeakLimit ? mdxPeakLimit / peak : 1.0;
-    final (:starts, :padded) = mdxChunks(n);
-    final spectrum = MdxSpectrum();
-    final left = Float32List(mdxChunk);
-    final right = Float32List(mdxChunk);
-    final outLeft = Float32List(mdxChunk);
-    final outRight = Float32List(mdxChunk);
-    // Sums and weights for padded positions [base, base + mdxChunk).
-    final sumL = Float64List(mdxChunk);
-    final sumR = Float64List(mdxChunk);
-    final weight = Float64List(mdxChunk);
+    final (:starts, :padded) = mdxChunks(n, spec);
+    final spectrum = MdxSpectrum(spec);
+    final left = Float32List(chunk);
+    final right = Float32List(chunk);
+    final outLeft = Float32List(chunk);
+    final outRight = Float32List(chunk);
+    // Sums and weights for padded positions [base, base + chunk).
+    final sumL = Float64List(chunk);
+    final sumR = Float64List(chunk);
+    final weight = Float64List(chunk);
     var base = 0;
     var written = 0; // padded positions finished
     var loudest = 0.0;
@@ -324,7 +395,7 @@ MdxResult separateVocals(
         final w = weight[i];
         final l = w == 0 ? 0.0 : sumL[i] / w;
         final r = w == 0 ? 0.0 : sumR[i] / w;
-        final m = at - mdxTrim;
+        final m = at - trim;
         if (m < 0 || m >= n) continue;
         out[2 * count] = l;
         out[2 * count + 1] = r;
@@ -334,29 +405,29 @@ MdxResult separateVocals(
       }
       sink.writeFromSync(Uint8List.sublistView(out, 0, 2 * count));
       final shift = upTo - base;
-      sumL.setRange(0, mdxChunk - shift, sumL, shift);
-      sumR.setRange(0, mdxChunk - shift, sumR, shift);
-      weight.setRange(0, mdxChunk - shift, weight, shift);
-      sumL.fillRange(mdxChunk - shift, mdxChunk, 0);
-      sumR.fillRange(mdxChunk - shift, mdxChunk, 0);
-      weight.fillRange(mdxChunk - shift, mdxChunk, 0);
+      sumL.setRange(0, chunk - shift, sumL, shift);
+      sumR.setRange(0, chunk - shift, sumR, shift);
+      weight.setRange(0, chunk - shift, weight, shift);
+      sumL.fillRange(chunk - shift, chunk, 0);
+      sumR.fillRange(chunk - shift, chunk, 0);
+      weight.fillRange(chunk - shift, chunk, 0);
       base = upTo;
       written = upTo;
     }
 
     for (var c = 0; c < starts.length; c++) {
       final start = starts[c];
-      final end = math.min(start + mdxChunk, padded);
+      final end = math.min(start + chunk, padded);
       final actual = end - start;
       // The padded mix: trim zeros, the mix, pad zeros.
-      left.fillRange(0, mdxChunk, 0);
-      right.fillRange(0, mdxChunk, 0);
-      final mixFrom = math.max(start, mdxTrim);
-      final mixTo = math.min(end, mdxTrim + n);
+      left.fillRange(0, chunk, 0);
+      right.fillRange(0, chunk, 0);
+      final mixFrom = math.max(start, trim);
+      final mixTo = math.min(end, trim + n);
       if (mixTo > mixFrom) {
         final l = Float32List(mixTo - mixFrom);
         final r = Float32List(mixTo - mixFrom);
-        mix.read(mixFrom - mdxTrim, mixTo - mixFrom, l, r, scale: scaleIn);
+        mix.read(mixFrom - trim, mixTo - mixFrom, l, r, scale: scaleIn);
         left.setRange(mixFrom - start, mixTo - start, l);
         right.setRange(mixFrom - start, mixTo - start, r);
       }
@@ -370,7 +441,7 @@ MdxResult separateVocals(
       spectrum.inverse(output, outLeft, outRight);
       spectrumUs += clock.elapsedMicroseconds;
       final window = symmetricHann(actual);
-      assert(start >= base && start + actual <= base + mdxChunk);
+      assert(start >= base && start + actual <= base + chunk);
       for (var i = 0; i < actual; i++) {
         final w = window[i];
         final at = start - base + i;
@@ -388,6 +459,7 @@ MdxResult separateVocals(
       frames: n,
       chunks: starts.length,
       scale: peak * scaleOut,
+      inputScale: scaleIn,
       modelMs: modelUs ~/ 1000,
       spectrumMs: spectrumUs ~/ 1000,
     );
